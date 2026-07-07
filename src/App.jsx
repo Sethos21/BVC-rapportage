@@ -95,6 +95,74 @@ function parseXLSX(file) {
   });
 }
 
+// Begrotingsbestand heeft samengevoegde cellen en meerdere headerrijen — dat leest
+// niet betrouwbaar als key/value rijen, dus hier als ruwe rij/kolom-grid (array-of-arrays).
+function parseXLSXRaw(file) {
+  return new Promise((res, rej) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const wb = XLSX.read(e.target.result, { type: "array" });
+        const sheets = {};
+        wb.SheetNames.forEach(n => {
+          sheets[n] = XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, defval: null });
+        });
+        res(sheets);
+      } catch (err) { rej(err); }
+    };
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+function vindBegrotingSheet(sheetsRaw, naamBevat) {
+  const naam = Object.keys(sheetsRaw).find(n => n.trim().toLowerCase().includes(naamBevat));
+  return naam ? sheetsRaw[naam] : null;
+}
+
+// Haalt de "Begroot {jaar}" P&L-kolom en het totaal begrote servicekosten-bedrag uit het
+// begrotingsbestand. De lay-out (welke kolom bij welk jaar hoort) staat niet vast — de
+// header-rij met "Budget"/"Realisatie" en de rij met jaartallen worden dynamisch opgezocht.
+function verwerkBegroting(sheetsRaw, jaar) {
+  // De P&L-begroting én de servicekosten-begroting staan als losse secties in hetzelfde
+  // tabblad (niet in het aparte "spec begr" tabblad — dat bevat een ongerelateerde
+  // huurder-specificatie). Beide secties gebruiken toevallig dezelfde kolompositie.
+  const plSheet = vindBegrotingSheet(sheetsRaw, "begroting");
+
+  const plBudget = {};
+  if (plSheet) {
+    let typeRijIdx = -1;
+    for (let i = 0; i < Math.min(plSheet.length, 10); i++) {
+      if (plSheet[i]?.some(c => c === "Budget")) { typeRijIdx = i; break; }
+    }
+    if (typeRijIdx !== -1) {
+      const typeRij = plSheet[typeRijIdx];
+      const jaarRij = plSheet[typeRijIdx + 1] || [];
+      const kolomIndex = typeRij.findIndex((c, idx) => c === "Budget" && jaarRij[idx] === jaar);
+      if (kolomIndex !== -1) {
+        plSheet.forEach(row => {
+          const label = row?.[0];
+          if (typeof label === "string" && label.trim() && typeof row[kolomIndex] === "number") {
+            plBudget[label.trim()] = row[kolomIndex];
+          }
+        });
+      }
+    }
+  }
+
+  // De servicekosten-begrotingssectie verderop in hetzelfde tabblad heeft haar eigen jaartal
+  // (vaak het lopende/vorige jaar, niet noodzakelijk hetzelfde als de P&L-kolom hierboven).
+  let svcBegroot = plBudget["Totale servicekosten"] ?? null;
+  let svcBegrootJaar = null;
+  if (plSheet) {
+    const labelRij = plSheet.find(row =>
+      typeof row?.[0] === "string" && row[0].toLowerCase().includes("service begroting"));
+    const match = labelRij?.[0]?.match(/\d{4}/);
+    if (match) svcBegrootJaar = Number(match[0]);
+  }
+
+  return { plBudget, svcBegroot, svcBegrootJaar };
+}
+
 function verwerkBoekingen(rows, complexFilter = null, unitFilter = null, jaar = 2026, kwartaal = 2) {
   const jaarVorig = jaar - 1;
   const jaarKort = String(jaar).slice(-2);
@@ -674,20 +742,23 @@ function DashboardTab({ bk, svc, balans, aiTekst, kleur }) {
 // P&L tab
 function PLTab({ bk, kleur }) {
   const COL_25 = "#2F75B6";
+  // begrotingLabel koppelt aan de rij-labels in het begrotingsbestand — die gebruikt eigen
+  // terminologie (bv. "Beheervergoeding" i.p.v. "Beheerkosten"), vandaar een expliciete mapping
+  // i.p.v. automatisch matchen op label. Rijen zonder mapping tonen "–" in de Begroot-kolom.
   const SECTIES = [
     { label:"OPBRENGSTEN", hdr:true },
-    { label:"Huuropbrengst belast",    key:"Huuropbrengst belast",    sign:1  },
-    { label:"Huuropbrengst onbelast",  key:"Huuropbrengst onbelast",  sign:1  },
+    { label:"Huuropbrengst belast",    key:"Huuropbrengst belast",    sign:1, begrotingLabel:"Huuropbrengst belast" },
+    { label:"Huuropbrengst onbelast",  key:"Huuropbrengst onbelast",  sign:1, begrotingLabel:"Huuropbrengst onbelast" },
     { label:"Verleende huurkorting",   key:"Verleende huurkorting",   sign:-1, kleur:C.orangeL },
     { label:"Zonnestroom",             key:"Zonnestroom",             sign:1  },
     { label:"KOSTEN", hdr:true },
-    { label:"Beheerkosten",            key:"Beheerkosten",            sign:-1 },
-    { label:"Verzekeringen",           key:"Verzekeringen",           sign:-1 },
-    { label:"Onderhoud gebouwen",      key:"Onderhoud gebouwen",      sign:-1 },
-    { label:"Onderhoud installaties",  key:"Onderhoud installaties",  sign:-1 },
-    { label:"OZB / WOZ",              key:"OZB / WOZ",              sign:-1 },
+    { label:"Beheerkosten",            key:"Beheerkosten",            sign:-1, begrotingLabel:"Beheervergoeding" },
+    { label:"Verzekeringen",           key:"Verzekeringen",           sign:-1, begrotingLabel:"Verzekeringen" },
+    { label:"Onderhoud gebouwen",      key:"Onderhoud gebouwen",      sign:-1, begrotingLabel:"Onderhoud gebouwen" },
+    { label:"Onderhoud installaties",  key:"Onderhoud installaties",  sign:-1, begrotingLabel:"Onderhoud installaties" },
+    { label:"OZB / WOZ",              key:"OZB / WOZ",              sign:-1, begrotingLabel:"Gemeentelijke lasten pand" },
     { label:"Gemeentelijke heffingen", key:"Gemeentelijke heffingen", sign:-1 },
-    { label:"Diverse alg. kosten",     key:"Diverse alg. kosten",    sign:-1 },
+    { label:"Diverse alg. kosten",     key:"Diverse alg. kosten",    sign:-1, begrotingLabel:"- Overige algemene kosten" },
   ];
 
   const jaar = bk.jaar, jaarVorig = bk.jaarVorig, kwartaal = bk.kwartaal;
@@ -695,7 +766,8 @@ function PLTab({ bk, kleur }) {
   const Q26 = Q25.slice(0, kwartaal);
   const labelHuidig = periodeLabel(kwartaal, jaar);
   const labelVorig  = periodeLabel(kwartaal, jaarVorig);
-  const totaalKolommen = 1 + Q25.length + Q26.length + 2 + 1;
+  const heeftBegroting = !!bk.plBudget;
+  const totaalKolommen = 1 + Q25.length + Q26.length + 2 + 1 + (heeftBegroting ? 1 : 0);
 
   return (
     <div>
@@ -728,6 +800,12 @@ function PLTab({ bk, kleur }) {
                 textAlign:"center", border:`1px solid ${C.grey2}`, fontSize:10 }}>
                 ∆
               </th>
+              {heeftBegroting && (
+                <th rowSpan={2} style={{ background:C.grey1, color:C.navy, padding:"5px 8px",
+                  textAlign:"center", border:`1px solid ${C.grey2}`, fontSize:10, minWidth:90 }}>
+                  Begroot {jaar}
+                </th>
+              )}
             </tr>
             <tr>
               {Q25.map(q=><th key={q} style={{ background:COL_25, color:C.white,
@@ -793,6 +871,14 @@ function PLTab({ bk, kleur }) {
                     border:`1px solid ${C.grey2}` }}>
                     {delta ? `${delta>=0?"+":""}${NL(delta)}` : "–"}
                   </td>
+                  {heeftBegroting && (
+                    <td style={{ padding:"5px 8px", textAlign:"right", background:C.grey1,
+                      fontVariantNumeric:"tabular-nums",
+                      border:`1px solid ${C.grey2}` }}>
+                      {rij.begrotingLabel && bk.plBudget[rij.begrotingLabel] != null
+                        ? NL(bk.plBudget[rij.begrotingLabel]) : "–"}
+                    </td>
+                  )}
                 </tr>
               );
             })}
@@ -815,7 +901,7 @@ function ServicekostenTab({ svc, kleur, unitFilter }) {
           ℹ Servicekosten zijn niet per unit beschikbaar — overzicht toont het gehele complex.
         </div>
       )}
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:10, marginBottom:20 }}>
+      <div style={{ display:"grid", gridTemplateColumns:svc?.begroot!=null?"repeat(5,1fr)":"repeat(4,1fr)", gap:10, marginBottom:20 }}>
         <KPI label={`Totaal kosten ${labelHuidig}`} val={svc?.tot26||0}
           delta={(svc?.tot26||0)-(svc?.tot25||0)} deltaLabel={labelVorig} goed_pos={false} />
         <KPI label={`Totaal kosten ${labelVorig}`} val={svc?.tot25||0} />
@@ -823,6 +909,10 @@ function ServicekostenTab({ svc, kleur, unitFilter }) {
           sub="Ontvangen (negatief)" />
         <KPI label={`Saldo ${labelHuidig}`} val={svc?.saldo26||0}
           sub={(svc?.saldo26||0)<=0?"Overschot ✓":"Tekort ⚠"} />
+        {svc?.begroot != null && (
+          <KPI label={`Begroot ${svc.begrootJaar||""}`.trim()} val={svc.begroot}
+            sub="Uit begrotingsbestand — jaartotaal" />
+        )}
       </div>
       <div style={{ overflowX:"auto" }}>
         <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
@@ -1502,10 +1592,22 @@ export default function App() {
         rrR = verwerkRentRoll(rrS[Object.keys(rrS)[0]]);
       }
 
+      let begroting = null;
+      if (bestanden.begroting) {
+        setVoortgang("Begroting inlezen…");
+        const begS = await parseXLSXRaw(bestanden.begroting);
+        begroting = verwerkBegroting(begS, periodeJaar);
+      }
+
       setVoortgang("Data verwerken…");
       const bk  = verwerkBoekingen(bkR, null, null, periodeJaar, periodeKwartaal);
       const svc = verwerkSvc(svcR, null, periodeJaar, periodeKwartaal);
       const bal = verwerkBalans(balR, periodeJaar, periodeKwartaal);
+      if (begroting) {
+        bk.plBudget = begroting.plBudget;
+        svc.begroot = begroting.svcBegroot;
+        svc.begrootJaar = begroting.svcBegrootJaar;
+      }
 
       setBkData(bk); setSvcData(svc); setBalData(bal); setRrData(rrR);
 
