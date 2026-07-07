@@ -1,0 +1,2083 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>BVC Rapportage Tool</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --navy:      #1F3864;
+    --navyMid:   #2F5597;
+    --navyLight: #D9E1F2;
+    --bg:        #F4F5F7;
+    --white:     #FFFFFF;
+    --grey1:     #F0F1F3;
+    --grey2:     #E2E4E9;
+    --grey3:     #9AA1B4;
+    --text:      #1A1D2E;
+    --textSub:   #5A6070;
+    --green:     #2D6A4F;
+    --greenL:    #E2EFDA;
+    --greenDark: #375623;
+    --orange:    #C55A11;
+    --orangeL:   #FCE4D6;
+    --yellow:    #7B6200;
+    --yellowL:   #FFF2CC;
+    --red:       #C00000;
+  }
+  body {
+    font-family: Inter, system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    min-height: 100vh;
+  }
+
+  /* Topbalk */
+  .topbar {
+    background: var(--navy);
+    color: #fff;
+    padding: 0 32px;
+    height: 52px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  .topbar-logo {
+    width: 28px; height: 28px;
+    background: #fff;
+    border-radius: 4px;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 14px; color: var(--navy);
+  }
+  .topbar-title { font-weight: 600; font-size: 14px; }
+  .topbar-badge {
+    background: rgba(255,255,255,0.14);
+    font-size: 12px; padding: 2px 10px; border-radius: 10px;
+  }
+  .topbar-right { margin-left: auto; font-size: 11px; opacity: 0.6; }
+
+  /* Layout */
+  .container { max-width: 860px; margin: 0 auto; padding: 40px 24px; }
+
+  /* Schermen */
+  .screen { display: none; }
+  .screen.active { display: block; }
+
+  /* Knoppen */
+  .btn {
+    border: none; border-radius: 4px; cursor: pointer;
+    font-family: inherit; font-size: 13px; font-weight: 600;
+    padding: 10px 22px; transition: opacity 0.15s;
+  }
+  .btn:hover { opacity: 0.88; }
+  .btn-primary { background: var(--navy); color: #fff; }
+  .btn-green   { background: var(--green); color: #fff; }
+  .btn-outline {
+    background: var(--white); color: var(--textSub);
+    border: 1px solid var(--grey2);
+  }
+  .btn:disabled { background: var(--grey2); color: var(--grey3); cursor: default; opacity: 1; }
+
+  /* Labels */
+  .field-label {
+    font-size: 10px; color: var(--textSub);
+    text-transform: uppercase; letter-spacing: 0.07em;
+    margin-bottom: 5px;
+  }
+
+  /* Select */
+  select {
+    width: 100%; padding: 8px 10px;
+    border: 1px solid var(--grey2); border-radius: 4px;
+    background: var(--white); color: var(--text);
+    font-family: inherit; font-size: 13px; cursor: pointer;
+  }
+
+  /* Periode rij */
+  .periode-grid {
+    display: grid;
+    grid-template-columns: 1fr 28px 1fr 1fr;
+    gap: 8px; align-items: end;
+    margin-bottom: 10px;
+  }
+  .periode-sep {
+    font-size: 13px; color: var(--textSub);
+    text-align: center; padding-bottom: 9px;
+  }
+  .periode-tag {
+    display: inline-block;
+    background: var(--navyLight); color: var(--navy);
+    font-size: 11px; font-weight: 600;
+    padding: 4px 12px; border-radius: 10px;
+    margin-bottom: 20px;
+  }
+
+  /* Upload grid */
+  .upload-grid {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 10px; margin-bottom: 20px;
+  }
+  .upload-item {
+    border: 1.5px dashed var(--grey2); border-radius: 4px;
+    padding: 11px 14px; display: flex; align-items: center;
+    gap: 10px; cursor: pointer; background: var(--white);
+    transition: border-color 0.15s;
+  }
+  .upload-item:hover { border-color: var(--navy); }
+  .upload-item.done {
+    border-color: var(--green); border-style: solid;
+    background: #E2EFDA18;
+  }
+  .upload-item.hidden { display: none; }
+  .upload-icon {
+    width: 30px; height: 30px; border-radius: 4px;
+    background: var(--grey1);
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; font-size: 14px;
+  }
+  .upload-item.done .upload-icon { background: var(--green); }
+  .upload-name { font-size: 12px; font-weight: 600; color: var(--text); }
+  .upload-sub  { font-size: 11px; color: var(--textSub); margin-top: 2px; }
+  .req { color: var(--red); margin-left: 3px; }
+
+  /* Badges */
+  .badge {
+    display: inline-block; font-size: 10px; font-weight: 600;
+    padding: 2px 8px; border-radius: 10px; margin: 2px 3px 2px 0;
+  }
+  .badge-blue  { background: var(--navyLight); color: var(--navy); }
+  .badge-green { background: var(--greenL); color: var(--green); }
+  .badge-grey  { background: var(--grey1); color: var(--grey3); }
+
+  /* Kaarten */
+  .card {
+    background: var(--white); border: 1px solid var(--grey2);
+    border-radius: 4px; padding: 18px 20px;
+  }
+
+  /* KPI rij */
+  .kpi-grid {
+    display: grid; grid-template-columns: repeat(3,1fr);
+    gap: 10px; margin-bottom: 20px;
+  }
+  .kpi-card {
+    background: var(--white); border: 1px solid var(--grey2);
+    border-radius: 4px; padding: 14px 16px;
+  }
+  .kpi-label {
+    font-size: 10px; color: var(--textSub);
+    text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 5px;
+  }
+  .kpi-value {
+    font-size: 20px; font-weight: 700; color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
+  .kpi-delta {
+    font-size: 11px; margin-top: 4px;
+    display: flex; align-items: center; gap: 5px;
+  }
+  .delta-pill {
+    font-size: 11px; font-weight: 600;
+    padding: 1px 8px; border-radius: 10px;
+  }
+  .delta-good { background: var(--greenL); color: var(--green); }
+  .delta-bad  { background: var(--orangeL); color: var(--orange); }
+
+  /* Signaalkaart */
+  .sig-row { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 20px; }
+  .sig {
+    font-size: 11px; font-weight: 600;
+    padding: 4px 11px; border-radius: 4px;
+    display: inline-flex; align-items: center; gap: 4px;
+  }
+  .sig-goed     { background: var(--greenL);  color: var(--green);  }
+  .sig-aandacht { background: var(--yellowL); color: var(--yellow); }
+  .sig-kritiek  { background: var(--orangeL); color: var(--orange); }
+
+  /* Sectietitel */
+  .section-label {
+    font-size: 10px; color: var(--textSub);
+    text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 8px;
+  }
+
+  /* AI samenvatting */
+  .ai-card {
+    background: var(--white); border: 1px solid var(--grey2);
+    border-left: 3px solid var(--navy); border-radius: 4px;
+    padding: 16px 20px; margin-bottom: 20px;
+  }
+  .ai-label {
+    font-size: 10px; font-weight: 700; color: var(--textSub);
+    text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 8px;
+  }
+  .ai-text { font-size: 13px; line-height: 1.75; color: var(--text); }
+
+  /* Loading */
+  .loading {
+    text-align: center; padding: 80px 0;
+  }
+  .spinner {
+    width: 40px; height: 40px;
+    border: 3px solid var(--grey2);
+    border-top-color: var(--navy);
+    border-radius: 50%;
+    margin: 0 auto 20px;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Klantkaarten */
+  .klant-card {
+    background: var(--white); border: 1px solid var(--grey2);
+    border-radius: 4px; padding: 14px 16px; margin-bottom: 10px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .klant-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .klant-naam { font-size: 13px; font-weight: 600; color: var(--text); }
+  .klant-sub  { font-size: 11px; color: var(--textSub); margin-top: 2px; }
+  .klant-tabs { margin-top: 5px; }
+
+  /* Foutmelding */
+  .fout {
+    background: var(--orangeL); color: var(--orange);
+    border-radius: 4px; padding: 12px 16px;
+    font-size: 13px; margin-top: 14px;
+  }
+
+  /* Info noot */
+  .info-note {
+    background: var(--navyLight); color: var(--navy);
+    border-radius: 4px; padding: 9px 14px;
+    font-size: 12px; margin-bottom: 16px;
+  }
+
+  /* Checkbox rijen */
+  .chk-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 0; border-bottom: 0.5px solid var(--grey2);
+    font-size: 12px; color: var(--text);
+  }
+  .chk-row:last-child { border-bottom: none; }
+
+  /* Tabel stijlen */
+  .tbl { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .tbl th {
+    background: var(--navy); color: #fff;
+    padding: 7px 10px; text-align: right;
+    border: 1px solid var(--grey2); font-size: 10px; font-weight: 700;
+  }
+  .tbl th:first-child { text-align: left; }
+  .tbl td {
+    padding: 6px 10px; border: 1px solid var(--grey2);
+    text-align: right; font-variant-numeric: tabular-nums;
+  }
+  .tbl td:first-child { text-align: left; }
+  .tbl tr:nth-child(even) td { background: var(--grey1); }
+  .tbl tr.hdr-row td {
+    background: var(--navy); color: #fff;
+    font-weight: 700; font-size: 11px; letter-spacing: 0.05em;
+  }
+  .tbl tr.totaal-row td {
+    background: var(--navyLight); font-weight: 700;
+    border-top: 2px solid var(--navy);
+  }
+  .cel-goed { background: var(--greenL) !important; color: var(--green); font-weight: 600; }
+  .cel-slecht { background: var(--orangeL) !important; color: var(--orange); font-weight: 600; }
+  .cel-bgr { background: #E8F0E3 !important; color: var(--greenDark); }
+
+  /* Tabs navigatie */
+  .tabs-nav {
+    display: flex; gap: 0; border-bottom: 2px solid var(--grey2);
+    margin-bottom: 24px; overflow-x: auto;
+  }
+  .tab-btn {
+    background: none; border: none; cursor: pointer;
+    padding: 10px 16px; font-size: 13px;
+    color: var(--textSub); font-family: inherit;
+    border-bottom: 2px solid transparent; margin-bottom: -2px;
+    white-space: nowrap; transition: color 0.15s;
+  }
+  .tab-btn.active { color: var(--navy); border-bottom-color: var(--navy); font-weight: 600; }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+
+  /* Balans stijl */
+  .balans-wrap { max-width: 620px; font-family: Georgia, serif; }
+  .balans-kop { text-align: center; margin-bottom: 24px; border-bottom: 2px solid var(--navy); padding-bottom: 16px; }
+  .balans-titel { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
+  .balans-sub { font-size: 12px; color: var(--textSub); font-family: Inter, sans-serif; }
+  .balans-tbl { width: 100%; border-collapse: collapse; }
+  .balans-tbl td { padding: 5px 0; border-bottom: 1px solid var(--grey2); font-size: 12px; }
+  .balans-tbl td:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
+  .balans-tbl td:nth-child(2) { border-left: 1px solid var(--grey2); padding-left: 8px; }
+  .balans-tbl td:nth-child(3) { border-left: 1px solid var(--grey2); padding-left: 8px; color: var(--textSub); }
+  .balans-sectie td { font-size: 11px; font-weight: 700; color: var(--navy); text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 1px solid var(--navy); padding-top: 14px; font-family: Inter, sans-serif; }
+  .balans-groep td { font-size: 11px; font-weight: 700; color: var(--navy); border-bottom: 1px solid var(--navy); padding: 7px 0 4px; font-family: Inter, sans-serif; }
+  .balans-subtot td { font-weight: 700; font-style: italic; border-top: 1px solid var(--navy); border-bottom: 2px solid var(--navy); }
+  .balans-totaal td { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; background: var(--navyLight); color: var(--navy); border-top: 2px solid var(--navy); border-bottom: 3px double var(--navy); font-family: Inter, sans-serif; padding: 8px 0; }
+  .balans-totaal td:not(:first-child) { font-variant-numeric: tabular-nums; }
+  .sluit-ok { color: var(--green); font-size: 11px; font-family: Inter, sans-serif; margin-top: 10px; font-weight: 600; }
+
+  /* Rent Roll */
+  .rest-goed     { background: var(--greenL) !important;  color: var(--green); }
+  .rest-aandacht { background: var(--yellowL) !important; color: var(--yellow); }
+  .rest-kritiek  { background: var(--orangeL) !important; color: var(--orange); }
+
+  /* Responsief */
+  @media (max-width: 600px) {
+    .upload-grid { grid-template-columns: 1fr; }
+    .kpi-grid { grid-template-columns: 1fr 1fr; }
+    .periode-grid { grid-template-columns: 1fr 20px 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<!-- TOPBALK -->
+<div class="topbar">
+  <div class="topbar-logo">V</div>
+  <span class="topbar-title">BVC Rapportage Tool</span>
+  <span id="topbar-badge" class="topbar-badge" style="display:none"></span>
+  <span class="topbar-right">Lokaal · geen internet vereist</span>
+</div>
+
+<div class="container">
+
+<!-- ══════════════════════════════════════════
+     SCHERM 1: UPLOAD
+══════════════════════════════════════════ -->
+<div class="screen active" id="s-upload">
+
+  <div style="margin-bottom:28px">
+    <h1 style="font-size:24px;font-weight:700;letter-spacing:-0.02em;margin-bottom:6px">
+      Rapportage genereren
+    </h1>
+    <p style="color:var(--textSub);font-size:13px">
+      Kies een klant, stel de periode in en upload de IDBC-bestanden.
+    </p>
+  </div>
+
+  <!-- Klant -->
+  <div style="margin-bottom:16px">
+    <div class="field-label">Klant</div>
+    <select id="klant-sel" onchange="updateKlant()" style="max-width:340px">
+      <option value="gvh">Gebroeders van Houtum</option>
+      <option value="fergagne">Fergagne BV</option>
+    </select>
+  </div>
+
+  <!-- Periode -->
+  <div style="margin-bottom:6px">
+    <div class="field-label">Rapportageperiode</div>
+    <div class="periode-grid" style="max-width:420px">
+      <div>
+        <div style="font-size:11px;color:var(--textSub);margin-bottom:4px">Van</div>
+        <select id="van-sel" onchange="updateTag()">
+          <option value="Q1">Q1</option>
+          <option value="Q2">Q2</option>
+          <option value="Q3">Q3</option>
+          <option value="Q4">Q4</option>
+        </select>
+      </div>
+      <div class="periode-sep">t/m</div>
+      <div>
+        <div style="font-size:11px;color:var(--textSub);margin-bottom:4px">Tot en met</div>
+        <select id="tm-sel" onchange="updateTag()">
+          <option value="Q1">Q1</option>
+          <option value="Q2" selected>Q2</option>
+          <option value="Q3">Q3</option>
+          <option value="Q4">Q4</option>
+        </select>
+      </div>
+      <div>
+        <div style="font-size:11px;color:var(--textSub);margin-bottom:4px">Jaar</div>
+        <select id="jaar-sel" onchange="updateTag()">
+          <option>2026</option>
+          <option>2025</option>
+          <option>2024</option>
+        </select>
+      </div>
+    </div>
+    <div class="periode-tag" id="periode-tag">Q1 t/m Q2 2026 · periodes 1–6</div>
+  </div>
+
+  <!-- Upload bestanden -->
+  <div class="field-label">Bestanden uploaden</div>
+  <div class="upload-grid" id="upload-grid">
+
+    <label class="upload-item" id="ui-boekingen">
+      <div class="upload-icon" id="icon-boekingen">📂</div>
+      <div>
+        <div class="upload-name">IDBC Boekingen<span class="req">*</span></div>
+        <div class="upload-sub" id="sub-boekingen">Sleep of klik om te uploaden</div>
+      </div>
+      <input type="file" accept=".xlsx,.xls" style="display:none"
+        onchange="bestandGekozen(this,'boekingen')">
+    </label>
+
+    <label class="upload-item" id="ui-servicekosten">
+      <div class="upload-icon" id="icon-servicekosten">📂</div>
+      <div>
+        <div class="upload-name">IDBC Servicekosten</div>
+        <div class="upload-sub" id="sub-servicekosten">Sleep of klik om te uploaden</div>
+      </div>
+      <input type="file" accept=".xlsx,.xls" style="display:none"
+        onchange="bestandGekozen(this,'servicekosten')">
+    </label>
+
+    <label class="upload-item" id="ui-balans">
+      <div class="upload-icon" id="icon-balans">📂</div>
+      <div>
+        <div class="upload-name">IDBC Balans per jaar<span class="req">*</span></div>
+        <div class="upload-sub" id="sub-balans">Sleep of klik om te uploaden</div>
+      </div>
+      <input type="file" accept=".xlsx,.xls" style="display:none"
+        onchange="bestandGekozen(this,'balans')">
+    </label>
+
+    <label class="upload-item" id="ui-rentroll">
+      <div class="upload-icon" id="icon-rentroll">📂</div>
+      <div>
+        <div class="upload-name">IDBC Rent Roll</div>
+        <div class="upload-sub" id="sub-rentroll">Sleep of klik om te uploaden</div>
+      </div>
+      <input type="file" accept=".xlsx,.xls" style="display:none"
+        onchange="bestandGekozen(this,'rentroll')">
+    </label>
+
+    <label class="upload-item" id="ui-begroting">
+      <div class="upload-icon" id="icon-begroting">📂</div>
+      <div>
+        <div class="upload-name">Begroting</div>
+        <div class="upload-sub" id="sub-begroting">Sleep of klik om te uploaden</div>
+      </div>
+      <input type="file" accept=".xlsx,.xls" style="display:none"
+        onchange="bestandGekozen(this,'begroting')">
+    </label>
+
+    <label class="upload-item hidden" id="ui-balansspec">
+      <div class="upload-icon" id="icon-balansspec">📂</div>
+      <div>
+        <div class="upload-name">Balans specificatie</div>
+        <div class="upload-sub" id="sub-balansspec">Sleep of klik om te uploaden</div>
+      </div>
+      <input type="file" accept=".xlsx,.xls" style="display:none"
+        onchange="bestandGekozen(this,'balansspec')">
+    </label>
+
+  </div>
+
+  <!-- Tabs info -->
+  <div style="margin-bottom:20px">
+    <div class="field-label">Rapportage bevat</div>
+    <div id="tabs-badges">
+      <span class="badge badge-blue">Dashboard</span>
+      <span class="badge badge-blue">P&L per kwartaal</span>
+      <span class="badge badge-blue">Servicekosten</span>
+      <span class="badge badge-blue">Rent Roll</span>
+      <span class="badge badge-blue">Cashflow</span>
+      <span class="badge badge-blue">Balans</span>
+      <span class="badge badge-blue">Signalen</span>
+    </div>
+  </div>
+
+  <!-- Foutmelding -->
+  <div class="fout" id="fout-msg" style="display:none"></div>
+
+  <!-- Knoppen -->
+  <div style="display:flex;gap:10px;margin-top:4px">
+    <button class="btn btn-primary" id="gen-btn" onclick="genereer()">
+      Rapportage genereren →
+    </button>
+    <button class="btn btn-outline" onclick="showScreen('s-klanten')">
+      Klanten beheren
+    </button>
+  </div>
+
+  <p style="font-size:11px;color:var(--textSub);margin-top:14px">
+    🔒 Alle data blijft lokaal op uw computer — geen internetverbinding vereist
+  </p>
+
+</div><!-- /s-upload -->
+
+<!-- ══════════════════════════════════════════
+     SCHERM 2: LADEN
+══════════════════════════════════════════ -->
+<div class="screen" id="s-laden">
+  <div class="loading">
+    <div class="spinner"></div>
+    <h3 style="font-size:17px;font-weight:600;margin-bottom:6px">Bezig met verwerken…</h3>
+    <p style="color:var(--textSub);font-size:13px" id="laden-tekst">Bestanden inlezen…</p>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     SCHERM 3: RAPPORT
+══════════════════════════════════════════ -->
+<div class="screen" id="s-rapport">
+
+  <!-- Rapport header -->
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;flex-wrap:wrap;gap:12px">
+    <div>
+      <p style="font-size:11px;color:var(--textSub);text-transform:uppercase;letter-spacing:0.07em;margin-bottom:4px" id="rpt-periode-lbl"></p>
+      <h2 style="font-size:22px;font-weight:700;letter-spacing:-0.02em;margin-bottom:3px" id="rpt-titel"></h2>
+      <p style="font-size:12px;color:var(--textSub)" id="rpt-sub"></p>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-green" id="download-btn" onclick="downloadExcel()">
+        ↓ Excel downloaden
+      </button>
+      <button class="btn btn-outline" onclick="showScreen('s-upload')">
+        ← Nieuw rapport
+      </button>
+    </div>
+  </div>
+
+  <!-- AI samenvatting -->
+  <div class="ai-card" id="ai-card" style="display:none">
+    <div class="ai-label">AI Managementsamenvatting</div>
+    <p class="ai-text" id="ai-tekst"></p>
+  </div>
+
+  <!-- KPI's -->
+  <div class="kpi-grid" id="kpi-grid"></div>
+
+  <!-- Signaalkaart -->
+  <div style="margin-bottom:20px">
+    <div class="section-label">Signaalkaart</div>
+    <div class="sig-row" id="sig-row"></div>
+  </div>
+
+  <!-- Tab navigatie -->
+  <div class="tabs-nav" id="tabs-nav"></div>
+
+  <!-- Tab inhoud -->
+  <div id="tab-inhoud"></div>
+
+</div><!-- /s-rapport -->
+
+<!-- ══════════════════════════════════════════
+     SCHERM 4: KLANTENBEHEER
+══════════════════════════════════════════ -->
+<div class="screen" id="s-klanten">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+    <div>
+      <h2 style="font-size:20px;font-weight:700;margin-bottom:4px">Klantenbeheer</h2>
+      <p style="font-size:13px;color:var(--textSub)">Beheer klantprofielen en rapportage-instellingen</p>
+    </div>
+    <button class="btn btn-outline" onclick="showScreen('s-upload')">← Terug</button>
+  </div>
+
+  <div id="klanten-lijst"></div>
+
+  <div style="margin-top:20px;padding:16px;background:var(--white);border:1px solid var(--grey2);border-radius:4px">
+    <div class="field-label" style="margin-bottom:12px">Nieuwe klant toevoegen</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+      <div>
+        <div style="font-size:11px;color:var(--textSub);margin-bottom:4px">Naam</div>
+        <input type="text" id="nieuw-naam" placeholder="Naam van de klant"
+          style="width:100%;padding:8px 10px;border:1px solid var(--grey2);border-radius:4px;font-family:inherit;font-size:13px">
+      </div>
+      <div>
+        <div style="font-size:11px;color:var(--textSub);margin-bottom:4px">Omschrijving</div>
+        <input type="text" id="nieuw-sub" placeholder="Adres of omschrijving"
+          style="width:100%;padding:8px 10px;border:1px solid var(--grey2);border-radius:4px;font-family:inherit;font-size:13px">
+      </div>
+    </div>
+    <div style="margin-bottom:12px">
+      <div class="field-label" style="margin-bottom:8px">Tabs</div>
+      <div style="background:var(--grey1);border-radius:4px;padding:10px 14px">
+        <div class="chk-row"><input type="checkbox" checked disabled> P&L per kwartaal (altijd)</div>
+        <div class="chk-row"><input type="checkbox" id="nc-svc" checked> Servicekosten</div>
+        <div class="chk-row"><input type="checkbox" id="nc-rr" checked> Rent Roll</div>
+        <div class="chk-row"><input type="checkbox" id="nc-cf" checked> Cashflow</div>
+        <div class="chk-row"><input type="checkbox" id="nc-bal" checked> Balans</div>
+        <div class="chk-row"><input type="checkbox" id="nc-spec"> Balans met specificatie</div>
+        <div class="chk-row"><input type="checkbox" id="nc-sig" checked> Signalen & actiepunten</div>
+      </div>
+    </div>
+    <button class="btn btn-primary" onclick="voegKlantToe()">Klant toevoegen</button>
+  </div>
+</div><!-- /s-klanten -->
+
+</div><!-- /container --><script>
+// ── Klantconfiguratie ──────────────────────────────────────────────────────
+const KLANTEN = {
+  gvh: {
+    naam: "Gebroeders van Houtum",
+    sub: "Rooise Zoom · Veghel",
+    kleur: "#1F3864",
+    tabs: ["pl","servicekosten","rentroll","cashflow","balans","signalen"],
+    svc_excl_complex: [4],
+    heeft_begroting: true,
+  },
+  fergagne: {
+    naam: "Fergagne BV",
+    sub: "Pater van den Elsenlaan · Veghel",
+    kleur: "#375623",
+    tabs: ["pl","servicekosten","rentroll","cashflow","balans","signalen"],
+    svc_excl_complex: [],
+    heeft_begroting: true,
+  },
+};
+
+// Extra klanten uit localStorage laden
+function laadExtraKlanten() {
+  try {
+    const extra = JSON.parse(localStorage.getItem("bvc_klanten") || "{}");
+    Object.assign(KLANTEN, extra);
+  } catch(e) {}
+}
+laadExtraKlanten();
+
+// ── State ──────────────────────────────────────────────────────────────────
+const STATE = {
+  klant: "gvh",
+  van: "Q1", tm: "Q2", jaar: "2026",
+  bestanden: {},
+  data: {},
+};
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+const NL = (n) => n == null ? "–" :
+  "€\u00A0" + Math.round(n).toLocaleString("nl-NL");
+const PCT = (n) => (n * 100).toFixed(1) + "%";
+
+function toQ(p) {
+  return p <= 3 ? "Q1" : p <= 6 ? "Q2" : p <= 9 ? "Q3" : "Q4";
+}
+
+function periodeNummers(van, tm) {
+  const start = van === "Q1" ? 1 : van === "Q2" ? 4 : van === "Q3" ? 7 : 10;
+  const eind  = tm  === "Q1" ? 3 : tm  === "Q2" ? 6 : tm  === "Q3" ? 9 : 12;
+  return { start, eind };
+}
+
+function inPeriode(periode, van, tm) {
+  const { start, eind } = periodeNummers(van, tm);
+  return periode >= start && periode <= eind;
+}
+
+function showScreen(id) {
+  document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
+  document.getElementById(id).classList.add("active");
+}
+
+// ── UI updates ─────────────────────────────────────────────────────────────
+function updateTag() {
+  STATE.van  = document.getElementById("van-sel").value;
+  STATE.tm   = document.getElementById("tm-sel").value;
+  STATE.jaar = document.getElementById("jaar-sel").value;
+  const { start, eind } = periodeNummers(STATE.van, STATE.tm);
+  const same = STATE.van === STATE.tm;
+  const lbl  = same
+    ? `${STATE.van} ${STATE.jaar} · periodes ${start}–${eind}`
+    : `${STATE.van} t/m ${STATE.tm} ${STATE.jaar} · periodes ${start}–${eind}`;
+  document.getElementById("periode-tag").textContent = lbl;
+}
+
+function updateKlant() {
+  STATE.klant = document.getElementById("klant-sel").value;
+  const p = KLANTEN[STATE.klant];
+  if (!p) return;
+  const heeftSvc  = p.tabs.includes("servicekosten");
+  const heeftSpec = p.tabs.includes("balansspec");
+  document.getElementById("ui-servicekosten").classList.toggle("hidden", !heeftSvc);
+  document.getElementById("ui-balansspec").classList.toggle("hidden", !heeftSpec);
+  const kleur = p.tabs === KLANTEN.fergagne?.tabs ? "badge-green" : "badge-blue";
+  const tabLabels = {
+    pl:"P&L per kwartaal", servicekosten:"Servicekosten",
+    rentroll:"Rent Roll", cashflow:"Cashflow",
+    balans:"Balans", balansspec:"Balans specificatie", signalen:"Signalen",
+  };
+  document.getElementById("tabs-badges").innerHTML =
+    '<span class="badge badge-blue">Dashboard</span>' +
+    p.tabs.map(t => `<span class="badge badge-blue">${tabLabels[t]||t}</span>`).join("");
+  document.getElementById("topbar-badge").textContent = p.naam;
+  document.getElementById("topbar-badge").style.display = "inline";
+}
+
+function bestandGekozen(input, key) {
+  if (!input.files[0]) return;
+  STATE.bestanden[key] = input.files[0];
+  document.getElementById("icon-" + key).textContent = "✓";
+  document.getElementById("icon-" + key).style.background = "#2D6A4F";
+  document.getElementById("icon-" + key).style.color = "#fff";
+  document.getElementById("sub-" + key).textContent = input.files[0].name;
+  document.getElementById("ui-" + key).classList.add("done");
+}
+
+// ── Excel lezen ────────────────────────────────────────────────────────────
+function leesExcel(file) {
+  return new Promise((res, rej) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const wb = XLSX.read(e.target.result, { type: "array", cellDates: true });
+        const sheets = {};
+        wb.SheetNames.forEach(n => {
+          sheets[n] = XLSX.utils.sheet_to_json(wb.Sheets[n], { defval: null });
+        });
+        res(sheets);
+      } catch(err) { rej(err); }
+    };
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+// ── Boekingen verwerken ────────────────────────────────────────────────────
+function verwerkBoekingen(rows, van, tm, jaar) {
+  const jr = parseInt(jaar);
+  const jrVorig = jr - 1;
+
+  const data = rows.map(r => ({
+    ...r,
+    netto: (r.Boeking_Bedrag_Debet || 0) - (r.Boeking_Bedrag_Credit || 0),
+    kwartaal: toQ(r.Boeking_Boekperiode || 1),
+  }));
+
+  const sum = (j, kw, gb, excl = []) => {
+    const gbl = Array.isArray(gb) ? gb : [gb];
+    return data.filter(r =>
+      r.Boeking_Boekjaar === j &&
+      (kw ? r.kwartaal === kw : true) &&
+      gbl.includes(r.Boeking_Grootboeknr) &&
+      !excl.includes(r.Boeking_OGB_Kostensoort_Omschr)
+    ).reduce((s, r) => s + r.netto, 0);
+  };
+
+  const huurKw = (j, kw) =>
+    Math.abs(sum(j, kw, [8800, 8801], ["Afrekening huurders"]));
+
+  // Periodes in rapportageperiode
+  const kwartalen = ["Q1","Q2","Q3","Q4"];
+  const { start, eind } = periodeNummers(van, tm);
+  const actieveKw = kwartalen.filter(q => {
+    const qStart = q === "Q1" ? 1 : q === "Q2" ? 4 : q === "Q3" ? 7 : 10;
+    const qEind  = q === "Q1" ? 3 : q === "Q2" ? 6 : q === "Q3" ? 9 : 12;
+    return qStart >= start && qEind <= eind;
+  });
+
+  const huurHuidig = actieveKw.reduce((s, q) => s + huurKw(jr, q), 0);
+  const huurVorig  = actieveKw.reduce((s, q) => s + huurKw(jrVorig, q), 0);
+
+  const onttHuidig = actieveKw.reduce((s, q) => s + sum(jr, q, 840), 0);
+  const bankHuidig = data.filter(r =>
+    r.Boeking_Boekjaar === jr &&
+    inPeriode(r.Boeking_Boekperiode, van, tm) &&
+    r.Boeking_Grootboeknr === 1010
+  ).reduce((s, r) => s + r.netto, 0);
+
+  // Huurtrend per kwartaal
+  const huurTrend = kwartalen.map(q => ({
+    kw: q,
+    huidig: huurKw(jr, q),
+    vorig: huurKw(jrVorig, q),
+  }));
+
+  // Per complex
+  const complexen = [...new Set(data.map(r => r.Boeking_Complexnr).filter(Boolean))].sort();
+  const huurPerComplex = complexen.map(cx => ({
+    complex: (data.find(r => r.Boeking_Complexnr === cx)?.Complexomschrijving || `Complex ${cx}`).substring(0,16),
+    huidig: actieveKw.reduce((s,q) => s + Math.abs(data.filter(r =>
+      r.Boeking_Boekjaar===jr && r.kwartaal===q &&
+      r.Boeking_Complexnr===cx && r.Boeking_Grootboeknr===8800
+    ).reduce((s,r)=>s+r.netto,0)), 0),
+    vorig: actieveKw.reduce((s,q) => s + Math.abs(data.filter(r =>
+      r.Boeking_Boekjaar===jrVorig && r.kwartaal===q &&
+      r.Boeking_Complexnr===cx && r.Boeking_Grootboeknr===8800
+    ).reduce((s,r)=>s+r.netto,0)), 0),
+  })).filter(c => c.huidig > 0 || c.vorig > 0);
+
+  // Bankstand opbouwen
+  const bankStand = [];
+  let s = 0;
+  kwartalen.forEach(q => {
+    s += data.filter(r =>
+      r.Boeking_Boekjaar===jrVorig && r.kwartaal===q && r.Boeking_Grootboeknr===1010
+    ).reduce((t,r)=>t+r.netto,0);
+    bankStand.push({ kw: `${q} '${String(jrVorig).slice(2)}`, stand: Math.round(s) });
+  });
+  actieveKw.forEach(q => {
+    s += data.filter(r =>
+      r.Boeking_Boekjaar===jr && r.kwartaal===q && r.Boeking_Grootboeknr===1010
+    ).reduce((t,r)=>t+r.netto,0);
+    bankStand.push({ kw: `${q} '${String(jr).slice(2)}`, stand: Math.round(s) });
+  });
+  const bankEind = s;
+
+  // P&L data per post
+  const EXCL = ["Afrekening huurders"];
+  const plPosten = [
+    { label:"Huuropbrengst belast",   gb:[8800],           sign:-1, sectie:"opbr" },
+    { label:"Huuropbrengst onbelast", gb:[8801],           sign:-1, sectie:"opbr" },
+    { label:"Verleende huurkorting",  gb:[8805,9400],      sign: 1, sectie:"opbr", kleur:"oranje" },
+    { label:"Zonnestroom",            gb:[8815],           sign:-1, sectie:"opbr" },
+    { label:"Beheerkosten",           gb:[4000],           sign: 1, sectie:"kost" },
+    { label:"Verzekeringen",          gb:[4130],           sign: 1, sectie:"kost" },
+    { label:"Onderhoud gebouwen",     gb:[4300,4305],      sign: 1, sectie:"kost" },
+    { label:"Onderhoud installaties", gb:[4340],           sign: 1, sectie:"kost" },
+    { label:"Onderhoud terrein",      gb:[4330],           sign: 1, sectie:"kost" },
+    { label:"Servicekosten eigenaar", gb:[4350],           sign: 1, sectie:"kost" },
+    { label:"OZB / WOZ",             gb:[4700],           sign: 1, sectie:"kost" },
+    { label:"Gemeentelijke heffingen",gb:[4710],           sign: 1, sectie:"kost" },
+    { label:"Niet verr. BTW",        gb:[4903],           sign: 1, sectie:"kost" },
+    { label:"Diverse alg. kosten",   gb:[4990],           sign: 1, sectie:"kost" },
+  ];
+
+  const plData = plPosten.map(post => {
+    const row = { label: post.label, sectie: post.sectie, kleur: post.kleur };
+    kwartalen.forEach(q => {
+      row[`v_${q}`] = post.sign * sum(jrVorig, q, post.gb, EXCL);
+      row[`h_${q}`] = post.sign * sum(jr,      q, post.gb, EXCL);
+    });
+    row.v_tot = actieveKw.reduce((s,q) => s + row[`v_${q}`], 0);
+    row.h_tot = actieveKw.reduce((s,q) => s + row[`h_${q}`], 0);
+    row.delta  = row.h_tot - row.v_tot;
+    return row;
+  });
+
+  // Totalen berekenen
+  const totOpbrH = plData.filter(r=>r.sectie==="opbr").reduce((s,r)=>s+r.h_tot,0);
+  const totOpbrV = plData.filter(r=>r.sectie==="opbr").reduce((s,r)=>s+r.v_tot,0);
+  const totKostH = plData.filter(r=>r.sectie==="kost").reduce((s,r)=>s+r.h_tot,0);
+  const totKostV = plData.filter(r=>r.sectie==="kost").reduce((s,r)=>s+r.v_tot,0);
+  const ebitdaH  = totOpbrH - totKostH;
+  const ebitdaV  = totOpbrV - totKostV;
+
+  // Kasstroom
+  const kasData = actieveKw.map(q => ({
+    kw: q,
+    huur:       huurKw(jr, q),
+    exploitatie:Math.abs(sum(jr,q,[4000,4130,4300,4305,4310,4330,4340,4350,4508,4700,4710,4903,4990,4992])),
+    onttrekking:Math.abs(sum(jr,q,840)),
+    netto:      sum(jr,q,1010),
+    ratio:      huurKw(jr,q) > 0 ? Math.abs(sum(jr,q,840)) / huurKw(jr,q) : 0,
+  }));
+
+  // Units beschikbaar voor filtering
+  const units = [...new Set(data.map(r=>r.Boeking_Unitnr).filter(Boolean))];
+  const cxLijst = complexen.map(cx => ({
+    nr: cx,
+    naam: data.find(r=>r.Boeking_Complexnr===cx)?.Complexomschrijving || `Complex ${cx}`,
+  }));
+
+  return {
+    huurHuidig, huurVorig, onttHuidig, bankEind,
+    ratio: huurHuidig > 0 ? onttHuidig / huurHuidig : 0,
+    huurTrend, huurPerComplex, bankStand, kasData,
+    plData, totOpbrH, totOpbrV, totKostH, totKostV, ebitdaH, ebitdaV,
+    actieveKw, kwartalen, jr, jrVorig, units, cxLijst,
+  };
+}
+
+// ── Servicekosten verwerken ────────────────────────────────────────────────
+function verwerkSvc(rows, van, tm, jaar, exclComplex = []) {
+  const jr = parseInt(jaar);
+  const jrV = jr - 1;
+  const EXCL = ["Afrekening huurders","Voorschot service"];
+  const { start, eind } = periodeNummers(van, tm);
+
+  const filter = (j, excl = EXCL) => rows.filter(r =>
+    r.Service_Begroting_Jaar === j &&
+    !exclComplex.includes(r.Service_Begroting_Complex) &&
+    !excl.includes(r.Service_Kostensoort_Naam)
+  );
+
+  const h1Sum = (j) => {
+    const sub = filter(j);
+    return sub.reduce((s,r) => {
+      for (let i = start; i <= eind; i++) {
+        s += r[`Service_Geboekt_periode_${String(i).padStart(2,"0")}`] || 0;
+      }
+      return s;
+    }, 0);
+  };
+
+  const byKs = (j) => {
+    const m = {};
+    filter(j).forEach(r => {
+      const k = r.Service_Kostensoort_Naam;
+      for (let i = start; i <= eind; i++) {
+        m[k] = (m[k]||0) + (r[`Service_Geboekt_periode_${String(i).padStart(2,"0")}`]||0);
+      }
+    });
+    return m;
+  };
+
+  const vscSum = (j) => rows.filter(r =>
+    r.Service_Begroting_Jaar === j &&
+    !exclComplex.includes(r.Service_Begroting_Complex) &&
+    r.Service_Kostensoort_Naam === "Voorschot service"
+  ).reduce((s,r) => {
+    for (let i = start; i <= eind; i++) {
+      s += r[`Service_Geboekt_periode_${String(i).padStart(2,"0")}`] || 0;
+    }
+    return s;
+  }, 0);
+
+  const tot  = h1Sum(jr);
+  const totV = h1Sum(jrV);
+  const vsc  = vscSum(jr);
+  const vscV = vscSum(jrV);
+  const ks   = byKs(jr);
+  const ksV  = byKs(jrV);
+
+  const detail = Object.keys({...ks,...ksV}).map(k => ({
+    ks: k,
+    huidig: Math.round(ks[k]||0),
+    vorig:  Math.round(ksV[k]||0),
+    delta:  Math.round((ks[k]||0)-(ksV[k]||0)),
+  }))
+  .filter(r => r.huidig > 50 || r.vorig > 50)
+  .sort((a,b) => b.huidig - a.huidig);
+
+  return {
+    tot, totV, vsc, vscV,
+    saldo: tot + vsc,
+    saldoV: totV + vscV,
+    detail,
+  };
+}
+
+// ── Balans verwerken ───────────────────────────────────────────────────────
+function verwerkBalans(rows, jaar) {
+  const jr  = parseInt(jaar);
+  const jrV = jr - 1;
+
+  const saldo = (j, gb) => {
+    const r = rows.find(r => r.Jaar === j && r.Grootboekrekeningnr === gb);
+    if (!r) return 0;
+    return r.Eindsaldo ?? ((r.Saldo_debet||0) - (r.Saldo_credit||0));
+  };
+
+  return {
+    bank:   { h: saldo(jr,1010),  v: saldo(jrV,1010)  },
+    deb:    { h: Math.abs(saldo(jr,1310)),  v: Math.abs(saldo(jrV,1310))  },
+    cred:   { h: Math.abs(saldo(jr,1600)),  v: Math.abs(saldo(jrV,1600))  },
+    vsc:    { h: Math.abs(saldo(jr,1712)),  v: Math.abs(saldo(jrV,1712))  },
+    ev:     { h: saldo(jr,850),   v: saldo(jrV,850)   },
+    btw:    { h: saldo(jr,1810),  v: saldo(jrV,1810)  },
+    ic:     { h: saldo(jr,1900),  v: saldo(jrV,1900)  },
+    jr, jrV,
+  };
+}
+
+// ── Rent Roll verwerken ────────────────────────────────────────────────────
+function verwerkRR(rows) {
+  return rows
+    .filter(r => r.Vorderingsoort === 1)
+    .map(r => ({
+      huurder:    r.Huurder_naam_1 || "–",
+      unit:       r.Unitnummer || "–",
+      adres:      r.Unit_adres || r.Unit_omschrijving || "–",
+      complex_nr: r.Complexnummer,
+      complex:    r.Complex_omschrijving || "–",
+      m2:         r.Gehuurd_oppervlak || 0,
+      jaarhuur:   r.Prolongatie_bedrag_jaar || 0,
+      vsc:        r.Service_voorschot_jaar || 0,
+      ingang:     r.Contract_ingangsdatum,
+      einde:      r.Contract_afloopdatum,
+      rest:       r.Restant_looptijd || 0,
+      index:      r.Indexeringspercentage || null,
+      index_datum:r.Indexeringsdatum || null,
+    }))
+    .sort((a,b) => a.rest - b.rest);
+}
+
+// ── Datum formatteren ──────────────────────────────────────────────────────
+function fmtDatum(d) {
+  if (!d) return "–";
+  try {
+    if (d instanceof Date) return d.toLocaleDateString("nl-NL");
+    const dt = new Date(d);
+    if (!isNaN(dt)) return dt.toLocaleDateString("nl-NL");
+    return String(d).split("T")[0];
+  } catch { return String(d); }
+}
+</script><script>
+// ── Genereer rapport ───────────────────────────────────────────────────────
+async function genereer() {
+  const p = KLANTEN[STATE.klant];
+  if (!STATE.bestanden.boekingen) {
+    toonFout("Upload minimaal het IDBC Boekingen bestand.");
+    return;
+  }
+  if (!STATE.bestanden.balans) {
+    toonFout("Upload minimaal het IDBC Balans bestand.");
+    return;
+  }
+  verbergFout();
+  showScreen("s-laden");
+
+  try {
+    setLaden("Boekingen inlezen…");
+    const bkS  = await leesExcel(STATE.bestanden.boekingen);
+    const bkR  = bkS[Object.keys(bkS)[0]];
+
+    setLaden("Balans inlezen…");
+    const balS = await leesExcel(STATE.bestanden.balans);
+    const balR = balS[Object.keys(balS)[0]];
+
+    let svcR = [], rrR = [];
+
+    if (STATE.bestanden.servicekosten) {
+      setLaden("Servicekosten inlezen…");
+      const svcS = await leesExcel(STATE.bestanden.servicekosten);
+      svcR = svcS[Object.keys(svcS)[0]];
+    }
+
+    if (STATE.bestanden.rentroll) {
+      setLaden("Rent Roll inlezen…");
+      const rrS = await leesExcel(STATE.bestanden.rentroll);
+      rrR = rrS[Object.keys(rrS)[0]];
+    }
+
+    setLaden("Data verwerken…");
+    const bk  = verwerkBoekingen(bkR, STATE.van, STATE.tm, STATE.jaar);
+    const svc = svcR.length ? verwerkSvc(svcR, STATE.van, STATE.tm, STATE.jaar, p.svc_excl_complex || []) : null;
+    const bal = verwerkBalans(balR, STATE.jaar);
+    const rr  = rrR.length ? verwerkRR(rrR) : [];
+
+    STATE.data = { bk, svc, bal, rr, p };
+
+    setLaden("Rapport opbouwen…");
+    bouwRapport(bk, svc, bal, rr, p);
+
+    showScreen("s-rapport");
+  } catch(e) {
+    showScreen("s-upload");
+    toonFout("Fout bij verwerken: " + e.message);
+  }
+}
+
+function setLaden(tekst) {
+  document.getElementById("laden-tekst").textContent = tekst;
+}
+
+function toonFout(msg) {
+  const el = document.getElementById("fout-msg");
+  el.textContent = msg;
+  el.style.display = "block";
+}
+
+function verbergFout() {
+  document.getElementById("fout-msg").style.display = "none";
+}
+
+// ── Rapport opbouwen ───────────────────────────────────────────────────────
+function bouwRapport(bk, svc, bal, rr, p) {
+  const { start, eind } = periodeNummers(STATE.van, STATE.tm);
+  const same = STATE.van === STATE.tm;
+  const periodeLbl = same
+    ? `${STATE.van} ${STATE.jaar}`
+    : `${STATE.van} t/m ${STATE.tm} ${STATE.jaar}`;
+
+  // Header
+  document.getElementById("rpt-periode-lbl").textContent =
+    `${periodeLbl} · periodes ${start}–${eind}`;
+  document.getElementById("rpt-titel").textContent = p.naam;
+  document.getElementById("rpt-sub").textContent   = p.sub;
+  document.getElementById("topbar-badge").textContent = p.naam;
+  document.getElementById("topbar-badge").style.display = "inline";
+
+  // KPI's
+  const kpis = [
+    {
+      label: `Huurinkomen ${periodeLbl}`,
+      val: bk.huurHuidig,
+      delta: bk.huurHuidig - bk.huurVorig,
+      deltaLbl: `zelfde periode ${bk.jrVorig}`,
+      goed: true,
+    },
+    {
+      label: "Eigenaarsonttrekking",
+      val: bk.onttHuidig,
+      sub: `Ratio: ${PCT(bk.ratio)}`,
+    },
+    {
+      label: `Servicekosten ${periodeLbl}`,
+      val: svc ? svc.tot : null,
+      delta: svc ? svc.tot - svc.totV : null,
+      deltaLbl: `zelfde periode ${bk.jrVorig}`,
+      goed: false,
+    },
+    {
+      label: "Svc saldo",
+      val: svc ? svc.saldo : null,
+      sub: svc && svc.saldo <= 0 ? "Voorschotten > kosten ✓" : "Tekort ⚠",
+    },
+    {
+      label: `Bankstand eind ${STATE.tm} ${STATE.jaar}`,
+      val: bk.bankEind,
+      delta: bk.bankEind - (bal.bank.v || 0),
+      deltaLbl: `FY ${bk.jrVorig}`,
+      goed: true,
+    },
+  ].filter(k => k.val != null);
+
+  const kpiGrid = document.getElementById("kpi-grid");
+  kpiGrid.style.gridTemplateColumns = `repeat(${Math.min(kpis.length,3)},1fr)`;
+  kpiGrid.innerHTML = kpis.map(k => `
+    <div class="kpi-card">
+      <div class="kpi-label">${k.label}</div>
+      <div class="kpi-value">${NL(k.val)}</div>
+      ${k.delta != null ? `
+        <div class="kpi-delta">
+          <span class="delta-pill ${(k.delta > 0) === k.goed ? "delta-good" : "delta-bad"}">
+            ${k.delta >= 0 ? "+" : ""}${NL(k.delta)}
+          </span>
+          <span style="font-size:11px;color:var(--textSub)">vs ${k.deltaLbl}</span>
+        </div>` : ""}
+      ${k.sub ? `<div style="font-size:11px;color:var(--textSub);margin-top:4px">${k.sub}</div>` : ""}
+    </div>
+  `).join("");
+
+  // Signalen
+  const signalen = [];
+  if (bk.huurHuidig > bk.huurVorig)
+    signalen.push({ cls:"sig-goed",     txt:`✓ Huur +${PCT((bk.huurHuidig-bk.huurVorig)/bk.huurVorig)}` });
+  else
+    signalen.push({ cls:"sig-kritiek",  txt:`✗ Huur ↓ ${PCT(Math.abs((bk.huurHuidig-bk.huurVorig)/bk.huurVorig))}` });
+
+  if (bk.ratio < 0.85)
+    signalen.push({ cls:"sig-goed",     txt:`✓ Ratio ${PCT(bk.ratio)}` });
+  else if (bk.ratio < 1)
+    signalen.push({ cls:"sig-aandacht", txt:`⚠ Ratio ${PCT(bk.ratio)}` });
+  else
+    signalen.push({ cls:"sig-kritiek",  txt:`✗ Ratio ${PCT(bk.ratio)}` });
+
+  if (bk.bankEind > 50000)
+    signalen.push({ cls:"sig-goed",     txt:`✓ Bank ${NL(bk.bankEind)}` });
+  else if (bk.bankEind > 0)
+    signalen.push({ cls:"sig-aandacht", txt:`⚠ Bank ${NL(bk.bankEind)}` });
+  else
+    signalen.push({ cls:"sig-kritiek",  txt:`✗ Bank ${NL(bk.bankEind)}` });
+
+  if (svc) {
+    if (svc.saldo <= 0)
+      signalen.push({ cls:"sig-goed",     txt:`✓ Svc saldo ${NL(svc.saldo)}` });
+    else
+      signalen.push({ cls:"sig-aandacht", txt:`⚠ Svc saldo ${NL(svc.saldo)}` });
+  }
+
+  if (bal.deb.h > bal.deb.v)
+    signalen.push({ cls:"sig-aandacht", txt:`⚠ Debiteuren ${NL(bal.deb.h)}` });
+  else
+    signalen.push({ cls:"sig-goed",     txt:`✓ Debiteuren ${NL(bal.deb.h)}` });
+
+  rr.filter(r => r.rest < 1 && r.rest > 0).forEach(r =>
+    signalen.push({ cls:"sig-kritiek", txt:`✗ Contract < 1jr: ${r.huurder.split(" ")[0]}` })
+  );
+
+  document.getElementById("sig-row").innerHTML =
+    signalen.map(s => `<span class="sig ${s.cls}">${s.txt}</span>`).join("");
+
+  // Tabs bouwen
+  const TAB_LABELS = {
+    pl:"P&L per kwartaal", servicekosten:"Servicekosten",
+    rentroll:"Rent Roll", cashflow:"Cashflow",
+    balans:"Balans", signalen:"Signalen & actiepunten",
+  };
+
+  const beschikbareTabs = p.tabs.filter(t => {
+    if (t === "servicekosten" && !svc) return false;
+    if (t === "rentroll" && !rr.length) return false;
+    return true;
+  });
+
+  const nav = document.getElementById("tabs-nav");
+  nav.innerHTML = beschikbareTabs.map((t, i) => `
+    <button class="tab-btn ${i===0?"active":""}"
+      onclick="activeerTab('${t}',this)">${TAB_LABELS[t]||t}</button>
+  `).join("");
+
+  // Tab inhoud renderen
+  const inhoud = document.getElementById("tab-inhoud");
+  inhoud.innerHTML = beschikbareTabs.map((t, i) => `
+    <div class="tab-content ${i===0?"active":""}" id="tc-${t}">
+      ${renderTab(t, bk, svc, bal, rr)}
+    </div>
+  `).join("");
+}
+
+function activeerTab(id, btn) {
+  document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+  document.querySelectorAll(".tab-content").forEach(c => c.classList.remove("active"));
+  btn.classList.add("active");
+  const tc = document.getElementById("tc-" + id);
+  if (tc) tc.classList.add("active");
+}
+
+// ── Tab renderers ──────────────────────────────────────────────────────────
+function renderTab(id, bk, svc, bal, rr) {
+  switch(id) {
+    case "pl":           return renderPL(bk);
+    case "servicekosten":return renderSvc(svc);
+    case "rentroll":     return renderRR(rr);
+    case "cashflow":     return renderCashflow(bk);
+    case "balans":       return renderBalans(bal, bk.jr, bk.jrV);
+    case "signalen":     return renderSignalen(bk, svc, bal, rr);
+    default: return "";
+  }
+}
+
+// ── P&L tab ────────────────────────────────────────────────────────────────
+function renderPL(bk) {
+  const kw = bk.actieveKw;
+  const jr  = bk.jr;
+  const jrV = bk.jrVorig;
+
+  let html = `
+    <div style="overflow-x:auto">
+    <table class="tbl">
+      <thead>
+        <tr>
+          <th rowspan="2" style="text-align:left;min-width:200px">Omschrijving</th>
+          <th colspan="${kw.length}" style="background:#2F75B6">${jrV} Actueel</th>
+          <th colspan="${kw.length}" style="background:${STATE.data.p.kleur}">${jr} Actueel</th>
+          <th style="background:#2F75B6">Totaal ${jrV}</th>
+          <th style="background:${STATE.data.p.kleur}">Totaal ${jr}</th>
+          <th>∆</th>
+          <th>∆ %</th>
+        </tr>
+        <tr>
+          ${kw.map(q=>`<th style="background:#2F75B6">${q} ${jrV}</th>`).join("")}
+          ${kw.map(q=>`<th style="background:${STATE.data.p.kleur}">${q} ${jr}</th>`).join("")}
+          <th style="background:#2F75B6"></th>
+          <th style="background:${STATE.data.p.kleur}"></th>
+          <th></th><th></th>
+        </tr>
+      </thead>
+      <tbody>`;
+
+  // Opbrengsten sectie
+  html += `<tr class="hdr-row"><td colspan="${4+kw.length*2}">OPBRENGSTEN</td></tr>`;
+  let totOpbrH_kw = Object.fromEntries(kw.map(q=>[q,0]));
+  let totOpbrV_kw = Object.fromEntries(kw.map(q=>[q,0]));
+
+  bk.plData.filter(r=>r.sectie==="opbr").forEach(r => {
+    const bg = r.kleur==="oranje" ? 'style="background:var(--orangeL)"' : "";
+    html += `<tr>
+      <td style="padding-left:20px" ${bg}>${r.label}</td>
+      ${kw.map(q=>`<td ${bg}>${r[`v_${q}`] ? NL(r[`v_${q}`]) : "–"}</td>`).join("")}
+      ${kw.map(q=>`<td ${bg}>${r[`h_${q}`] ? NL(r[`h_${q}`]) : "–"}</td>`).join("")}
+      <td ${bg}>${NL(r.v_tot)}</td>
+      <td ${bg}>${NL(r.h_tot)}</td>
+      <td class="${r.delta>=0?"cel-goed":"cel-slecht"}">${r.delta>=0?"+":""}${NL(r.delta)}</td>
+      <td class="${r.delta>=0?"cel-goed":"cel-slecht"}">${r.v_tot ? PCT(r.delta/Math.abs(r.v_tot)) : "–"}</td>
+    </tr>`;
+    kw.forEach(q => { totOpbrH_kw[q] += r[`h_${q}`]; totOpbrV_kw[q] += r[`v_${q}`]; });
+  });
+
+  // Totaal opbrengsten
+  const dOpbr = bk.totOpbrH - bk.totOpbrV;
+  html += `<tr class="totaal-row">
+    <td>TOTAAL OPBRENGSTEN</td>
+    ${kw.map(q=>`<td>${NL(totOpbrV_kw[q])}</td>`).join("")}
+    ${kw.map(q=>`<td>${NL(totOpbrH_kw[q])}</td>`).join("")}
+    <td>${NL(bk.totOpbrV)}</td>
+    <td>${NL(bk.totOpbrH)}</td>
+    <td class="${dOpbr>=0?"cel-goed":"cel-slecht"}">${dOpbr>=0?"+":""}${NL(dOpbr)}</td>
+    <td class="${dOpbr>=0?"cel-goed":"cel-slecht"}">${bk.totOpbrV ? PCT(dOpbr/Math.abs(bk.totOpbrV)) : "–"}</td>
+  </tr>`;
+
+  // Kosten sectie
+  html += `<tr class="hdr-row"><td colspan="${4+kw.length*2}">KOSTEN</td></tr>`;
+  let totKostH_kw = Object.fromEntries(kw.map(q=>[q,0]));
+  let totKostV_kw = Object.fromEntries(kw.map(q=>[q,0]));
+
+  bk.plData.filter(r=>r.sectie==="kost").forEach(r => {
+    html += `<tr>
+      <td style="padding-left:20px">${r.label}</td>
+      ${kw.map(q=>`<td>${r[`v_${q}`] ? NL(r[`v_${q}`]) : "–"}</td>`).join("")}
+      ${kw.map(q=>`<td>${r[`h_${q}`] ? NL(r[`h_${q}`]) : "–"}</td>`).join("")}
+      <td>${NL(r.v_tot)}</td>
+      <td>${NL(r.h_tot)}</td>
+      <td class="${r.delta<=0?"cel-goed":"cel-slecht"}">${r.delta>=0?"+":""}${NL(r.delta)}</td>
+      <td class="${r.delta<=0?"cel-goed":"cel-slecht"}">${r.v_tot ? PCT(r.delta/Math.abs(r.v_tot)) : "–"}</td>
+    </tr>`;
+    kw.forEach(q => { totKostH_kw[q] += r[`h_${q}`]; totKostV_kw[q] += r[`v_${q}`]; });
+  });
+
+  // Totaal kosten
+  const dKost = bk.totKostH - bk.totKostV;
+  html += `<tr class="totaal-row">
+    <td>TOTAAL KOSTEN</td>
+    ${kw.map(q=>`<td>${NL(totKostV_kw[q])}</td>`).join("")}
+    ${kw.map(q=>`<td>${NL(totKostH_kw[q])}</td>`).join("")}
+    <td>${NL(bk.totKostV)}</td>
+    <td>${NL(bk.totKostH)}</td>
+    <td class="${dKost<=0?"cel-goed":"cel-slecht"}">${dKost>=0?"+":""}${NL(dKost)}</td>
+    <td class="${dKost<=0?"cel-goed":"cel-slecht"}">${bk.totKostV ? PCT(dKost/Math.abs(bk.totKostV)) : "–"}</td>
+  </tr>`;
+
+  // EBITDA
+  const dEbitda = bk.ebitdaH - bk.ebitdaV;
+  html += `<tr style="background:var(--navy);color:#fff;font-weight:700">
+    <td style="color:#fff">EBITDA</td>
+    ${kw.map(q=>`<td style="color:#fff">–</td>`).join("")}
+    ${kw.map(q=>`<td style="color:#fff">–</td>`).join("")}
+    <td style="color:#fff">${NL(bk.ebitdaV)}</td>
+    <td style="color:#fff">${NL(bk.ebitdaH)}</td>
+    <td style="color:#fff">${dEbitda>=0?"+":""}${NL(dEbitda)}</td>
+    <td style="color:#fff">${bk.ebitdaV ? PCT(dEbitda/Math.abs(bk.ebitdaV)) : "–"}</td>
+  </tr>`;
+
+  html += `</tbody></table></div>`;
+  return html;
+}
+
+// ── Servicekosten tab ──────────────────────────────────────────────────────
+function renderSvc(svc) {
+  if (!svc) return '<p style="color:var(--textSub)">Geen servicekosten data beschikbaar.</p>';
+
+  let html = `
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px">
+      <div class="kpi-card"><div class="kpi-label">Totaal kosten</div><div class="kpi-value">${NL(svc.tot)}</div><div class="kpi-delta"><span class="delta-pill ${svc.tot<svc.totV?"delta-good":"delta-bad"}">${svc.tot<=svc.totV?"-":"+"}${NL(Math.abs(svc.tot-svc.totV))}</span></div></div>
+      <div class="kpi-card"><div class="kpi-label">Vorige periode</div><div class="kpi-value">${NL(svc.totV)}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Voorschotten</div><div class="kpi-value">${NL(svc.vsc)}</div><div style="font-size:11px;color:var(--textSub);margin-top:4px">Ontvangen (negatief)</div></div>
+      <div class="kpi-card"><div class="kpi-label">Saldo</div><div class="kpi-value">${NL(svc.saldo)}</div><div style="font-size:11px;color:var(--textSub);margin-top:4px">${svc.saldo<=0?"Overschot ✓":"Tekort ⚠"}</div></div>
+    </div>
+    <div style="overflow-x:auto">
+    <table class="tbl">
+      <thead><tr>
+        <th style="text-align:left;min-width:200px">Kostensoort</th>
+        <th>Huidig</th><th>Vorig</th>
+        <th>∆ Absoluut</th><th>∆ %</th><th>Signaal</th>
+      </tr></thead>
+      <tbody>`;
+
+  svc.detail.forEach((r,i) => {
+    const good = r.delta <= 0;
+    const sig = r.delta > 1000 ? "🔴 Kritiek"
+      : r.delta > 0 ? "🟡 Licht"
+      : r.delta < -2000 ? "🟢 Daling" : "→ Stabiel";
+    const sigBg = sig.includes("Kritiek") ? "var(--orangeL)"
+      : sig.includes("Licht") ? "var(--yellowL)"
+      : sig.includes("Daling") ? "var(--greenL)" : "var(--grey1)";
+    html += `<tr>
+      <td style="padding-left:16px">${r.ks}</td>
+      <td>${NL(r.huidig)}</td>
+      <td style="color:var(--textSub)">${NL(r.vorig)}</td>
+      <td class="${good?"cel-goed":"cel-slecht"}">${r.delta>=0?"+":""}${NL(r.delta)}</td>
+      <td class="${good?"cel-goed":"cel-slecht"}">${r.vorig ? PCT(r.delta/r.vorig) : "–"}</td>
+      <td style="text-align:center;background:${sigBg};font-size:11px;font-weight:600">${sig}</td>
+    </tr>`;
+  });
+
+  // Totaalrij
+  html += `<tr class="totaal-row">
+    <td>TOTAAL KOSTEN</td>
+    <td>${NL(svc.tot)}</td>
+    <td>${NL(svc.totV)}</td>
+    <td class="${svc.tot<=svc.totV?"cel-goed":"cel-slecht"}">${svc.tot<=svc.totV?"-":"+"}${NL(Math.abs(svc.tot-svc.totV))}</td>
+    <td class="${svc.tot<=svc.totV?"cel-goed":"cel-slecht"}">${svc.totV ? PCT((svc.tot-svc.totV)/svc.totV) : "–"}</td>
+    <td></td>
+  </tr>`;
+
+  // Voorschotten
+  html += `<tr style="background:#E8F4FD;font-style:italic">
+    <td style="padding-left:16px">Voorschotten ontvangen</td>
+    <td>${NL(svc.vsc)}</td>
+    <td style="color:var(--textSub)">${NL(svc.vscV)}</td>
+    <td colspan="3" style="font-size:11px;color:var(--textSub)">Negatief = ontvangen</td>
+  </tr>`;
+
+  // Saldo
+  const saldoGoed = svc.saldo <= 0;
+  html += `<tr class="totaal-row" style="${saldoGoed?"background:var(--greenL);color:var(--green)":"background:var(--orangeL);color:var(--orange)"}">
+    <td style="color:inherit">SALDO (kosten + voorschotten)</td>
+    <td style="color:inherit">${NL(svc.saldo)}</td>
+    <td style="color:var(--textSub)">${NL(svc.saldoV)}</td>
+    <td colspan="3" style="font-size:11px;color:inherit">${saldoGoed?"Voorschotten > kosten (overschot)":"Tekort — kosten > voorschotten"}</td>
+  </tr>`;
+
+  html += `</tbody></table></div>`;
+  return html;
+}
+
+// ── Rent Roll tab ──────────────────────────────────────────────────────────
+function renderRR(rr) {
+  if (!rr.length) return '<p style="color:var(--textSub)">Geen Rent Roll data beschikbaar.</p>';
+
+  const datum = new Date().toLocaleDateString("nl-NL",{day:"numeric",month:"long",year:"numeric"});
+  const totM2  = rr.reduce((s,r)=>s+r.m2,0);
+  const totJH  = rr.reduce((s,r)=>s+r.jaarhuur,0);
+  const totVsc = rr.reduce((s,r)=>s+r.vsc,0);
+
+  let html = `
+    <div style="margin-bottom:12px">
+      <span style="font-size:12px;font-weight:600;color:var(--navy);background:var(--navyLight);padding:4px 12px;border-radius:10px">
+        Per ${datum}
+      </span>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px">
+      <div class="kpi-card"><div class="kpi-label">Totaal jaarhuur</div><div class="kpi-value">${NL(totJH)}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Verhuurd</div><div class="kpi-value">${Math.round(totM2).toLocaleString("nl-NL")} m²</div></div>
+      <div class="kpi-card"><div class="kpi-label">Gem. €/m²/jr</div><div class="kpi-value">€ ${totM2>0?Math.round(totJH/totM2):0}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Svc. voorschot/jr</div><div class="kpi-value">${NL(totVsc)}</div></div>
+    </div>
+    <div style="overflow-x:auto">
+    <table class="tbl">
+      <thead><tr>
+        <th style="text-align:left;min-width:180px">Huurder</th>
+        <th style="text-align:left">Adres/Unit</th>
+        <th style="text-align:left">Complex</th>
+        <th>m²</th><th>Jaarhuur</th><th>€/m²/jr</th>
+        <th>Svc./jr</th><th>Ingang</th><th>Einde</th>
+        <th>Restant</th><th>Indexering</th><th>Risico</th>
+      </tr></thead>
+      <tbody>`;
+
+  rr.forEach(r => {
+    const restCls = r.rest<1 ? "rest-kritiek" : r.rest<2 ? "rest-aandacht" : "rest-goed";
+    const riskLbl = r.rest<1 ? "🔴 <1jr" : r.rest<2 ? "⚠ 1-2jr" : "✓ >2jr";
+    html += `<tr>
+      <td style="font-weight:500">${r.huurder.substring(0,30)}</td>
+      <td style="font-size:11px;color:var(--textSub)">${r.adres}</td>
+      <td style="font-size:11px">${r.complex.substring(0,14)}</td>
+      <td>${Math.round(r.m2)}</td>
+      <td style="font-weight:600">${NL(r.jaarhuur)}</td>
+      <td>${r.m2>0?"€ "+Math.round(r.jaarhuur/r.m2):"–"}</td>
+      <td>${NL(r.vsc)}</td>
+      <td style="font-size:11px">${fmtDatum(r.ingang)}</td>
+      <td style="font-size:11px">${r.einde?fmtDatum(r.einde):"Doorlopend"}</td>
+      <td class="${restCls}">${r.rest>0?r.rest.toFixed(1)+" jr":"Verlopen"}</td>
+      <td style="font-size:11px">${r.index?r.index+"%":"–"}${r.index_datum?" ("+fmtDatum(r.index_datum)+")":""}</td>
+      <td class="${restCls}" style="text-align:center;font-size:11px;font-weight:600">${riskLbl}</td>
+    </tr>`;
+  });
+
+  // Totaalrij
+  html += `<tr class="totaal-row">
+    <td>TOTAAL</td><td colspan="2"></td>
+    <td>${Math.round(totM2).toLocaleString("nl-NL")}</td>
+    <td>${NL(totJH)}</td>
+    <td>€ ${totM2>0?Math.round(totJH/totM2):0}</td>
+    <td>${NL(totVsc)}</td>
+    <td colspan="5"></td>
+  </tr>`;
+
+  html += `</tbody></table></div>`;
+  return html;
+}
+
+// ── Cashflow tab ───────────────────────────────────────────────────────────
+function renderCashflow(bk) {
+  const kw = bk.actieveKw;
+  const totHuur = kw.reduce((s,_,i)=>s+(bk.kasData[i]?.huur||0),0);
+  const totExpl = kw.reduce((s,_,i)=>s+(bk.kasData[i]?.exploitatie||0),0);
+  const totOntt = kw.reduce((s,_,i)=>s+(bk.kasData[i]?.onttrekking||0),0);
+  const totNetto= kw.reduce((s,_,i)=>s+(bk.kasData[i]?.netto||0),0);
+
+  let html = `
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px">
+      <div class="kpi-card" style="border-left:3px solid var(--navy)">
+        <div class="kpi-label">Bankstand eind ${STATE.tm}</div>
+        <div class="kpi-value">${NL(bk.bankEind)}</div>
+        <div style="font-size:11px;margin-top:4px;color:${bk.bankEind>=50000?"var(--green)":"var(--orange)"}">
+          ${bk.bankEind>=50000?"✓ Boven streefwaarde €50.000":"⚠ Onder streefwaarde €50.000"}
+        </div>
+      </div>
+      <div class="kpi-card"><div class="kpi-label">Huurinkomsten</div><div class="kpi-value">${NL(totHuur)}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Eigenaarsonttrekking</div><div class="kpi-value">${NL(totOntt)}</div><div style="font-size:11px;color:var(--textSub);margin-top:4px">Ratio: ${PCT(bk.ratio)}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Netto kasstroom</div><div class="kpi-value">${NL(totNetto)}</div><div style="font-size:11px;margin-top:4px;color:${totNetto>=0?"var(--green)":"var(--orange)"}">${totNetto>=0?"Instroom ✓":"Uitstroom ⚠"}</div></div>
+    </div>
+
+    <div style="overflow-x:auto">
+    <table class="tbl">
+      <thead><tr>
+        <th style="text-align:left;min-width:200px">Omschrijving</th>
+        ${kw.map(q=>`<th>${q} ${bk.jr}</th>`).join("")}
+        <th>Totaal</th>
+      </tr></thead>
+      <tbody>`;
+
+  const rijen = [
+    { label:"Huurontvangsten", key:"huur", goed:true },
+    { label:"Exploitatiekosten betaald", key:"exploitatie", goed:false },
+    { label:"Eigenaarsonttrekkingen", key:"onttrekking", goed:false },
+    { label:"Netto kasstroom", key:"netto", netto:true },
+  ];
+
+  rijen.forEach(rij => {
+    const vals = bk.kasData.map(d => d[rij.key]||0);
+    const tot  = vals.reduce((s,v)=>s+v,0);
+    const isNetto = rij.netto;
+    const rowStyle = isNetto ? `style="background:var(--navy);color:#fff;font-weight:700"` : "";
+    html += `<tr ${rowStyle}>
+      <td style="${isNetto?"color:#fff":"padding-left:16px"}">${rij.label}</td>
+      ${vals.map(v => {
+        const bg = isNetto ? (v>=0?"var(--greenL)":"var(--orangeL)") : "inherit";
+        const fg = isNetto ? (v>=0?"var(--green)":"var(--orange)") : "inherit";
+        return `<td style="background:${bg};color:${fg};${isNetto?"font-weight:600":""}">${v?NL(v):"–"}</td>`;
+      }).join("")}
+      <td style="${isNetto?(tot>=0?"background:var(--greenL);color:var(--green);font-weight:700":"background:var(--orangeL);color:var(--orange);font-weight:700"):""}">${tot?NL(tot):"–"}</td>
+    </tr>`;
+  });
+
+  // Bankstand verloop
+  html += `<tr style="background:var(--grey1)">
+    <td style="font-style:italic;color:var(--textSub);padding-left:16px">Bankstand einde periode</td>
+    ${bk.bankStand.slice(-kw.length).map(b => {
+      const bg = b.stand>=50000?"var(--greenL)":b.stand>=0?"var(--yellowL)":"var(--orangeL)";
+      const fg = b.stand>=50000?"var(--green)":b.stand>=0?"var(--yellow)":"var(--orange)";
+      return `<td style="background:${bg};color:${fg};font-weight:600">${NL(b.stand)}</td>`;
+    }).join("")}
+    <td style="background:${bk.bankEind>=50000?"var(--greenL)":bk.bankEind>=0?"var(--yellowL)":"var(--orangeL)"};color:${bk.bankEind>=50000?"var(--green)":bk.bankEind>=0?"var(--yellow)":"var(--orange)"};font-weight:700">${NL(bk.bankEind)}</td>
+  </tr>`;
+
+  html += `</tbody></table></div>`;
+
+  // Uitbetalingsratio tabel
+  html += `
+    <div style="margin-top:20px">
+      <div class="section-label">Uitbetalingsratio per kwartaal · norm &lt; 85%</div>
+      <table class="tbl">
+        <thead><tr>
+          <th style="text-align:left">Kwartaal</th>
+          <th>Huurinkomen</th><th>Onttrekking</th><th>Ratio</th><th>Status</th>
+        </tr></thead>
+        <tbody>
+          ${bk.kasData.map(d => {
+            const goed = d.ratio < 0.85;
+            const mid  = d.ratio < 1.0;
+            const bg   = goed?"var(--greenL)":mid?"var(--yellowL)":"var(--orangeL)";
+            const fg   = goed?"var(--green)":mid?"var(--yellow)":"var(--orange)";
+            return `<tr>
+              <td>${d.kw} ${bk.jr}</td>
+              <td>${NL(d.huur)}</td>
+              <td>${NL(d.onttrekking)}</td>
+              <td style="background:${bg};color:${fg};font-weight:600">${PCT(d.ratio)}</td>
+              <td style="background:${bg};color:${fg};font-weight:600;text-align:center">
+                ${goed?"✓ Gezond":mid?"⚠ Hoog":"✗ Boven 100%"}
+              </td>
+            </tr>`;
+          }).join("")}
+        </tbody>
+      </table>
+    </div>`;
+
+  return html;
+}
+
+// ── Balans tab ─────────────────────────────────────────────────────────────
+function renderBalans(bal, jr, jrV) {
+  const fmt = (n) => n ? Math.abs(Math.round(n)).toLocaleString("nl-NL") : "–";
+  const fmtS = (n) => {
+    if (!n && n!==0) return "–";
+    return n < 0 ? `(${Math.abs(Math.round(n)).toLocaleString("nl-NL")})` : Math.round(n).toLocaleString("nl-NL");
+  };
+
+  const totActH = (bal.deb.h||0) + (bal.bank.h||0);
+  const totActV = (bal.deb.v||0) + (bal.bank.v||0);
+  const totPasH = (bal.cred.h||0) + (bal.vsc.h||0);
+  const totPasV = (bal.cred.v||0) + (bal.vsc.v||0);
+  const sluit   = Math.abs(totActH - totPasH) < 100;
+
+  return `
+    <div class="balans-wrap">
+      <div class="balans-kop">
+        <div class="balans-titel">Balans</div>
+        <div class="balans-sub">Per ${STATE.tm} ${STATE.jaar} · met vergelijking per Q4 ${jrV}</div>
+      </div>
+
+      <div style="font-size:10px;color:var(--textSub);margin-bottom:16px;font-family:Inter,sans-serif">
+        Bedragen in euro's · (bedrag) = negatief saldo
+      </div>
+
+      <table class="balans-tbl">
+        <thead>
+          <tr>
+            <td style="font-weight:600;font-size:11px;color:var(--textSub);padding-bottom:8px;font-family:Inter,sans-serif">&nbsp;</td>
+            <td style="font-weight:600;font-size:11px;color:var(--navy);border-left:1px solid var(--grey2);padding:0 0 8px 8px;font-family:Inter,sans-serif">${STATE.tm} ${STATE.jaar}</td>
+            <td style="font-size:11px;color:var(--textSub);border-left:1px solid var(--grey2);padding:0 0 8px 8px;font-family:Inter,sans-serif">Q4 ${jrV}</td>
+          </tr>
+        </thead>
+        <tbody>
+          <!-- ACTIVA -->
+          <tr class="balans-sectie"><td colspan="3">Activa</td></tr>
+          <tr class="balans-groep"><td colspan="3">Vlottende activa</td></tr>
+          <tr><td style="padding-left:16px">Huurdebiteuren</td><td>${fmt(bal.deb.h)}</td><td>${fmt(bal.deb.v)}</td></tr>
+          <tr><td style="padding-left:16px">Liquide middelen</td><td>${fmt(bal.bank.h)}</td><td>${fmt(bal.bank.v)}</td></tr>
+          <tr class="balans-subtot">
+            <td style="font-style:italic">Totaal vlottende activa</td>
+            <td>${fmt(totActH)}</td><td>${fmt(totActV)}</td>
+          </tr>
+          <tr class="balans-totaal">
+            <td>Totaal activa</td>
+            <td>${fmt(totActH)}</td><td>${fmt(totActV)}</td>
+          </tr>
+
+          <tr><td colspan="3" style="height:20px"></td></tr>
+
+          <!-- PASSIVA -->
+          <tr class="balans-sectie"><td colspan="3">Passiva</td></tr>
+          <tr class="balans-groep"><td colspan="3">Kortlopende schulden</td></tr>
+          <tr><td style="padding-left:16px">Crediteuren</td><td>${fmt(bal.cred.h)}</td><td>${fmt(bal.cred.v)}</td></tr>
+          <tr><td style="padding-left:16px">Svc.kosten vooruit ontvangen</td><td>${fmt(bal.vsc.h)}</td><td>${fmt(bal.vsc.v)}</td></tr>
+          ${bal.ic && bal.ic.h ? `<tr><td style="padding-left:16px">Intercompany rekening</td><td>${fmtS(bal.ic.h)}</td><td>${fmtS(bal.ic.v)}</td></tr>` : ""}
+          <tr class="balans-subtot">
+            <td style="font-style:italic">Totaal kortlopende schulden</td>
+            <td>${fmt(totPasH)}</td><td>${fmt(totPasV)}</td>
+          </tr>
+          <tr class="balans-totaal">
+            <td>Totaal passiva</td>
+            <td>${fmt(totPasH)}</td><td>${fmt(totPasV)}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="sluit-ok">
+        ${sluit ? "✓ Balans sluit — activa = passiva" : "⚠ Balans sluit niet — controleer de data"}
+        (${fmt(totActH)})
+      </div>
+    </div>`;
+}
+
+// ── Signalen tab ───────────────────────────────────────────────────────────
+function renderSignalen(bk, svc, bal, rr) {
+  const signalen = [];
+
+  // Huurgroei
+  signalen.push(bk.huurHuidig > bk.huurVorig ? {
+    prio:"🟢 Positief", pbg:"var(--greenL)", pfg:"var(--green)",
+    onderwerp:`Huurgroei ${STATE.van} t/m ${STATE.tm} ${STATE.jaar}`,
+    effect:`${NL(bk.huurVorig)} → ${NL(bk.huurHuidig)} (+${PCT((bk.huurHuidig-bk.huurVorig)/bk.huurVorig)})`,
+    actie:"Monitor kwartaaltrend. Controleer nieuwe contracten en indexeringen.",
+  } : {
+    prio:"🔴 Aandacht", pbg:"var(--orangeL)", pfg:"var(--orange)",
+    onderwerp:`Huur gedaald vs zelfde periode ${bk.jrVorig}`,
+    effect:`${NL(bk.huurVorig)} → ${NL(bk.huurHuidig)}`,
+    actie:"Onderzoek oorzaak: leegstand, kortingen of vertrek huurder.",
+  });
+
+  // Uitbetalingsratio
+  signalen.push(bk.ratio < 0.85 ? {
+    prio:"🟢 Positief", pbg:"var(--greenL)", pfg:"var(--green)",
+    onderwerp:"Uitbetalingsratio gezond",
+    effect:`${PCT(bk.ratio)} — onder norm van 85%`,
+    actie:"Blijf monitoren. Streef naar ratio < 85% per kwartaal.",
+  } : {
+    prio:"🟡 Aandacht", pbg:"var(--yellowL)", pfg:"var(--yellow)",
+    onderwerp:`Uitbetalingsratio verhoogd (${PCT(bk.ratio)})`,
+    effect:`Boven norm van 85%`,
+    actie:"Beoordeel of onttrekkingen verlaagd kunnen worden.",
+  });
+
+  // Bankstand
+  signalen.push(bk.bankEind >= 50000 ? {
+    prio:"🟢 Positief", pbg:"var(--greenL)", pfg:"var(--green)",
+    onderwerp:"Bankstand boven streefwaarde",
+    effect:`${NL(bk.bankEind)} — boven €50.000`,
+    actie:"Positief. Bewaken bij grote onttrekkingen.",
+  } : {
+    prio:"🔴 Aandacht", pbg:"var(--orangeL)", pfg:"var(--orange)",
+    onderwerp:"Bankstand onder streefwaarde",
+    effect:`${NL(bk.bankEind)} — onder €50.000`,
+    actie:"Cashflow bewaken. Overweeg lagere onttrekking.",
+  });
+
+  // Debiteuren
+  if (bal.deb.h > bal.deb.v) signalen.push({
+    prio:"🟡 Aandacht", pbg:"var(--yellowL)", pfg:"var(--yellow)",
+    onderwerp:"Huurdebiteuren gestegen",
+    effect:`${NL(bal.deb.v)} → ${NL(bal.deb.h)} (+${NL(bal.deb.h-bal.deb.v)})`,
+    actie:"Inningsproces aanscherpen. Betalingsherinnering sturen.",
+  });
+
+  // Servicekosten signalen
+  if (svc) {
+    svc.detail.filter(r=>r.delta>1000).slice(0,3).forEach(r => signalen.push({
+      prio:"🔴 Aandacht", pbg:"var(--orangeL)", pfg:"var(--orange)",
+      onderwerp:`Servicekosten gestegen: ${r.ks}`,
+      effect:`${NL(r.vorig)} → ${NL(r.huidig)} (+${NL(r.delta)})`,
+      actie:"Controleer contract en facturen. Beoordeel of actie nodig is.",
+    }));
+  }
+
+  // Contracten aflopen
+  rr.filter(r=>r.rest<1&&r.rest>0).forEach(r => signalen.push({
+    prio:"🔴 Urgent", pbg:"var(--orangeL)", pfg:"var(--orange)",
+    onderwerp:`Contract verloopt — ${r.huurder.substring(0,25)}`,
+    effect:`Restant: ${r.rest.toFixed(1)} jaar · Jaarhuur: ${NL(r.jaarhuur)}`,
+    actie:"Direct contact opnemen voor verlenging of nieuwe huurder.",
+  }));
+
+  rr.filter(r=>r.rest>=1&&r.rest<2).forEach(r => signalen.push({
+    prio:"🟡 Bewaken", pbg:"var(--yellowL)", pfg:"var(--yellow)",
+    onderwerp:`Contract binnen 2 jaar — ${r.huurder.substring(0,25)}`,
+    effect:`Restant: ${r.rest.toFixed(1)} jaar · Jaarhuur: ${NL(r.jaarhuur)}`,
+    actie:"Verlengingsgesprek plannen komend kwartaal.",
+  }));
+
+  let html = `
+    <div style="margin-bottom:16px">
+      <div class="section-label">Automatisch gegenereerd op basis van de geüploade data</div>
+    </div>
+    <table class="tbl">
+      <thead><tr>
+        <th style="text-align:left;width:110px">Prioriteit</th>
+        <th style="text-align:left;width:220px">Onderwerp</th>
+        <th style="text-align:left">Financieel effect</th>
+        <th style="text-align:left">Aanbevolen actie</th>
+      </tr></thead>
+      <tbody>`;
+
+  signalen.forEach((s,i) => {
+    html += `<tr>
+      <td style="background:${s.pbg};color:${s.pfg};font-weight:700">${s.prio}</td>
+      <td style="font-weight:600;background:${i%2===0?"var(--white)":"var(--grey1)"}">${s.onderwerp}</td>
+      <td style="font-size:11px;color:var(--textSub);font-style:italic;background:${i%2===0?"var(--white)":"var(--grey1)"}">${s.effect}</td>
+      <td style="font-size:11px;background:${i%2===0?"var(--white)":"var(--grey1)"}">${s.actie}</td>
+    </tr>`;
+  });
+
+  html += `</tbody></table>`;
+  return html;
+}
+</script><script>
+// ── Excel export ───────────────────────────────────────────────────────────
+function downloadExcel() {
+  const { bk, svc, bal, rr, p } = STATE.data;
+  const wb = XLSX.utils.book_new();
+  const periode = `${STATE.van}-${STATE.tm}-${STATE.jaar}`;
+
+  // ── Sheet 1: Dashboard KPI's ──────────────────────────────────────────
+  const kpiData = [
+    ["BVC Rapportage — " + p.naam, "", ""],
+    ["Periode:", `${STATE.van} t/m ${STATE.tm} ${STATE.jaar}`, ""],
+    ["Gegenereerd:", new Date().toLocaleDateString("nl-NL"), ""],
+    ["", "", ""],
+    ["Indicator", "Huidig", "Vorig"],
+    ["Huurinkomen", Math.round(bk.huurHuidig), Math.round(bk.huurVorig)],
+    ["Eigenaarsonttrekking", Math.round(bk.onttHuidig), ""],
+    ["Uitbetalingsratio", parseFloat((bk.ratio*100).toFixed(1))+"%", ""],
+    ["Bankstand eind periode", Math.round(bk.bankEind), ""],
+    ["Huurdebiteuren", Math.round(bal.deb.h), Math.round(bal.deb.v)],
+  ];
+  if (svc) {
+    kpiData.push(["Servicekosten", Math.round(svc.tot), Math.round(svc.totV)]);
+    kpiData.push(["Svc. voorschotten", Math.round(svc.vsc), Math.round(svc.vscV)]);
+    kpiData.push(["Svc. saldo", Math.round(svc.saldo), Math.round(svc.saldoV)]);
+  }
+  XLSX.utils.book_append_sheet(wb,
+    XLSX.utils.aoa_to_sheet(kpiData), "Dashboard");
+
+  // ── Sheet 2: P&L per kwartaal ─────────────────────────────────────────
+  const kw = bk.actieveKw;
+  const plHdr1 = ["Omschrijving",
+    ...kw.map(q=>`${q} ${bk.jrVorig}`),
+    ...kw.map(q=>`${q} ${bk.jr}`),
+    `Totaal ${bk.jrVorig}`, `Totaal ${bk.jr}`, "∆", "∆ %",
+  ];
+  const plRows = [plHdr1];
+
+  plRows.push(["OPBRENGSTEN"]);
+  bk.plData.filter(r=>r.sectie==="opbr").forEach(r => {
+    plRows.push([
+      r.label,
+      ...kw.map(q=>Math.round(r[`v_${q}`])||0),
+      ...kw.map(q=>Math.round(r[`h_${q}`])||0),
+      Math.round(r.v_tot), Math.round(r.h_tot),
+      Math.round(r.delta),
+      r.v_tot ? parseFloat((r.delta/Math.abs(r.v_tot)*100).toFixed(1))+"%" : "–",
+    ]);
+  });
+  plRows.push([
+    "TOTAAL OPBRENGSTEN",
+    ...kw.map(()=>""), ...kw.map(()=>""),
+    Math.round(bk.totOpbrV), Math.round(bk.totOpbrH),
+    Math.round(bk.totOpbrH-bk.totOpbrV),
+    bk.totOpbrV ? parseFloat(((bk.totOpbrH-bk.totOpbrV)/Math.abs(bk.totOpbrV)*100).toFixed(1))+"%" : "–",
+  ]);
+
+  plRows.push([""]);
+  plRows.push(["KOSTEN"]);
+  bk.plData.filter(r=>r.sectie==="kost").forEach(r => {
+    plRows.push([
+      r.label,
+      ...kw.map(q=>Math.round(r[`v_${q}`])||0),
+      ...kw.map(q=>Math.round(r[`h_${q}`])||0),
+      Math.round(r.v_tot), Math.round(r.h_tot),
+      Math.round(r.delta),
+      r.v_tot ? parseFloat((r.delta/Math.abs(r.v_tot)*100).toFixed(1))+"%" : "–",
+    ]);
+  });
+  plRows.push([
+    "TOTAAL KOSTEN",
+    ...kw.map(()=>""), ...kw.map(()=>""),
+    Math.round(bk.totKostV), Math.round(bk.totKostH),
+    Math.round(bk.totKostH-bk.totKostV),
+    bk.totKostV ? parseFloat(((bk.totKostH-bk.totKostV)/Math.abs(bk.totKostV)*100).toFixed(1))+"%" : "–",
+  ]);
+  plRows.push([""]);
+  plRows.push([
+    "EBITDA",
+    ...kw.map(()=>""), ...kw.map(()=>""),
+    Math.round(bk.ebitdaV), Math.round(bk.ebitdaH),
+    Math.round(bk.ebitdaH-bk.ebitdaV),
+    bk.ebitdaV ? parseFloat(((bk.ebitdaH-bk.ebitdaV)/Math.abs(bk.ebitdaV)*100).toFixed(1))+"%" : "–",
+  ]);
+
+  XLSX.utils.book_append_sheet(wb,
+    XLSX.utils.aoa_to_sheet(plRows), "P&L per kwartaal");
+
+  // ── Sheet 3: Servicekosten ────────────────────────────────────────────
+  if (svc) {
+    const svcRows = [
+      ["Kostensoort","Huidig","Vorig","∆ Absoluut","∆ %","Signaal"],
+      ...svc.detail.map(r => [
+        r.ks, r.huidig, r.vorig, r.delta,
+        r.vorig ? parseFloat((r.delta/r.vorig*100).toFixed(1))+"%" : "–",
+        r.delta>1000?"Kritiek":r.delta>0?"Licht":r.delta<-2000?"Daling":"Stabiel",
+      ]),
+      [""],
+      ["TOTAAL KOSTEN", Math.round(svc.tot), Math.round(svc.totV),
+        Math.round(svc.tot-svc.totV), "", ""],
+      ["Voorschotten ontvangen", Math.round(svc.vsc), Math.round(svc.vscV), "", "", ""],
+      ["SALDO", Math.round(svc.saldo), Math.round(svc.saldoV),
+        Math.round(svc.saldo-svc.saldoV), "",
+        svc.saldo<=0?"Overschot":"Tekort"],
+    ];
+    XLSX.utils.book_append_sheet(wb,
+      XLSX.utils.aoa_to_sheet(svcRows), "Servicekosten");
+  }
+
+  // ── Sheet 4: Rent Roll ────────────────────────────────────────────────
+  if (rr.length) {
+    const datum = new Date().toLocaleDateString("nl-NL");
+    const rrRows = [
+      [`Rent Roll per ${datum} — ${p.naam}`],
+      [""],
+      ["Huurder","Adres/Unit","Complex","m²","Jaarhuur",
+       "€/m²/jr","Svc./jr","Ingangsdatum","Einddatum",
+       "Restant (jr)","Indexering","Risico"],
+      ...rr.map(r => [
+        r.huurder, r.adres, r.complex,
+        Math.round(r.m2), Math.round(r.jaarhuur),
+        r.m2>0?Math.round(r.jaarhuur/r.m2):0,
+        Math.round(r.vsc),
+        fmtDatum(r.ingang), r.einde?fmtDatum(r.einde):"Doorlopend",
+        parseFloat(r.rest.toFixed(1)),
+        r.index?r.index+"%":"–",
+        r.rest<1?"Urgent <1jr":r.rest<2?"Bewaken 1-2jr":"OK >2jr",
+      ]),
+      [""],
+      ["TOTAAL","","",
+       Math.round(rr.reduce((s,r)=>s+r.m2,0)),
+       Math.round(rr.reduce((s,r)=>s+r.jaarhuur,0)),
+       "","",Math.round(rr.reduce((s,r)=>s+r.vsc,0)),
+       "","","",""],
+    ];
+    XLSX.utils.book_append_sheet(wb,
+      XLSX.utils.aoa_to_sheet(rrRows), "Rent Roll");
+  }
+
+  // ── Sheet 5: Cashflow ─────────────────────────────────────────────────
+  const cfHdr = ["Omschrijving", ...kw.map(q=>`${q} ${bk.jr}`), "Totaal"];
+  const cfRows = [cfHdr];
+  ["huur","exploitatie","onttrekking","netto"].forEach(key => {
+    const lbl = key==="huur"?"Huurontvangsten"
+      :key==="exploitatie"?"Exploitatiekosten"
+      :key==="onttrekking"?"Eigenaarsonttrekkingen":"Netto kasstroom";
+    const vals = bk.kasData.map(d=>Math.round(d[key]||0));
+    cfRows.push([lbl, ...vals, vals.reduce((s,v)=>s+v,0)]);
+  });
+  cfRows.push(["Bankstand einde periode",
+    ...bk.bankStand.slice(-kw.length).map(b=>Math.round(b.stand)),
+    Math.round(bk.bankEind),
+  ]);
+  XLSX.utils.book_append_sheet(wb,
+    XLSX.utils.aoa_to_sheet(cfRows), "Cashflow");
+
+  // ── Sheet 6: Balans ───────────────────────────────────────────────────
+  const totActH = (bal.deb.h||0)+(bal.bank.h||0);
+  const totActV = (bal.deb.v||0)+(bal.bank.v||0);
+  const totPasH = (bal.cred.h||0)+(bal.vsc.h||0);
+  const totPasV = (bal.cred.v||0)+(bal.vsc.v||0);
+
+  const balRows = [
+    [`Balans — ${p.naam}`],
+    [`Per ${STATE.tm} ${STATE.jaar} | vergelijking Q4 ${bk.jrVorig}`],
+    [""],
+    ["", `${STATE.tm} ${STATE.jaar}`, `Q4 ${bk.jrVorig}`],
+    ["ACTIVA","",""],
+    ["Vlottende activa","",""],
+    ["  Huurdebiteuren", Math.round(bal.deb.h), Math.round(bal.deb.v)],
+    ["  Liquide middelen", Math.round(bal.bank.h), Math.round(bal.bank.v)],
+    ["Totaal activa", Math.round(totActH), Math.round(totActV)],
+    ["","",""],
+    ["PASSIVA","",""],
+    ["Kortlopende schulden","",""],
+    ["  Crediteuren", Math.round(bal.cred.h), Math.round(bal.cred.v)],
+    ["  Svc.kosten vooruit ontvangen", Math.round(bal.vsc.h), Math.round(bal.vsc.v)],
+  ];
+  if (bal.ic && bal.ic.h) {
+    balRows.push(["  Intercompany rekening", Math.round(bal.ic.h), Math.round(bal.ic.v)]);
+  }
+  balRows.push(["Totaal passiva", Math.round(totPasH), Math.round(totPasV)]);
+  balRows.push([""]);
+  balRows.push([
+    Math.abs(totActH-totPasH)<100 ? "✓ Balans sluit" : "⚠ Balans sluit niet",
+    "","",
+  ]);
+
+  XLSX.utils.book_append_sheet(wb,
+    XLSX.utils.aoa_to_sheet(balRows), "Balans");
+
+  // ── Sheet 7: Signalen ─────────────────────────────────────────────────
+  const sigRows = [
+    ["Signalen & Actiepunten — " + p.naam],
+    [`Periode: ${STATE.van} t/m ${STATE.tm} ${STATE.jaar}`],
+    [""],
+    ["Prioriteit","Onderwerp","Financieel effect","Aanbevolen actie"],
+  ];
+
+  // Zelfde logica als renderSignalen maar voor Excel
+  const addSig = (prio, onderwerp, effect, actie) =>
+    sigRows.push([prio, onderwerp, effect, actie]);
+
+  if (bk.huurHuidig > bk.huurVorig)
+    addSig("Positief", `Huurgroei ${STATE.van}-${STATE.tm} ${STATE.jaar}`,
+      `${Math.round(bk.huurVorig).toLocaleString("nl-NL")} → ${Math.round(bk.huurHuidig).toLocaleString("nl-NL")}`,
+      "Monitor kwartaaltrend.");
+  else
+    addSig("Aandacht", "Huur gedaald",
+      `${Math.round(bk.huurVorig).toLocaleString("nl-NL")} → ${Math.round(bk.huurHuidig).toLocaleString("nl-NL")}`,
+      "Onderzoek oorzaak: leegstand, kortingen of vertrek huurder.");
+
+  addSig(
+    bk.ratio < 0.85 ? "Positief" : "Aandacht",
+    `Uitbetalingsratio ${PCT(bk.ratio)}`,
+    bk.ratio < 0.85 ? "Onder norm van 85%" : "Boven norm van 85%",
+    bk.ratio < 0.85 ? "Blijf monitoren." : "Beoordeel verlaging onttrekkingen.",
+  );
+
+  addSig(
+    bk.bankEind >= 50000 ? "Positief" : "Aandacht",
+    `Bankstand ${Math.round(bk.bankEind).toLocaleString("nl-NL")}`,
+    bk.bankEind >= 50000 ? "Boven streefwaarde €50.000" : "Onder streefwaarde €50.000",
+    bk.bankEind >= 50000 ? "Positief. Bewaken bij grote onttrekkingen." : "Cashflow bewaken.",
+  );
+
+  if (bal.deb.h > bal.deb.v)
+    addSig("Aandacht", "Debiteuren gestegen",
+      `${Math.round(bal.deb.v).toLocaleString("nl-NL")} → ${Math.round(bal.deb.h).toLocaleString("nl-NL")}`,
+      "Inningsproces aanscherpen.");
+
+  if (svc) {
+    svc.detail.filter(r=>r.delta>1000).slice(0,3).forEach(r =>
+      addSig("Aandacht", `Svc gestegen: ${r.ks}`,
+        `${r.vorig.toLocaleString("nl-NL")} → ${r.huidig.toLocaleString("nl-NL")}`,
+        "Controleer contract en facturen."));
+  }
+
+  rr.filter(r=>r.rest<1&&r.rest>0).forEach(r =>
+    addSig("Urgent", `Contract verloopt: ${r.huurder}`,
+      `Restant: ${r.rest.toFixed(1)} jr · Jaarhuur: ${Math.round(r.jaarhuur).toLocaleString("nl-NL")}`,
+      "Direct contact opnemen voor verlenging."));
+
+  rr.filter(r=>r.rest>=1&&r.rest<2).forEach(r =>
+    addSig("Bewaken", `Contract binnen 2jr: ${r.huurder}`,
+      `Restant: ${r.rest.toFixed(1)} jr · Jaarhuur: ${Math.round(r.jaarhuur).toLocaleString("nl-NL")}`,
+      "Verlengingsgesprek plannen."));
+
+  XLSX.utils.book_append_sheet(wb,
+    XLSX.utils.aoa_to_sheet(sigRows), "Signalen");
+
+  // ── Downloaden ────────────────────────────────────────────────────────
+  const bestandsnaam = `Rapportage_${p.naam.replace(/\s+/g,"_")}_${periode}.xlsx`;
+  XLSX.writeFile(wb, bestandsnaam);
+}
+
+// ── Klantenbeheer ──────────────────────────────────────────────────────────
+function renderKlantenLijst() {
+  const lijst = document.getElementById("klanten-lijst");
+  if (!lijst) return;
+
+  lijst.innerHTML = Object.entries(KLANTEN).map(([key, p]) => `
+    <div class="klant-card">
+      <div class="klant-dot" style="background:${p.kleur||"#9AA1B4"}"></div>
+      <div style="flex:1;margin-left:10px">
+        <div class="klant-naam">${p.naam}</div>
+        <div class="klant-sub">${p.sub||""}</div>
+        <div class="klant-tabs" style="margin-top:5px">
+          ${(p.tabs||[]).map(t => `<span class="badge badge-blue">${t}</span>`).join("")}
+        </div>
+      </div>
+    </div>
+  `).join("");
+}
+
+function voegKlantToe() {
+  const naam = document.getElementById("nieuw-naam").value.trim();
+  const sub  = document.getElementById("nieuw-sub").value.trim();
+  if (!naam) { alert("Voer een naam in."); return; }
+
+  const tabs = ["pl"];
+  if (document.getElementById("nc-svc").checked)  tabs.push("servicekosten");
+  if (document.getElementById("nc-rr").checked)   tabs.push("rentroll");
+  if (document.getElementById("nc-cf").checked)   tabs.push("cashflow");
+  if (document.getElementById("nc-bal").checked)  tabs.push("balans");
+  if (document.getElementById("nc-spec").checked) tabs.push("balansspec");
+  if (document.getElementById("nc-sig").checked)  tabs.push("signalen");
+
+  const key = naam.toLowerCase().replace(/\s+/g,"_").replace(/[^a-z0-9_]/g,"");
+  KLANTEN[key] = { naam, sub, kleur:"#5A6070", tabs, svc_excl_complex:[] };
+
+  // Opslaan in localStorage
+  try {
+    const extra = JSON.parse(localStorage.getItem("bvc_klanten") || "{}");
+    extra[key] = KLANTEN[key];
+    localStorage.setItem("bvc_klanten", JSON.stringify(extra));
+  } catch(e) {}
+
+  // Dropdown updaten
+  const sel = document.getElementById("klant-sel");
+  const opt = document.createElement("option");
+  opt.value = key; opt.textContent = naam;
+  sel.appendChild(opt);
+
+  // Velden leegmaken
+  document.getElementById("nieuw-naam").value = "";
+  document.getElementById("nieuw-sub").value  = "";
+
+  renderKlantenLijst();
+  alert(`Klant "${naam}" toegevoegd!`);
+}
+
+// ── Initialisatie ──────────────────────────────────────────────────────────
+document.addEventListener("DOMContentLoaded", () => {
+  updateTag();
+  updateKlant();
+  renderKlantenLijst();
+
+  // Drag & drop op de hele pagina
+  document.addEventListener("dragover", e => e.preventDefault());
+  document.addEventListener("drop", e => {
+    e.preventDefault();
+    const files = Array.from(e.dataTransfer.files).filter(f =>
+      f.name.endsWith(".xlsx") || f.name.endsWith(".xls")
+    );
+    files.forEach(f => {
+      const naam = f.name.toLowerCase();
+      if (naam.includes("boek"))         bestandGekozen({files:[f]},"boekingen"),   STATE.bestanden.boekingen=f;
+      else if (naam.includes("service")) bestandGekozen({files:[f]},"servicekosten"),STATE.bestanden.servicekosten=f;
+      else if (naam.includes("balans") && naam.includes("spec")) bestandGekozen({files:[f]},"balansspec"),STATE.bestanden.balansspec=f;
+      else if (naam.includes("balans"))  bestandGekozen({files:[f]},"balans"),       STATE.bestanden.balans=f;
+      else if (naam.includes("rent") || naam.includes("roll")) bestandGekozen({files:[f]},"rentroll"),STATE.bestanden.rentroll=f;
+      else if (naam.includes("begrot"))  bestandGekozen({files:[f]},"begroting"),    STATE.bestanden.begroting=f;
+    });
+  });
+});
+</script>
+</body>
+</html>
