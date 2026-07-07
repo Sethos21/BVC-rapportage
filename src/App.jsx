@@ -100,10 +100,17 @@ function verwerkBoekingen(rows, complexFilter = null, unitFilter = null, jaar = 
   const jaarKort = String(jaar).slice(-2);
   const jaarVorigKort = String(jaarVorig).slice(-2);
 
+  // IDBC exporteert codevelden (jaar, grootboek, complex) als tekst — normaliseren naar getal
+  // zodat de ===-vergelijkingen verderop ook echt matchen.
   let data = rows.map(r => ({
     ...r,
     netto: (r.Boeking_Bedrag_Debet || 0) - (r.Boeking_Bedrag_Credit || 0),
     kwartaal: toQ(r.Boeking_Boekperiode || 1),
+    Boeking_Boekjaar: Number(r.Boeking_Boekjaar),
+    Boeking_Grootboeknr: Number(r.Boeking_Grootboeknr),
+    Boeking_Complexnr: r.Boeking_Complexnr != null && String(r.Boeking_Complexnr).trim() !== ""
+      ? Number(r.Boeking_Complexnr) : null,
+    Boeking_Unitnr: r.Boeking_Unitnr != null ? String(r.Boeking_Unitnr).trim() : null,
   }));
   if (complexFilter) data = data.filter(r => r.Boeking_Complexnr === complexFilter);
   if (unitFilter)    data = data.filter(r => r.Boeking_Unitnr === unitFilter);
@@ -243,7 +250,13 @@ function verwerkSvc(rows, complexFilter = null, jaar = 2026, kwartaal = 2) {
   const jaarVorig = jaar - 1;
   const periodes = kwartaal * 3;
   const EXCL = ["Afrekening huurders","Voorschot service"];
-  let d = rows;
+  // IDBC exporteert jaar/complex als tekst — normaliseren naar getal voor de ===-vergelijkingen.
+  let d = rows.map(r => ({
+    ...r,
+    Service_Begroting_Jaar: Number(r.Service_Begroting_Jaar),
+    Service_Begroting_Complex: r.Service_Begroting_Complex != null && String(r.Service_Begroting_Complex).trim() !== ""
+      ? Number(r.Service_Begroting_Complex) : null,
+  }));
   if (complexFilter) d = d.filter(r => r.Service_Begroting_Complex === complexFilter);
 
   const periodeSom = (jr, excl = EXCL) => {
@@ -305,14 +318,20 @@ function verwerkSvc(rows, complexFilter = null, jaar = 2026, kwartaal = 2) {
 function verwerkBalans(rows, jaar = 2026, kwartaal = 2) {
   const jaarVorig = jaar - 1;
   const periodeCode = String(kwartaal * 3).padStart(2, "0");
+  // IDBC exporteert Jaar/Grootboekrekeningnr als tekst — normaliseren naar getal.
+  const genormaliseerd = rows.map(r => ({
+    ...r,
+    Jaar: Number(r.Jaar),
+    Grootboekrekeningnr: Number(r.Grootboekrekeningnr),
+  }));
   // Huidig jaar: saldo t/m het gekozen kwartaal. Vorig jaar: altijd volledig boekjaar (vergelijking t.o.v. jaarstart).
   const saldoHuidig = (gb) => {
-    const r = rows.find(r => r.Jaar===jaar && r.Grootboekrekeningnr===gb);
+    const r = genormaliseerd.find(r => r.Jaar===jaar && r.Grootboekrekeningnr===gb);
     if (!r) return 0;
     return r[`Saldo_tm_periode_${periodeCode}`] ?? r.Eindsaldo ?? ((r.Saldo_debet||0)-(r.Saldo_credit||0));
   };
   const saldoVorig = (gb) => {
-    const r = rows.find(r => r.Jaar===jaarVorig && r.Grootboekrekeningnr===gb);
+    const r = genormaliseerd.find(r => r.Jaar===jaarVorig && r.Grootboekrekeningnr===gb);
     if (!r) return 0;
     return r.Eindsaldo ?? r.Saldo_tm_periode_12 ?? ((r.Saldo_debet||0)-(r.Saldo_credit||0));
   };
@@ -327,14 +346,15 @@ function verwerkBalans(rows, jaar = 2026, kwartaal = 2) {
 }
 
 function verwerkRentRoll(rows) {
+  // IDBC exporteert Vorderingsoort/Complexnummer als tekst ("01") — normaliseren voor de vergelijking.
   return rows
-    .filter(r => r.Vorderingsoort === 1)
+    .filter(r => Number(r.Vorderingsoort) === 1)
     .map(r => ({
       huurder:    r.Huurder_naam_1,
-      unit:       r.Unitnummer,
+      unit:       r.Unitnummer != null ? String(r.Unitnummer).trim() : null,
       unit_omschr:r.Unit_omschrijving,
       unit_adres: r.Unit_adres,
-      complex_nr: r.Complexnummer,
+      complex_nr: r.Complexnummer != null && String(r.Complexnummer).trim() !== "" ? Number(r.Complexnummer) : null,
       complex:    r.Complex_omschrijving,
       m2:         r.Gehuurd_oppervlak || r["m2/Verhuur"] || 0,
       jaarhuur:   r.Prolongatie_bedrag_jaar || 0,
