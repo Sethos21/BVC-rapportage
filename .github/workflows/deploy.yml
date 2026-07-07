@@ -25,6 +25,8 @@ jobs:
         run: npm run build
         env:
           REACT_APP_WORKER_URL: ${{ vars.REACT_APP_WORKER_URL }}
+      - name: Tool kopiëren naar build
+        run: cp excel_tool.html build/excel_tool.html    
 
       - name: Deployen naar GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
