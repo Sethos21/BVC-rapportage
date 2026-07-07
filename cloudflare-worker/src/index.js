@@ -21,24 +21,31 @@ export default {
 
     const body = await request.text();
 
-    const anthropicResponse = await fetch(ANTHROPIC_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": env.ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01",
-      },
-      body,
-    });
+    try {
+      const anthropicResponse = await fetch(ANTHROPIC_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": (env.ANTHROPIC_API_KEY || "").trim(),
+          "anthropic-version": "2023-06-01",
+        },
+        body,
+      });
 
-    const responseBody = await anthropicResponse.text();
+      const responseBody = await anthropicResponse.text();
 
-    return new Response(responseBody, {
-      status: anthropicResponse.status,
-      headers: {
-        "Content-Type": "application/json",
-        ...corsHeaders(),
-      },
-    });
+      return new Response(responseBody, {
+        status: anthropicResponse.status,
+        headers: {
+          "Content-Type": "application/json",
+          ...corsHeaders(),
+        },
+      });
+    } catch (err) {
+      return new Response(JSON.stringify({ error: String(err) }), {
+        status: 502,
+        headers: { "Content-Type": "application/json", ...corsHeaders() },
+      });
+    }
   },
 };
