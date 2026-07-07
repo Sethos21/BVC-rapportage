@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import * as XLSX from "xlsx";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer, Cell, ComposedChart, Area,
@@ -383,6 +383,21 @@ function verwerkSvc(rows, complexFilter = null, jaar = 2026, kwartaal = 2) {
   return { jaar, jaarVorig, kwartaal, tot26, tot25, vsc25, vsc26, saldo26: tot26+vsc26, saldo25: tot25+vsc25, svcVgl, svcDetail };
 }
 
+// Rangschikt een balansrekening in Activa/Passiva o.b.v. het rekeningnummer. Voor de
+// reeksen waar zowel vorderingen als schulden in voorkomen (14xx/15xx/17xx/19xx+) wordt
+// het saldo-teken gebruikt. Dit is alleen voor de WEERGAVE-groepering; de sluitingscontrole
+// hieronder is teken-onafhankelijk en dus niet gevoelig voor een verkeerde indeling hier.
+function rekeningGroep(nr, richtingWaarde) {
+  if (nr >= 800  && nr <= 899)  return { sectie:"passiva", groep:"Eigen vermogen",       accent:C.greenDark };
+  if (nr >= 900  && nr <= 999)  return { sectie:"passiva", groep:"Voorzieningen",        accent:C.navy };
+  if (nr >= 1000 && nr <= 1099) return { sectie:"activa",  groep:"Liquide middelen",     accent:C.navyMid };
+  if (nr >= 1300 && nr <= 1399) return { sectie:"activa",  groep:"Vlottende activa",     accent:C.navyMid };
+  if (nr >= 1600 && nr <= 1699) return { sectie:"passiva", groep:"Kortlopende schulden", accent:C.navy };
+  return richtingWaarde >= 0
+    ? { sectie:"activa",  groep:"Vlottende activa",     accent:C.navyMid }
+    : { sectie:"passiva", groep:"Kortlopende schulden", accent:C.navy };
+}
+
 function verwerkBalans(rows, jaar = 2026, kwartaal = 2) {
   const jaarVorig = jaar - 1;
   const periodeCode = String(kwartaal * 3).padStart(2, "0");
@@ -403,8 +418,61 @@ function verwerkBalans(rows, jaar = 2026, kwartaal = 2) {
     if (!r) return 0;
     return r.Eindsaldo ?? r.Saldo_tm_periode_12 ?? ((r.Saldo_debet||0)-(r.Saldo_credit||0));
   };
+
+  // Volledig rekeningschema — alle rekeningen met Balans_vw "Balans" (i.p.v. de 5 vaste
+  // rekeningen hierboven), gegroepeerd in Activa/Passiva-secties met subtotalen.
+  const rekeningenHuidig = {}, rekeningenVorig = {}, omschrijvingen = {};
+  let resultaatVWHuidig = 0, resultaatVWVorig = 0;
+  genormaliseerd.forEach(r => {
+    if (r.Jaar === jaar) {
+      const v = r[`Saldo_tm_periode_${periodeCode}`] ?? r.Eindsaldo ?? 0;
+      if (r.Balans_vw === "Balans") { rekeningenHuidig[r.Grootboekrekeningnr] = v; omschrijvingen[r.Grootboekrekeningnr] = r.Rekening_omschrijving; }
+      else if (r.Balans_vw === "V & W") resultaatVWHuidig += v;
+    } else if (r.Jaar === jaarVorig) {
+      const v = r.Eindsaldo ?? 0;
+      if (r.Balans_vw === "Balans") { rekeningenVorig[r.Grootboekrekeningnr] = v; omschrijvingen[r.Grootboekrekeningnr] = r.Rekening_omschrijving; }
+      else if (r.Balans_vw === "V & W") resultaatVWVorig += v;
+    }
+  });
+
+  const alleNummers = [...new Set([...Object.keys(rekeningenHuidig), ...Object.keys(rekeningenVorig)])]
+    .map(Number).sort((a,b) => a-b);
+
+  const groepenMap = {};
+  let sumBalansHuidig = 0, sumBalansVorig = 0;
+  alleNummers.forEach(nr => {
+    const huidig = rekeningenHuidig[nr] ?? 0;
+    const vorig  = rekeningenVorig[nr] ?? 0;
+    sumBalansHuidig += huidig; sumBalansVorig += vorig;
+    if (huidig === 0 && vorig === 0) return; // lege/tussenrekeningen niet tonen
+    const { sectie, groep, accent } = rekeningGroep(nr, huidig !== 0 ? huidig : vorig);
+    const key = `${sectie}|${groep}`;
+    if (!groepenMap[key]) groepenMap[key] = { sectie, groep, accent, posten: [], subtotaalHuidig: 0, subtotaalVorig: 0 };
+    groepenMap[key].posten.push({ nr, label: omschrijvingen[nr] || `Rekening ${nr}`, huidig, vorig });
+    groepenMap[key].subtotaalHuidig += huidig;
+    groepenMap[key].subtotaalVorig  += vorig;
+  });
+
+  const activa   = ["Liquide middelen","Vlottende activa"].map(g => groepenMap[`activa|${g}`]).filter(Boolean);
+  const passiva  = ["Eigen vermogen","Voorzieningen","Kortlopende schulden"].map(g => groepenMap[`passiva|${g}`]).filter(Boolean);
+  const totaalActivaHuidig  = activa.reduce((s,g)=>s+g.subtotaalHuidig,0);
+  const totaalActivaVorig   = activa.reduce((s,g)=>s+g.subtotaalVorig,0);
+  const totaalPassivaHuidig = passiva.reduce((s,g)=>s+g.subtotaalHuidig,0);
+  const totaalPassivaVorig  = passiva.reduce((s,g)=>s+g.subtotaalVorig,0);
+
+  // Sluitingscontrole — teken-onafhankelijk: door dubbel boekhouden moet de som van álle
+  // balansrekeningen exact tegenovergesteld zijn aan de som van álle V&W-rekeningen
+  // (samen altijd nul), ongeacht hoe rekeningen hierboven in Activa/Passiva zijn ingedeeld.
+  const verschilHuidig = Math.round((sumBalansHuidig + resultaatVWHuidig) * 100) / 100;
+  const verschilVorig  = Math.round((sumBalansVorig + resultaatVWVorig) * 100) / 100;
+  const sluit = Math.abs(verschilHuidig) < 1 && Math.abs(verschilVorig) < 1;
+
   return {
     jaar, jaarVorig, kwartaal,
+    activa, passiva,
+    totaalActivaHuidig, totaalActivaVorig, totaalPassivaHuidig, totaalPassivaVorig,
+    sluit, verschilHuidig, verschilVorig,
+    // oude, platte velden — gebruikt door Dashboard/Excel-export/AI-samenvatting
     bank25: saldoVorig(1010), bank26: saldoHuidig(1010),
     deb25: Math.abs(saldoVorig(1310)), deb26: Math.abs(saldoHuidig(1310)),
     cred25: Math.abs(saldoVorig(1600)), cred26: Math.abs(saldoHuidig(1600)),
@@ -624,14 +692,14 @@ const TT = ({ active, payload, label }) => {
 
 // ── Tab navigatie ──────────────────────────────────────────────────────────
 const TABS = [
-  { id:"dashboard",     label:"Dashboard"       },
-  { id:"pl",            label:"P&L per kwartaal"},
-  { id:"servicekosten", label:"Servicekosten"   },
-  { id:"rentroll",      label:"Rent Roll"       },
-  { id:"cashflow",      label:"Cashflow"        },
-  { id:"balans",        label:"Balans"          },
-  { id:"signalen",      label:"Signalen"        },
-  { id:"archief",       label:"Archief"         },
+  { id:"dashboard",     label:"Dashboard",        icon:"◻" },
+  { id:"pl",            label:"P&L per kwartaal", icon:"≡" },
+  { id:"servicekosten", label:"Servicekosten",    icon:"⚙" },
+  { id:"rentroll",      label:"Rent Roll",        icon:"📋" },
+  { id:"cashflow",      label:"Cashflow",         icon:"💰" },
+  { id:"balans",        label:"Balans",           icon:"⚖" },
+  { id:"signalen",      label:"Signalen",         icon:"⚑" },
+  { id:"archief",       label:"Archief",          icon:"📁" },
 ];
 
 // ── TABS inhoud ────────────────────────────────────────────────────────────
@@ -767,7 +835,8 @@ function PLTab({ bk, kleur }) {
   const labelHuidig = periodeLabel(kwartaal, jaar);
   const labelVorig  = periodeLabel(kwartaal, jaarVorig);
   const heeftBegroting = !!bk.plBudget;
-  const totaalKolommen = 1 + Q25.length + Q26.length + 2 + 1 + (heeftBegroting ? 1 : 0);
+  const afwijkingKolommen = heeftBegroting ? 2 : 1;
+  const totaalKolommen = 1 + Q25.length + Q26.length + 2 + (heeftBegroting?1:0) + afwijkingKolommen;
 
   return (
     <div>
@@ -784,48 +853,52 @@ function PLTab({ bk, kleur }) {
           <thead>
             <tr>
               <th style={{ background:C.grey1, padding:"5px 10px", textAlign:"left",
-                border:`1px solid ${C.grey2}`, fontSize:10, color:C.textSub }} rowSpan={2}>
+                border:`1px solid ${C.grey2}`, fontSize:10, color:C.text }} rowSpan={2}>
                 Omschrijving
               </th>
-              {[{l:`ACTUEEL ${jaarVorig}`,s:Q25.length,bg:COL_25},{l:`ACTUEEL ${jaar}`,s:Q26.length,bg:kleur}].map((g,i)=>(
+              {[
+                {l:`ACTUEEL ${jaarVorig}`,s:Q25.length,bg:COL_25},
+                {l:`ACTUEEL ${jaar}`,s:Q26.length,bg:kleur},
+                {l:`TOTALEN ${labelHuidig.split(" ")[0]}`,s:2,bg:C.navyMid},
+                ...(heeftBegroting ? [{l:"BEGROTING",s:1,bg:C.greenDark}] : []),
+                {l:"AFWIJKING",s:afwijkingKolommen,bg:C.navy},
+              ].map((g,i)=>(
                 <th key={i} colSpan={g.s} style={{ background:g.bg, color:C.white,
                   padding:"5px 8px", textAlign:"center", border:`1px solid ${C.grey2}`,
-                  fontSize:10, fontWeight:700 }}>{g.l}</th>
+                  fontSize:10, fontWeight:700, letterSpacing:"0.05em" }}>{g.l}</th>
               ))}
-              <th style={{ background:C.navy, color:C.white, padding:"5px 8px",
-                textAlign:"center", border:`1px solid ${C.grey2}`, fontSize:10 }} colSpan={2}>
-                TOTALEN {labelHuidig.split(" ")[0]}
-              </th>
-              <th style={{ background:C.navy, color:C.white, padding:"5px 8px",
-                textAlign:"center", border:`1px solid ${C.grey2}`, fontSize:10 }}>
-                ∆
-              </th>
-              {heeftBegroting && (
-                <th rowSpan={2} style={{ background:C.grey1, color:C.navy, padding:"5px 8px",
-                  textAlign:"center", border:`1px solid ${C.grey2}`, fontSize:10, minWidth:90 }}>
-                  Begroot {jaar}
-                </th>
-              )}
             </tr>
             <tr>
               {Q25.map(q=><th key={q} style={{ background:COL_25, color:C.white,
                 padding:"5px 8px", textAlign:"right", border:`1px solid ${C.grey2}`,
-                fontSize:10, minWidth:90 }}>{q} {jaarVorig}</th>)}
+                fontSize:10, minWidth:84 }}>{q} {jaarVorig}</th>)}
               {Q26.map(q=><th key={q} style={{ background:kleur, color:C.white,
                 padding:"5px 8px", textAlign:"right", border:`1px solid ${C.grey2}`,
-                fontSize:10, minWidth:90 }}>{q} {jaar}</th>)}
+                fontSize:10, minWidth:84 }}>{q} {jaar}</th>)}
               <th style={{ background:kleur, color:C.white, padding:"5px 8px",
-                textAlign:"right", border:`1px solid ${C.grey2}`, fontSize:10, minWidth:90 }}>
+                textAlign:"right", border:`1px solid ${C.grey2}`, fontSize:10, minWidth:84 }}>
                 {labelHuidig}
               </th>
               <th style={{ background:COL_25, color:C.white, padding:"5px 8px",
-                textAlign:"right", border:`1px solid ${C.grey2}`, fontSize:10, minWidth:90 }}>
+                textAlign:"right", border:`1px solid ${C.grey2}`, fontSize:10, minWidth:84 }}>
                 {labelVorig}
               </th>
+              {heeftBegroting && (
+                <th style={{ background:C.greenDark, color:C.white, padding:"5px 8px",
+                  textAlign:"right", border:`1px solid ${C.grey2}`, fontSize:10, minWidth:84 }}>
+                  {labelHuidig}
+                </th>
+              )}
               <th style={{ background:C.navy, color:C.white, padding:"5px 8px",
-                textAlign:"right", border:`1px solid ${C.grey2}`, fontSize:10, minWidth:90 }}>
-                ∆ {labelHuidig.split(" ")[0]}
+                textAlign:"right", border:`1px solid ${C.grey2}`, fontSize:10, minWidth:84 }}>
+                vs {labelVorig.split(" ")[0]}
               </th>
+              {heeftBegroting && (
+                <th style={{ background:C.navy, color:C.white, padding:"5px 8px",
+                  textAlign:"right", border:`1px solid ${C.grey2}`, fontSize:10, minWidth:84 }}>
+                  vs Begroting
+                </th>
+              )}
             </tr>
           </thead>
           <tbody>
@@ -833,50 +906,61 @@ function PLTab({ bk, kleur }) {
               if (rij.hdr) return (
                 <tr key={ri}>
                   <td colSpan={totaalKolommen} style={{ background:C.navy, color:C.white,
-                    padding:"6px 10px", fontWeight:700, fontSize:11,
+                    padding:"6px 10px", fontWeight:700, fontSize:11, letterSpacing:"0.05em",
                     border:`1px solid ${C.grey2}` }}>{rij.label}</td>
                 </tr>
               );
               const d = (bk.plData||[]).find(r => r.label === rij.key) || {};
               const periodeHuidigRij = Q26.reduce((s,q) => s + (d[`q${q.toLowerCase()}_26`]||0), 0);
               const periodeVorigRij  = Q25.slice(0,Q26.length).reduce((s,q) => s + (d[`q${q.toLowerCase()}_25`]||0), 0);
-              const delta = (periodeHuidigRij-periodeVorigRij)*rij.sign;
+              // Begroting is een jaartotaal — naar rato herrekend zodat de vergelijking met de
+              // (deel-jaar) actuele cijfers eerlijk is.
+              const begrootFy = rij.begrotingLabel != null ? (bk.plBudget?.[rij.begrotingLabel] ?? null) : null;
+              const begrootRij = begrootFy != null ? Math.round(begrootFy * kwartaal / 4) : null;
+              const deltaVorig  = (periodeHuidigRij-periodeVorigRij)*rij.sign;
+              const deltaBgr    = begrootRij != null ? (periodeHuidigRij-begrootRij)*rij.sign : null;
               const rowBg = rij.kleur || (ri%2===0?C.white:C.grey1);
-              const dbg = delta >= 0 ? C.greenL : C.orangeL;
+              const dbgVorig = deltaVorig >= 0 ? C.greenL : C.orangeL;
+              const dbgBgr   = deltaBgr != null ? (deltaBgr >= 0 ? C.greenL : C.orangeL) : rowBg;
               return (
                 <tr key={ri}>
-                  <td style={{ padding:"5px 10px", background:rowBg,
+                  <td style={{ padding:"5px 10px", background:rowBg, color:C.text,
                     paddingLeft:20, border:`1px solid ${C.grey2}` }}>{rij.label}</td>
                   {Q25.map(q => {
                     const v = d[`q${q.toLowerCase()}_25`]||0;
                     return <td key={q} style={{ padding:"5px 8px", textAlign:"right",
-                      background:rowBg, fontVariantNumeric:"tabular-nums",
+                      background:rowBg, color:C.text, fontVariantNumeric:"tabular-nums",
                       border:`1px solid ${C.grey2}` }}>{v ? NL(v) : "–"}</td>;
                   })}
                   {Q26.map(q => {
                     const v = d[`q${q.toLowerCase()}_26`]||0;
                     return <td key={q} style={{ padding:"5px 8px", textAlign:"right",
-                      background:rowBg, fontVariantNumeric:"tabular-nums",
+                      background:rowBg, color:C.text, fontVariantNumeric:"tabular-nums",
                       border:`1px solid ${C.grey2}` }}>{v ? NL(v) : "–"}</td>;
                   })}
-                  <td style={{ padding:"5px 8px", textAlign:"right", background:rowBg,
+                  <td style={{ padding:"5px 8px", textAlign:"right", background:rowBg, color:C.text,
                     fontWeight:600, fontVariantNumeric:"tabular-nums",
                     border:`1px solid ${C.grey2}` }}>{periodeHuidigRij ? NL(periodeHuidigRij) : "–"}</td>
-                  <td style={{ padding:"5px 8px", textAlign:"right", background:rowBg,
+                  <td style={{ padding:"5px 8px", textAlign:"right", background:rowBg, color:C.text,
                     fontVariantNumeric:"tabular-nums",
                     border:`1px solid ${C.grey2}` }}>{periodeVorigRij ? NL(periodeVorigRij) : "–"}</td>
-                  <td style={{ padding:"5px 8px", textAlign:"right", background:dbg,
-                    color:delta>=0?C.green:C.orange, fontWeight:600,
+                  {heeftBegroting && (
+                    <td style={{ padding:"5px 8px", textAlign:"right", background:"#E8F0E3", color:C.greenDark,
+                      fontVariantNumeric:"tabular-nums",
+                      border:`1px solid ${C.grey2}` }}>{begrootRij != null ? NL(begrootRij) : "–"}</td>
+                  )}
+                  <td style={{ padding:"5px 8px", textAlign:"right", background:dbgVorig,
+                    color:deltaVorig>=0?C.green:C.orange, fontWeight:600,
                     fontVariantNumeric:"tabular-nums",
                     border:`1px solid ${C.grey2}` }}>
-                    {delta ? `${delta>=0?"+":""}${NL(delta)}` : "–"}
+                    {deltaVorig ? `${deltaVorig>=0?"+":""}${NL(deltaVorig)}` : "–"}
                   </td>
                   {heeftBegroting && (
-                    <td style={{ padding:"5px 8px", textAlign:"right", background:C.grey1,
+                    <td style={{ padding:"5px 8px", textAlign:"right", background:dbgBgr,
+                      color:deltaBgr!=null?(deltaBgr>=0?C.green:C.orange):C.text, fontWeight:600,
                       fontVariantNumeric:"tabular-nums",
                       border:`1px solid ${C.grey2}` }}>
-                      {rij.begrotingLabel && bk.plBudget[rij.begrotingLabel] != null
-                        ? NL(bk.plBudget[rij.begrotingLabel]) : "–"}
+                      {deltaBgr != null ? `${deltaBgr>=0?"+":""}${NL(deltaBgr)}` : "–"}
                     </td>
                   )}
                 </tr>
@@ -893,6 +977,27 @@ function PLTab({ bk, kleur }) {
 function ServicekostenTab({ svc, kleur, unitFilter }) {
   const labelHuidig = periodeLabel(svc?.kwartaal, svc?.jaar);
   const labelVorig  = periodeLabel(svc?.kwartaal, svc?.jaarVorig);
+  const kwartaal = svc?.kwartaal || 2;
+  const heeftBegroting = !!svc?.plBudget;
+
+  // Begroting-kostensoorten gebruiken dezelfde naamgeving als de servicekosten-export (in
+  // tegenstelling tot de P&L, waar de terminologie verschilt), dus directe naam-match volstaat.
+  // De begroting is een jaartotaal — voor een eerlijke vergelijking wordt naar rato van het
+  // gekozen aantal kwartalen herrekend (FY Bgr toont het ongeprorateerde jaarbedrag).
+  const vindFyBegroting = (ks) => svc?.plBudget?.[(ks||"").trim()] ?? svc?.plBudget?.[ks] ?? null;
+
+  const svcVgl = (svc?.svcDetail||[]).map(r => {
+    const fyBgr = vindFyBegroting(r.ks);
+    const h1Bgr = fyBgr != null ? Math.round(fyBgr * kwartaal / 4) : null;
+    return { ...r, fyBgr, h1Bgr, deltaBgr: h1Bgr != null ? r.h1_26 - h1Bgr : null };
+  });
+
+  const totaal25 = svcVgl.reduce((s,r)=>s+r.h1_25,0);
+  const totaal26 = svcVgl.reduce((s,r)=>s+r.h1_26,0);
+  const totaalH1Bgr = svcVgl.reduce((s,r)=>s+(r.h1Bgr||0),0);
+  const totaalFyBgr = svcVgl.reduce((s,r)=>s+(r.fyBgr||0),0);
+  const restKolommen = heeftBegroting ? 6 : 3;
+
   return (
     <div>
       {unitFilter && (
@@ -901,7 +1006,7 @@ function ServicekostenTab({ svc, kleur, unitFilter }) {
           ℹ Servicekosten zijn niet per unit beschikbaar — overzicht toont het gehele complex.
         </div>
       )}
-      <div style={{ display:"grid", gridTemplateColumns:svc?.begroot!=null?"repeat(5,1fr)":"repeat(4,1fr)", gap:10, marginBottom:20 }}>
+      <div style={{ display:"grid", gridTemplateColumns:heeftBegroting?"repeat(5,1fr)":"repeat(4,1fr)", gap:10, marginBottom:20 }}>
         <KPI label={`Totaal kosten ${labelHuidig}`} val={svc?.tot26||0}
           delta={(svc?.tot26||0)-(svc?.tot25||0)} deltaLabel={labelVorig} goed_pos={false} />
         <KPI label={`Totaal kosten ${labelVorig}`} val={svc?.tot25||0} />
@@ -909,28 +1014,41 @@ function ServicekostenTab({ svc, kleur, unitFilter }) {
           sub="Ontvangen (negatief)" />
         <KPI label={`Saldo ${labelHuidig}`} val={svc?.saldo26||0}
           sub={(svc?.saldo26||0)<=0?"Overschot ✓":"Tekort ⚠"} />
-        {svc?.begroot != null && (
-          <KPI label={`Begroot ${svc.begrootJaar||""}`.trim()} val={svc.begroot}
-            sub="Uit begrotingsbestand — jaartotaal" />
+        {heeftBegroting && (
+          <KPI label={`Begroot ${labelHuidig}`} val={totaalH1Bgr}
+            sub={`FY begroting: ${NL(totaalFyBgr)}`} />
         )}
       </div>
       <div style={{ overflowX:"auto" }}>
         <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
           <thead>
             <tr>
-              {["Kostensoort",labelVorig,labelHuidig,"∆ Absoluut","∆ %","Signaal"].map((h,i)=>(
-                <th key={i} style={{ background:i===0?C.navy:i<=2?"#2F75B6":i===5?C.navy:kleur,
-                  color:C.white, padding:"7px 10px",
-                  textAlign:i===0?"left":"right",
-                  border:`1px solid ${C.grey2}`, fontSize:10, fontWeight:700,
-                  minWidth:i===0?180:90 }}>{h}</th>
+              {[
+                {l:"Kostensoort", bg:C.navy, align:"left", w:170},
+                {l:labelVorig, bg:"#2F75B6", align:"right"},
+                {l:labelHuidig, bg:kleur, align:"right"},
+                {l:"∆ Absoluut", bg:C.navy, align:"right"},
+                {l:"∆ %", bg:C.navy, align:"right"},
+                ...(heeftBegroting ? [
+                  {l:`${labelHuidig} Bgr`, bg:C.greenDark, align:"right"},
+                  {l:"vs Begroting", bg:C.navy, align:"right"},
+                  {l:"FY Bgr", bg:C.greenDark, align:"right"},
+                ] : []),
+                {l:"Signaal", bg:C.navy, align:"center"},
+              ].map((h,i) => (
+                <th key={i} style={{ background:h.bg, color:C.white, padding:"7px 10px",
+                  textAlign:h.align, border:`1px solid ${C.grey2}`, fontSize:10, fontWeight:700,
+                  minWidth:h.w||90 }}>
+                  {h.l}
+                </th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {(svc?.svcDetail||[]).map((r,i) => {
+            {svcVgl.map((r,i) => {
               const bg = i%2===0?C.white:C.grey1;
               const good = r.delta <= 0;
+              const goodBgr = r.deltaBgr != null ? r.deltaBgr <= 0 : null;
               const sig = r.delta > 1000 && !good ? "🔴 Kritiek"
                 : r.delta > 0 ? "🟡 Licht" : r.delta < -2000 ? "🟢 Daling" : "→ Stabiel";
               const sbg = sig.includes("Kritiek") ? C.orangeL
@@ -938,12 +1056,12 @@ function ServicekostenTab({ svc, kleur, unitFilter }) {
                 : sig.includes("Daling") ? C.greenL : C.grey1;
               return (
                 <tr key={i}>
-                  <td style={{ padding:"6px 10px", background:bg,
+                  <td style={{ padding:"6px 10px", background:bg, color:C.text,
                     border:`1px solid ${C.grey2}` }}>{r.ks}</td>
-                  <td style={{ padding:"6px 10px", textAlign:"right", background:bg,
+                  <td style={{ padding:"6px 10px", textAlign:"right", background:bg, color:C.text,
                     fontVariantNumeric:"tabular-nums", border:`1px solid ${C.grey2}` }}>
                     {NL(r.h1_25)}</td>
-                  <td style={{ padding:"6px 10px", textAlign:"right", background:bg,
+                  <td style={{ padding:"6px 10px", textAlign:"right", background:bg, color:C.text,
                     fontVariantNumeric:"tabular-nums", border:`1px solid ${C.grey2}` }}>
                     {NL(r.h1_26)}</td>
                   <td style={{ padding:"6px 10px", textAlign:"right",
@@ -956,13 +1074,75 @@ function ServicekostenTab({ svc, kleur, unitFilter }) {
                     color:good?C.green:C.orange, fontWeight:600,
                     border:`1px solid ${C.grey2}` }}>
                     {r.h1_25 ? `${((r.delta/r.h1_25)*100).toFixed(1)}%` : "–"}</td>
+                  {heeftBegroting && (
+                    <>
+                      <td style={{ padding:"6px 10px", textAlign:"right", background:"#E8F0E3", color:C.greenDark,
+                        fontVariantNumeric:"tabular-nums", border:`1px solid ${C.grey2}` }}>
+                        {r.h1Bgr != null ? NL(r.h1Bgr) : "–"}</td>
+                      <td style={{ padding:"6px 10px", textAlign:"right",
+                        background:goodBgr==null?bg:(goodBgr?C.greenL:C.orangeL),
+                        color:goodBgr==null?C.text:(goodBgr?C.green:C.orange), fontWeight:600,
+                        fontVariantNumeric:"tabular-nums", border:`1px solid ${C.grey2}` }}>
+                        {r.deltaBgr != null ? `${r.deltaBgr>=0?"+":""}${NL(r.deltaBgr)}` : "–"}</td>
+                      <td style={{ padding:"6px 10px", textAlign:"right", background:"#E8F0E3", color:C.greenDark,
+                        fontVariantNumeric:"tabular-nums", border:`1px solid ${C.grey2}` }}>
+                        {r.fyBgr != null ? NL(r.fyBgr) : "–"}</td>
+                    </>
+                  )}
                   <td style={{ padding:"5px 8px", textAlign:"center",
                     background:sbg, border:`1px solid ${C.grey2}`, fontSize:11, fontWeight:600,
-                    color:sbg===C.greenL?C.green:sbg===C.orangeL?C.orange:sbg===C.yellowL?C.yellow:C.grey3 }}>
+                    color:sbg===C.greenL?C.green:sbg===C.orangeL?C.orange:sbg===C.yellowL?C.yellow:C.text }}>
                     {sig}</td>
                 </tr>
               );
             })}
+            {/* Totaalrij */}
+            <tr style={{ fontWeight:700 }}>
+              <td style={{ padding:"7px 10px", background:C.navyLight, color:C.text, border:`1px solid ${C.grey2}` }}>TOTAAL KOSTEN</td>
+              <td style={{ padding:"7px 10px", textAlign:"right", background:C.navyLight, color:C.text,
+                fontVariantNumeric:"tabular-nums", border:`1px solid ${C.grey2}` }}>{NL(totaal25)}</td>
+              <td style={{ padding:"7px 10px", textAlign:"right", background:C.navyLight, color:C.text,
+                fontVariantNumeric:"tabular-nums", border:`1px solid ${C.grey2}` }}>{NL(totaal26)}</td>
+              <td style={{ padding:"7px 10px", textAlign:"right",
+                background:totaal26<=totaal25?C.greenL:C.orangeL, color:totaal26<=totaal25?C.green:C.orange,
+                fontVariantNumeric:"tabular-nums", border:`1px solid ${C.grey2}` }}>{NL(totaal26-totaal25)}</td>
+              <td style={{ padding:"7px 10px", textAlign:"right",
+                background:totaal26<=totaal25?C.greenL:C.orangeL, color:totaal26<=totaal25?C.green:C.orange,
+                border:`1px solid ${C.grey2}` }}>{totaal25?`${(((totaal26-totaal25)/totaal25)*100).toFixed(1)}%`:"–"}</td>
+              {heeftBegroting && (
+                <>
+                  <td style={{ padding:"7px 10px", textAlign:"right", background:"#E8F0E3", color:C.greenDark,
+                    fontVariantNumeric:"tabular-nums", border:`1px solid ${C.grey2}` }}>{NL(totaalH1Bgr)}</td>
+                  <td style={{ padding:"7px 10px", textAlign:"right",
+                    background:totaal26<=totaalH1Bgr?C.greenL:C.orangeL, color:totaal26<=totaalH1Bgr?C.green:C.orange,
+                    fontVariantNumeric:"tabular-nums", border:`1px solid ${C.grey2}` }}>{NL(totaal26-totaalH1Bgr)}</td>
+                  <td style={{ padding:"7px 10px", textAlign:"right", background:"#E8F0E3", color:C.greenDark,
+                    fontVariantNumeric:"tabular-nums", border:`1px solid ${C.grey2}` }}>{NL(totaalFyBgr)}</td>
+                </>
+              )}
+              <td style={{ background:C.navyLight, border:`1px solid ${C.grey2}` }} />
+            </tr>
+            {/* Voorschotten */}
+            <tr>
+              <td style={{ padding:"6px 10px", background:"#E8F4FD", color:C.text, fontStyle:"italic",
+                border:`1px solid ${C.grey2}` }}>Voorschotten ontvangen</td>
+              <td style={{ padding:"6px 10px", textAlign:"right", background:"#E8F4FD", color:C.text,
+                fontVariantNumeric:"tabular-nums", border:`1px solid ${C.grey2}` }}>{NL(svc?.vsc25||0)}</td>
+              <td style={{ padding:"6px 10px", textAlign:"right", background:"#E8F4FD", color:C.text,
+                fontVariantNumeric:"tabular-nums", border:`1px solid ${C.grey2}` }}>{NL(svc?.vsc26||0)}</td>
+              <td colSpan={restKolommen} style={{ background:"#E8F4FD", border:`1px solid ${C.grey2}`,
+                fontSize:11, color:C.text, padding:"6px 10px", fontStyle:"italic" }}>Negatief = ontvangen</td>
+            </tr>
+            {/* Saldo */}
+            <tr style={{ fontWeight:700 }}>
+              <td style={{ padding:"7px 10px", background:C.greenL, color:C.green, border:`1px solid ${C.grey2}` }}>SALDO</td>
+              <td style={{ padding:"7px 10px", textAlign:"right", background:C.greenL, color:C.green,
+                fontVariantNumeric:"tabular-nums", border:`1px solid ${C.grey2}` }}>{NL((svc?.tot25||0)+(svc?.vsc25||0))}</td>
+              <td style={{ padding:"7px 10px", textAlign:"right", background:C.greenL, color:C.green,
+                fontVariantNumeric:"tabular-nums", border:`1px solid ${C.grey2}` }}>{NL(svc?.saldo26||0)}</td>
+              <td colSpan={restKolommen} style={{ background:C.greenL, border:`1px solid ${C.grey2}`,
+                fontSize:11, color:C.green, padding:"7px 10px" }}>Negatief = overschot (voorschotten &gt; kosten)</td>
+            </tr>
           </tbody>
         </table>
       </div>
@@ -1019,7 +1199,7 @@ function RentRollTab({ rr, kleur, complexFilter, unitFilter }) {
               const bg = i%2===0?C.white:C.grey1;
               const rBg = r.rest<1?C.orangeL:r.rest<2?C.yellowL:C.greenL;
               const rFg = r.rest<1?C.orange:r.rest<2?C.yellow:C.green;
-              const rLbl = r.rest<1?"🔴 <1jr":r.rest<2?"⚠ 1-2jr":"✓ >2jr";
+              const rLbl = r.rest<1?"🔴 Urgent <1jr":r.rest<2?"⚠ Bewaken 1-2jr":"✓ Looptijd >2jr";
               const fmtDatum = (d) => {
                 if (!d) return "–";
                 try { return new Date(d).toLocaleDateString("nl-NL"); }
@@ -1098,7 +1278,17 @@ function RentRollTab({ rr, kleur, complexFilter, unitFilter }) {
 function CashflowTab({ bk, kleur, unitFilter }) {
   const data = bk.kasstroomData || [];
   const labelHuidig = periodeLabel(bk.kwartaal, bk.jaar);
-  const jaarKort = String(bk.jaar).slice(-2);
+
+  // "Overige mutaties" is een resterende post (servicekosten, BTW-afdrachten e.d. die niet
+  // apart per kwartaal beschikbaar zijn) zodat Inkomsten - Uitgaven altijd exact gelijk is
+  // aan de werkelijke bankmutatie — geen geschatte/verzonnen bedragen, wel een eerlijke sluitpost.
+  const dataMetTotalen = data.map(d => {
+    const overigeMutaties = (d.huur||0) - (d.exploitatie||0) - (d.onttrekking||0) - (d.netto||0);
+    return { ...d, totInkomsten: d.huur||0, overigeMutaties, totUitgaven: (d.exploitatie||0)+(d.onttrekking||0)+overigeMutaties };
+  });
+
+  const nettoHuidig = dataMetTotalen.filter(d=>d.jaar===bk.jaar).reduce((s,d)=>s+d.netto,0);
+
   return (
     <div>
       {unitFilter && (
@@ -1107,10 +1297,12 @@ function CashflowTab({ bk, kleur, unitFilter }) {
           ℹ Cashflow is niet per unit beschikbaar — overzicht toont het gehele complex.
         </div>
       )}
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:10, marginBottom:20 }}>
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:10, marginBottom:20 }}>
         <KPI label={`Bankstand eind ${labelHuidig}`} val={bk.bankstandHuidig}
-          delta={bk.bankstandHuidig-(bk.kasstroomData?.[0]?.netto||0)}
-          deltaLabel={`begin ${bk.jaarVorig}`} />
+          delta={bk.bankstandHuidig-(bk.bankStand?.find(b=>b.jaar===bk.jaarVorig)?.stand||0)}
+          deltaLabel={`FY ${bk.jaarVorig}`} />
+        <KPI label={`Netto kasstroom ${labelHuidig}`} val={nettoHuidig}
+          sub={nettoHuidig>=0?"Instroom ✓":"Uitstroom ⚠"} />
         <KPI label={`Huurinkomen ${labelHuidig}`} val={bk.periodeHuidig} />
         <KPI label="Eigenaarsonttrekking" val={bk.onttrekkingHuidig}
           sub={`Ratio: ${PCT(bk.ratioHuidig)}`} />
@@ -1172,6 +1364,50 @@ function CashflowTab({ bk, kleur, unitFilter }) {
         </div>
       </div>
 
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14, marginBottom:14 }}>
+        <div style={{ background:C.white, border:`1px solid ${C.grey2}`,
+          borderRadius:2, padding:"18px 14px" }}>
+          <div style={{ fontSize:10, fontWeight:700, color:C.textSub,
+            letterSpacing:"0.07em", textTransform:"uppercase", marginBottom:14 }}>
+            Inkomsten vs uitgaven per kwartaal
+          </div>
+          <ResponsiveContainer width="100%" height={190}>
+            <BarChart data={dataMetTotalen} barCategoryGap="30%">
+              <CartesianGrid strokeDasharray="3 3" stroke={C.grey2} vertical={false} />
+              <XAxis dataKey="kw" tick={{ fontSize:9, fill:C.textSub }}
+                axisLine={false} tickLine={false} />
+              <YAxis tick={{ fontSize:9, fill:C.textSub }} axisLine={false} tickLine={false}
+                tickFormatter={v=>`€${(v/1000).toFixed(0)}K`} />
+              <Tooltip content={<TT />} />
+              <Legend wrapperStyle={{ fontSize:11 }} />
+              <Bar dataKey="totInkomsten" name="Totaal inkomsten" fill={C.navy} radius={[2,2,0,0]} />
+              <Bar dataKey="totUitgaven" name="Totaal uitgaven" fill={C.orangeL} stroke={C.orange} strokeWidth={1} radius={[2,2,0,0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+        <div style={{ background:C.white, border:`1px solid ${C.grey2}`,
+          borderRadius:2, padding:"18px 14px" }}>
+          <div style={{ fontSize:10, fontWeight:700, color:C.textSub,
+            letterSpacing:"0.07em", textTransform:"uppercase", marginBottom:14 }}>
+            Netto kasstroom per kwartaal
+          </div>
+          <ResponsiveContainer width="100%" height={190}>
+            <BarChart data={data} barCategoryGap="40%">
+              <CartesianGrid strokeDasharray="3 3" stroke={C.grey2} vertical={false} />
+              <XAxis dataKey="kw" tick={{ fontSize:9, fill:C.textSub }}
+                axisLine={false} tickLine={false} />
+              <YAxis tick={{ fontSize:9, fill:C.textSub }} axisLine={false} tickLine={false}
+                tickFormatter={v=>`€${(v/1000).toFixed(0)}K`} />
+              <Tooltip content={<TT />} />
+              <ReferenceLine y={0} stroke={C.grey3} />
+              <Bar dataKey="netto" name="Netto kasstroom" radius={[2,2,0,0]}>
+                {data.map((d,i) => (<Cell key={i} fill={d.netto>=0?C.green:C.orange} />))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
       <div style={{ background:C.white, border:`1px solid ${C.grey2}`,
         borderRadius:2, padding:"18px 14px" }}>
         <div style={{ fontSize:10, fontWeight:700, color:C.textSub,
@@ -1182,56 +1418,110 @@ function CashflowTab({ bk, kleur, unitFilter }) {
           <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
             <thead>
               <tr>
-                {["Omschrijving",...data.map(d=>d.kw),labelHuidig,`FY ${bk.jaarVorig}`].map((h,i)=>(
-                  <th key={i} style={{
-                    background:h.includes(`'${jaarKort}`)?"#2F5597":h===labelHuidig?"#2F5597":h===`FY ${bk.jaarVorig}`?"#2F75B6":i===0?C.grey1:C.navyMid,
-                    color:i===0?C.textSub:C.white,
-                    padding:"6px 8px", textAlign:i===0?"left":"right",
-                    border:`1px solid ${C.grey2}`, fontSize:10, fontWeight:700,
-                    minWidth:i===0?160:90 }}>{h}</th>
+                <th style={{ background:C.grey1, color:C.text, padding:"6px 8px", textAlign:"left",
+                  border:`1px solid ${C.grey2}`, fontSize:10, fontWeight:700, minWidth:220 }}>
+                  Omschrijving
+                </th>
+                {data.map((d,i)=>(
+                  <th key={i} style={{ background:d.jaar===bk.jaar?C.navyMid:"#2F75B6", color:C.white,
+                    padding:"6px 8px", textAlign:"right", border:`1px solid ${C.grey2}`,
+                    fontSize:10, fontWeight:700, minWidth:90 }}>{d.kw}</th>
                 ))}
+                <th style={{ background:C.greenDark, color:C.white, padding:"6px 8px", textAlign:"right",
+                  border:`1px solid ${C.grey2}`, fontSize:10, fontWeight:700, minWidth:100 }}>
+                  {labelHuidig}
+                </th>
+                <th style={{ background:"#2F75B6", color:C.white, padding:"6px 8px", textAlign:"right",
+                  border:`1px solid ${C.grey2}`, fontSize:10, fontWeight:700, minWidth:100 }}>
+                  FY {bk.jaarVorig}
+                </th>
               </tr>
             </thead>
             <tbody>
               {[
-                { label:"Huurontvangsten", key:"huur",       positief:true  },
-                { label:"Exploitatiekosten",key:"exploitatie",positief:false },
-                { label:"Eigenaarsonttrekkingen",key:"onttrekking",positief:false},
-                { label:"Netto kasstroom", key:"netto",       netto:true     },
-              ].map((rij,ri) => {
-                const h1_26 = data.filter(d=>d.jaar===bk.jaar).reduce((s,d)=>s+(d[rij.key]||0),0);
-                const fy_25 = data.filter(d=>d.jaar===bk.jaarVorig).reduce((s,d)=>s+(d[rij.key]||0),0);
-                const bg = rij.netto?C.navy:ri%2===0?C.white:C.grey1;
+                { label:"INKOMSTEN", hdr:true },
+                { label:"Huurontvangsten", key:"huur", positief:true },
+                { label:"TOTAAL INKOMSTEN", key:"totInkomsten", totaal:true, positief:true },
+                { label:"UITGAVEN", hdr:true },
+                { label:"Exploitatiekosten betaald", key:"exploitatie", positief:false },
+                { label:"Eigenaarsonttrekkingen", key:"onttrekking", positief:false },
+                { label:"Overige mutaties (servicekosten, BTW e.d.)", key:"overigeMutaties", positief:false },
+                { label:"TOTAAL UITGAVEN", key:"totUitgaven", totaal:true, positief:false },
+                { label:"NETTO KASSTROOM", key:"netto", totaal:true, netto:true },
+              ].map((rij, ri) => {
+                if (rij.hdr) return (
+                  <tr key={ri}>
+                    <td colSpan={data.length+3} style={{ background:C.navy, color:C.white,
+                      padding:"6px 8px", fontWeight:700, fontSize:11, letterSpacing:"0.05em",
+                      border:`1px solid ${C.grey2}` }}>{rij.label}</td>
+                  </tr>
+                );
+                const isNetto = rij.netto;
+                const rowBg = isNetto ? C.navy : rij.totaal ? C.navyLight : C.white;
+                const rowFg = isNetto ? C.white : C.text;
+                const huidigTotaal = dataMetTotalen.filter(d=>d.jaar===bk.jaar).reduce((s,d)=>s+(d[rij.key]||0),0);
+                const vorigTotaal  = dataMetTotalen.filter(d=>d.jaar===bk.jaarVorig).reduce((s,d)=>s+(d[rij.key]||0),0);
                 return (
                   <tr key={ri}>
-                    <td style={{ padding:"6px 10px", background:bg,
-                      color:rij.netto?C.white:C.text,
-                      fontWeight:rij.netto?700:400,
-                      border:`1px solid ${C.grey2}` }}>{rij.label}</td>
-                    {data.map((d,di) => {
+                    <td style={{ padding:"6px 8px", background:rowBg, color:rowFg,
+                      fontWeight:rij.totaal?700:400, border:`1px solid ${C.grey2}` }}>
+                      {rij.label}
+                    </td>
+                    {dataMetTotalen.map((d,di) => {
                       const v = d[rij.key]||0;
-                      const cellBg = rij.netto?(v>=0?C.greenL:C.orangeL):bg;
-                      const cellFg = rij.netto?(v>=0?C.green:C.orange):rij.netto?C.white:C.text;
+                      const cellBg = isNetto ? (v>=0?C.greenL:C.orangeL) : rowBg;
+                      const cellFg = isNetto ? (v>=0?C.green:C.orange) : rowFg;
                       return (
                         <td key={di} style={{ padding:"6px 8px", textAlign:"right",
-                          background:cellBg, color:cellFg,
-                          fontVariantNumeric:"tabular-nums",
-                          border:`1px solid ${C.grey2}` }}>
+                          background:cellBg, color:cellFg, fontWeight:rij.totaal?700:400,
+                          fontVariantNumeric:"tabular-nums", border:`1px solid ${C.grey2}` }}>
                           {v ? NL(v) : "–"}
                         </td>
                       );
                     })}
                     <td style={{ padding:"6px 8px", textAlign:"right",
-                      background:rij.netto?(h1_26>=0?C.greenL:C.orangeL):"#E8F0E3",
-                      color:rij.netto?(h1_26>=0?C.green:C.orange):C.greenDark,
+                      background:isNetto?(huidigTotaal>=0?C.greenL:C.orangeL):"#E8F0E3",
+                      color:isNetto?(huidigTotaal>=0?C.green:C.orange):C.greenDark,
                       fontWeight:700, fontVariantNumeric:"tabular-nums",
-                      border:`1px solid ${C.grey2}` }}>{h1_26?NL(h1_26):"–"}</td>
-                    <td style={{ padding:"6px 8px", textAlign:"right",
-                      background:C.grey1, fontVariantNumeric:"tabular-nums",
-                      border:`1px solid ${C.grey2}` }}>{fy_25?NL(fy_25):"–"}</td>
+                      border:`1px solid ${C.grey2}` }}>{huidigTotaal?NL(huidigTotaal):"–"}</td>
+                    <td style={{ padding:"6px 8px", textAlign:"right", background:C.grey1, color:C.text,
+                      fontWeight:rij.totaal?700:400, fontVariantNumeric:"tabular-nums",
+                      border:`1px solid ${C.grey2}` }}>{vorigTotaal?NL(vorigTotaal):"–"}</td>
                   </tr>
                 );
               })}
+              <tr>
+                <td style={{ padding:"6px 8px", background:C.grey1, color:C.text, fontStyle:"italic",
+                  border:`1px solid ${C.grey2}` }}>Bankstand begin periode</td>
+                {bk.bankStand.map((b,i) => {
+                  const vorig = i>0 ? bk.bankStand[i-1].stand : b.stand - (data[i]?.netto||0);
+                  return <td key={i} style={{ padding:"6px 8px", textAlign:"right", background:C.grey1, color:C.text,
+                    fontVariantNumeric:"tabular-nums", border:`1px solid ${C.grey2}` }}>{NL(vorig)}</td>;
+                })}
+                <td colSpan={2} style={{ background:C.grey1, border:`1px solid ${C.grey2}` }} />
+              </tr>
+              <tr style={{ fontWeight:700 }}>
+                <td style={{ padding:"6px 8px", background:C.navyMid, color:C.white,
+                  border:`1px solid ${C.grey2}` }}>Bankstand einde periode</td>
+                {(bk.bankStand||[]).map((b,i) => (
+                  <td key={i} style={{ padding:"6px 8px", textAlign:"right",
+                    background:b.stand>=50000?C.greenL:b.stand>=0?C.yellowL:C.orangeL,
+                    color:b.stand>=50000?C.green:b.stand>=0?C.yellow:C.orange,
+                    fontVariantNumeric:"tabular-nums", border:`1px solid ${C.grey2}` }}>
+                    {NL(b.stand)}
+                  </td>
+                ))}
+                <td style={{ padding:"6px 8px", textAlign:"right",
+                  background:bk.bankstandHuidig>=50000?C.greenL:C.yellowL,
+                  color:bk.bankstandHuidig>=50000?C.green:C.yellow,
+                  fontVariantNumeric:"tabular-nums", border:`1px solid ${C.grey2}` }}>
+                  {NL(bk.bankstandHuidig)}
+                </td>
+                <td style={{ padding:"6px 8px", textAlign:"right", background:C.grey1, color:C.text,
+                  fontVariantNumeric:"tabular-nums", border:`1px solid ${C.grey2}` }}>
+                  {NL(bk.bankStand?.find(b=>b.jaar===bk.jaarVorig && b.kw.startsWith("Q4"))?.stand)}
+                </td>
+              </tr>
             </tbody>
           </table>
         </div>
@@ -1241,140 +1531,178 @@ function CashflowTab({ bk, kleur, unitFilter }) {
 }
 
 // Balans tab
-function BalansTab({ balans, unitFilter }) {
-  const fmt = (n) => n ? Math.abs(Math.round(n)).toLocaleString("nl-NL") : "-";
-  const jaar = balans?.jaar || 2026, jaarVorig = balans?.jaarVorig || 2025, kwartaal = balans?.kwartaal || 2;
+function BalansGroepBlok({ groep, fmtSigned }) {
   return (
-    <div style={{ maxWidth:700 }}>
+    <>
+      <tr>
+        <td colSpan={3} style={{ padding:0 }}>
+          <div style={{ display:"flex", alignItems:"center", borderLeft:`4px solid ${groep.accent}`,
+            background:`${groep.accent}10`, padding:"7px 0 7px 12px", marginTop:8 }}>
+            <span style={{ fontSize:11, fontWeight:700, color:groep.accent, letterSpacing:"0.06em",
+              textTransform:"uppercase", fontFamily:"Inter, system-ui, sans-serif" }}>
+              {groep.groep}
+            </span>
+          </div>
+        </td>
+      </tr>
+      {groep.posten.map((post,i) => (
+        <tr key={i} style={{ background:i%2===0?C.white:C.grey1 }}>
+          <td style={{ padding:"6px 0 6px 16px", fontSize:12, color:C.text,
+            borderBottom:`1px solid ${C.grey2}` }}>
+            {post.label}
+          </td>
+          <td style={{ width:130, textAlign:"right", padding:"6px 0 6px 8px", fontSize:12,
+            fontVariantNumeric:"tabular-nums", color:post.huidig<0?C.red:C.text,
+            borderLeft:`1px solid ${C.grey2}`, borderBottom:`1px solid ${C.grey2}` }}>
+            {fmtSigned(post.huidig)}
+          </td>
+          <td style={{ width:130, textAlign:"right", padding:"6px 0 6px 8px", fontSize:12,
+            fontVariantNumeric:"tabular-nums", color:post.vorig<0?C.red:C.text,
+            borderLeft:`1px solid ${C.grey2}`, borderBottom:`1px solid ${C.grey2}` }}>
+            {fmtSigned(post.vorig)}
+          </td>
+        </tr>
+      ))}
+      <tr style={{ background:`${groep.accent}12`, borderTop:`1.5px solid ${groep.accent}` }}>
+        <td style={{ padding:"6px 0 8px 16px", fontSize:12, fontWeight:700,
+          color:groep.accent, fontStyle:"italic", fontFamily:"Inter, system-ui, sans-serif" }}>
+          Totaal {groep.groep.toLowerCase()}
+        </td>
+        <td style={{ borderLeft:`1px solid ${C.grey2}` }} />
+        <td style={{ width:130, textAlign:"right", padding:"6px 0 8px 8px", fontSize:12, fontWeight:700,
+          fontVariantNumeric:"tabular-nums", color:groep.accent,
+          borderLeft:`1px solid ${C.grey2}`, borderBottom:`2px solid ${groep.accent}` }}>
+          {fmtSigned(groep.subtotaalHuidig)}
+        </td>
+        <td style={{ width:130, textAlign:"right", padding:"6px 0 8px 8px", fontSize:12, fontWeight:700,
+          fontVariantNumeric:"tabular-nums", color:C.text,
+          borderLeft:`1px solid ${C.grey2}`, borderBottom:`2px solid ${groep.accent}` }}>
+          {fmtSigned(groep.subtotaalVorig)}
+        </td>
+      </tr>
+    </>
+  );
+}
+
+function BalansTab({ balans, unitFilter }) {
+  const fmtSigned = (n) => {
+    if (n == null || Math.round(n) === 0) return "–";
+    if (n < 0) return `(${Math.abs(Math.round(n)).toLocaleString("nl-NL")})`;
+    return Math.round(n).toLocaleString("nl-NL");
+  };
+  const jaar = balans?.jaar || 2026, jaarVorig = balans?.jaarVorig || 2025, kwartaal = balans?.kwartaal || 2;
+
+  return (
+    <div style={{ fontFamily:"Georgia, 'Times New Roman', serif", color:C.text }}>
       {unitFilter && (
-        <div style={{ background:C.navyLight, color:C.navy, padding:"8px 14px",
-          borderRadius:2, fontSize:12, marginBottom:16 }}>
-          ℹ Balans is niet per unit beschikbaar — overzicht toont de volledige balans.
+        <div style={{ background:C.navyLight, color:C.navy, padding:"8px 14px", borderRadius:2,
+          fontSize:12, marginBottom:16, fontFamily:"Inter, system-ui, sans-serif" }}>
+          ℹ Balans is niet per complex of unit beschikbaar — overzicht toont altijd de volledige portfolio.
         </div>
       )}
-      <div style={{ textAlign:"center", marginBottom:28,
-        borderBottom:`3px solid ${C.navy}`, paddingBottom:16 }}>
-        <h2 style={{ fontSize:20, fontWeight:700, margin:"0 0 4px",
-          fontFamily:"Georgia, serif" }}>Balans</h2>
-        <p style={{ fontSize:12, color:C.textSub, margin:0 }}>
-          Per {periodeEindDatum(kwartaal, jaar)} · vergelijking 31 december {jaarVorig}
-        </p>
+      <div style={{ maxWidth:740, margin:"0 auto" }}>
+        <div style={{ textAlign:"center", marginBottom:28, borderBottom:`3px solid ${C.navy}`, paddingBottom:16 }}>
+          <h2 style={{ fontSize:20, fontWeight:700, margin:"0 0 4px" }}>Balans</h2>
+          <p style={{ fontSize:12, color:C.text, margin:0, fontFamily:"Inter, system-ui, sans-serif" }}>
+            Per {periodeEindDatum(kwartaal, jaar)} · vergelijking 31 december {jaarVorig}
+          </p>
+        </div>
+
+        <table style={{ width:"100%", borderCollapse:"collapse" }}>
+          <thead>
+            <tr style={{ borderBottom:`2px solid ${C.navy}` }}>
+              <th style={{ textAlign:"left", padding:"4px 0 8px", fontSize:11, fontWeight:400, color:C.text,
+                fontFamily:"Inter, system-ui, sans-serif" }}>&nbsp;</th>
+              <th style={{ width:130, textAlign:"right", padding:"4px 0 8px 8px", fontSize:11, fontWeight:600,
+                color:C.navy, borderLeft:`1px solid ${C.grey2}`, fontFamily:"Inter, system-ui, sans-serif" }}>
+                {periodeEindDatumKort(kwartaal, jaar)}
+              </th>
+              <th style={{ width:130, textAlign:"right", padding:"4px 0 8px 8px", fontSize:11, fontWeight:600,
+                color:C.text, borderLeft:`1px solid ${C.grey2}`, fontFamily:"Inter, system-ui, sans-serif" }}>
+                31-12-{jaarVorig}
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {/* ACTIVA */}
+            <tr>
+              <td colSpan={3} style={{ padding:"16px 0 2px" }}>
+                <div style={{ background:C.navy, color:C.white, padding:"7px 14px", fontSize:11,
+                  fontWeight:700, letterSpacing:"0.08em", textTransform:"uppercase",
+                  fontFamily:"Inter, system-ui, sans-serif" }}>
+                  Activa
+                </div>
+              </td>
+            </tr>
+            {(balans?.activa||[]).map((g,i) => <BalansGroepBlok key={i} groep={g} fmtSigned={fmtSigned} />)}
+            <tr style={{ background:C.navyLight, borderTop:`2px solid ${C.navy}` }}>
+              <td style={{ padding:"9px 0 9px 14px", fontSize:13, fontWeight:700, textTransform:"uppercase",
+                letterSpacing:"0.04em", color:C.navy, fontFamily:"Inter, system-ui, sans-serif" }}>
+                Totaal activa
+              </td>
+              <td style={{ borderLeft:`1px solid ${C.grey2}` }} />
+              <td style={{ textAlign:"right", padding:"9px 0 9px 8px", fontSize:13, fontWeight:700,
+                fontVariantNumeric:"tabular-nums", color:C.navy, borderLeft:`1px solid ${C.grey2}`,
+                borderBottom:`3px double ${C.navy}`, fontFamily:"Inter, system-ui, sans-serif" }}>
+                {fmtSigned(balans?.totaalActivaHuidig)}
+              </td>
+              <td style={{ textAlign:"right", padding:"9px 0 9px 8px", fontSize:13, fontWeight:700,
+                fontVariantNumeric:"tabular-nums", color:C.text, borderLeft:`1px solid ${C.grey2}`,
+                borderBottom:`3px double ${C.navy}`, fontFamily:"Inter, system-ui, sans-serif" }}>
+                {fmtSigned(balans?.totaalActivaVorig)}
+              </td>
+            </tr>
+
+            <tr><td colSpan={3} style={{ height:28 }} /></tr>
+
+            {/* PASSIVA */}
+            <tr>
+              <td colSpan={3} style={{ padding:"0 0 2px" }}>
+                <div style={{ background:C.navy, color:C.white, padding:"7px 14px", fontSize:11,
+                  fontWeight:700, letterSpacing:"0.08em", textTransform:"uppercase",
+                  fontFamily:"Inter, system-ui, sans-serif" }}>
+                  Passiva
+                </div>
+              </td>
+            </tr>
+            {(balans?.passiva||[]).map((g,i) => <BalansGroepBlok key={i} groep={g} fmtSigned={fmtSigned} />)}
+            <tr style={{ background:C.navyLight, borderTop:`2px solid ${C.navy}` }}>
+              <td style={{ padding:"9px 0 9px 14px", fontSize:13, fontWeight:700, textTransform:"uppercase",
+                letterSpacing:"0.04em", color:C.navy, fontFamily:"Inter, system-ui, sans-serif" }}>
+                Totaal passiva
+              </td>
+              <td style={{ borderLeft:`1px solid ${C.grey2}` }} />
+              <td style={{ textAlign:"right", padding:"9px 0 9px 8px", fontSize:13, fontWeight:700,
+                fontVariantNumeric:"tabular-nums", color:C.navy, borderLeft:`1px solid ${C.grey2}`,
+                borderBottom:`3px double ${C.navy}`, fontFamily:"Inter, system-ui, sans-serif" }}>
+                {fmtSigned(balans?.totaalPassivaHuidig)}
+              </td>
+              <td style={{ textAlign:"right", padding:"9px 0 9px 8px", fontSize:13, fontWeight:700,
+                fontVariantNumeric:"tabular-nums", color:C.text, borderLeft:`1px solid ${C.grey2}`,
+                borderBottom:`3px double ${C.navy}`, fontFamily:"Inter, system-ui, sans-serif" }}>
+                {fmtSigned(balans?.totaalPassivaVorig)}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        {/* Sluitingscontrole — som van alle balansrekeningen + alle resultaatrekeningen moet nul zijn */}
+        <div style={{ marginTop:14, fontSize:11, fontFamily:"Inter, system-ui, sans-serif",
+          fontWeight:600, display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+          {balans?.sluit ? (
+            <span style={{ background:C.greenL, color:C.green, padding:"2px 10px", borderRadius:2 }}>
+              ✓ Balans sluit
+            </span>
+          ) : (
+            <span style={{ background:C.orangeL, color:C.orange, padding:"2px 10px", borderRadius:2 }}>
+              ✗ Balans sluit niet — verschil € {Math.abs(balans?.verschilHuidig||0).toLocaleString("nl-NL")}
+            </span>
+          )}
+          <span style={{ fontWeight:400, color:C.text }}>
+            Som van alle balans- en resultaatrekeningen samen: € {(balans?.verschilHuidig||0).toLocaleString("nl-NL")} (moet € 0 zijn)
+          </span>
+        </div>
       </div>
-      <table style={{ width:"100%", borderCollapse:"collapse",
-        fontFamily:"Georgia, serif" }}>
-        <thead>
-          <tr style={{ borderBottom:`2px solid ${C.navy}` }}>
-            <th style={{ textAlign:"left", padding:"4px 0 8px",
-              fontSize:11, fontWeight:400, color:C.textSub }}>&nbsp;</th>
-            <th style={{ width:130, textAlign:"right", padding:"4px 0 8px 8px",
-              fontSize:11, fontWeight:600, color:C.navy,
-              borderLeft:`1px solid ${C.grey2}` }}>{periodeEindDatumKort(kwartaal, jaar)}</th>
-            <th style={{ width:130, textAlign:"right", padding:"4px 0 8px 8px",
-              fontSize:11, color:C.textSub,
-              borderLeft:`1px solid ${C.grey2}` }}>31-12-{jaarVorig}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {/* ACTIVA */}
-          <tr>
-            <td colSpan={3} style={{ padding:"14px 0 4px",
-              fontSize:13, fontWeight:700, color:C.navy,
-              letterSpacing:"0.08em", textTransform:"uppercase",
-              borderTop:`2px solid ${C.navy}`,
-              fontFamily:"Inter, system-ui, sans-serif" }}>Activa</td>
-          </tr>
-          {[
-            { label:"Vlottende activa", hdr:true },
-            { label:"Huurdebiteuren",           h:balans?.deb26,  v:balans?.deb25  },
-            { label:"Liquide middelen",          h:balans?.bank26, v:balans?.bank25 },
-            { label:"Overige vlottende activa",  h:null, v:null },
-          ].map((r,i) => r.hdr ? (
-            <tr key={i}>
-              <td colSpan={3} style={{ padding:"8px 0 4px 0",
-                fontSize:11, fontWeight:700, color:C.navy,
-                letterSpacing:"0.04em", textTransform:"uppercase",
-                borderBottom:`1px solid ${C.navy}`,
-                fontFamily:"Inter, system-ui, sans-serif" }}>{r.label}</td>
-            </tr>
-          ) : (
-            <tr key={i} style={{ borderBottom:`1px solid ${C.grey2}` }}>
-              <td style={{ padding:"5px 0 5px 16px", fontSize:12 }}>{r.label}</td>
-              <td style={{ textAlign:"right", padding:"5px 0 5px 8px", fontSize:12,
-                fontVariantNumeric:"tabular-nums",
-                borderLeft:`1px solid ${C.grey2}` }}>
-                {r.h != null ? fmt(r.h) : "–"}</td>
-              <td style={{ textAlign:"right", padding:"5px 0 5px 8px", fontSize:12,
-                fontVariantNumeric:"tabular-nums", color:C.textSub,
-                borderLeft:`1px solid ${C.grey2}` }}>
-                {r.v != null ? fmt(r.v) : "–"}</td>
-            </tr>
-          ))}
-          <tr style={{ borderTop:`1.5px solid ${C.navy}`,
-            background:C.navyLight }}>
-            <td style={{ padding:"7px 0 7px 8px", fontSize:12, fontWeight:700,
-              color:C.navy, fontStyle:"italic" }}>Totaal activa</td>
-            <td style={{ textAlign:"right", padding:"7px 0 7px 8px", fontSize:12,
-              fontWeight:700, fontVariantNumeric:"tabular-nums", color:C.navy,
-              borderLeft:`1px solid ${C.grey2}`,
-              borderBottom:`3px double ${C.navy}` }}>
-              {fmt((balans?.deb26||0)+(balans?.bank26||0))}</td>
-            <td style={{ textAlign:"right", padding:"7px 0 7px 8px", fontSize:12,
-              fontWeight:700, fontVariantNumeric:"tabular-nums", color:C.textSub,
-              borderLeft:`1px solid ${C.grey2}`,
-              borderBottom:`3px double ${C.navy}` }}>
-              {fmt((balans?.deb25||0)+(balans?.bank25||0))}</td>
-          </tr>
-
-          <tr><td colSpan={3} style={{ height:24 }} /></tr>
-
-          {/* PASSIVA */}
-          <tr>
-            <td colSpan={3} style={{ padding:"0 0 4px", fontSize:13, fontWeight:700,
-              color:C.navy, letterSpacing:"0.08em", textTransform:"uppercase",
-              borderTop:`2px solid ${C.navy}`,
-              fontFamily:"Inter, system-ui, sans-serif" }}>Passiva</td>
-          </tr>
-          {[
-            { label:"Kortlopende schulden", hdr:true },
-            { label:"Crediteuren",                    h:balans?.cred26, v:balans?.cred25 },
-            { label:"Svc.kosten vooruit ontvangen",   h:balans?.vsc26,  v:balans?.vsc25  },
-          ].map((r,i) => r.hdr ? (
-            <tr key={i}>
-              <td colSpan={3} style={{ padding:"8px 0 4px 0",
-                fontSize:11, fontWeight:700, color:C.navy,
-                letterSpacing:"0.04em", textTransform:"uppercase",
-                borderBottom:`1px solid ${C.navy}`,
-                fontFamily:"Inter, system-ui, sans-serif" }}>{r.label}</td>
-            </tr>
-          ) : (
-            <tr key={i} style={{ borderBottom:`1px solid ${C.grey2}` }}>
-              <td style={{ padding:"5px 0 5px 16px", fontSize:12 }}>{r.label}</td>
-              <td style={{ textAlign:"right", padding:"5px 0 5px 8px", fontSize:12,
-                fontVariantNumeric:"tabular-nums",
-                borderLeft:`1px solid ${C.grey2}` }}>
-                {r.h != null ? fmt(r.h) : "–"}</td>
-              <td style={{ textAlign:"right", padding:"5px 0 5px 8px", fontSize:12,
-                fontVariantNumeric:"tabular-nums", color:C.textSub,
-                borderLeft:`1px solid ${C.grey2}` }}>
-                {r.v != null ? fmt(r.v) : "–"}</td>
-            </tr>
-          ))}
-          <tr style={{ borderTop:`1.5px solid ${C.navy}`, background:C.navyLight }}>
-            <td style={{ padding:"7px 0 7px 8px", fontSize:12, fontWeight:700,
-              color:C.navy, fontStyle:"italic" }}>Totaal passiva</td>
-            <td style={{ textAlign:"right", padding:"7px 0 7px 8px", fontSize:12,
-              fontWeight:700, fontVariantNumeric:"tabular-nums", color:C.navy,
-              borderLeft:`1px solid ${C.grey2}`,
-              borderBottom:`3px double ${C.navy}` }}>
-              {fmt((balans?.cred26||0)+(balans?.vsc26||0))}</td>
-            <td style={{ textAlign:"right", padding:"7px 0 7px 8px", fontSize:12,
-              fontWeight:700, fontVariantNumeric:"tabular-nums", color:C.textSub,
-              borderLeft:`1px solid ${C.grey2}`,
-              borderBottom:`3px double ${C.navy}` }}>
-              {fmt((balans?.cred25||0)+(balans?.vsc25||0))}</td>
-          </tr>
-        </tbody>
-      </table>
     </div>
   );
 }
@@ -1555,12 +1883,40 @@ export default function App() {
   const [periodeJaar, setPeriodeJaar]         = useState(2026);
   const [periodeKwartaal, setPeriodeKwartaal] = useState(2);
 
-  // Data
-  const [bkData,  setBkData]  = useState(null);
-  const [svcData, setSvcData] = useState(null);
+  // Data (ongefilterd — dit wordt opgeslagen/hersteld via archief)
+  const [bkDataBasis,  setBkDataBasis]  = useState(null);
+  const [svcDataBasis, setSvcDataBasis] = useState(null);
   const [balData, setBalData] = useState(null);
   const [rrData,  setRrData]  = useState([]);
   const [aiTekst, setAiTekst] = useState("");
+  const [begrotingData, setBegrotingData] = useState(null);
+
+  // Ruwe, ongefilterde Excel-rijen — alleen in het geheugen van de huidige sessie
+  // (niet in het archief, dat zou de opslag te groot maken). Filteren op complex/unit
+  // herberekent hiermee; bij een uit het archief geladen rapport is dit null en werkt
+  // filteren dus niet (er is dan alleen het kant-en-klare eindresultaat beschikbaar).
+  const [ruweRijen, setRuweRijen] = useState(null);
+
+  // Complex-/unitfilter herberekent live uit de ruwe rijen als die beschikbaar zijn.
+  const bkData = useMemo(() => {
+    const basis = (ruweRijen && (complexFilter || unitFilter))
+      ? verwerkBoekingen(ruweRijen.bkR, complexFilter, unitFilter, periodeJaar, periodeKwartaal)
+      : bkDataBasis;
+    if (!basis) return null;
+    return begrotingData ? { ...basis, plBudget: begrotingData.plBudget } : basis;
+  }, [ruweRijen, complexFilter, unitFilter, periodeJaar, periodeKwartaal, bkDataBasis, begrotingData]);
+
+  const svcData = useMemo(() => {
+    const basis = (ruweRijen && complexFilter)
+      ? verwerkSvc(ruweRijen.svcR, complexFilter, periodeJaar, periodeKwartaal)
+      : svcDataBasis;
+    if (!basis) return null;
+    return begrotingData
+      ? { ...basis, plBudget: begrotingData.plBudget, begroot: begrotingData.svcBegroot, begrootJaar: begrotingData.svcBegrootJaar }
+      : basis;
+  }, [ruweRijen, complexFilter, periodeJaar, periodeKwartaal, svcDataBasis, begrotingData]);
+
+  const kanFilteren = !!ruweRijen;
 
   const p = portfolio ? PORTFOLIOS[portfolio] : null;
 
@@ -1605,11 +1961,14 @@ export default function App() {
       const bal = verwerkBalans(balR, periodeJaar, periodeKwartaal);
       if (begroting) {
         bk.plBudget = begroting.plBudget;
+        svc.plBudget = begroting.plBudget;
         svc.begroot = begroting.svcBegroot;
         svc.begrootJaar = begroting.svcBegrootJaar;
       }
 
-      setBkData(bk); setSvcData(svc); setBalData(bal); setRrData(rrR);
+      setRuweRijen({ bkR, svcR });
+      setBegrotingData(begroting);
+      setBkDataBasis(bk); setSvcDataBasis(svc); setBalData(bal); setRrData(rrR);
 
       setVoortgang("AI-analyse genereren…");
       const tekst = await haalAIAnalyse(p.label, { ...bk, svc, balans: bal });
@@ -1639,7 +1998,8 @@ export default function App() {
     setPortfolio(key);
     const laatste = archiefLaden().find(a => a.portfolioKey === key && a.data);
     if (laatste) {
-      setBkData(laatste.data.bk); setSvcData(laatste.data.svc);
+      setRuweRijen(null); setBegrotingData(null);
+      setBkDataBasis(laatste.data.bk); setSvcDataBasis(laatste.data.svc);
       setBalData(laatste.data.balans); setRrData(laatste.data.rr || []);
       setAiTekst(laatste.data.aiTekst || "");
       setPeriodeJaar(laatste.jaar || 2026); setPeriodeKwartaal(laatste.kwartaal || 2);
@@ -1652,7 +2012,8 @@ export default function App() {
 
   // Nieuwe rapportage voor dezelfde portfolio (behoudt portfolio, reset upload/periode)
   const nieuweRapportage = () => {
-    setBestanden({}); setBkData(null); setSvcData(null); setBalData(null);
+    setBestanden({}); setRuweRijen(null); setBegrotingData(null);
+    setBkDataBasis(null); setSvcDataBasis(null); setBalData(null);
     setRrData([]); setAiTekst(""); setFout("");
     setComplexFilter(null); setUnitFilter(null);
     setPeriodeJaar(2026); setPeriodeKwartaal(2);
@@ -1664,7 +2025,8 @@ export default function App() {
     if (!a.data) return;
     const key = a.portfolioKey || Object.keys(PORTFOLIOS).find(k => PORTFOLIOS[k].label === a.portfolio);
     setPortfolio(key || null);
-    setBkData(a.data.bk); setSvcData(a.data.svc);
+    setRuweRijen(null); setBegrotingData(null);
+    setBkDataBasis(a.data.bk); setSvcDataBasis(a.data.svc);
     setBalData(a.data.balans); setRrData(a.data.rr || []);
     setAiTekst(a.data.aiTekst || "");
     setPeriodeJaar(a.jaar || 2026); setPeriodeKwartaal(a.kwartaal || 2);
@@ -1673,29 +2035,12 @@ export default function App() {
   };
 
   const reset = () => {
-    setPortfolio(null); setBestanden({}); setBkData(null);
-    setSvcData(null); setBalData(null); setRrData([]);
+    setPortfolio(null); setBestanden({}); setRuweRijen(null); setBegrotingData(null);
+    setBkDataBasis(null); setSvcDataBasis(null); setBalData(null); setRrData([]);
     setAiTekst(""); setTab("dashboard"); setStap("kies");
     setComplexFilter(null); setUnitFilter(null);
     setPeriodeJaar(2026); setPeriodeKwartaal(2);
   };
-
-  // Filter opnieuw verwerken als complex/unit wijzigt
-  const gefilterdBk = bkData && (complexFilter || unitFilter)
-    ? (() => {
-        const bkS_raw = bkData; // al verwerkt, herverwerk niet
-        return bkS_raw;
-      })()
-    : bkData;
-
-  // Beschikbare units voor geselecteerd complex
-  const beschikbareUnits = bkData?.complexen && complexFilter
-    ? [...new Set(
-        (bkData.units||[]).filter(u => {
-          return true; // vereenvoudigd — toon alle units
-        })
-      )]
-    : bkData?.units || [];
 
   return (
     <div style={{ minHeight:"100vh", background:C.bg,
@@ -1906,10 +2251,11 @@ export default function App() {
                 <span style={{ fontSize:11, color:C.textSub, fontWeight:600 }}>Filter:</span>
                 <select
                   value={complexFilter || ""}
+                  disabled={!kanFilteren}
                   onChange={e => { setComplexFilter(e.target.value?Number(e.target.value):null); setUnitFilter(null); }}
                   style={{ border:`1px solid ${C.grey2}`, borderRadius:2,
-                    padding:"4px 10px", fontSize:12, background:C.white,
-                    color:C.text, cursor:"pointer" }}>
+                    padding:"4px 10px", fontSize:12, background:kanFilteren?C.white:C.grey1,
+                    color:kanFilteren?C.text:C.grey3, cursor:kanFilteren?"pointer":"default" }}>
                   <option value="">Alle complexen</option>
                   {(bkData.complexen||[]).map(cx => (
                     <option key={cx.nr} value={cx.nr}>{cx.naam}</option>
@@ -1918,11 +2264,11 @@ export default function App() {
                 <select
                   value={unitFilter || ""}
                   onChange={e => setUnitFilter(e.target.value||null)}
-                  disabled={!complexFilter}
-                  style={{ border:`1px solid ${complexFilter?C.grey2:C.grey2}`,
+                  disabled={!kanFilteren || !complexFilter}
+                  style={{ border:`1px solid ${C.grey2}`,
                     borderRadius:2, padding:"4px 10px", fontSize:12,
-                    background:complexFilter?C.white:C.grey1,
-                    color:complexFilter?C.text:C.grey3, cursor:complexFilter?"pointer":"default" }}>
+                    background:(kanFilteren&&complexFilter)?C.white:C.grey1,
+                    color:(kanFilteren&&complexFilter)?C.text:C.grey3, cursor:(kanFilteren&&complexFilter)?"pointer":"default" }}>
                   <option value="">Alle units</option>
                   {(bkData.units||[]).map(u => (
                     <option key={u} value={u}>{u}</option>
@@ -1935,10 +2281,22 @@ export default function App() {
                     × Filter wissen
                   </button>
                 )}
-                {unitFilter && (
-                  <span style={{ background:C.navyLight, color:C.navyMid,
+                {!kanFilteren && (
+                  <span style={{ background:C.grey1, color:C.text,
                     fontSize:11, padding:"3px 10px", borderRadius:2 }}>
-                    ℹ Servicekosten, balans en cashflow tonen het volledige complex
+                    ℹ Filteren kan alleen direct na het uploaden van bestanden in deze sessie
+                  </span>
+                )}
+                {kanFilteren && unitFilter && (
+                  <span style={{ background:C.navyLight, color:C.navy,
+                    fontSize:11, padding:"3px 10px", borderRadius:2 }}>
+                    ℹ Servicekosten en balans tonen het volledige complex
+                  </span>
+                )}
+                {kanFilteren && complexFilter && !unitFilter && (
+                  <span style={{ background:C.navyLight, color:C.navy,
+                    fontSize:11, padding:"3px 10px", borderRadius:2 }}>
+                    ℹ Balans toont altijd de volledige portfolio
                   </span>
                 )}
               </div>
@@ -1953,7 +2311,7 @@ export default function App() {
                     color:tab===t.id?p.kleur:C.textSub,
                     borderBottom:`2px solid ${tab===t.id?p.kleur:"transparent"}`,
                     marginBottom:-1, whiteSpace:"nowrap" }}>
-                    {t.label}
+                    <span style={{ marginRight:6 }}>{t.icon}</span>{t.label}
                   </button>
                 ))}
               </div>
