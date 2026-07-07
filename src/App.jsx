@@ -30,6 +30,19 @@ const NL = (n) => n == null ? "–" : `€\u00A0${Math.round(n).toLocaleString("
 const PCT = (n) => `${(n * 100).toFixed(1)}%`;
 const toQ = (p) => p <= 3 ? "Q1" : p <= 6 ? "Q2" : p <= 9 ? "Q3" : "Q4";
 
+const KWARTAAL_OPTIES = [
+  { waarde: 1, label: "1e kwartaal (Q1)" },
+  { waarde: 2, label: "2e kwartaal (Q2)" },
+  { waarde: 3, label: "3e kwartaal (Q3)" },
+  { waarde: 4, label: "4e kwartaal (Q4)" },
+];
+const periodeLabel = (kwartaal, jaar) =>
+  ({ 1: `Q1 ${jaar}`, 2: `H1 ${jaar}`, 3: `9M ${jaar}`, 4: `FY ${jaar}` }[kwartaal] || `Q${kwartaal} ${jaar}`);
+const periodeEindDatum = (kwartaal, jaar) =>
+  ({ 1: `31 maart ${jaar}`, 2: `30 juni ${jaar}`, 3: `30 september ${jaar}`, 4: `31 december ${jaar}` }[kwartaal]);
+const periodeEindDatumKort = (kwartaal, jaar) =>
+  ({ 1: `31-03-${jaar}`, 2: `30-06-${jaar}`, 3: `30-09-${jaar}`, 4: `31-12-${jaar}` }[kwartaal]);
+
 // ── Portfolios ─────────────────────────────────────────────────────────────
 const PORTFOLIOS = {
   gvh: {
@@ -82,7 +95,11 @@ function parseXLSX(file) {
   });
 }
 
-function verwerkBoekingen(rows, complexFilter = null, unitFilter = null) {
+function verwerkBoekingen(rows, complexFilter = null, unitFilter = null, jaar = 2026, kwartaal = 2) {
+  const jaarVorig = jaar - 1;
+  const jaarKort = String(jaar).slice(-2);
+  const jaarVorigKort = String(jaarVorig).slice(-2);
+
   let data = rows.map(r => ({
     ...r,
     netto: (r.Boeking_Bedrag_Debet || 0) - (r.Boeking_Bedrag_Credit || 0),
@@ -91,37 +108,39 @@ function verwerkBoekingen(rows, complexFilter = null, unitFilter = null) {
   if (complexFilter) data = data.filter(r => r.Boeking_Complexnr === complexFilter);
   if (unitFilter)    data = data.filter(r => r.Boeking_Unitnr === unitFilter);
 
-  const sumGB = (jaar, kw, gb, excl = []) => {
+  const sumGB = (jr, kw, gb, excl = []) => {
     const gbl = Array.isArray(gb) ? gb : [gb];
     return data.filter(r =>
-      r.Boeking_Boekjaar === jaar && r.kwartaal === kw &&
+      r.Boeking_Boekjaar === jr && r.kwartaal === kw &&
       gbl.includes(r.Boeking_Grootboeknr) &&
       !excl.includes(r.Boeking_OGB_Kostensoort_Omschr)
     ).reduce((s, r) => s + r.netto, 0);
   };
 
-  const huurKw = (jaar, kw) =>
-    Math.abs(sumGB(jaar, kw, [8800, 8801], ["Afrekening huurders"]));
+  const huurKw = (jr, kw) =>
+    Math.abs(sumGB(jr, kw, [8800, 8801], ["Afrekening huurders"]));
 
   const KWARTALEN = ["Q1","Q2","Q3","Q4"];
-  const h1_26 = huurKw(2026,"Q1") + huurKw(2026,"Q2");
-  const h1_25 = huurKw(2025,"Q1") + huurKw(2025,"Q2");
-  const fy25  = KWARTALEN.reduce((s,q) => s + huurKw(2025,q), 0);
+  const Q_HUIDIG = KWARTALEN.slice(0, kwartaal);
+
+  const periodeHuidig = Q_HUIDIG.reduce((s,q) => s + huurKw(jaar,q), 0);
+  const periodeVorig  = Q_HUIDIG.reduce((s,q) => s + huurKw(jaarVorig,q), 0);
+  const fyVorig       = KWARTALEN.reduce((s,q) => s + huurKw(jaarVorig,q), 0);
 
   const ontt_q = {};
   const bank_q = {};
-  [2025,2026].forEach(j => KWARTALEN.forEach(q => {
+  [jaarVorig, jaar].forEach(j => KWARTALEN.forEach(q => {
     ontt_q[`${j}_${q}`] = sumGB(j, q, 840);
     bank_q[`${j}_${q}`] = sumGB(j, q, 1010);
   }));
 
-  const ontt_h1 = (ontt_q["2026_Q1"]||0) + (ontt_q["2026_Q2"]||0);
-  const ratio_h1 = h1_26 > 0 ? ontt_h1 / h1_26 : 0;
+  const onttrekkingHuidig = Q_HUIDIG.reduce((s,q) => s + (ontt_q[`${jaar}_${q}`]||0), 0);
+  const ratioHuidig = periodeHuidig > 0 ? onttrekkingHuidig / periodeHuidig : 0;
 
   const huurTrend = KWARTALEN.map(q => ({
     kw: q,
-    "2025": huurKw(2025, q),
-    "2026": huurKw(2026, q),
+    vorig: huurKw(jaarVorig, q),
+    huidig: huurKw(jaar, q),
   }));
 
   // Per complex huurverdeling
@@ -130,55 +149,54 @@ function verwerkBoekingen(rows, complexFilter = null, unitFilter = null) {
     const lbl = data.find(r => r.Boeking_Complexnr === cx)?.Complexomschrijving || `Complex ${cx}`;
     return {
       complex: lbl.split("(")[0].trim().substring(0, 15),
-      "H1 2025": Math.abs(data.filter(r =>
-        r.Boeking_Boekjaar===2025 && ["Q1","Q2"].includes(r.kwartaal) &&
+      vorig: Math.abs(data.filter(r =>
+        r.Boeking_Boekjaar===jaarVorig && Q_HUIDIG.includes(r.kwartaal) &&
         r.Boeking_Complexnr===cx && r.Boeking_Grootboeknr===8800
       ).reduce((s,r)=>s+r.netto,0)),
-      "H1 2026": Math.abs(data.filter(r =>
-        r.Boeking_Boekjaar===2026 && ["Q1","Q2"].includes(r.kwartaal) &&
+      huidig: Math.abs(data.filter(r =>
+        r.Boeking_Boekjaar===jaar && Q_HUIDIG.includes(r.kwartaal) &&
         r.Boeking_Complexnr===cx && r.Boeking_Grootboeknr===8800
       ).reduce((s,r)=>s+r.netto,0)),
     };
-  }).filter(c => c["H1 2026"] > 0 || c["H1 2025"] > 0);
+  }).filter(c => c.huidig > 0 || c.vorig > 0);
 
-  // Bankstand opbouwen
+  // Bankstand opbouwen (startpunt is een vaste historische referentiewaarde)
   const BANK_START = -13227;
   let s = BANK_START;
   const bankStand = KWARTALEN.map(q => {
-    s += bank_q[`2025_${q}`] || 0;
-    return { kw: `${q} '25`, stand: Math.round(s), jaar: 2025 };
+    s += bank_q[`${jaarVorig}_${q}`] || 0;
+    return { kw: `${q} '${jaarVorigKort}`, stand: Math.round(s), jaar: jaarVorig };
   });
   let s2 = s;
-  ["Q1","Q2"].forEach(q => {
-    s2 += bank_q[`2026_${q}`] || 0;
-    bankStand.push({ kw: `${q} '26`, stand: Math.round(s2), jaar: 2026 });
+  Q_HUIDIG.forEach(q => {
+    s2 += bank_q[`${jaar}_${q}`] || 0;
+    bankStand.push({ kw: `${q} '${jaarKort}`, stand: Math.round(s2), jaar });
   });
-  const bank_h1_26 = s2;
+  const bankstandHuidig = s2;
 
   // Kasstroom tabel
   const kasstroomData = [
     ...KWARTALEN.map(q => ({
-      kw: `${q} '25`, jaar: 2025,
-      huur: huurKw(2025,q),
-      exploitatie: Math.abs(sumGB(2025,q,[4000,4130,4200,4300,4305,4310,4330,4340,4350,4508,4700,4710,4903,4990,4992])),
-      onttrekking: Math.abs(ontt_q[`2025_${q}`]||0),
-      netto: bank_q[`2025_${q}`]||0,
+      kw: `${q} '${jaarVorigKort}`, jaar: jaarVorig,
+      huur: huurKw(jaarVorig,q),
+      exploitatie: Math.abs(sumGB(jaarVorig,q,[4000,4130,4200,4300,4305,4310,4330,4340,4350,4508,4700,4710,4903,4990,4992])),
+      onttrekking: Math.abs(ontt_q[`${jaarVorig}_${q}`]||0),
+      netto: bank_q[`${jaarVorig}_${q}`]||0,
     })),
-    ...["Q1","Q2"].map(q => ({
-      kw: `${q} '26`, jaar: 2026,
-      huur: huurKw(2026,q),
-      exploitatie: Math.abs(sumGB(2026,q,[4000,4130,4200,4300,4305,4310,4330,4340,4350,4508,4700,4710,4903,4990,4992])),
-      onttrekking: Math.abs(ontt_q[`2026_${q}`]||0),
-      netto: bank_q[`2026_${q}`]||0,
+    ...Q_HUIDIG.map(q => ({
+      kw: `${q} '${jaarKort}`, jaar,
+      huur: huurKw(jaar,q),
+      exploitatie: Math.abs(sumGB(jaar,q,[4000,4130,4200,4300,4305,4310,4330,4340,4350,4508,4700,4710,4903,4990,4992])),
+      onttrekking: Math.abs(ontt_q[`${jaar}_${q}`]||0),
+      netto: bank_q[`${jaar}_${q}`]||0,
     })),
   ].map(r => ({ ...r, ratio: r.huur > 0 ? r.onttrekking / r.huur : 0 }));
 
   // Units beschikbaar
   const units = [...new Set(data.map(r => r.Boeking_Unitnr).filter(Boolean))];
 
-  // P&L data
+  // P&L data — "_25"/"_26" zijn interne sleutels voor "vorig jaar"/"huidig jaar"
   const plData = [];
-  const GB_KOSTEN = [4000,4130,4200,4300,4305,4310,4330,4340,4350,4508,4700,4710,4903,4990,4992];
   const EXCL_BK = ["Afrekening huurders"];
 
   const plRijen = [
@@ -201,16 +219,17 @@ function verwerkBoekingen(rows, complexFilter = null, unitFilter = null) {
   plRijen.forEach(rij => {
     const row = { label: rij.label };
     KWARTALEN.forEach(q => {
-      row[`q${q.toLowerCase()}_25`] = rij.sign * sumGB(2025, q, rij.gb, EXCL_BK);
+      row[`q${q.toLowerCase()}_25`] = rij.sign * sumGB(jaarVorig, q, rij.gb, EXCL_BK);
     });
-    ["Q1","Q2"].forEach(q => {
-      row[`q${q.toLowerCase()}_26`] = rij.sign * sumGB(2026, q, rij.gb, EXCL_BK);
+    Q_HUIDIG.forEach(q => {
+      row[`q${q.toLowerCase()}_26`] = rij.sign * sumGB(jaar, q, rij.gb, EXCL_BK);
     });
     plData.push(row);
   });
 
   return {
-    h1_26, h1_25, fy25, ontt_h1, ratio_h1, bank_h1_26,
+    jaar, jaarVorig, kwartaal,
+    periodeHuidig, periodeVorig, fyVorig, onttrekkingHuidig, ratioHuidig, bankstandHuidig,
     huurTrend, huurPerComplex, bankStand, kasstroomData,
     plData, units, ontt_q, bank_q,
     complexen: complexen.map(cx => ({
@@ -220,52 +239,54 @@ function verwerkBoekingen(rows, complexFilter = null, unitFilter = null) {
   };
 }
 
-function verwerkSvc(rows, complexFilter = null) {
+function verwerkSvc(rows, complexFilter = null, jaar = 2026, kwartaal = 2) {
+  const jaarVorig = jaar - 1;
+  const periodes = kwartaal * 3;
   const EXCL = ["Afrekening huurders","Voorschot service"];
   let d = rows;
   if (complexFilter) d = d.filter(r => r.Service_Begroting_Complex === complexFilter);
 
-  const h1Sum = (jaar, excl = EXCL) => {
+  const periodeSom = (jr, excl = EXCL) => {
     const sub = d.filter(r =>
-      r.Service_Begroting_Jaar === jaar && !excl.includes(r.Service_Kostensoort_Naam)
+      r.Service_Begroting_Jaar === jr && !excl.includes(r.Service_Kostensoort_Naam)
     );
     return sub.reduce((s, r) => {
-      for (let i=1;i<=6;i++) s += r[`Service_Geboekt_periode_${String(i).padStart(2,"0")}`] || 0;
+      for (let i=1;i<=periodes;i++) s += r[`Service_Geboekt_periode_${String(i).padStart(2,"0")}`] || 0;
       return s;
     }, 0);
   };
 
-  const byKs = (jaar) => {
+  const byKs = (jr) => {
     const sub = d.filter(r =>
-      r.Service_Begroting_Jaar === jaar && !EXCL.includes(r.Service_Kostensoort_Naam)
+      r.Service_Begroting_Jaar === jr && !EXCL.includes(r.Service_Kostensoort_Naam)
     );
     const m = {};
     sub.forEach(r => {
       const k = r.Service_Kostensoort_Naam;
-      for (let i=1;i<=6;i++) m[k] = (m[k]||0) + (r[`Service_Geboekt_periode_${String(i).padStart(2,"0")}`]||0);
+      for (let i=1;i<=periodes;i++) m[k] = (m[k]||0) + (r[`Service_Geboekt_periode_${String(i).padStart(2,"0")}`]||0);
     });
     return m;
   };
 
-  const vscSum = (jaar) => d.filter(r =>
-    r.Service_Begroting_Jaar === jaar && r.Service_Kostensoort_Naam === "Voorschot service"
+  const vscSom = (jr) => d.filter(r =>
+    r.Service_Begroting_Jaar === jr && r.Service_Kostensoort_Naam === "Voorschot service"
   ).reduce((s,r) => {
-    for(let i=1;i<=6;i++) s += r[`Service_Geboekt_periode_${String(i).padStart(2,"0")}`]||0;
+    for(let i=1;i<=periodes;i++) s += r[`Service_Geboekt_periode_${String(i).padStart(2,"0")}`]||0;
     return s;
   }, 0);
 
-  const tot26 = h1Sum(2026), tot25 = h1Sum(2025);
-  const vsc25 = vscSum(2025), vsc26 = vscSum(2026);
-  const ks25 = byKs(2025), ks26 = byKs(2026);
+  const tot26 = periodeSom(jaar), tot25 = periodeSom(jaarVorig);
+  const vsc25 = vscSom(jaarVorig), vsc26 = vscSom(jaar);
+  const ks25 = byKs(jaarVorig), ks26 = byKs(jaar);
 
   const svcVgl = Object.keys({...ks25,...ks26})
     .map(k => ({
       naam: k.length>22?k.slice(0,22)+"…":k,
-      "H1 2025": Math.round(ks25[k]||0),
-      "H1 2026": Math.round(ks26[k]||0),
+      vorig: Math.round(ks25[k]||0),
+      huidig: Math.round(ks26[k]||0),
     }))
-    .filter(r => r["H1 2025"]>50 || r["H1 2026"]>50)
-    .sort((a,b) => b["H1 2026"]-a["H1 2026"])
+    .filter(r => r.vorig>50 || r.huidig>50)
+    .sort((a,b) => b.huidig-a.huidig)
     .slice(0,12);
 
   const svcDetail = Object.keys({...ks25,...ks26})
@@ -278,21 +299,30 @@ function verwerkSvc(rows, complexFilter = null) {
     .filter(r => r.h1_25>50 || r.h1_26>50)
     .sort((a,b) => b.h1_26-a.h1_26);
 
-  return { tot26, tot25, vsc25, vsc26, saldo26: tot26+vsc26, saldo25: tot25+vsc25, svcVgl, svcDetail };
+  return { jaar, jaarVorig, kwartaal, tot26, tot25, vsc25, vsc26, saldo26: tot26+vsc26, saldo25: tot25+vsc25, svcVgl, svcDetail };
 }
 
-function verwerkBalans(rows) {
-  const saldo = (jaar, gb) => {
+function verwerkBalans(rows, jaar = 2026, kwartaal = 2) {
+  const jaarVorig = jaar - 1;
+  const periodeCode = String(kwartaal * 3).padStart(2, "0");
+  // Huidig jaar: saldo t/m het gekozen kwartaal. Vorig jaar: altijd volledig boekjaar (vergelijking t.o.v. jaarstart).
+  const saldoHuidig = (gb) => {
     const r = rows.find(r => r.Jaar===jaar && r.Grootboekrekeningnr===gb);
     if (!r) return 0;
-    return r.Saldo_tm_periode_06 ?? r.Eindsaldo ?? ((r.Saldo_debet||0)-(r.Saldo_credit||0));
+    return r[`Saldo_tm_periode_${periodeCode}`] ?? r.Eindsaldo ?? ((r.Saldo_debet||0)-(r.Saldo_credit||0));
+  };
+  const saldoVorig = (gb) => {
+    const r = rows.find(r => r.Jaar===jaarVorig && r.Grootboekrekeningnr===gb);
+    if (!r) return 0;
+    return r.Eindsaldo ?? r.Saldo_tm_periode_12 ?? ((r.Saldo_debet||0)-(r.Saldo_credit||0));
   };
   return {
-    bank25: saldo(2025,1010), bank26: saldo(2026,1010),
-    deb25: Math.abs(saldo(2025,1310)), deb26: Math.abs(saldo(2026,1310)),
-    cred25: Math.abs(saldo(2025,1600)), cred26: Math.abs(saldo(2026,1600)),
-    vsc25: Math.abs(saldo(2025,1712)), vsc26: Math.abs(saldo(2026,1712)),
-    ev25: saldo(2025,850), ev26: saldo(2026,850),
+    jaar, jaarVorig, kwartaal,
+    bank25: saldoVorig(1010), bank26: saldoHuidig(1010),
+    deb25: Math.abs(saldoVorig(1310)), deb26: Math.abs(saldoHuidig(1310)),
+    cred25: Math.abs(saldoVorig(1600)), cred26: Math.abs(saldoHuidig(1600)),
+    vsc25: Math.abs(saldoVorig(1712)), vsc26: Math.abs(saldoHuidig(1712)),
+    ev25: saldoVorig(850), ev26: saldoHuidig(850),
   };
 }
 
@@ -320,17 +350,20 @@ function verwerkRentRoll(rows) {
 
 // ── Claude AI analyse ──────────────────────────────────────────────────────
 async function haalAIAnalyse(portfolioLabel, kpis) {
-  const prompt = `Je bent een Nederlandse vastgoed asset manager. Geef een beknopte managementsamenvatting in 4-5 zinnen in het Nederlands op basis van onderstaande H1 2026 cijfers voor ${portfolioLabel}. Wees concreet met bedragen en noem 2-3 opvallende punten.
+  const jaar = kpis.jaar, jaarVorig = kpis.jaarVorig, kwartaal = kpis.kwartaal;
+  const labelHuidig = periodeLabel(kwartaal, jaar);
+  const labelVorig  = periodeLabel(kwartaal, jaarVorig);
+  const prompt = `Je bent een Nederlandse vastgoed asset manager. Geef een beknopte managementsamenvatting in 4-5 zinnen in het Nederlands op basis van onderstaande ${labelHuidig} cijfers voor ${portfolioLabel}. Wees concreet met bedragen en noem 2-3 opvallende punten.
 
-Huurinkomen H1 2026: €${Math.round(kpis.h1_26).toLocaleString("nl-NL")}
-Huurinkomen H1 2025: €${Math.round(kpis.h1_25).toLocaleString("nl-NL")}
-Groei: ${((kpis.h1_26-kpis.h1_25)/kpis.h1_25*100).toFixed(1)}%
-Eigenaarsonttrekkingen H1 2026: €${Math.round(kpis.ontt_h1).toLocaleString("nl-NL")}
-Uitbetalingsratio: ${(kpis.ratio_h1*100).toFixed(1)}%
-Servicekosten H1 2026: €${Math.round(kpis.svc?.tot26||0).toLocaleString("nl-NL")}
-Servicekosten H1 2025: €${Math.round(kpis.svc?.tot25||0).toLocaleString("nl-NL")}
-Bankstand eind H1 2026: €${Math.round(kpis.bank_h1_26||0).toLocaleString("nl-NL")}
-Huurdebiteuren H1 2026: €${Math.round(kpis.balans?.deb26||0).toLocaleString("nl-NL")}
+Huurinkomen ${labelHuidig}: €${Math.round(kpis.periodeHuidig).toLocaleString("nl-NL")}
+Huurinkomen ${labelVorig}: €${Math.round(kpis.periodeVorig).toLocaleString("nl-NL")}
+Groei: ${((kpis.periodeHuidig-kpis.periodeVorig)/kpis.periodeVorig*100).toFixed(1)}%
+Eigenaarsonttrekkingen ${labelHuidig}: €${Math.round(kpis.onttrekkingHuidig).toLocaleString("nl-NL")}
+Uitbetalingsratio: ${(kpis.ratioHuidig*100).toFixed(1)}%
+Servicekosten ${labelHuidig}: €${Math.round(kpis.svc?.tot26||0).toLocaleString("nl-NL")}
+Servicekosten ${labelVorig}: €${Math.round(kpis.svc?.tot25||0).toLocaleString("nl-NL")}
+Bankstand eind ${labelHuidig}: €${Math.round(kpis.bankstandHuidig||0).toLocaleString("nl-NL")}
+Huurdebiteuren ${labelHuidig}: €${Math.round(kpis.balans?.deb26||0).toLocaleString("nl-NL")}
 
 Geef alleen de samenvatting, geen opmaak of opsommingtekens.`;
 
@@ -366,16 +399,18 @@ function archiefOpslaan(item) {
 // ── Excel export ───────────────────────────────────────────────────────────
 function exporteerExcel(label, bk, svc, balans, rr) {
   const wb = XLSX.utils.book_new();
+  const labelHuidig = periodeLabel(bk.kwartaal, bk.jaar);
+  const labelVorig  = periodeLabel(bk.kwartaal, bk.jaarVorig);
 
   // KPI sheet
   const kpiData = [
-    ["Indicator","H1 2026","H1 2025","Δ"],
-    ["Huurinkomen",Math.round(bk.h1_26),Math.round(bk.h1_25),Math.round(bk.h1_26-bk.h1_25)],
-    ["Eigenaarsonttrekking",Math.round(bk.ontt_h1),"",""],
-    ["Uitbetalingsratio",PCT(bk.ratio_h1),"",""],
+    ["Indicator",labelHuidig,labelVorig,"Δ"],
+    ["Huurinkomen",Math.round(bk.periodeHuidig),Math.round(bk.periodeVorig),Math.round(bk.periodeHuidig-bk.periodeVorig)],
+    ["Eigenaarsonttrekking",Math.round(bk.onttrekkingHuidig),"",""],
+    ["Uitbetalingsratio",PCT(bk.ratioHuidig),"",""],
     ["Servicekosten",Math.round(svc?.tot26||0),Math.round(svc?.tot25||0),Math.round((svc?.tot26||0)-(svc?.tot25||0))],
     ["Saldo servicekosten",Math.round(svc?.saldo26||0),Math.round(svc?.saldo25||0),""],
-    ["Bankstand",Math.round(bk.bank_h1_26),Math.round(balans?.bank25||0),""],
+    ["Bankstand",Math.round(bk.bankstandHuidig),Math.round(balans?.bank25||0),""],
     ["Huurdebiteuren",Math.round(balans?.deb26||0),Math.round(balans?.deb25||0),""],
   ];
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(kpiData), "KPI Overzicht");
@@ -383,14 +418,14 @@ function exporteerExcel(label, bk, svc, balans, rr) {
   // Huurtrend
   if (bk.huurTrend) {
     XLSX.utils.book_append_sheet(wb,
-      XLSX.utils.aoa_to_sheet([["Kwartaal","2025","2026"],...bk.huurTrend.map(r=>[r.kw,r["2025"],r["2026"]])]),
+      XLSX.utils.aoa_to_sheet([["Kwartaal",String(bk.jaarVorig),String(bk.jaar)],...bk.huurTrend.map(r=>[r.kw,r.vorig,r.huidig])]),
       "Huurtrend");
   }
 
   // Servicekosten
   if (svc?.svcDetail) {
     XLSX.utils.book_append_sheet(wb,
-      XLSX.utils.aoa_to_sheet([["Kostensoort","H1 2025","H1 2026","Δ"],...svc.svcDetail.map(r=>[r.ks,r.h1_25,r.h1_26,r.delta])]),
+      XLSX.utils.aoa_to_sheet([["Kostensoort",labelVorig,labelHuidig,"Δ"],...svc.svcDetail.map(r=>[r.ks,r.h1_25,r.h1_26,r.delta])]),
       "Servicekosten");
   }
 
@@ -403,7 +438,7 @@ function exporteerExcel(label, bk, svc, balans, rr) {
       ]), "Rent Roll");
   }
 
-  XLSX.writeFile(wb, `Rapportage_${label.replace(/\s+/g,"_")}_H1_2026.xlsx`);
+  XLSX.writeFile(wb, `Rapportage_${label.replace(/\s+/g,"_")}_${labelHuidig.replace(/\s+/g,"_")}.xlsx`);
 }
 
 // ── Kleine UI componenten ──────────────────────────────────────────────────
@@ -515,6 +550,8 @@ const TABS = [
 
 // Dashboard
 function DashboardTab({ bk, svc, balans, aiTekst, kleur }) {
+  const labelHuidig = periodeLabel(bk.kwartaal, bk.jaar);
+  const labelVorig  = periodeLabel(bk.kwartaal, bk.jaarVorig);
   return (
     <div>
       {aiTekst && (
@@ -530,16 +567,16 @@ function DashboardTab({ bk, svc, balans, aiTekst, kleur }) {
       )}
 
       <div style={{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:10, marginBottom:22 }}>
-        <KPI label="Huurinkomen H1" val={bk.h1_26}
-          delta={bk.h1_26-bk.h1_25} deltaLabel="H1 2025" />
-        <KPI label="Eigenaarsonttrekking" val={bk.ontt_h1}
-          sub={`Ratio: ${PCT(bk.ratio_h1)}`} />
-        <KPI label="Servicekosten H1" val={svc?.tot26||0}
-          delta={(svc?.tot26||0)-(svc?.tot25||0)} deltaLabel="H1 2025" goed_pos={false} />
-        <KPI label="Svc saldo H1" val={svc?.saldo26||0}
+        <KPI label={`Huurinkomen ${labelHuidig}`} val={bk.periodeHuidig}
+          delta={bk.periodeHuidig-bk.periodeVorig} deltaLabel={labelVorig} />
+        <KPI label="Eigenaarsonttrekking" val={bk.onttrekkingHuidig}
+          sub={`Ratio: ${PCT(bk.ratioHuidig)}`} />
+        <KPI label={`Servicekosten ${labelHuidig}`} val={svc?.tot26||0}
+          delta={(svc?.tot26||0)-(svc?.tot25||0)} deltaLabel={labelVorig} goed_pos={false} />
+        <KPI label={`Svc saldo ${labelHuidig}`} val={svc?.saldo26||0}
           sub={(svc?.saldo26||0)<=0?"Voorschotten > kosten ✓":"Tekort ⚠"} />
-        <KPI label="Bankstand eind H1" val={bk.bank_h1_26}
-          delta={bk.bank_h1_26-(balans?.bank25||0)} deltaLabel="FY 2025" />
+        <KPI label={`Bankstand eind ${labelHuidig}`} val={bk.bankstandHuidig}
+          delta={bk.bankstandHuidig-(balans?.bank25||0)} deltaLabel={`FY ${bk.jaarVorig}`} />
       </div>
 
       <div style={{ background:C.white, border:`1px solid ${C.grey2}`,
@@ -549,12 +586,12 @@ function DashboardTab({ bk, svc, balans, aiTekst, kleur }) {
           Signaalkaart
         </div>
         <div style={{ display:"flex", flexWrap:"wrap", gap:7 }}>
-          <Signaal status={bk.h1_26>bk.h1_25?"goed":"kritiek"}
-            tekst={`Huur ${bk.h1_26>bk.h1_25?"+":""}${(((bk.h1_26-bk.h1_25)/bk.h1_25)*100).toFixed(1)}% vs H1 2025`} />
-          <Signaal status={bk.ratio_h1<0.85?"goed":bk.ratio_h1<1?"aandacht":"kritiek"}
-            tekst={`Uitbetalingsratio ${PCT(bk.ratio_h1)}`} />
-          <Signaal status={(bk.bank_h1_26||0)>50000?"goed":(bk.bank_h1_26||0)>0?"aandacht":"kritiek"}
-            tekst={`Bankstand ${NL(bk.bank_h1_26)}`} />
+          <Signaal status={bk.periodeHuidig>bk.periodeVorig?"goed":"kritiek"}
+            tekst={`Huur ${bk.periodeHuidig>bk.periodeVorig?"+":""}${(((bk.periodeHuidig-bk.periodeVorig)/bk.periodeVorig)*100).toFixed(1)}% vs ${labelVorig}`} />
+          <Signaal status={bk.ratioHuidig<0.85?"goed":bk.ratioHuidig<1?"aandacht":"kritiek"}
+            tekst={`Uitbetalingsratio ${PCT(bk.ratioHuidig)}`} />
+          <Signaal status={(bk.bankstandHuidig||0)>50000?"goed":(bk.bankstandHuidig||0)>0?"aandacht":"kritiek"}
+            tekst={`Bankstand ${NL(bk.bankstandHuidig)}`} />
           <Signaal status={(svc?.saldo26||0)<=0?"goed":"aandacht"}
             tekst={`Svc saldo ${NL(svc?.saldo26||0)}`} />
           <Signaal status={(balans?.deb26||0)<=(balans?.deb25||0)?"goed":"aandacht"}
@@ -578,8 +615,8 @@ function DashboardTab({ bk, svc, balans, aiTekst, kleur }) {
                 tickFormatter={v=>`€${(v/1000).toFixed(0)}K`} />
               <Tooltip content={<TT />} />
               <Legend wrapperStyle={{ fontSize:11 }} />
-              <Bar dataKey="2025" fill={C.navyLight} name="2025" radius={[2,2,0,0]} />
-              <Bar dataKey="2026" fill={kleur} name="2026" radius={[2,2,0,0]} />
+              <Bar dataKey="vorig" fill={C.navyLight} name={String(bk.jaarVorig)} radius={[2,2,0,0]} />
+              <Bar dataKey="huidig" fill={kleur} name={String(bk.jaar)} radius={[2,2,0,0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -588,7 +625,7 @@ function DashboardTab({ bk, svc, balans, aiTekst, kleur }) {
           borderRadius:2, padding:"18px 14px" }}>
           <div style={{ fontSize:10, fontWeight:700, color:C.textSub,
             letterSpacing:"0.07em", textTransform:"uppercase", marginBottom:14 }}>
-            Servicekosten H1 vergelijking
+            Servicekosten {labelHuidig} vergelijking
           </div>
           <ResponsiveContainer width="100%" height={200}>
             <BarChart data={(svc?.svcVgl||[]).slice(0,6)} layout="vertical" barCategoryGap="25%">
@@ -600,10 +637,10 @@ function DashboardTab({ bk, svc, balans, aiTekst, kleur }) {
                 width={120} axisLine={false} tickLine={false} />
               <Tooltip content={<TT />} />
               <Legend wrapperStyle={{ fontSize:11 }} />
-              <Bar dataKey="H1 2025" fill={C.navyLight} name="H1 2025" radius={[0,2,2,0]} />
-              <Bar dataKey="H1 2026" name="H1 2026" radius={[0,2,2,0]}>
+              <Bar dataKey="vorig" fill={C.navyLight} name={labelVorig} radius={[0,2,2,0]} />
+              <Bar dataKey="huidig" name={labelHuidig} radius={[0,2,2,0]}>
                 {(svc?.svcVgl||[]).slice(0,6).map((e,i) => (
-                  <Cell key={i} fill={e["H1 2026"]>e["H1 2025"]?C.orange:kleur} />
+                  <Cell key={i} fill={e.huidig>e.vorig?C.orange:kleur} />
                 ))}
               </Bar>
             </BarChart>
@@ -633,8 +670,12 @@ function PLTab({ bk, kleur }) {
     { label:"Diverse alg. kosten",     key:"Diverse alg. kosten",    sign:-1 },
   ];
 
+  const jaar = bk.jaar, jaarVorig = bk.jaarVorig, kwartaal = bk.kwartaal;
   const Q25 = ["Q1","Q2","Q3","Q4"];
-  const Q26 = ["Q1","Q2"];
+  const Q26 = Q25.slice(0, kwartaal);
+  const labelHuidig = periodeLabel(kwartaal, jaar);
+  const labelVorig  = periodeLabel(kwartaal, jaarVorig);
+  const totaalKolommen = 1 + Q25.length + Q26.length + 2 + 1;
 
   return (
     <div>
@@ -654,14 +695,14 @@ function PLTab({ bk, kleur }) {
                 border:`1px solid ${C.grey2}`, fontSize:10, color:C.textSub }} rowSpan={2}>
                 Omschrijving
               </th>
-              {[{l:"ACTUEEL 2025",s:4,bg:COL_25},{l:"ACTUEEL 2026",s:2,bg:kleur}].map((g,i)=>(
+              {[{l:`ACTUEEL ${jaarVorig}`,s:Q25.length,bg:COL_25},{l:`ACTUEEL ${jaar}`,s:Q26.length,bg:kleur}].map((g,i)=>(
                 <th key={i} colSpan={g.s} style={{ background:g.bg, color:C.white,
                   padding:"5px 8px", textAlign:"center", border:`1px solid ${C.grey2}`,
                   fontSize:10, fontWeight:700 }}>{g.l}</th>
               ))}
               <th style={{ background:C.navy, color:C.white, padding:"5px 8px",
                 textAlign:"center", border:`1px solid ${C.grey2}`, fontSize:10 }} colSpan={2}>
-                TOTALEN H1
+                TOTALEN {labelHuidig.split(" ")[0]}
               </th>
               <th style={{ background:C.navy, color:C.white, padding:"5px 8px",
                 textAlign:"center", border:`1px solid ${C.grey2}`, fontSize:10 }}>
@@ -671,21 +712,21 @@ function PLTab({ bk, kleur }) {
             <tr>
               {Q25.map(q=><th key={q} style={{ background:COL_25, color:C.white,
                 padding:"5px 8px", textAlign:"right", border:`1px solid ${C.grey2}`,
-                fontSize:10, minWidth:90 }}>{q} 2025</th>)}
+                fontSize:10, minWidth:90 }}>{q} {jaarVorig}</th>)}
               {Q26.map(q=><th key={q} style={{ background:kleur, color:C.white,
                 padding:"5px 8px", textAlign:"right", border:`1px solid ${C.grey2}`,
-                fontSize:10, minWidth:90 }}>{q} 2026</th>)}
+                fontSize:10, minWidth:90 }}>{q} {jaar}</th>)}
               <th style={{ background:kleur, color:C.white, padding:"5px 8px",
                 textAlign:"right", border:`1px solid ${C.grey2}`, fontSize:10, minWidth:90 }}>
-                H1 2026
+                {labelHuidig}
               </th>
               <th style={{ background:COL_25, color:C.white, padding:"5px 8px",
                 textAlign:"right", border:`1px solid ${C.grey2}`, fontSize:10, minWidth:90 }}>
-                H1 2025
+                {labelVorig}
               </th>
               <th style={{ background:C.navy, color:C.white, padding:"5px 8px",
                 textAlign:"right", border:`1px solid ${C.grey2}`, fontSize:10, minWidth:90 }}>
-                ∆ H1
+                ∆ {labelHuidig.split(" ")[0]}
               </th>
             </tr>
           </thead>
@@ -693,15 +734,15 @@ function PLTab({ bk, kleur }) {
             {SECTIES.map((rij, ri) => {
               if (rij.hdr) return (
                 <tr key={ri}>
-                  <td colSpan={10} style={{ background:C.navy, color:C.white,
+                  <td colSpan={totaalKolommen} style={{ background:C.navy, color:C.white,
                     padding:"6px 10px", fontWeight:700, fontSize:11,
                     border:`1px solid ${C.grey2}` }}>{rij.label}</td>
                 </tr>
               );
               const d = (bk.plData||[]).find(r => r.label === rij.key) || {};
-              const h1_26 = (d.qq1_26||0)+(d.qq2_26||0);
-              const h1_25 = (d.qq1_25||0)+(d.qq2_25||0);
-              const delta = (h1_26-h1_25)*rij.sign;
+              const periodeHuidigRij = Q26.reduce((s,q) => s + (d[`q${q.toLowerCase()}_26`]||0), 0);
+              const periodeVorigRij  = Q25.slice(0,Q26.length).reduce((s,q) => s + (d[`q${q.toLowerCase()}_25`]||0), 0);
+              const delta = (periodeHuidigRij-periodeVorigRij)*rij.sign;
               const rowBg = rij.kleur || (ri%2===0?C.white:C.grey1);
               const dbg = delta >= 0 ? C.greenL : C.orangeL;
               return (
@@ -722,10 +763,10 @@ function PLTab({ bk, kleur }) {
                   })}
                   <td style={{ padding:"5px 8px", textAlign:"right", background:rowBg,
                     fontWeight:600, fontVariantNumeric:"tabular-nums",
-                    border:`1px solid ${C.grey2}` }}>{h1_26 ? NL(h1_26) : "–"}</td>
+                    border:`1px solid ${C.grey2}` }}>{periodeHuidigRij ? NL(periodeHuidigRij) : "–"}</td>
                   <td style={{ padding:"5px 8px", textAlign:"right", background:rowBg,
                     fontVariantNumeric:"tabular-nums",
-                    border:`1px solid ${C.grey2}` }}>{h1_25 ? NL(h1_25) : "–"}</td>
+                    border:`1px solid ${C.grey2}` }}>{periodeVorigRij ? NL(periodeVorigRij) : "–"}</td>
                   <td style={{ padding:"5px 8px", textAlign:"right", background:dbg,
                     color:delta>=0?C.green:C.orange, fontWeight:600,
                     fontVariantNumeric:"tabular-nums",
@@ -744,6 +785,8 @@ function PLTab({ bk, kleur }) {
 
 // Servicekosten tab
 function ServicekostenTab({ svc, kleur, unitFilter }) {
+  const labelHuidig = periodeLabel(svc?.kwartaal, svc?.jaar);
+  const labelVorig  = periodeLabel(svc?.kwartaal, svc?.jaarVorig);
   return (
     <div>
       {unitFilter && (
@@ -753,19 +796,19 @@ function ServicekostenTab({ svc, kleur, unitFilter }) {
         </div>
       )}
       <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:10, marginBottom:20 }}>
-        <KPI label="Totaal kosten H1 2026" val={svc?.tot26||0}
-          delta={(svc?.tot26||0)-(svc?.tot25||0)} deltaLabel="H1 2025" goed_pos={false} />
-        <KPI label="Totaal kosten H1 2025" val={svc?.tot25||0} />
-        <KPI label="Voorschotten H1 2026"  val={svc?.vsc26||0}
+        <KPI label={`Totaal kosten ${labelHuidig}`} val={svc?.tot26||0}
+          delta={(svc?.tot26||0)-(svc?.tot25||0)} deltaLabel={labelVorig} goed_pos={false} />
+        <KPI label={`Totaal kosten ${labelVorig}`} val={svc?.tot25||0} />
+        <KPI label={`Voorschotten ${labelHuidig}`}  val={svc?.vsc26||0}
           sub="Ontvangen (negatief)" />
-        <KPI label="Saldo H1 2026" val={svc?.saldo26||0}
+        <KPI label={`Saldo ${labelHuidig}`} val={svc?.saldo26||0}
           sub={(svc?.saldo26||0)<=0?"Overschot ✓":"Tekort ⚠"} />
       </div>
       <div style={{ overflowX:"auto" }}>
         <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
           <thead>
             <tr>
-              {["Kostensoort","H1 2025","H1 2026","∆ Absoluut","∆ %","Signaal"].map((h,i)=>(
+              {["Kostensoort",labelVorig,labelHuidig,"∆ Absoluut","∆ %","Signaal"].map((h,i)=>(
                 <th key={i} style={{ background:i===0?C.navy:i<=2?"#2F75B6":i===5?C.navy:kleur,
                   color:C.white, padding:"7px 10px",
                   textAlign:i===0?"left":"right",
@@ -944,6 +987,8 @@ function RentRollTab({ rr, kleur, complexFilter, unitFilter }) {
 // Cashflow tab
 function CashflowTab({ bk, kleur, unitFilter }) {
   const data = bk.kasstroomData || [];
+  const labelHuidig = periodeLabel(bk.kwartaal, bk.jaar);
+  const jaarKort = String(bk.jaar).slice(-2);
   return (
     <div>
       {unitFilter && (
@@ -953,14 +998,14 @@ function CashflowTab({ bk, kleur, unitFilter }) {
         </div>
       )}
       <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:10, marginBottom:20 }}>
-        <KPI label="Bankstand eind H1 2026" val={bk.bank_h1_26}
-          delta={bk.bank_h1_26-(bk.kasstroomData?.[0]?.netto||0)}
-          deltaLabel="begin 2025" />
-        <KPI label="Huurinkomen H1 2026" val={bk.h1_26} />
-        <KPI label="Eigenaarsonttrekking H1" val={bk.ontt_h1}
-          sub={`Ratio: ${PCT(bk.ratio_h1)}`} />
+        <KPI label={`Bankstand eind ${labelHuidig}`} val={bk.bankstandHuidig}
+          delta={bk.bankstandHuidig-(bk.kasstroomData?.[0]?.netto||0)}
+          deltaLabel={`begin ${bk.jaarVorig}`} />
+        <KPI label={`Huurinkomen ${labelHuidig}`} val={bk.periodeHuidig} />
+        <KPI label="Eigenaarsonttrekking" val={bk.onttrekkingHuidig}
+          sub={`Ratio: ${PCT(bk.ratioHuidig)}`} />
         <KPI label="Streefwaarde bank" val={50000}
-          sub={bk.bank_h1_26>=50000?"✓ Boven streefwaarde":"⚠ Onder streefwaarde"} />
+          sub={bk.bankstandHuidig>=50000?"✓ Boven streefwaarde":"⚠ Onder streefwaarde"} />
       </div>
 
       <div style={{ display:"grid", gridTemplateColumns:"1.4fr 1fr", gap:14, marginBottom:14 }}>
@@ -1027,9 +1072,9 @@ function CashflowTab({ bk, kleur, unitFilter }) {
           <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
             <thead>
               <tr>
-                {["Omschrijving",...data.map(d=>d.kw),"H1 2026","FY 2025"].map((h,i)=>(
+                {["Omschrijving",...data.map(d=>d.kw),labelHuidig,`FY ${bk.jaarVorig}`].map((h,i)=>(
                   <th key={i} style={{
-                    background:h.includes("'26")?"#2F5597":h==="H1 2026"?"#2F5597":h==="FY 2025"?"#2F75B6":i===0?C.grey1:C.navyMid,
+                    background:h.includes(`'${jaarKort}`)?"#2F5597":h===labelHuidig?"#2F5597":h===`FY ${bk.jaarVorig}`?"#2F75B6":i===0?C.grey1:C.navyMid,
                     color:i===0?C.textSub:C.white,
                     padding:"6px 8px", textAlign:i===0?"left":"right",
                     border:`1px solid ${C.grey2}`, fontSize:10, fontWeight:700,
@@ -1044,8 +1089,8 @@ function CashflowTab({ bk, kleur, unitFilter }) {
                 { label:"Eigenaarsonttrekkingen",key:"onttrekking",positief:false},
                 { label:"Netto kasstroom", key:"netto",       netto:true     },
               ].map((rij,ri) => {
-                const h1_26 = data.filter(d=>d.jaar===2026).reduce((s,d)=>s+(d[rij.key]||0),0);
-                const fy_25 = data.filter(d=>d.jaar===2025).reduce((s,d)=>s+(d[rij.key]||0),0);
+                const h1_26 = data.filter(d=>d.jaar===bk.jaar).reduce((s,d)=>s+(d[rij.key]||0),0);
+                const fy_25 = data.filter(d=>d.jaar===bk.jaarVorig).reduce((s,d)=>s+(d[rij.key]||0),0);
                 const bg = rij.netto?C.navy:ri%2===0?C.white:C.grey1;
                 return (
                   <tr key={ri}>
@@ -1088,6 +1133,7 @@ function CashflowTab({ bk, kleur, unitFilter }) {
 // Balans tab
 function BalansTab({ balans, unitFilter }) {
   const fmt = (n) => n ? Math.abs(Math.round(n)).toLocaleString("nl-NL") : "-";
+  const jaar = balans?.jaar || 2026, jaarVorig = balans?.jaarVorig || 2025, kwartaal = balans?.kwartaal || 2;
   return (
     <div style={{ maxWidth:700 }}>
       {unitFilter && (
@@ -1101,7 +1147,7 @@ function BalansTab({ balans, unitFilter }) {
         <h2 style={{ fontSize:20, fontWeight:700, margin:"0 0 4px",
           fontFamily:"Georgia, serif" }}>Balans</h2>
         <p style={{ fontSize:12, color:C.textSub, margin:0 }}>
-          Per 30 juni 2026 · vergelijking 31 december 2025
+          Per {periodeEindDatum(kwartaal, jaar)} · vergelijking 31 december {jaarVorig}
         </p>
       </div>
       <table style={{ width:"100%", borderCollapse:"collapse",
@@ -1112,10 +1158,10 @@ function BalansTab({ balans, unitFilter }) {
               fontSize:11, fontWeight:400, color:C.textSub }}>&nbsp;</th>
             <th style={{ width:130, textAlign:"right", padding:"4px 0 8px 8px",
               fontSize:11, fontWeight:600, color:C.navy,
-              borderLeft:`1px solid ${C.grey2}` }}>30-06-2026</th>
+              borderLeft:`1px solid ${C.grey2}` }}>{periodeEindDatumKort(kwartaal, jaar)}</th>
             <th style={{ width:130, textAlign:"right", padding:"4px 0 8px 8px",
               fontSize:11, color:C.textSub,
-              borderLeft:`1px solid ${C.grey2}` }}>31-12-2025</th>
+              borderLeft:`1px solid ${C.grey2}` }}>31-12-{jaarVorig}</th>
           </tr>
         </thead>
         <tbody>
@@ -1225,27 +1271,29 @@ function BalansTab({ balans, unitFilter }) {
 
 // Signalen tab
 function SignalenTab({ bk, svc, balans, rr }) {
+  const labelHuidig = periodeLabel(bk.kwartaal, bk.jaar);
+  const labelVorig  = periodeLabel(bk.kwartaal, bk.jaarVorig);
   const signalen = [
-    bk.h1_26 > bk.h1_25
-      ? { prio:"🟢 Positief", pbg:C.greenL, pfg:C.green, onderwerp:"Huurgroei H1 2026",
-          effect:`H1 2025: ${NL(bk.h1_25)} → H1 2026: ${NL(bk.h1_26)} (+${(((bk.h1_26-bk.h1_25)/bk.h1_25)*100).toFixed(1)}%)`,
+    bk.periodeHuidig > bk.periodeVorig
+      ? { prio:"🟢 Positief", pbg:C.greenL, pfg:C.green, onderwerp:`Huurgroei ${labelHuidig}`,
+          effect:`${labelVorig}: ${NL(bk.periodeVorig)} → ${labelHuidig}: ${NL(bk.periodeHuidig)} (+${(((bk.periodeHuidig-bk.periodeVorig)/bk.periodeVorig)*100).toFixed(1)}%)`,
           actie:"Monitor kwartaaltrend. Controleer op nieuwe contracten en indexeringen." }
-      : { prio:"🔴 Aandacht", pbg:C.orangeL, pfg:C.orange, onderwerp:"Huur gedaald vs H1 2025",
-          effect:`H1 2025: ${NL(bk.h1_25)} → H1 2026: ${NL(bk.h1_26)}`,
+      : { prio:"🔴 Aandacht", pbg:C.orangeL, pfg:C.orange, onderwerp:`Huur gedaald vs ${labelVorig}`,
+          effect:`${labelVorig}: ${NL(bk.periodeVorig)} → ${labelHuidig}: ${NL(bk.periodeHuidig)}`,
           actie:"Onderzoek oorzaak (leegstand, kortingen, vertrek huurder)." },
-    bk.ratio_h1 < 0.85
+    bk.ratioHuidig < 0.85
       ? { prio:"🟢 Positief", pbg:C.greenL, pfg:C.green, onderwerp:"Uitbetalingsratio gezond",
-          effect:`${PCT(bk.ratio_h1)} — onder norm van 85%`,
+          effect:`${PCT(bk.ratioHuidig)} — onder norm van 85%`,
           actie:"Blijf monitoren. Streef naar ratio < 85% per kwartaal." }
       : { prio:"🟡 Aandacht", pbg:C.yellowL, pfg:C.yellow, onderwerp:"Uitbetalingsratio verhoogd",
-          effect:`${PCT(bk.ratio_h1)} — boven norm van 85%`,
+          effect:`${PCT(bk.ratioHuidig)} — boven norm van 85%`,
           actie:"Beoordeel of onttrekkingen verlaagd kunnen worden." },
-    (bk.bank_h1_26||0) >= 50000
+    (bk.bankstandHuidig||0) >= 50000
       ? { prio:"🟢 Positief", pbg:C.greenL, pfg:C.green, onderwerp:"Bankstand boven streefwaarde",
-          effect:`${NL(bk.bank_h1_26)} — boven €50.000`,
+          effect:`${NL(bk.bankstandHuidig)} — boven €50.000`,
           actie:"Positief. Bewaken bij grote onttrekkingen komend halfjaar." }
       : { prio:"🔴 Aandacht", pbg:C.orangeL, pfg:C.orange, onderwerp:"Bankstand onder streefwaarde",
-          effect:`${NL(bk.bank_h1_26)} — onder streefwaarde €50.000`,
+          effect:`${NL(bk.bankstandHuidig)} — onder streefwaarde €50.000`,
           actie:"Cashflow bewaken. Overweeg lagere onttrekking H2." },
     ...(rr||[]).filter(r=>r.rest<1).map(r=>({
       prio:"🔴 Urgent", pbg:C.orangeL, pfg:C.orange,
@@ -1333,7 +1381,7 @@ function ArchiefTab({ onHerstel }) {
       <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
         <thead>
           <tr>
-            {["Portfolio","Periode","Datum opgeslagen","Huurinkomen H1","Bankstand","Acties"].map((h,i)=>(
+            {["Portfolio","Periode","Datum opgeslagen","Huurinkomen","Bankstand","Acties"].map((h,i)=>(
               <th key={i} style={{ background:C.navy, color:C.white,
                 padding:"7px 10px", textAlign:"left",
                 border:`1px solid ${C.grey2}`, fontSize:10 }}>{h}</th>
@@ -1346,7 +1394,7 @@ function ArchiefTab({ onHerstel }) {
               <td style={{ padding:"8px 10px", border:`1px solid ${C.grey2}`,
                 fontWeight:600 }}>{a.portfolio}</td>
               <td style={{ padding:"8px 10px", border:`1px solid ${C.grey2}` }}>
-                {a.periode||"H1 2026"}</td>
+                {a.periode || "–"}</td>
               <td style={{ padding:"8px 10px", border:`1px solid ${C.grey2}`,
                 color:C.textSub, fontSize:11 }}>
                 {new Date(a.datum).toLocaleString("nl-NL")}</td>
@@ -1357,10 +1405,12 @@ function ArchiefTab({ onHerstel }) {
                 fontVariantNumeric:"tabular-nums" }}>
                 {a.bankstand ? NL(a.bankstand) : "–"}</td>
               <td style={{ padding:"8px 10px", border:`1px solid ${C.grey2}` }}>
-                <button onClick={() => onHerstel(a)} style={{
-                  background:C.navy, color:C.white, border:"none",
-                  borderRadius:2, padding:"4px 10px", fontSize:11,
-                  cursor:"pointer", marginRight:6 }}>
+                <button onClick={() => onHerstel(a)} disabled={!a.data}
+                  title={!a.data ? "Opgeslagen vóór deze update — geen volledige data beschikbaar" : undefined}
+                  style={{
+                    background:a.data?C.navy:C.grey2, color:a.data?C.white:C.grey3,
+                    border:"none", borderRadius:2, padding:"4px 10px", fontSize:11,
+                    cursor:a.data?"pointer":"default", marginRight:6 }}>
                   Bekijken
                 </button>
                 <button onClick={() => verwijder(a.id)} style={{
@@ -1390,6 +1440,10 @@ export default function App() {
   // Gefilterd
   const [complexFilter, setComplexFilter] = useState(null);
   const [unitFilter, setUnitFilter]       = useState(null);
+
+  // Periode
+  const [periodeJaar, setPeriodeJaar]         = useState(2026);
+  const [periodeKwartaal, setPeriodeKwartaal] = useState(2);
 
   // Data
   const [bkData,  setBkData]  = useState(null);
@@ -1429,9 +1483,9 @@ export default function App() {
       }
 
       setVoortgang("Data verwerken…");
-      const bk  = verwerkBoekingen(bkR);
-      const svc = verwerkSvc(svcR);
-      const bal = verwerkBalans(balR);
+      const bk  = verwerkBoekingen(bkR, null, null, periodeJaar, periodeKwartaal);
+      const svc = verwerkSvc(svcR, null, periodeJaar, periodeKwartaal);
+      const bal = verwerkBalans(balR, periodeJaar, periodeKwartaal);
 
       setBkData(bk); setSvcData(svc); setBalData(bal); setRrData(rrR);
 
@@ -1439,12 +1493,16 @@ export default function App() {
       const tekst = await haalAIAnalyse(p.label, { ...bk, svc, balans: bal });
       setAiTekst(tekst);
 
-      // Archief opslaan
+      // Archief opslaan — volledige snapshot zodat het rapport later teruggehaald kan worden
       archiefOpslaan({
+        portfolioKey: portfolio,
         portfolio: p.label,
-        periode: "H1 2026",
-        h1_huur: bk.h1_26,
-        bankstand: bk.bank_h1_26,
+        jaar: periodeJaar,
+        kwartaal: periodeKwartaal,
+        periode: periodeLabel(periodeKwartaal, periodeJaar),
+        h1_huur: bk.periodeHuidig,
+        bankstand: bk.bankstandHuidig,
+        data: { bk, svc, balans: bal, rr: rrR, aiTekst: tekst },
       });
 
       setVoortgang(""); setStap("rapport");
@@ -1454,11 +1512,50 @@ export default function App() {
     }
   };
 
+  // Portfolio kiezen: laad automatisch het laatst opgeslagen rapport, anders naar upload
+  const kiesPortfolio = (key) => {
+    setPortfolio(key);
+    const laatste = archiefLaden().find(a => a.portfolioKey === key && a.data);
+    if (laatste) {
+      setBkData(laatste.data.bk); setSvcData(laatste.data.svc);
+      setBalData(laatste.data.balans); setRrData(laatste.data.rr || []);
+      setAiTekst(laatste.data.aiTekst || "");
+      setPeriodeJaar(laatste.jaar || 2026); setPeriodeKwartaal(laatste.kwartaal || 2);
+      setComplexFilter(null); setUnitFilter(null); setTab("dashboard");
+      setStap("rapport");
+    } else {
+      setStap("upload");
+    }
+  };
+
+  // Nieuwe rapportage voor dezelfde portfolio (behoudt portfolio, reset upload/periode)
+  const nieuweRapportage = () => {
+    setBestanden({}); setBkData(null); setSvcData(null); setBalData(null);
+    setRrData([]); setAiTekst(""); setFout("");
+    setComplexFilter(null); setUnitFilter(null);
+    setPeriodeJaar(2026); setPeriodeKwartaal(2);
+    setTab("dashboard"); setStap("upload");
+  };
+
+  // Rapport herstellen vanuit het archief
+  const herstelArchief = (a) => {
+    if (!a.data) return;
+    const key = a.portfolioKey || Object.keys(PORTFOLIOS).find(k => PORTFOLIOS[k].label === a.portfolio);
+    setPortfolio(key || null);
+    setBkData(a.data.bk); setSvcData(a.data.svc);
+    setBalData(a.data.balans); setRrData(a.data.rr || []);
+    setAiTekst(a.data.aiTekst || "");
+    setPeriodeJaar(a.jaar || 2026); setPeriodeKwartaal(a.kwartaal || 2);
+    setComplexFilter(null); setUnitFilter(null); setTab("dashboard");
+    setStap("rapport");
+  };
+
   const reset = () => {
     setPortfolio(null); setBestanden({}); setBkData(null);
     setSvcData(null); setBalData(null); setRrData([]);
     setAiTekst(""); setTab("dashboard"); setStap("kies");
     setComplexFilter(null); setUnitFilter(null);
+    setPeriodeJaar(2026); setPeriodeKwartaal(2);
   };
 
   // Filter opnieuw verwerken als complex/unit wijzigt
@@ -1498,11 +1595,20 @@ export default function App() {
           )}
         </div>
         {stap !== "kies" && (
-          <button onClick={reset} style={{ background:"rgba(255,255,255,0.1)",
-            color:C.white, border:"none", padding:"5px 14px",
-            borderRadius:2, cursor:"pointer", fontSize:12 }}>
-            ← Nieuw rapport
-          </button>
+          <div style={{ display:"flex", gap:8 }}>
+            {stap === "rapport" && (
+              <button onClick={nieuweRapportage} style={{ background:"rgba(255,255,255,0.18)",
+                color:C.white, border:"none", padding:"5px 14px",
+                borderRadius:2, cursor:"pointer", fontSize:12, fontWeight:600 }}>
+                + Nieuwe rapportage
+              </button>
+            )}
+            <button onClick={reset} style={{ background:"rgba(255,255,255,0.1)",
+              color:C.white, border:"none", padding:"5px 14px",
+              borderRadius:2, cursor:"pointer", fontSize:12 }}>
+              ← Ander portfolio
+            </button>
+          </div>
         )}
       </div>
 
@@ -1514,13 +1620,13 @@ export default function App() {
             <h1 style={{ fontSize:28, fontWeight:700, marginBottom:8,
               letterSpacing:"-0.02em" }}>Kies een portfolio</h1>
             <p style={{ color:C.textSub, marginBottom:36, fontSize:14 }}>
-              Selecteer het vastgoedportfolio voor de H1 2026 rapportage.
+              Selecteer het vastgoedportfolio. De laatst opgeslagen cijfers worden automatisch getoond.
             </p>
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr",
               gap:16, maxWidth:580 }}>
               {Object.entries(PORTFOLIOS).map(([key, pf]) => (
                 <button key={key}
-                  onClick={() => { setPortfolio(key); setStap("upload"); }}
+                  onClick={() => kiesPortfolio(key)}
                   style={{ background:C.white, border:`1.5px solid ${C.grey2}`,
                     borderRadius:2, padding:"24px 28px", cursor:"pointer",
                     textAlign:"left", transition:"all 0.15s" }}
@@ -1551,7 +1657,7 @@ export default function App() {
             <button onClick={() => setStap("kies")} style={{ background:"none",
               border:"none", cursor:"pointer", color:C.navyMid,
               fontSize:13, marginBottom:20 }}>← Terug</button>
-            <ArchiefTab onHerstel={() => {}} />
+            <ArchiefTab onHerstel={herstelArchief} />
           </div>
         )}
 
@@ -1570,6 +1676,33 @@ export default function App() {
                 <span style={{ color:C.red }}> *</span> = verplicht
               </p>
             </div>
+
+            <div style={{ background:C.white, border:`1px solid ${C.grey2}`,
+              borderRadius:2, padding:"16px 18px", marginBottom:20, maxWidth:660 }}>
+              <div style={{ fontSize:11, fontWeight:700, color:C.textSub,
+                letterSpacing:"0.07em", textTransform:"uppercase", marginBottom:10 }}>
+                Voor welke periode is dit rapport?<span style={{ color:C.red }}> *</span>
+              </div>
+              <div style={{ display:"flex", gap:10, alignItems:"center" }}>
+                <select value={periodeKwartaal}
+                  onChange={e => setPeriodeKwartaal(Number(e.target.value))}
+                  style={{ border:`1px solid ${C.grey2}`, borderRadius:2,
+                    padding:"7px 12px", fontSize:13, background:C.white,
+                    color:C.text, cursor:"pointer" }}>
+                  {KWARTAAL_OPTIES.map(k => (
+                    <option key={k.waarde} value={k.waarde}>{k.label}</option>
+                  ))}
+                </select>
+                <input type="number" value={periodeJaar}
+                  onChange={e => setPeriodeJaar(Number(e.target.value) || periodeJaar)}
+                  style={{ border:`1px solid ${C.grey2}`, borderRadius:2,
+                    padding:"7px 12px", fontSize:13, width:90, color:C.text }} />
+                <span style={{ fontSize:12, color:C.textSub }}>
+                  → rapport toont {periodeLabel(periodeKwartaal, periodeJaar)} vs {periodeLabel(periodeKwartaal, periodeJaar-1)}
+                </span>
+              </div>
+            </div>
+
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr",
               gap:10, maxWidth:660 }}>
               {p.bestanden.map(b => (
@@ -1624,7 +1757,7 @@ export default function App() {
                 <div>
                   <p style={{ fontSize:11, color:C.textSub, letterSpacing:"0.07em",
                     textTransform:"uppercase", margin:"0 0 4px" }}>
-                    H1 2026 · periodes 1–6
+                    {periodeLabel(bkData.kwartaal, bkData.jaar)} · periodes 1–{bkData.kwartaal*3}
                   </p>
                   <h2 style={{ fontSize:22, fontWeight:700, margin:0 }}>{p.label}</h2>
                   <p style={{ fontSize:12, color:C.textSub, margin:"3px 0 0" }}>{p.sub}</p>
