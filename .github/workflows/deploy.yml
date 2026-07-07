@@ -24,7 +24,7 @@ jobs:
       - name: App bouwen
         run: npm run build
         env:
-          REACT_APP_ANTHROPIC_KEY: ${{ secrets.REACT_APP_ANTHROPIC_KEY }}
+          REACT_APP_WORKER_URL: ${{ vars.REACT_APP_WORKER_URL }}
 
       - name: Deployen naar GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
