@@ -1,8 +1,8 @@
 {
   "files": {
-    "main.js": "/static/js/main.ec27ff3a.js",
-    "index.html": "/index.html",
-    "main.ec27ff3a.js.map": "/static/js/main.ec27ff3a.js.map"
+    "main.js": "/BVC-rapportage/static/js/main.ec27ff3a.js",
+    "index.html": "/BVC-rapportage/index.html",
+    "main.ec27ff3a.js.map": "/BVC-rapportage/static/js/main.ec27ff3a.js.map"
   },
   "entrypoints": [
     "static/js/main.ec27ff3a.js"
