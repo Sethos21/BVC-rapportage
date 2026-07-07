@@ -951,24 +951,33 @@ function verwerkBalans(rows, jaar) {
   const jr  = parseInt(jaar);
   const jrV = jr - 1;
 
-  const saldo = (j, gb) => {
+  // Gebruik Saldo_tm_periode_06 voor H1, Eindsaldo voor FY vorig jaar
+  const saldoH1 = (j, gb) => {
     const r = rows.find(r => r.Jaar === j && r.Grootboekrekeningnr === gb);
     if (!r) return 0;
-    return r.Eindsaldo ?? ((r.Saldo_debet||0) - (r.Saldo_credit||0));
+    // Voor huidig jaar: gebruik Saldo_tm_periode met het juiste kwartaal
+    const tm = STATE.tm;
+    const kolom = tm === "Q1" ? "Saldo_tm_periode_03"
+      : tm === "Q2" ? "Saldo_tm_periode_06"
+      : tm === "Q3" ? "Saldo_tm_periode_09"
+      : "Saldo_tm_periode_12";
+    return r[kolom] ?? r.Eindsaldo ?? 0;
+  };
+
+  const saldoFY = (j, gb) => {
+    const r = rows.find(r => r.Jaar === j && r.Grootboekrekeningnr === gb);
+    if (!r) return 0;
+    return r.Eindsaldo ?? 0;
   };
 
   return {
-    bank:   { h: saldo(jr,1010),  v: saldo(jrV,1010)  },
-    deb:    { h: Math.abs(saldo(jr,1310)),  v: Math.abs(saldo(jrV,1310))  },
-    cred:   { h: Math.abs(saldo(jr,1600)),  v: Math.abs(saldo(jrV,1600))  },
-    vsc:    { h: Math.abs(saldo(jr,1712)),  v: Math.abs(saldo(jrV,1712))  },
-    ev:     { h: saldo(jr,850),   v: saldo(jrV,850)   },
-    btw:    { h: saldo(jr,1810),  v: saldo(jrV,1810)  },
-    ic:     { h: saldo(jr,1900),  v: saldo(jrV,1900)  },
+    bank:  { h: saldoH1(jr,1010),           v: saldoFY(jrV,1010)           },
+    deb:   { h: Math.abs(saldoH1(jr,1310)), v: Math.abs(saldoFY(jrV,1310)) },
+    cred:  { h: Math.abs(saldoH1(jr,1600)), v: Math.abs(saldoFY(jrV,1600)) },
+    svcbet:{ h: saldoH1(jr,1712),           v: saldoFY(jrV,1712)           },
     jr, jrV,
   };
 }
-
 // ── Rent Roll verwerken ────────────────────────────────────────────────────
 function verwerkRR(rows) {
   return rows
@@ -979,14 +988,14 @@ function verwerkRR(rows) {
       adres:      r.Unit_adres || r.Unit_omschrijving || "–",
       complex_nr: r.Complexnummer,
       complex:    r.Complex_omschrijving || "–",
-      m2:         r.Gehuurd_oppervlak || 0,
+      m2:         r.Gehuurd_oppervlak || r["m2/Verhuur"] || 0,
       jaarhuur:   r.Prolongatie_bedrag_jaar || 0,
       vsc:        r.Service_voorschot_jaar || 0,
       ingang:     r.Contract_ingangsdatum,
       einde:      r.Contract_afloopdatum,
       rest:       r.Restant_looptijd || 0,
-      index:      r.Indexeringspercentage || null,
-      index_datum:r.Indexeringsdatum || null,
+      index:      null,
+      index_datum:null,
     }))
     .sort((a,b) => a.rest - b.rest);
 }
@@ -1622,7 +1631,7 @@ function renderBalans(bal, jr, jrV) {
           <tr class="balans-sectie"><td colspan="3">Passiva</td></tr>
           <tr class="balans-groep"><td colspan="3">Kortlopende schulden</td></tr>
           <tr><td style="padding-left:16px">Crediteuren</td><td>${fmt(bal.cred.h)}</td><td>${fmt(bal.cred.v)}</td></tr>
-          <tr><td style="padding-left:16px">Svc.kosten vooruit ontvangen</td><td>${fmt(bal.vsc.h)}</td><td>${fmt(bal.vsc.v)}</td></tr>
+          <tr><td style="padding-left:16px">Servicekosten betaald</td><td>${fmt(bal.svcbet.h)}</td><td>${fmt(bal.svcbet.v)}</td></tr>
           ${bal.ic && bal.ic.h ? `<tr><td style="padding-left:16px">Intercompany rekening</td><td>${fmtS(bal.ic.h)}</td><td>${fmtS(bal.ic.v)}</td></tr>` : ""}
           <tr class="balans-subtot">
             <td style="font-style:italic">Totaal kortlopende schulden</td>
@@ -1918,7 +1927,7 @@ function downloadExcel() {
     ["PASSIVA","",""],
     ["Kortlopende schulden","",""],
     ["  Crediteuren", Math.round(bal.cred.h), Math.round(bal.cred.v)],
-    ["  Svc.kosten vooruit ontvangen", Math.round(bal.vsc.h), Math.round(bal.vsc.v)],
+   ["  Servicekosten betaald", Math.round(bal.svcbet.h), Math.round(bal.svcbet.v)],
   ];
   if (bal.ic && bal.ic.h) {
     balRows.push(["  Intercompany rekening", Math.round(bal.ic.h), Math.round(bal.ic.v)]);
