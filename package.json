@@ -2,6 +2,7 @@
   "name": "bvc-rapportage",
   "version": "0.1.0",
   "private": true,
+  "homepage": "https://sethos21.github.io/BVC-rapportage",
   "dependencies": {
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
