@@ -9,11 +9,6 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
-    env:
-      # Alleen nodig voor `prisma generate`/`validate`, die een geldige
-      # (niet per se bereikbare) datasource-URL vereisen om het schema te
-      # kunnen parsen. Geen live database nodig voor deze CI-stappen.
-      DATABASE_URL: "postgresql://ci:ci@localhost:5432/bvc_rapportage_ci?schema=public"
     steps:
       - uses: actions/checkout@v4
 
@@ -27,12 +22,6 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-
-      - name: Generate Prisma client
-        run: pnpm --filter @bvc/db generate
-
-      - name: Validate Prisma schema
-        run: pnpm --filter @bvc/db validate
 
       - name: Lint
         run: pnpm lint

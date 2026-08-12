@@ -1,94 +1,121 @@
-# BVC Rapportage
+# BVC Rapportage (FinancieelRapport)
 
-Financiële vastgoedrapportagetool voor BVC. Deze repository wordt herbouwd
-volgens het overdrachtsdossier **Vastgoed-AI_Architectuur_v2.0** (Google
-Drive, eigenaar BVC) — dat dossier is inhoudelijk leidend, niet dit
-document. Bij twijfel: lees eerst `CLAUDE_PROJECTINSTRUCTIES.md` en
-`00_PROJECTSTATUS.md` in dat dossier.
+Financiële vastgoedrapportagetool voor BVC. Inhoudelijk leidend is het
+overdrachtsdossier **Vastgoed-AI_Architectuur_v2.0** (Google Drive,
+eigenaar BVC), aangevuld en op punten overruled door twee latere lokale
+overdrachtsdocumenten:
 
-## Waarom een relationele database (niet Firestore)
+1. `CLAUDE_OVERDRACHT_LOKALE_DATAOPZET_v0.1.md`
+2. `CLAUDE_AANVULLENDE_INSTRUCTIES_LOKALE_BRONNEN_v0.1.md` (laatste woord
+   bij conflicten over repository, lokale opslag en bronselectie)
 
-Het zusterproject `actielijst-online` gebruikt Firebase/Firestore. Dit
-project gebruikt in plaats daarvan **PostgreSQL**, om twee redenen:
+Dit document is een samenvatting, geen vervanging — bij twijfel gelden de
+brondocumenten.
 
-1. Het is een formeel vastgesteld ontwerpbesluit in het dossier
-   (**OB-033**: *"Zonder bruikbare bestaande repository geldt TypeScript
-   met een relationele PostgreSQL-datalaag als technische standaard."*).
-2. De brondata is inherent relationeel: samengestelde natuurlijke sleutels
-   (bv. `Bedrijfsnr + Boekjaar + Dagboeknr + Boekstuknr + Volgnr`),
-   verplichte debet/credit-boekstukintegriteit, en sterk genormaliseerde
-   entiteiten (`administratie → complex → unit`, contract-koppelingen,
-   grootboekmapping) — precies het soort data waar foreign keys en
-   transacties voor bedoeld zijn.
+## Architectuur: lokaal, geen cloud, geen centrale database
+
+**Belangrijke koerswijziging (2026-08-12):** het project startte als een
+cloud-architectuur (Next.js + PostgreSQL, zie git-historie). Seth heeft dat
+expliciet teruggedraaid: de applicatie moet **lokaal/on-premise** draaien,
+bereikbaar binnen het interne bedrijfsnetwerk, zonder publieke SQL-hosting
+of centrale databaseserver — de gegevens blijven in de werkomgeving.
+
+- **Geen PostgreSQL, geen Prisma.** In plaats daarvan: de xlsx-bronbestanden
+  zelf zijn leidend; een lokaal, volledig herbouwbaar SQLite-bestand
+  (`node:sqlite`, ingebouwd in Node 22) dient uitsluitend als cache/index
+  per administratie (`packages/cache`).
+- **Eén administratie tegelijk**, niet-gelijktijdig gebruik door Seth en
+  een paar collega's.
+- **Hybride bronopslag**: per brontype én per administratie wordt expliciet
+  gekozen tussen `gedeeld` (één centrale map met regels voor meerdere
+  administraties, gefilterd op `Bedrijfsnr`) of `eigen` (bronmap van die
+  ene administratie). Nooit automatisch samenvoegen of uitwijken.
+- **Geen bronarchief.** Per bronmap/brontype staat alleen het actuele
+  bestand; een geldige nieuwe import vervangt het vorige atomisch. Geen
+  historische kopieën — wel auditmetadata (jsonl).
 
 ## Structuur
 
 ```
 apps/
-  web/              Next.js-app (rapportages, dashboards — nog grotendeels te bouwen)
-  worker/           Importjobs: bronbestand -> validatie -> staging (CLI, geen live cron/queue nog)
+  web/              Next.js-app (rapportages — nog grotendeels te bouwen; draait lokaal, geen cloud-hosting)
+  worker/           Bronresolver, veilig vervangingsprotocol, cache-herbouw (CLI)
 packages/
-  domain/           Centrale berekeningen (CAL-FIN-*, CAL-VG-*, CAL-CTR-*) — geen rapportlokale formules
+  domain/           Centrale berekeningen + geld-/percentageformattering (CAL-FIN-*, CAL-VG-*, CAL-CTR-*, huisstijlregels)
   data-contracts/   Zod-schema's + parsers per brontype, op de ECHTE kolomnamen van de IDBC-exports
-  db/               Prisma-schema (PostgreSQL) — staging + kernmodel
+  cache/            Lokale herbouwbare SQLite-cache (geen systeem-van-record)
   reporting/        Nog leeg — rapportdefinities/KPI-laag volgt in een latere fase
   tests/            Nog leeg — integratie-/e2e-tests volgen in een latere fase
 legacy/             De oorspronkelijke single-file HTML-prototype, bewaard als referentie
 ```
 
-## Wat nu al werkt (Fase 1: import, staging, datakwaliteit)
+### Databronmap (runtime, niet in git)
 
-- `packages/data-contracts`: Zod-broncontracten voor de 7 IDBC-bronnen
+```
+<BVC_DATA_ROOT>/
+├── config/                          rapportdefinities/, grootboekmappings/, managementparameters/
+├── bron_gedeeld/                    boekingen.xlsx, balans_per_jaar.xlsx, rentroll.xlsx, ...
+├── audit/import_log_gedeeld.jsonl
+└── administraties/<Bedrijfsnr>_<naam>/
+    ├── administratie.json           bronlocaties per brontype: 'gedeeld' | 'eigen'
+    ├── bron/                        alleen brontypen op 'eigen' (standaard: begroting)
+    ├── cache/cache.sqlite           volledig herbouwbaar, geen historie
+    ├── rapporten/
+    └── audit/import_log.jsonl
+```
+
+`BVC_DATA_ROOT` is bewust configureerbaar (env var), geen hardcoded pad —
+dit draait op verschillende werkcomputers.
+
+## Wat nu al werkt
+
+- **`packages/data-contracts`** — Zod-broncontracten voor 8 IDBC-bronnen
   (Boekingen, Balans, Servicekosten, Contracten, Units, RentRoll, Complex
-  Totalen), opgebouwd op **echte, bij het bronbestand geverifieerde
-  kolomnamen** — niet verzonnen. Twee bevestigde naamsinconsistenties
-  tussen bronnen zijn expliciet in code gedocumenteerd: RentRoll gebruikt
-  `Bedrijfsnummer` (niet `Bedrijfsnr`), Complex Totalen gebruikt
-  `Complexnr` (niet `Complexnummer`).
-- `packages/domain`: centrale financiële en vastgoedberekeningen
-  (`Boeking_Saldo`, boekstukcontrole, bezettingsgraad, oppervlaktehiërarchie,
-  jaarhuur, ...) met unit tests die expliciet de bekende fouten uit het
-  foutdossier reproduceren (bv. de bankaansluiting-afwijking uit FA-005).
-- `packages/db`: Postgres-schema met append-only staging (ruwe rij +
-  gevalideerde sleutelvelden) en het begin van het genormaliseerde model
-  (`dim_administratie`, `dim_complex`, `dim_unit`, `dim_grootboekrekening`,
-  `map_rapportregel_grootboekrekening`, `fact_grootboekboeking`,
-  `fact_balansstand`, `ctrl_data_check`, `def_managementparameter` — geseed
-  met de pilot-startwaarden uit `12_MANAGEMENTPARAMETERS_v0.1.md`).
-- `apps/worker`: CLI die een bronbestand valideert en wegschrijft naar de
-  bijbehorende staging-tabel, idempotent op bestandshash.
+  Totalen, **Ouderdomsanalyse**), op **echte, geverifieerde kolomnamen**.
+  Bevestigde naamsinconsistenties tussen bronnen zijn expliciet in code
+  gedocumenteerd (RentRoll: `Bedrijfsnummer`; Complex Totalen: `Complexnr`).
+- **`packages/domain`** — centrale financiële/vastgoedberekeningen plus
+  geld-/percentageformattering conform de huisstijl- en rekenregels
+  (`€ 1.250,75`, centen afronden per stap, nul is geldig, totalen altijd
+  controleren).
+- **`packages/cache`** — bouwt en opent de lokale SQLite-cache.
+- **`apps/worker`** — bronresolver (`gedeeld`/`eigen`, nooit samenvoegen),
+  het veilige vervangingsprotocol (kopie → hash+validatie → bij fout niets
+  wijzigen → atomisch vervangen → caches ongeldig maken → audit → opruimen),
+  een crash-herstelbare lockfile, en cache-herbouw met verplichte
+  administratiescheiding (getest: een gedeeld bronbestand met meerdere
+  administraties lekt nooit rijen tussen administraties).
 
 ## Wat nadrukkelijk nog NIET gebouwd is
 
-- **Rapportpagina's, dashboards, KPI-schermen** — `apps/web` is een
-  placeholder. De rapportdefinities/KPI-laag (`packages/reporting`) is leeg.
-- **Contract-, huur- en servicekosten-domeinmodel** (`dim_huurder`,
-  `dim_contract`, `link_contract_*`, `fact_contract_prijsregel`,
-  `fact_rentrollregel`, `fact_servicekostenregel`, `fact_budgetregel`,
-  `fact_signalering`, `fact_managementaandachtspunt`, `def_kpi`,
-  `def_rapportregel`) — volgt in latere MVP-stappen per
-  `11_IMPLEMENTATIE_ROADMAP.md`.
-- **Grootboekmapping-goedkeuring**: er is geen enkele `GOEDGEKEURD`-mapping.
-  Claude mag mappings alleen als `VOORGESTELD` registreren (OB-034) —
-  productierapporten zijn hierdoor sowieso nog geblokkeerd (PAR-MAP-001).
-- **Authenticatie/rollen** (Beheerder, Financieel beoordelaar,
-  Vastgoedmanager, Eigenaar/lezer, Applicatiebeheerder).
-- **Hosting/deploy**: nog geen gekozen omgeving voor Next.js + PostgreSQL
-  (Firebase Hosting alleen volstaat hier niet — dat host geen server/DB).
-  De CI-workflow (`.github/workflows/ci.yml`) bouwt/test alleen, deployt niets.
-- Bronnen die het dossier zelf al blokkeert: openstaande-postenbron
-  (debiteurenouderdom), bankstreefwaarden per administratie, en het lege
-  bestand "Nog onbekend" (geen data, niet importeren tot geïdentificeerd).
+- **Rapportpagina's/exports** (HTML/PDF/DOCX in BVC-huisstijl) — `apps/web`
+  is een placeholder. Eerste concrete doel: P&L-exploitatierapportage per
+  vastgoedobject (testcase: object 070 "Rooise Zoom", 2020–2026).
+- **Begroting-broncontract**: `BVC_Begrotingsformat_v0.2.xlsx` heeft nog
+  geen volledig Zod-contract (alleen leesbaarheid wordt nu gecontroleerd) —
+  zie `apps/worker/src/validateBron.ts`.
+- **Contract-, huur- en servicekosten-rapportlogica**, grootboekmapping-
+  goedkeuring (alleen `VOORGESTELD` mag Claude registreren, nooit
+  `GOEDGEKEURD`), authenticatie/rollen.
+- **Definitieve locatie** van `BVC_DATA_ROOT` en back-upeigenaar — open punt.
+- Deze repository blijft voorlopig op GitHub (`Sethos21/BVC-rapportage`,
+  waar deze sessie al op werkte toen de "geen nieuwe repo zonder
+  goedkeuring"-instructie kwam) — verhuizing naar `BVC-Tools/apps/FinancieelRapport/`
+  is een aparte, latere goedkeuringsstap, geen automatisme.
 
 ## Lokale ontwikkeling
 
 ```bash
 pnpm install
-cp packages/db/.env.example packages/db/.env   # DATABASE_URL naar een lokale Postgres
-pnpm db:generate
-pnpm db:validate
-pnpm typecheck
-pnpm test
+pnpm lint
+pnpm -r typecheck
+pnpm -r test
+
+# CLI (vereist BVC_DATA_ROOT):
+export BVC_DATA_ROOT=/pad/naar/BVC-FinancieelRapport
+pnpm --filter @bvc/worker cli status <administratieId>
+pnpm --filter @bvc/worker cli replace boekingen gedeeld /pad/naar/nieuw-bestand.xlsx
+pnpm --filter @bvc/worker cli rebuild-cache <administratieId>
 ```
 
 ## Herkomst
