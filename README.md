@@ -74,6 +74,11 @@ dit draait op verschillende werkcomputers.
   Totalen, **Ouderdomsanalyse**), op **echte, geverifieerde kolomnamen**.
   Bevestigde naamsinconsistenties tussen bronnen zijn expliciet in code
   gedocumenteerd (RentRoll: `Bedrijfsnummer`; Complex Totalen: `Complexnr`).
+  Plus **`BVC_Begrotingsformat_v0.2.xlsx`** (metadata, Exploitatie,
+  Servicekosten): begrotingswaarde wordt zelf herberekend uit q1–q4/
+  jaarbedrag (nooit de brongrijze/berekende kolommen vertrouwd), met
+  controles op tekenconventie, dubbele mapping-codes en `NIET_TOEGEWEZEN`-
+  complexen.
 - **`packages/domain`** — centrale financiële/vastgoedberekeningen plus
   geld-/percentageformattering conform de huisstijl- en rekenregels
   (`€ 1.250,75`, centen afronden per stap, nul is geldig, totalen altijd
@@ -91,9 +96,6 @@ dit draait op verschillende werkcomputers.
 - **Rapportpagina's/exports** (HTML/PDF/DOCX in BVC-huisstijl) — `apps/web`
   is een placeholder. Eerste concrete doel: P&L-exploitatierapportage per
   vastgoedobject (testcase: object 070 "Rooise Zoom", 2020–2026).
-- **Begroting-broncontract**: `BVC_Begrotingsformat_v0.2.xlsx` heeft nog
-  geen volledig Zod-contract (alleen leesbaarheid wordt nu gecontroleerd) —
-  zie `apps/worker/src/validateBron.ts`.
 - **Contract-, huur- en servicekosten-rapportlogica**, grootboekmapping-
   goedkeuring (alleen `VOORGESTELD` mag Claude registreren, nooit
   `GOEDGEKEURD`), authenticatie/rollen.

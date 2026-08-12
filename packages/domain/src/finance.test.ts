@@ -2,6 +2,7 @@ import Decimal from "decimal.js";
 import { describe, expect, it } from "vitest";
 import {
   bankaansluiting,
+  berekenBegrotingswaarde,
   boekingSaldo,
   boekstukcontrole,
   budgetafwijkingPct,
@@ -114,5 +115,48 @@ describe("nietGemapteRekeningenMetSaldo (PAR-MAP-001)", () => {
     const geblokkeerd = nietGemapteRekeningenMetSaldo(standen, new Set(["072::1400"]));
     expect(geblokkeerd).toHaveLength(1);
     expect(geblokkeerd[0]?.grootboekrekeningnr).toBe("1300");
+  });
+});
+
+describe("berekenBegrotingswaarde (BVC_Begrotingsformat_v0.2)", () => {
+  it("gebruikt de som van de kwartalen wanneer alle vier zijn ingevuld (PL_HUUR_BELAST-voorbeeld)", () => {
+    const resultaat = berekenBegrotingswaarde(
+      new Decimal("139152"), new Decimal("130321"), new Decimal("128610"), new Decimal("128610"), null,
+    );
+    expect(resultaat.type).toBe("bekend");
+    if (resultaat.type === "bekend") {
+      expect(resultaat.waarde.methode).toBe("KWARTAAL");
+      expect(resultaat.waarde.fy.toString()).toBe("526693");
+    }
+  });
+
+  it("verdeelt een jaarbedrag tijdsevenredig wanneer alle kwartalen leeg zijn", () => {
+    const resultaat = berekenBegrotingswaarde(null, null, null, null, new Decimal("12409"));
+    expect(resultaat.type).toBe("bekend");
+    if (resultaat.type === "bekend") {
+      expect(resultaat.waarde.methode).toBe("TIJDSEVENREDIG");
+      expect(resultaat.waarde.q1.toString()).toBe("3102.25");
+      expect(resultaat.waarde.fy.toString()).toBe("12409");
+    }
+  });
+
+  it("is onbekend zonder kwartalen en zonder jaarbedrag (PL_ZONNESTROOM/JAARBEDRAG ONTBREEKT-voorbeeld)", () => {
+    const resultaat = berekenBegrotingswaarde(null, null, null, null, null);
+    expect(resultaat.type).toBe("onbekend");
+  });
+
+  it("is onbekend (Controle vereist) bij gedeeltelijk ingevulde kwartalen, verzint niets", () => {
+    const resultaat = berekenBegrotingswaarde(new Decimal("100"), new Decimal("100"), null, null, null);
+    expect(resultaat.type).toBe("onbekend");
+  });
+
+  it("mengt nooit kwartaal- en jaarmethode: vier ingevulde kwartalen zijn leidend, ook als jaarbedrag ook is ingevuld", () => {
+    const resultaat = berekenBegrotingswaarde(
+      new Decimal("10"), new Decimal("10"), new Decimal("10"), new Decimal("10"), new Decimal("999"),
+    );
+    expect(resultaat.type).toBe("bekend");
+    if (resultaat.type === "bekend") {
+      expect(resultaat.waarde.fy.toString()).toBe("40");
+    }
   });
 });

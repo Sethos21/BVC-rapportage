@@ -1,6 +1,7 @@
 export * from "./lib/coerce.js";
 export * from "./lib/parseRows.js";
 export * from "./lib/readWorkbook.js";
+export * from "./sources/begroting.js";
 
 export * from "./sources/boekingen.js";
 export * from "./sources/balans.js";

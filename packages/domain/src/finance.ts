@@ -89,6 +89,47 @@ export function procentueleVerandering(
   };
 }
 
+export interface BegrotingswaardeResultaat {
+  q1: Decimal;
+  q2: Decimal;
+  q3: Decimal;
+  q4: Decimal;
+  fy: Decimal;
+  methode: "KWARTAAL" | "TIJDSEVENREDIG";
+}
+
+/**
+ * Begrotingswaarde per periode (BVC_Begrotingsformat_v0.2, "Zo vul je de
+ * begroting in"): zijn alle kwartalen ingevuld, dan is de som van de
+ * kwartalen leidend. Zijn alle kwartalen leeg en bestaat een jaarbedrag,
+ * verdeel tijdsevenredig over vier kwartalen. Meng nooit beide methodes
+ * binnen één post; een gedeeltelijk ingevuld kwartaalpatroon is een fout,
+ * geen berekening (de rapportagetool verzint geen ontbrekend kwartaal).
+ */
+export function berekenBegrotingswaarde(
+  q1: Decimal | null,
+  q2: Decimal | null,
+  q3: Decimal | null,
+  q4: Decimal | null,
+  jaarbedrag: Decimal | null,
+): OnbekendOf<BegrotingswaardeResultaat> {
+  const kwartalen = [q1, q2, q3, q4];
+  const aantalIngevuld = kwartalen.filter((k) => k !== null).length;
+
+  if (aantalIngevuld === 4) {
+    const [k1, k2, k3, k4] = kwartalen as [Decimal, Decimal, Decimal, Decimal];
+    return { type: "bekend", waarde: { q1: k1, q2: k2, q3: k3, q4: k4, fy: k1.plus(k2).plus(k3).plus(k4), methode: "KWARTAAL" } };
+  }
+  if (aantalIngevuld === 0) {
+    if (jaarbedrag === null) {
+      return { type: "onbekend", reden: "geen kwartalen en geen jaarbedrag ingevuld" };
+    }
+    const kwart = jaarbedrag.dividedBy(4);
+    return { type: "bekend", waarde: { q1: kwart, q2: kwart, q3: kwart, q4: kwart, fy: jaarbedrag, methode: "TIJDSEVENREDIG" } };
+  }
+  return { type: "onbekend", reden: `gedeeltelijk ingevulde kwartalen (${aantalIngevuld} van 4) — Controle vereist, geen aanname toegestaan` };
+}
+
 /** CAL-FIN-009 — Budgetafwijking = realisatie - budget. Alleen met goedgekeurde begrotingsversie. */
 export function budgetafwijking(realisatie: Decimal, budget: Decimal): Decimal {
   return realisatie.minus(budget);

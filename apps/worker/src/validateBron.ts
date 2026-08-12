@@ -1,5 +1,8 @@
 import {
   parseBalans,
+  parseBegrotingExploitatie,
+  parseBegrotingMetadata,
+  parseBegrotingServicekosten,
   parseBoekingen,
   parseComplexTotalen,
   parseContracten,
@@ -51,12 +54,13 @@ function controleerBedrijfsnr<T>(rijen: readonly T[], veldSelector: (rij: T) => 
  * Valideert een (kandidaat-)bronbestand tegen het broncontract van dat
  * brontype. Geeft alleen issues terug — het vervangingsprotocol (replace.ts)
  * beslist op basis daarvan of de bestaande bron mag worden vervangen.
- *
- * `begroting` heeft nog geen volledig Zod-broncontract (BVC_Begrotingsformat_v0.2
- * met secties/mappingcodes) — dat is een bekende, expliciete beperking, geen
- * verzonnen validatie. Alleen leesbaarheid wordt gecontroleerd.
  */
 export function valideerBron(bronType: BronType, buffer: Buffer, context: ValidatieContext = {}): ValidatieResultaat {
+  // Begroting is een meerdere-tabbladen-werkmap, dus geen readFirstSheetAsRows.
+  if (bronType === "begroting") {
+    return valideerBegroting(buffer, context);
+  }
+
   const ruweRijen = readFirstSheetAsRows(buffer);
 
   switch (bronType) {
@@ -103,15 +107,36 @@ export function valideerBron(bronType: BronType, buffer: Buffer, context: Valida
       });
       return { rowCount: rijen.length, issues: [...issues, ...controleerBedrijfsnr(rijen, (r) => r.bedrijfsnr, context.verwachtBedrijfsnr)], duplicaatIssues };
     }
-    case "begroting": {
-      return {
-        rowCount: ruweRijen.length,
-        issues:
-          ruweRijen.length === 0
-            ? [{ rowIndex: -1, bericht: "Begrotingsbestand bevat geen rijen.", ernst: "KRITIEK" }]
-            : [{ rowIndex: -1, bericht: "Geen volledig BVC_Begrotingsformat_v0.2-broncontract geïmplementeerd — alleen leesbaarheid gecontroleerd.", ernst: "WAARSCHUWING" }],
-        duplicaatIssues: [],
-      };
-    }
   }
+}
+
+/**
+ * BVC_Begrotingsformat_v0.2.xlsx: metadata (Instellingen) + Exploitatie +
+ * Servicekosten samen valideren. Zonder geldige administratiecode/boekjaar
+ * wordt de hele import geblokkeerd. Bij bronmodus 'eigen' moet de
+ * administratiecode overeenkomen met de bronmap-administratie.
+ */
+function valideerBegroting(buffer: Buffer, context: ValidatieContext): ValidatieResultaat {
+  const { metadata, issues: metadataIssues } = parseBegrotingMetadata(buffer);
+  if (!metadata) {
+    return { rowCount: 0, issues: metadataIssues, duplicaatIssues: [] };
+  }
+
+  const administratieIssues: RowIssue[] =
+    context.verwachtBedrijfsnr !== undefined && metadata.administratiecode !== context.verwachtBedrijfsnr
+      ? [{
+          rowIndex: -1,
+          bericht: `Begroting hoort bij administratiecode "${metadata.administratiecode}", maar deze bronmap is ingesteld voor administratie "${context.verwachtBedrijfsnr}" — blokkerende fout.`,
+          ernst: "KRITIEK",
+        }]
+      : [];
+
+  const exploitatie = parseBegrotingExploitatie(buffer);
+  const servicekosten = parseBegrotingServicekosten(buffer);
+
+  return {
+    rowCount: exploitatie.rijen.length + servicekosten.rijen.length,
+    issues: [...metadataIssues, ...administratieIssues, ...exploitatie.issues, ...servicekosten.issues],
+    duplicaatIssues: [...exploitatie.duplicaatIssues, ...servicekosten.duplicaatIssues],
+  };
 }
