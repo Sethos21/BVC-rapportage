@@ -1,0 +1,26 @@
+{
+  "name": "@bvc/db",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "generate": "prisma generate",
+    "validate": "prisma validate",
+    "migrate:dev": "prisma migrate dev",
+    "typecheck": "tsc --noEmit",
+    "test": "echo \"no unit tests in @bvc/db yet\""
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.1"
+  },
+  "devDependencies": {
+    "prisma": "^6.19.1",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  }
+}

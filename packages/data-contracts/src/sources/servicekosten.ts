@@ -1,0 +1,121 @@
+import { z } from "zod";
+import Decimal from "decimal.js";
+import { zCode, zCodeOptional, zDecimal } from "../lib/coerce.js";
+import { parseRowsWithSchema, vindDubbeleNatuurlijkeSleutels, type ParseResult, type RowIssue } from "../lib/parseRows.js";
+
+/**
+ * Bron: "IDBC Servicekosten Boekingen vanaf 2024" — zowel de XLSX-
+ * archiefversie als de native Google Sheets "werkversie" hebben identieke
+ * kolommen (geverifieerd tegen beide echte bronbestanden, 111 kolommen
+ * totaal). AP-15/OB-031: gebruik per laadbatch precies één van de twee.
+ * Natuurlijke sleutel: Bedrijfsnr + Service_BK_Boekjaar + Service_BK_Boekperiode
+ * + Service_BK_Dagboeknummer + Service_BK_Boekstuknummer + Service_BK_Volgnummer.
+ */
+export const ServicekostenregelBronSchema = z.object({
+  Bedrijfsnr: zCode,
+  Service_BK_Boekjaar: z.preprocess((v) => (typeof v === "string" ? Number(v) : v), z.number().int()),
+  Service_BK_Boekperiode: zCode,
+  Service_BK_Dagboeknummer: zCode,
+  Service_BK_Boekstuknummer: zCode,
+  Service_BK_Volgnummer: zCode,
+  Service_BK_Complexnummer: zCodeOptional,
+  Service_BK_Unitnummer: zCodeOptional,
+  Service_BK_Contractnummer: zCodeOptional,
+  Huurdernummer: zCodeOptional,
+  Service_BK_Kostensoort: zCode,
+  Kostensoort_omschrijving: zCodeOptional,
+  Service_BK_Omschrijving: zCodeOptional,
+  Service_BK_Bedrag_debet: zDecimal,
+  Service_BK_Bedrag_credit: zDecimal,
+  Service_BK_Doorbelasten: zCodeOptional,
+});
+
+export type ServicekostenregelBron = z.infer<typeof ServicekostenregelBronSchema>;
+
+/** 06_DATA_EN_ODBC_v0.3.md — kostensoort 9600 wordt altijd uitgesloten, andere varianten alleen gesignaleerd. */
+export type ServicekostenUitsluitingsstatus =
+  | "GEEN"
+  | "UITGESLOTEN_AFREKENING_VORIG_JAAR"
+  | "CONTROLE_VEREIST_MOGELIJKE_SERVICEAFREKENING";
+
+const SERVICEAFREKENING_VARIANTEN = ["serviceafrekening", "service afrekening", "service-afrekening", "serviceafrek", "serv.afrek", "afrekening service"];
+
+export function bepaalUitsluitingsstatus(kostensoort: string, omschrijving: string | null): ServicekostenUitsluitingsstatus {
+  if (kostensoort.trim() === "9600") {
+    return "UITGESLOTEN_AFREKENING_VORIG_JAAR";
+  }
+  const omschrijvingLower = (omschrijving ?? "").toLowerCase();
+  if (SERVICEAFREKENING_VARIANTEN.some((variant) => omschrijvingLower.includes(variant))) {
+    return "CONTROLE_VEREIST_MOGELIJKE_SERVICEAFREKENING";
+  }
+  return "GEEN";
+}
+
+export interface GestaagdeServicekostenregel {
+  bedrijfsnr: string;
+  serviceBkBoekjaar: number;
+  serviceBkBoekperiode: string;
+  serviceBkDagboeknummer: string;
+  serviceBkBoekstuknummer: string;
+  serviceBkVolgnummer: string;
+  serviceBkComplexnummer: string | null;
+  serviceBkUnitnummer: string | null;
+  serviceBkContractnummer: string | null;
+  huurdernummer: string | null;
+  serviceBkKostensoort: string;
+  kostensoortOmschrijving: string | null;
+  serviceBkOmschrijving: string | null;
+  serviceBkBedragDebet: Decimal;
+  serviceBkBedragCredit: Decimal;
+  serviceBoekingSaldo: Decimal;
+  serviceBkDoorbelasten: string | null;
+  uitsluitingsstatus: ServicekostenUitsluitingsstatus;
+  raw: ServicekostenregelBron;
+}
+
+function naarGestaagdeServicekostenregel(bron: ServicekostenregelBron): GestaagdeServicekostenregel {
+  return {
+    bedrijfsnr: bron.Bedrijfsnr,
+    serviceBkBoekjaar: bron.Service_BK_Boekjaar,
+    serviceBkBoekperiode: bron.Service_BK_Boekperiode,
+    serviceBkDagboeknummer: bron.Service_BK_Dagboeknummer,
+    serviceBkBoekstuknummer: bron.Service_BK_Boekstuknummer,
+    serviceBkVolgnummer: bron.Service_BK_Volgnummer,
+    serviceBkComplexnummer: bron.Service_BK_Complexnummer,
+    serviceBkUnitnummer: bron.Service_BK_Unitnummer,
+    serviceBkContractnummer: bron.Service_BK_Contractnummer,
+    huurdernummer: bron.Huurdernummer,
+    serviceBkKostensoort: bron.Service_BK_Kostensoort,
+    kostensoortOmschrijving: bron.Kostensoort_omschrijving,
+    serviceBkOmschrijving: bron.Service_BK_Omschrijving,
+    serviceBkBedragDebet: bron.Service_BK_Bedrag_debet,
+    serviceBkBedragCredit: bron.Service_BK_Bedrag_credit,
+    serviceBoekingSaldo: bron.Service_BK_Bedrag_debet.minus(bron.Service_BK_Bedrag_credit),
+    serviceBkDoorbelasten: bron.Service_BK_Doorbelasten,
+    uitsluitingsstatus: bepaalUitsluitingsstatus(bron.Service_BK_Kostensoort, bron.Service_BK_Omschrijving),
+    raw: bron,
+  };
+}
+
+export function servicekostenregelNatuurlijkeSleutel(rij: GestaagdeServicekostenregel): string {
+  return [rij.bedrijfsnr, rij.serviceBkBoekjaar, rij.serviceBkBoekperiode, rij.serviceBkDagboeknummer, rij.serviceBkBoekstuknummer, rij.serviceBkVolgnummer].join("::");
+}
+
+export interface ServicekostenParseResultaat extends ParseResult<GestaagdeServicekostenregel> {
+  duplicaatIssues: RowIssue[];
+}
+
+export function parseServicekosten(ruweRijen: readonly Record<string, unknown>[]): ServicekostenParseResultaat {
+  const { rijen, issues } = parseRowsWithSchema(ruweRijen, ServicekostenregelBronSchema);
+  const gestaagd = rijen.map(naarGestaagdeServicekostenregel);
+  const duplicaatIssues = vindDubbeleNatuurlijkeSleutels(gestaagd, servicekostenregelNatuurlijkeSleutel);
+  const signaalIssues: RowIssue[] = gestaagd
+    .map((rij, index) => ({ rij, index }))
+    .filter(({ rij }) => rij.uitsluitingsstatus === "CONTROLE_VEREIST_MOGELIJKE_SERVICEAFREKENING")
+    .map(({ rij, index }) => ({
+      rowIndex: index,
+      bericht: `Kostensoort ${rij.serviceBkKostensoort} (${rij.kostensoortOmschrijving ?? "?"}): omschrijving bevat mogelijk een serviceafrekeningsterm — controle vereist, niet automatisch uitgesloten.`,
+      ernst: "WAARSCHUWING" as const,
+    }));
+  return { rijen: gestaagd, issues: [...issues, ...signaalIssues], duplicaatIssues };
+}

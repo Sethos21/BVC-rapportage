@@ -1,0 +1,10 @@
+{
+  "name": "@bvc/reporting",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "echo \"@bvc/reporting: nog geen broncode\"",
+    "test": "echo \"@bvc/reporting: nog geen broncode\""
+  }
+}

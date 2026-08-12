@@ -1,0 +1,519 @@
+// BVC Rapportage — relationeel datamodel (PostgreSQL)
+//
+// Bron: overdrachtsdossier Vastgoed-AI_Architectuur_v2.0, met name
+// 02_BVC_DATAMODEL_DEEL_2_LOGISCH_DATAMODEL_v0.3.md en
+// 03_BVC_DATA_DICTIONARY_v0.4.md. Zie ook OB-033 (relationele
+// PostgreSQL-datalaag is de vastgestelde technische standaard).
+//
+// Scope van dit schema: Fase 1 (import/staging/datakwaliteit) plus het
+// begin van Fase 2 (grootboekmapping) uit 11_IMPLEMENTATIE_ROADMAP.md.
+// Contract/huur/servicekosten/begroting/signalering-tabellen volgen in
+// een latere fase — zie packages/db/README.md voor de precieze grens.
+//
+// Ruwe staging bewaart de volledige brongetrouwe rij in `raw` (Json) naast
+// de sleutel-/lineagevelden die nodig zijn voor validatie en query's —
+// dit volgt letterlijk de datamodel-instructie voor `stg_bronrecord`
+// ("ruwe payload") in plaats van alle 37-170 bronkolommen 1-op-1 als
+// aparte kolommen te modelleren.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Staging (append-only, ruw + bronspecifiek gevalideerd)
+// ─────────────────────────────────────────────────────────────────────────
+
+enum ValidatieStatus {
+  IN_BEHANDELING
+  GESLAAGD
+  GEBLOKKEERD
+}
+
+enum BronSysteem {
+  IDBC
+}
+
+/// Eén batch = één specifiek bronbestand, exact één keer geladen.
+/// AP-15 / OB-031: per bron en rapportbatch is precies één bronversie actief.
+model StgImportBatch {
+  id               String          @id @default(uuid())
+  bronSysteem      BronSysteem     @default(IDBC)
+  bronTabel        String
+  bronBestandsnaam String
+  bronBestandHash  String
+  administratieCode String?
+  rowCount         Int?
+  validatieStatus  ValidatieStatus @default(IN_BEHANDELING)
+  validatieIssues  Json?
+  isActieveVersie  Boolean         @default(false)
+  geladenOp        DateTime        @default(now())
+  aangemaaktOp     DateTime        @default(now())
+
+  boekingen        StgBoekingsregel[]
+  balansstanden    StgBalansstand[]
+  servicekosten    StgServicekostenregel[]
+  contracten       StgContract[]
+  rentroll         StgRentrollregel[]
+  units            StgUnit[]
+  complexTotalen   StgComplexTotaal[]
+  begrotingregels  StgBegrotingregel[]
+
+  @@unique([bronTabel, bronBestandHash])
+  @@map("stg_import_batch")
+}
+
+/// Bronveldnamen 1-op-1 uit "IDBC Boekingen vanaf 2024.xlsx" (168 kolommen,
+/// hier verkort tot de sleutel-/rekenvelden; overige kolommen in `raw`).
+model StgBoekingsregel {
+  id                    String   @id @default(uuid())
+  batchId               String
+  batch                 StgImportBatch @relation(fields: [batchId], references: [id])
+
+  bedrijfsnr            String
+  boekingBoekjaar        Int
+  boekingBoekperiode      String
+  boekingDagboeknr        String
+  boekingBoekstuknr       String
+  boekingVolgnr           String
+  boekstukSleutel        String
+  boekingBoekdatum        DateTime
+  boekingGrootboeknr       String
+  boekingKostenplaatsnr    String?
+  boekingComplexnr        String?
+  boekingUnitnr           String?
+  boekingContractnr        String?
+  boekingHuurdernr        String?
+  boekingBedragDebet      Decimal  @db.Decimal(18, 2)
+  boekingBedragCredit     Decimal  @db.Decimal(18, 2)
+  boekingSaldo           Decimal  @db.Decimal(18, 2)
+  boekingOmschrijving     String?
+  boekingGrootboekA       String?
+  boekingGrootboekB       String?
+
+  raw                   Json
+  geladenOp             DateTime @default(now())
+
+  @@unique([batchId, bedrijfsnr, boekingBoekjaar, boekingDagboeknr, boekingBoekstuknr, boekingVolgnr])
+  @@index([bedrijfsnr, boekstukSleutel])
+  @@map("stg_boekingsregel")
+}
+
+/// Bronveldnamen 1-op-1 uit "IDCB Balans per jaar vanaf 2024.xlsx".
+model StgBalansstand {
+  id                  String   @id @default(uuid())
+  batchId             String
+  batch               StgImportBatch @relation(fields: [batchId], references: [id])
+
+  bedrijfsnr          String
+  jaar                Int
+  grootboekrekeningnr String
+  beginbalansDebet    Decimal? @db.Decimal(18, 2)
+  beginbalansCredit   Decimal? @db.Decimal(18, 2)
+  saldoDebet          Decimal  @db.Decimal(18, 2)
+  saldoCredit         Decimal  @db.Decimal(18, 2)
+  eindsaldoDebet      Decimal? @db.Decimal(18, 2)
+  eindsaldoCredit     Decimal? @db.Decimal(18, 2)
+  eindsaldo           Decimal  @db.Decimal(18, 2)
+  rekeningOmschrijving String?
+  balansVw            String?
+
+  raw                 Json
+  geladenOp           DateTime @default(now())
+
+  @@unique([batchId, bedrijfsnr, jaar, grootboekrekeningnr])
+  @@map("stg_balansstand")
+}
+
+/// Bronveldnamen 1-op-1 uit de servicekostenboekingen-export (native
+/// Google Sheet "werkversie" en het XLSX-archief hebben identieke kolommen —
+/// zie AP-15, nooit beide tegelijk als actieve batch gebruiken).
+model StgServicekostenregel {
+  id                        String   @id @default(uuid())
+  batchId                   String
+  batch                     StgImportBatch @relation(fields: [batchId], references: [id])
+
+  bedrijfsnr                String
+  serviceBkBoekjaar          Int
+  serviceBkBoekperiode        String
+  serviceBkDagboeknummer      String
+  serviceBkBoekstuknummer     String
+  serviceBkVolgnummer         String
+  serviceBkComplexnummer      String?
+  serviceBkUnitnummer         String?
+  serviceBkContractnummer     String?
+  huurdernummer              String?
+  serviceBkKostensoort        String
+  kostensoortOmschrijving    String?
+  serviceBkOmschrijving       String?
+  serviceBkBedragDebet        Decimal  @db.Decimal(18, 2)
+  serviceBkBedragCredit       Decimal  @db.Decimal(18, 2)
+  serviceBoekingSaldo         Decimal  @db.Decimal(18, 2)
+  serviceBkDoorbelasten       String?
+  serviceBkJaarAfrekening     String?
+  serviceBkPeriodeAfrekening  String?
+
+  /// PAR uit 06_DATA_EN_ODBC_v0.3.md: kostensoort 9600 wordt bij inlezen
+  /// herkenbaar gemarkeerd en uitgesloten van actuele analyses, maar blijft
+  /// auditbaar. Omschrijvingsvarianten van serviceafrekening op ándere
+  /// kostensoorten krijgen "controle vereist", geen automatische uitsluiting.
+  uitsluitingsstatus         String?
+
+  raw                       Json
+  geladenOp                 DateTime @default(now())
+
+  @@unique([batchId, bedrijfsnr, serviceBkBoekjaar, serviceBkBoekperiode, serviceBkDagboeknummer, serviceBkBoekstuknummer, serviceBkVolgnummer])
+  @@map("stg_servicekostenregel")
+}
+
+/// Bronveldnamen 1-op-1 uit "IDBC Contracten Huidig".
+model StgContract {
+  id                        String    @id @default(uuid())
+  batchId                   String
+  batch                     StgImportBatch @relation(fields: [batchId], references: [id])
+
+  bedrijfsnr                String
+  contract                  String
+  complexnummer             String?
+  unitnummer                String?
+  huurdernummer             String?
+  ingangsdatum              DateTime?
+  afloopdatum               DateTime?
+  expiratieExpiratiedatum   DateTime?
+  expiratieOpzegdatum       DateTime?
+  expiratieAantalPerOptie   Int?
+  expiratieHuidige          String?
+  checkLopendContract       String?
+
+  raw                       Json
+  geladenOp                 DateTime @default(now())
+
+  @@unique([batchId, bedrijfsnr, contract])
+  @@map("stg_contract")
+}
+
+/// Bronveldnamen 1-op-1 uit "RentRoll". Let op: dit bestand gebruikt
+/// "Bedrijfsnummer" (lange vorm), anders dan alle overige bronnen die
+/// "Bedrijfsnr" gebruiken — bevestigd bij bronvenspectie, geen fout.
+model StgRentrollregel {
+  id                       String    @id @default(uuid())
+  batchId                  String
+  batch                    StgImportBatch @relation(fields: [batchId], references: [id])
+
+  bedrijfsnummer           String
+  contractnummer           String
+  vorderingsoort           String
+  unitnummer               String?
+  complexnummer            String?
+  rapportageDatum          DateTime?
+  prolongatieBedragJaar    Decimal?  @db.Decimal(18, 2)
+  kortingBedragJaar        Decimal?  @db.Decimal(18, 2)
+  serviceVoorschotJaar     Decimal?  @db.Decimal(18, 2)
+  gehuurdOppervlak         Decimal?  @db.Decimal(12, 2)
+  contractExpiratiedatum   DateTime?
+  contractOpzegdatum       DateTime?
+
+  raw                      Json
+  geladenOp                DateTime @default(now())
+
+  @@unique([batchId, bedrijfsnummer, contractnummer, vorderingsoort, unitnummer])
+  @@map("stg_rentrollregel")
+}
+
+/// Bronveldnamen 1-op-1 uit "IDBC Units".
+model StgUnit {
+  id               String    @id @default(uuid())
+  batchId          String
+  batch            StgImportBatch @relation(fields: [batchId], references: [id])
+
+  bedrijfsnr       String
+  complexnummer    String
+  unitnummer       String
+  unitNonActief    String?
+  unitomschrijving String?
+  unitsoort        String?
+  unitVvo          Decimal?  @db.Decimal(12, 2)
+  unitBvo          Decimal?  @db.Decimal(12, 2)
+  unitAdres        String?
+  unitPostcode     String?
+  unitPlaats       String?
+
+  raw              Json
+  geladenOp        DateTime @default(now())
+
+  @@unique([batchId, bedrijfsnr, complexnummer, unitnummer])
+  @@map("stg_unit")
+}
+
+/// Bronveldnamen 1-op-1 uit "IDBC Complex Totalen". Let op: dit bestand
+/// gebruikt "Complexnr", anders dan Units/Contracten/RentRoll/Servicekosten
+/// die "Complexnummer" gebruiken — bevestigd bij broninspectie.
+model StgComplexTotaal {
+  id                String    @id @default(uuid())
+  batchId           String
+  batch             StgImportBatch @relation(fields: [batchId], references: [id])
+
+  bedrijfsnr        String
+  complexnr         String
+  totaalOppervlakte Decimal?  @db.Decimal(14, 2)
+  totaalVerhuurd    Decimal?  @db.Decimal(14, 2)
+  totaalLeegstand   Decimal?  @db.Decimal(14, 2)
+
+  raw               Json
+  geladenOp         DateTime @default(now())
+
+  @@unique([batchId, bedrijfsnr, complexnr])
+  @@map("stg_complex_totaal")
+}
+
+/// BVC_Begrotingsformat_v0.2.xlsx — importbereik A:H, metadata verplicht
+/// bij upload (staat nog niet als vast veld in het bronformat zelf).
+model StgBegrotingregel {
+  id                String    @id @default(uuid())
+  batchId           String
+  batch             StgImportBatch @relation(fields: [batchId], references: [id])
+
+  administratieCode String
+  boekjaar          Int
+  begrotingsversie  String
+  status            String
+  mappingCode       String
+  onderdeel         String
+  post              String
+  complexCode       String?
+  q1                Decimal?  @db.Decimal(18, 2)
+  q2                Decimal?  @db.Decimal(18, 2)
+  q3                Decimal?  @db.Decimal(18, 2)
+  q4                Decimal?  @db.Decimal(18, 2)
+  begrotingFy       Decimal?  @db.Decimal(18, 2)
+  toelichting       String?
+
+  raw               Json
+  geladenOp         DateTime @default(now())
+
+  @@unique([batchId, administratieCode, boekjaar, begrotingsversie, onderdeel, mappingCode, complexCode])
+  @@map("stg_begrotingregel")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Geharmoniseerd logisch model (kern — Fase 1/2 subset)
+// ─────────────────────────────────────────────────────────────────────────
+
+/// BVC → Eigenaar → Vastgoedonderneming → Administratie → Complex → Unit.
+/// Eigenaar/Vastgoedonderneming volgen in een latere fase; Administratie
+/// is voor Fase 1/2 de praktische scope-grens (1 administratie = 1 Bedrijfsnr).
+model DimAdministratie {
+  id                String   @id @default(uuid())
+  administratieCode String   @unique
+  administratieNaam String?
+  valuta            String   @default("EUR")
+  boekjaarStartMaand Int     @default(1)
+  status            String   @default("actief")
+
+  complexen         DimComplex[]
+  grootboekrekeningen DimGrootboekrekening[]
+  mappings          MapRapportregelGrootboekrekening[]
+  boekingen         FactGrootboekboeking[]
+  balansstanden     FactBalansstand[]
+
+  @@map("dim_administratie")
+}
+
+model DimComplex {
+  id               String   @id @default(uuid())
+  administratieId  String
+  administratie    DimAdministratie @relation(fields: [administratieId], references: [id])
+  complexCode      String
+  complexNaam      String?
+  adres            String?
+  plaats           String?
+  status           String   @default("actief")
+
+  units            DimUnit[]
+
+  @@unique([administratieId, complexCode])
+  @@map("dim_complex")
+}
+
+model DimUnit {
+  id             String   @id @default(uuid())
+  complexId      String
+  complex        DimComplex @relation(fields: [complexId], references: [id])
+  unitCode       String
+  unitNaam       String?
+  unitType       String?
+  oppervlakteM2  Decimal? @db.Decimal(12, 2)
+  oppervlakteBron String?
+  status         String   @default("verhuurbaar")
+
+  @@unique([complexId, unitCode])
+  @@map("dim_unit")
+}
+
+model DimGrootboekrekening {
+  id                 String   @id @default(uuid())
+  administratieId    String
+  administratie      DimAdministratie @relation(fields: [administratieId], references: [id])
+  rekeningnummer     String
+  rekeningnaam       String?
+  balansOfResultaat  String?
+  status             String   @default("actief")
+
+  mappings           MapRapportregelGrootboekrekening[]
+  boekingen          FactGrootboekboeking[]
+  balansstanden      FactBalansstand[]
+
+  @@unique([administratieId, rekeningnummer])
+  @@map("dim_grootboekrekening")
+}
+
+enum MappingStatus {
+  VOORGESTELD
+  TE_BEOORDELEN
+  GOEDGEKEURD
+  VERVALLEN
+}
+
+/// GROOTBOEKMAPPING_SPEC_v0.1.md — natuurlijke sleutel: Bedrijfsnr +
+/// Grootboekrekening + Geldig_vanaf. Alleen GOEDGEKEURD mag in definitieve
+/// rapportuitkomsten. Claude mag VOORGESTELD registreren, nooit GOEDGEKEURD zetten.
+model MapRapportregelGrootboekrekening {
+  id                     String        @id @default(uuid())
+  administratieId        String
+  administratie          DimAdministratie @relation(fields: [administratieId], references: [id])
+  grootboekrekeningId    String
+  grootboekrekening      DimGrootboekrekening @relation(fields: [grootboekrekeningId], references: [id])
+
+  balansOfResultaat      String
+  rapportcode            String
+  hoofdrubriek           String?
+  subrubriek             String?
+  presentatiefactor      Int
+  ebitdaStatus           String?
+  onderhoudstype         String?
+  investeringsrubriek    String?
+  cashflowcategorie      String?
+
+  geldigVanaf            DateTime
+  geldigTot              DateTime?
+  status                 MappingStatus @default(VOORGESTELD)
+  versie                 String
+  reden                  String?
+  goedgekeurdDoor         String?
+  goedgekeurdOp           DateTime?
+
+  aangemaaktOp           DateTime      @default(now())
+
+  @@unique([administratieId, grootboekrekeningId, geldigVanaf])
+  @@map("map_rapportregel_grootboekrekening")
+}
+
+/// Leidende gerealiseerde mutaties (AP-01). Gevuld vanuit StgBoekingsregel
+/// ná validatie; debet/credit blijven behouden, saldo is afgeleid (CAL-FIN-001).
+model FactGrootboekboeking {
+  id                    String   @id @default(uuid())
+  administratieId       String
+  administratie         DimAdministratie @relation(fields: [administratieId], references: [id])
+  grootboekrekeningId   String
+  grootboekrekening     DimGrootboekrekening @relation(fields: [grootboekrekeningId], references: [id])
+
+  boekjaar              Int
+  periode               Int?
+  boekingsdatum         DateTime
+  boekstuknummer        String?
+  boekstukSleutel       String
+  dagboekCode           String?
+  omschrijving          String?
+
+  complexId             String?
+  unitId                String?
+  contractId             String?
+
+  debetBedrag           Decimal  @db.Decimal(18, 2)
+  creditBedrag          Decimal  @db.Decimal(18, 2)
+  saldoBedrag           Decimal  @db.Decimal(18, 2)
+
+  sourceRecordId         String
+  bronBatchId            String
+
+  geladenOp              DateTime @default(now())
+
+  @@unique([administratieId, sourceRecordId])
+  @@index([administratieId, boekstukSleutel])
+  @@map("fact_grootboekboeking")
+}
+
+/// Jaarstand uit "Balans per jaar" — leidend voor beginbalans/eindbalans
+/// en investeringssignalering (mutaties Gebouwen/Aanschafwaarde).
+model FactBalansstand {
+  id                   String   @id @default(uuid())
+  administratieId      String
+  administratie        DimAdministratie @relation(fields: [administratieId], references: [id])
+  grootboekrekeningId  String
+  grootboekrekening    DimGrootboekrekening @relation(fields: [grootboekrekeningId], references: [id])
+
+  boekjaar             Int
+  peildatum            DateTime
+  debet                Decimal  @db.Decimal(18, 2)
+  credit               Decimal  @db.Decimal(18, 2)
+  saldo                Decimal  @db.Decimal(18, 2)
+
+  bronBatchId          String
+  geladenOp            DateTime @default(now())
+
+  @@unique([administratieId, grootboekrekeningId, boekjaar, peildatum])
+  @@map("fact_balansstand")
+}
+
+enum ControleErnst {
+  KRITIEK
+  WAARSCHUWING
+}
+
+enum ControleStatus {
+  OPEN
+  OPGELOST
+  GEACCEPTEERD
+}
+
+/// Herhaalbare, auditbare controle-uitkomsten (06_CONTROLES_EN_HERLEIDBAARHEID).
+/// Kritieke fouten blokkeren definitieve export/publicatie.
+model CtrlDataCheck {
+  id               String         @id @default(uuid())
+  controlecode     String
+  naam             String
+  ernst            ControleErnst
+  status           ControleStatus @default(OPEN)
+  administratieCode String?
+  periode          String?
+  recordAantal     Int?
+  afwijkingBedrag  Decimal?       @db.Decimal(18, 2)
+  detail           Json?
+  controlemoment   DateTime       @default(now())
+
+  @@index([controlecode, status])
+  @@map("ctrl_data_check")
+}
+
+/// Alle drempels/normen/toleranties centraal en versieerbaar (AP-13, OB-030).
+/// Startwaarden: zie packages/db/prisma/seed.ts (12_MANAGEMENTPARAMETERS_v0.1.md).
+model DefManagementparameter {
+  id          String    @id @default(uuid())
+  code        String
+  scope       String    @default("algemeen")
+  waarde      String
+  eenheid     String?
+  geldigVanaf DateTime  @default(now())
+  geldigTot   DateTime?
+  eigenaar    String?
+  status      String    @default("pilot")
+  versie      String    @default("v0.1")
+
+  @@unique([code, scope, geldigVanaf])
+  @@map("def_managementparameter")
+}

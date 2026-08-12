@@ -1,0 +1,10 @@
+{
+  "name": "@bvc/tests",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "echo \"@bvc/tests: nog geen integratie-/e2e-tests\"",
+    "test": "echo \"@bvc/tests: nog geen integratie-/e2e-tests\""
+  }
+}
