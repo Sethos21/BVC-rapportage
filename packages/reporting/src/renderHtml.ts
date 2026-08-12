@@ -1,5 +1,6 @@
 import Decimal from "decimal.js";
-import { formatEUR, formatPercentage } from "@bvc/domain";
+import { formatPercentage } from "@bvc/domain";
+import { escapeHtml, formatBedragHtml, renderRapportDocument } from "./huisstijl.js";
 import type { PLRapportInvoer } from "./types.js";
 import { berekenPLOveralTotaal, berekenPLTotalen, berekenPLTrend, berekenPostenTotaal, type PLJaarTotalen } from "./plRapport.js";
 
@@ -18,44 +19,10 @@ import { berekenPLOveralTotaal, berekenPLTotalen, berekenPLTrend, berekenPostenT
  * exploitatieresultaat, grafiek (inkomsten vs. kosten per jaar), toelichting.
  *
  * Nog te porten uit legacy/index.html (zie packages/reporting/README.md):
- * 01 Kerncijfers, 03 Kasstroom, 04 Balans, 05 Servicekosten, 06 Verhuur,
- * 07 Onderhoud & investeringen, 08 Signalen.
+ * 03 Kasstroom, 04 Balans, 05 Servicekosten, 06 Verhuur, 07 Onderhoud &
+ * investeringen, 08 Signalen. Huisstijl (CSS/escaping/formattering) staat
+ * gedeeld in huisstijl.ts — zie ook renderKerncijfers.ts.
  */
-
-const HUISSTIJL_CSS = `
-  :root{
-    --ink:#1c2521; --muted:#626b64; --muted2:#8a8f88;
-    --green:#21594a; --green2:#2e8b57; --red:#bf4a30;
-    --paper:#f6f4ee; --card:#ffffff; --line:#e6e4dc; --line3:#f1efe9;
-    --tintGreen:#eef4f1;
-  }
-  body{font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:14px;color:var(--ink);margin:0;padding:0;background:#fff}
-  .serif{font-family:'Spectral',serif}
-  .pagina{max-width:900px;margin:0 auto;padding:32px}
-  .cover{text-align:center;padding:120px 32px;background:var(--paper)}
-  .cover .eyebrow{font:400 13px 'IBM Plex Sans';letter-spacing:0.15em;text-transform:uppercase;color:var(--muted2)}
-  .cover h1{font:600 34px/1.1 'Spectral',serif;color:var(--ink);margin:9px 0 6px}
-  .cover .object{font-size:20px;margin-top:24px}
-  .cover .periode{color:var(--muted);margin-top:8px}
-  h2{font:600 25px/1.15 'Spectral',serif;color:var(--ink);border-bottom:2px solid var(--green);padding-bottom:6px;margin-top:40px}
-  table{width:100%;border-collapse:collapse;margin-top:12px;font-variant-numeric:tabular-nums}
-  th,td{padding:9px 10px;text-align:right;border-top:1px solid var(--line3)}
-  th:first-child,td:first-child{text-align:left}
-  th{font:600 10.5px 'IBM Plex Sans';letter-spacing:0.05em;text-transform:uppercase;color:var(--muted2);background:#faf9f5;border-top:none}
-  .negatief{color:var(--red)}
-  .totaalrij td{font-weight:700;border-top:2px solid var(--green);background:var(--tintGreen)}
-  .toelichting{margin-top:12px;color:var(--muted);font-size:13.5px}
-  .grafiek{margin-top:16px}
-`;
-
-function escapeHtml(tekst: string): string {
-  return tekst.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
-}
-
-function formatBedragHtml(bedrag: Decimal): string {
-  const tekst = escapeHtml(formatEUR(bedrag, "haakjes"));
-  return bedrag.isNegative() ? `<span class="negatief">${tekst}</span>` : tekst;
-}
 
 function renderCover(invoer: PLRapportInvoer): string {
   const perioden = `${invoer.jaren[0]?.jaar ?? "?"}–${invoer.jaren[invoer.jaren.length - 1]?.jaar ?? "?"}`;
@@ -159,23 +126,12 @@ function renderToelichting(invoer: PLRapportInvoer): string {
 
 export function renderPLRapportHtml(invoer: PLRapportInvoer): string {
   const totalen = berekenPLTotalen(invoer);
-  return `<!DOCTYPE html>
-<html lang="nl">
-<head>
-<meta charset="UTF-8" />
-<title>Exploitatierapportage — ${escapeHtml(invoer.objectnaam)}</title>
-<style>${HUISSTIJL_CSS}</style>
-</head>
-<body>
-${renderCover(invoer)}
-<div class="pagina">
+  const body = `
 ${renderSamenvatting(totalen)}
 ${renderPostentabel("Inkomsten", invoer.jaren, (j) => j.huurinkomstenPerEenheid)}
 ${renderPostentabel("Kosten", invoer.jaren, (j) => j.kostenPerCategorie)}
 ${renderNettoResultaat(totalen)}
 ${renderGrafiek(totalen)}
-${renderToelichting(invoer)}
-</div>
-</body>
-</html>`;
+${renderToelichting(invoer)}`;
+  return renderRapportDocument(`Exploitatierapportage — ${invoer.objectnaam}`, renderCover(invoer), body);
 }

@@ -1,5 +1,19 @@
 # @bvc/reporting
 
+## Kerncijfers (sectie 01 — KPI-dashboard)
+
+`renderKerncijfersHtml` rendert het portefeuille-KPI-dashboard: 6
+KPI-kaarten (huurinkomen, EBITDA, uitbetalingsratio, bankstand, debiteuren,
+servicekosten-saldo, elk met mutatie-/statuskleur), kwartaalbalken
+huurinkomen, huur-per-complextabel en een optionele bezettingsgraadkaart.
+Poort van `legacy/index.html`'s `renderOverzicht` (zie
+"Streefontwerp"-sectie hieronder), met herberekende cijfers via
+`kerncijfers.ts` i.p.v. de inline JS-berekeningen uit legacy.
+`renderKerncijfers.ts` rekent zelf niets uit.
+
+Testcase: "Fergagne BV" (zie `*.test.ts`), dezelfde klant als het
+aangeleverde streefontwerp-PDF.
+
 ## P&L-exploitatierapportage (eerste rapportonderdeel)
 
 `renderPLRapportHtml` rendert een exploitatierapport per vastgoedobject in
@@ -31,24 +45,27 @@ en huisstijl; de rekenlogica daarin (inline JS) wordt **niet** hergebruikt —
 die moet via `@bvc/domain`/`@bvc/reporting` herberekend worden, net als bij
 de P&L-cijfers nu.
 
-Huisstijl (kleuren, typografie, kaart-/tabelpatronen) is al overgenomen in
-`renderHtml.ts`'s `HUISSTIJL_CSS`. Nog te porten secties (met bronregels in
-`legacy/index.html`):
+Huisstijl (kleuren, typografie, kaart-/tabelpatronen) staat gedeeld in
+`huisstijl.ts` (`HUISSTIJL_CSS`, `escapeHtml`, `formatBedragHtml`,
+`renderRapportDocument`) en wordt door elke sectierenderer hergebruikt.
+Nog te porten secties (met bronregels in `legacy/index.html`):
 
-| # | Sectie | Legacy render-functie | Regel |
-|---|---|---|---|
-| 01 | Kerncijfers (KPI-dashboard: huurinkomen, EBITDA, uitbetalingsratio, bankstand, debiteuren, servicekosten-saldo + bezettingsgraad) | `renderOverzicht` | ~1502 |
-| 02 | Resultaat P&L per kwartaal | `renderPnl` | ~1580 (deels al gebouwd, ander datamodel/CSS) |
-| 03 | Kasstroom | `renderCashflow` | ~1647 |
-| 04 | Balans | `renderBalans` | ~1725 |
-| 05 | Servicekosten (incl. stijgers/dalers, signaalbadges) | `renderServicekosten` | ~1859 |
-| 06 | Verhuur / huuroverzicht (contracttabel, statusbadges op resterende looptijd) | `renderRentroll` | ~1897 |
-| 07 | Onderhoud & investeringen | `renderOnderhoud` | ~1983 |
-| 08 | Signalen & aandachtspunten | `renderSignalen` | ~2020 |
+| # | Sectie | Legacy render-functie | Regel | Status |
+|---|---|---|---|---|
+| 01 | Kerncijfers (KPI-dashboard: huurinkomen, EBITDA, uitbetalingsratio, bankstand, debiteuren, servicekosten-saldo + bezettingsgraad) | `renderOverzicht` | ~1502 | ✅ gebouwd (`kerncijfers.ts` + `renderKerncijfers.ts`) |
+| 02 | Resultaat P&L per kwartaal | `renderPnl` | ~1580 | deels gebouwd (ander datamodel/CSS: jaarcijfers i.p.v. kwartaal+begroting) |
+| 03 | Kasstroom | `renderCashflow` | ~1647 | nog te bouwen |
+| 04 | Balans | `renderBalans` | ~1725 | nog te bouwen |
+| 05 | Servicekosten (incl. stijgers/dalers, signaalbadges) | `renderServicekosten` | ~1859 | nog te bouwen |
+| 06 | Verhuur / huuroverzicht (contracttabel, statusbadges op resterende looptijd) | `renderRentroll` | ~1897 | nog te bouwen |
+| 07 | Onderhoud & investeringen | `renderOnderhoud` | ~1983 | nog te bouwen |
+| 08 | Signalen & aandachtspunten | `renderSignalen` | ~2020 | nog te bouwen |
 
 Elke sectie krijgt een eigen typed invoermodel (`types.ts`) en een puur
-rekenmodule (zoals `plRapport.ts`) los van de renderer, zodat de
-"geen berekeningen in de UI-laag"-regel overal geldt. Volgorde nog te
-bepalen; 01 (Kerncijfers) ligt het meest voor de hand als volgende stap na
-P&L, omdat het qua databehoefte het dichtst bij de al bestaande
-domeinfuncties (`bezettingsgraadUnits`, `procentueleVerandering`) ligt.
+rekenmodule (zoals `plRapport.ts`/`kerncijfers.ts`) los van de renderer,
+zodat de "geen berekeningen in de UI-laag"-regel overal geldt. Volgorde
+nog te bepalen voor 03–08; 05 (Servicekosten, met stijgers/dalers en
+signaalbadges) of 06 (Verhuur/huuroverzicht) liggen het meest voor de
+hand als volgende stap, omdat ze qua databehoefte het dichtst bij de al
+bestaande bron-/domeinfuncties liggen (`sources/servicekosten.ts`,
+`sources/contracten.ts`, `resterendeLooptijdDagen`).
