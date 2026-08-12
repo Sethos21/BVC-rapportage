@@ -4,30 +4,47 @@ import type { PLRapportInvoer } from "./types.js";
 import { berekenPLOveralTotaal, berekenPLTotalen, berekenPLTrend, berekenPostenTotaal, type PLJaarTotalen } from "./plRapport.js";
 
 /**
- * HTML-renderer voor de P&L-exploitatierapportage, in BVC-huisstijl
- * (CLAUDE.md-sjabloon): positieve bedragen zwart, negatieve bedragen rood
- * tussen haakjes, totaalrijen vetgedrukt met navy-achtergrond (#1B2A4A) en
- * witte tekst. Rendert alleen — rekent niets uit (zie plRapport.ts).
+ * HTML-renderer voor de P&L-exploitatierapportage, in BVC-huisstijl. De
+ * huisstijl (kleuren, typografie, kaart-/tabelpatronen) is overgenomen van
+ * `legacy/index.html` (`:root`-variabelen, `.sec-kicker`/`.sec-title`,
+ * `.card`, `.row-total`) — dat bestand is de bevestigde bron van het door
+ * de gebruiker aangeleverde streefontwerp (PDF, zelfde sectie-CSS en
+ * pagina-indeling). Positieve bedragen zwart, negatieve bedragen rood
+ * tussen haakjes; totaalrijen krijgen een groene bovenrand + tint
+ * (`.row-total`, i.p.v. het eerdere generieke navy-blok). Rendert alleen —
+ * rekent niets uit (zie plRapport.ts).
  *
  * Rapportstructuur: coverpage, samenvatting, inkomsten, kosten, netto
  * exploitatieresultaat, grafiek (inkomsten vs. kosten per jaar), toelichting.
+ *
+ * Nog te porten uit legacy/index.html (zie packages/reporting/README.md):
+ * 01 Kerncijfers, 03 Kasstroom, 04 Balans, 05 Servicekosten, 06 Verhuur,
+ * 07 Onderhoud & investeringen, 08 Signalen.
  */
 
 const HUISSTIJL_CSS = `
-  body{font-family:'Segoe UI',Arial,sans-serif;color:#1a1a1a;margin:0;padding:0;background:#fff}
+  :root{
+    --ink:#1c2521; --muted:#626b64; --muted2:#8a8f88;
+    --green:#21594a; --green2:#2e8b57; --red:#bf4a30;
+    --paper:#f6f4ee; --card:#ffffff; --line:#e6e4dc; --line3:#f1efe9;
+    --tintGreen:#eef4f1;
+  }
+  body{font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:14px;color:var(--ink);margin:0;padding:0;background:#fff}
+  .serif{font-family:'Spectral',serif}
   .pagina{max-width:900px;margin:0 auto;padding:32px}
-  .cover{text-align:center;padding:120px 32px}
-  .cover h1{font-size:28px;color:#1B2A4A;margin-bottom:8px}
+  .cover{text-align:center;padding:120px 32px;background:var(--paper)}
+  .cover .eyebrow{font:400 13px 'IBM Plex Sans';letter-spacing:0.15em;text-transform:uppercase;color:var(--muted2)}
+  .cover h1{font:600 34px/1.1 'Spectral',serif;color:var(--ink);margin:9px 0 6px}
   .cover .object{font-size:20px;margin-top:24px}
-  .cover .periode{color:#555;margin-top:8px}
-  h2{color:#1B2A4A;border-bottom:2px solid #1B2A4A;padding-bottom:6px;margin-top:40px}
-  table{width:100%;border-collapse:collapse;margin-top:12px}
-  th,td{padding:8px 10px;text-align:right;border-bottom:1px solid #ddd}
+  .cover .periode{color:var(--muted);margin-top:8px}
+  h2{font:600 25px/1.15 'Spectral',serif;color:var(--ink);border-bottom:2px solid var(--green);padding-bottom:6px;margin-top:40px}
+  table{width:100%;border-collapse:collapse;margin-top:12px;font-variant-numeric:tabular-nums}
+  th,td{padding:9px 10px;text-align:right;border-top:1px solid var(--line3)}
   th:first-child,td:first-child{text-align:left}
-  th{background:#f2f2f2;color:#333}
-  .negatief{color:#c0392b}
-  .totaalrij td,.totaalrij th{font-weight:bold;background:#1B2A4A;color:#fff}
-  .toelichting{margin-top:12px;color:#444;font-size:14px}
+  th{font:600 10.5px 'IBM Plex Sans';letter-spacing:0.05em;text-transform:uppercase;color:var(--muted2);background:#faf9f5;border-top:none}
+  .negatief{color:var(--red)}
+  .totaalrij td{font-weight:700;border-top:2px solid var(--green);background:var(--tintGreen)}
+  .toelichting{margin-top:12px;color:var(--muted);font-size:13.5px}
   .grafiek{margin-top:16px}
 `;
 
@@ -44,8 +61,8 @@ function renderCover(invoer: PLRapportInvoer): string {
   const perioden = `${invoer.jaren[0]?.jaar ?? "?"}–${invoer.jaren[invoer.jaren.length - 1]?.jaar ?? "?"}`;
   return `
     <div class="cover">
-      <div style="font-size:14px;letter-spacing:2px;color:#1B2A4A">BVC VASTGOED CONSULTANTS</div>
-      <h1>Exploitatierapportage</h1>
+      <div class="eyebrow">BVC Vastgoed Consultants</div>
+      <h1 class="serif">Exploitatierapportage</h1>
       <div class="object">${escapeHtml(invoer.objectnaam)} (object ${escapeHtml(invoer.objectnummer)})</div>
       <div class="periode">${escapeHtml(perioden)}</div>
     </div>`;
@@ -119,8 +136,8 @@ function renderGrafiek(totalen: readonly PLJaarTotalen[]): string {
       const huurHoogte = t.huurTotaal.dividedBy(maxWaarde).times(hoogte).toNumber();
       const kostenHoogte = t.kostenTotaal.abs().dividedBy(maxWaarde).times(hoogte).toNumber();
       return `
-        <rect x="${x + 10}" y="${hoogte - huurHoogte}" width="30" height="${huurHoogte}" fill="#1B2A4A" />
-        <rect x="${x + 45}" y="${hoogte - kostenHoogte}" width="30" height="${kostenHoogte}" fill="#c0392b" />
+        <rect x="${x + 10}" y="${hoogte - huurHoogte}" width="30" height="${huurHoogte}" rx="3" fill="#21594a" />
+        <rect x="${x + 45}" y="${hoogte - kostenHoogte}" width="30" height="${kostenHoogte}" rx="3" fill="#bf4a30" />
         <text x="${x + 40}" y="${hoogte + 16}" font-size="11" text-anchor="middle">${t.jaar}</text>`;
     })
     .join("");
@@ -128,7 +145,7 @@ function renderGrafiek(totalen: readonly PLJaarTotalen[]): string {
     <h2>Inkomsten vs. kosten per jaar</h2>
     <div class="grafiek">
       <svg width="${totalen.length * breedtePerJaar + 20}" height="${hoogte + 30}">${staven}</svg>
-      <div style="font-size:12px;margin-top:4px"><span style="color:#1B2A4A">■</span> huurinkomsten &nbsp; <span style="color:#c0392b">■</span> kosten</div>
+      <div style="font-size:12px;margin-top:4px"><span style="color:#21594a">■</span> huurinkomsten &nbsp; <span style="color:#bf4a30">■</span> kosten</div>
     </div>`;
 }
 
