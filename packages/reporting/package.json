@@ -3,8 +3,19 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
   "scripts": {
-    "typecheck": "echo \"@bvc/reporting: nog geen broncode\"",
-    "test": "echo \"@bvc/reporting: nog geen broncode\""
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@bvc/domain": "workspace:*",
+    "decimal.js": "^10.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.2",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10"
   }
 }
