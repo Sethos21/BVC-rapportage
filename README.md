@@ -110,9 +110,19 @@ dit draait op verschillende werkcomputers.
   wijzigen → atomisch vervangen → caches ongeldig maken → audit → opruimen),
   een crash-herstelbare lockfile, cache-herbouw met verplichte
   administratiescheiding (getest: een gedeeld bronbestand met meerdere
-  administraties lekt nooit rijen tussen administraties), en
+  administraties lekt nooit rijen tussen administraties), `init-administratie`
+  (nieuwe administratie initialiseren zonder handmatig JSON te schrijven) en
   `laadBeheerparameters` (leest `config/parameters.json` uit de data root,
   valt terug op standaardwaarden als het bestand ontbreekt).
+- **Cache-herbouw bij grote gedeelde bronbestanden.** `rebuild-cache` meldt
+  nu per brontype voortgang (bestandsgrootte, ingelezen/gefilterde
+  rijaantallen, verwerkingsduur — standaard naar stderr) en verwerkt de acht
+  brontypen één voor één rechtstreeks naar SQLite (`@bvc/cache`'s
+  `CacheBuilder`) i.p.v. eerst alle brontypen volledig als objecten in het
+  geheugen te verzamelen. `XLSX.read` gebruikt `dense: true` (SheetJS'
+  geheugenzuinigere celopslag). Benchmark (168 kolommen, 40.000 rijen,
+  320 MB — ruim groter dan een 41 MB productiebestand): ~31 s, ~1,7 GB piek,
+  met per-fase logging i.p.v. zonder zichtbaar teken van leven.
 - **`apps/worker/scripts/build-exe.mjs`** — bouwt de Worker als standalone
   `bvc-worker.exe` (Node Single Executable Application): geen Node/pnpm-
   installatie nodig op de doelmachine, zie "Productie-uitvoering" hieronder.

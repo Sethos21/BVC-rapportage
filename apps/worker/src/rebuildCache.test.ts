@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { rebuildCache } from "./rebuildCache.js";
 import { nieuweAdministratieConfig, schrijfAdministratieConfig } from "./administratie.js";
 import { administratieCachePad, administratieDir, bronGedeeldDir } from "./paths.js";
@@ -38,7 +38,7 @@ describe("rebuildCache — administratiescheiding op een gedeelde bron", () => {
       },
     ]);
 
-    const resultaatA = rebuildCache({ root, administratieId: "002_fergagne" });
+    const resultaatA = rebuildCache({ root, administratieId: "002_fergagne", onVoortgang: () => {} });
     expect(resultaatA.rowCounts["boekingen"]).toBe(1);
 
     const cacheA = new DatabaseSync(administratieCachePad(root, "002_fergagne"), { readOnly: true });
@@ -46,7 +46,7 @@ describe("rebuildCache — administratiescheiding op een gedeelde bron", () => {
     cacheA.close();
     expect(rijenA).toEqual([{ bedrijfsnr: "002", omschrijving: "admin 002" }]);
 
-    const resultaatB = rebuildCache({ root, administratieId: "003_cosinus" });
+    const resultaatB = rebuildCache({ root, administratieId: "003_cosinus", onVoortgang: () => {} });
     expect(resultaatB.rowCounts["boekingen"]).toBe(1);
     const cacheB = new DatabaseSync(administratieCachePad(root, "003_cosinus"), { readOnly: true });
     const rijenB = cacheB.prepare("SELECT bedrijfsnr, omschrijving FROM boekingen").all();
@@ -59,7 +59,7 @@ describe("rebuildCache — administratiescheiding op een gedeelde bron", () => {
   });
 
   it("meldt ontbrekende bronnen expliciet i.p.v. de cache stilzwijgend leeg te laten zonder signaal", () => {
-    const resultaat = rebuildCache({ root, administratieId: "002_fergagne" });
+    const resultaat = rebuildCache({ root, administratieId: "002_fergagne", onVoortgang: () => {} });
     expect(resultaat.ontbrekendeBronnen).toContain("boekingen");
     expect(resultaat.rowCounts["boekingen"]).toBe(0);
   });
@@ -73,8 +73,43 @@ describe("rebuildCache — administratiescheiding op een gedeelde bron", () => {
       },
     ]);
 
-    const eerste = rebuildCache({ root, administratieId: "002_fergagne" });
-    const tweede = rebuildCache({ root, administratieId: "002_fergagne" });
+    const eerste = rebuildCache({ root, administratieId: "002_fergagne", onVoortgang: () => {} });
+    const tweede = rebuildCache({ root, administratieId: "002_fergagne", onVoortgang: () => {} });
     expect(tweede.rowCounts).toEqual(eerste.rowCounts);
+  });
+});
+
+describe("rebuildCache — voortgangslogging", () => {
+  it("meldt per bron het bestand, de ingelezen rijen en de gefilterde rijen, en tot slot dat de cache is weggeschreven", () => {
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "boekingen.xlsx"), [
+      {
+        Bedrijfsnr: "002", Boekstuk_Sleutel: "0024001", Boeking_Dagboeknr: "20", Boeking_Boekjaar: 2024,
+        Boeking_Boekperiode: "01", Boeking_Boekstuknr: "024001", Boeking_Volgnr: "000001", Boeking_Boekdatum: "01-01-2024",
+        Boeking_Grootboeknr: "1010", Boeking_Bedrag_Debet: 100, Boeking_Bedrag_Credit: 0, Boeking_Omschrijving: "test",
+      },
+      {
+        Bedrijfsnr: "003", Boekstuk_Sleutel: "0034001", Boeking_Dagboeknr: "20", Boeking_Boekjaar: 2024,
+        Boeking_Boekperiode: "01", Boeking_Boekstuknr: "034001", Boeking_Volgnr: "000001", Boeking_Boekdatum: "01-01-2024",
+        Boeking_Grootboeknr: "1010", Boeking_Bedrag_Debet: 200, Boeking_Bedrag_Credit: 0, Boeking_Omschrijving: "andere administratie",
+      },
+    ]);
+
+    const meldingen: string[] = [];
+    rebuildCache({ root, administratieId: "002_fergagne", onVoortgang: (bericht) => meldingen.push(bericht) });
+
+    expect(meldingen.some((m) => m.includes("boekingen") && m.includes("lezen") && m.includes("KB"))).toBe(true);
+    expect(meldingen.some((m) => m.includes("boekingen") && m.includes("2 rijen ingelezen"))).toBe(true);
+    expect(meldingen.some((m) => m.includes("boekingen") && m.includes("1 rijen voor deze administratie") && m.includes("van 2 gevalideerd"))).toBe(true);
+    expect(meldingen.some((m) => m.toLowerCase().includes("cache herbouwd"))).toBe(true);
+  });
+
+  it("gebruikt standaard een stderr-logger als er geen onVoortgang wordt meegegeven (geen stille runs zonder enig teken van leven)", () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      rebuildCache({ root, administratieId: "002_fergagne" });
+      expect(spy).toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

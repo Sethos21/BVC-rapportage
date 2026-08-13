@@ -8,7 +8,7 @@ import * as XLSX from "xlsx";
  * celtype; de coerce-helpers in ./coerce.ts doen de eigenlijke normalisatie.
  */
 export function readFirstSheetAsRows(buffer: Buffer | ArrayBuffer): Record<string, unknown>[] {
-  const workbook = XLSX.read(buffer, { cellDates: true, raw: true });
+  const workbook = XLSX.read(buffer, { cellDates: true, raw: true, dense: true });
   const firstSheetName = workbook.SheetNames[0];
   if (!firstSheetName) {
     throw new Error("Werkmap bevat geen tabbladen.");
@@ -29,7 +29,7 @@ export function listSheetNames(buffer: Buffer | ArrayBuffer): string[] {
  * binair geverifieerd, alleen via de tekstuele inhoud van het bestand.
  */
 export function readSheetAsRows(buffer: Buffer | ArrayBuffer, hint: string): Record<string, unknown>[] {
-  const workbook = XLSX.read(buffer, { cellDates: true, raw: true });
+  const workbook = XLSX.read(buffer, { cellDates: true, raw: true, dense: true });
   const naam = workbook.SheetNames.find((n) => n.toLowerCase().includes(hint.toLowerCase()));
   if (!naam) {
     throw new Error(`Geen tabblad gevonden dat overeenkomt met "${hint}". Beschikbare tabbladen: ${workbook.SheetNames.join(", ")}.`);
@@ -56,7 +56,7 @@ export function readSheetRowsWithHeaderRow(
   hint: string,
   headerRowIndex: number,
 ): Record<string, unknown>[] {
-  const workbook = XLSX.read(buffer, { cellDates: true, raw: true });
+  const workbook = XLSX.read(buffer, { cellDates: true, raw: true, dense: true });
   const naam = workbook.SheetNames.find((n) => n.toLowerCase().includes(hint.toLowerCase()));
   if (!naam) {
     throw new Error(`Geen tabblad gevonden dat overeenkomt met "${hint}". Beschikbare tabbladen: ${workbook.SheetNames.join(", ")}.`);
