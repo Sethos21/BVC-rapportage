@@ -63,7 +63,19 @@ naar DSN/SQL geen herontwerp is:
 `BVC_DATA_ROOT` (env var, geen hardcoded pad) is de enige plek voor
 brondata, cache en rapporten — nooit in deze repository. Zie README voor
 de volledige mapstructuur, `gedeeld`/`eigen`-bronmodi en het
-vervangingsprotocol.
+vervangingsprotocol. Het pad kan een netwerkschijf/UNC-pad zijn.
+
+## 5b. Productie-uitvoering zonder Node/pnpm-installatie
+
+De bedrijfsomgeving staat geen Node.js/pnpm-installatie op de server toe.
+`apps/worker` wordt daarom als standalone Windows-executable gedraaid
+(`pnpm --filter @bvc/worker build:exe`, Node Single Executable
+Applications) — zie README §"Productie-uitvoering" voor de volledige
+toelichting en aandachtspunten. Ontwikkelen blijft gewoon op Node 22
+(pnpm, `node:sqlite`); alleen de productie-uitvoering is Node-
+onafhankelijk. Nieuwe functionaliteit in `apps/worker` moet met deze
+packaging-stap blijven werken (geen dynamische `require`/afhankelijkheid
+van bestanden buiten de esbuild-bundel).
 
 ## 6. Financiële grondslagen (niet onderhandelbaar)
 

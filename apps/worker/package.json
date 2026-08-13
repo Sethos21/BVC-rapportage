@@ -6,7 +6,8 @@
   "scripts": {
     "cli": "tsx src/cli.ts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "build:exe": "node scripts/build-exe.mjs"
   },
   "dependencies": {
     "@bvc/cache": "workspace:*",
@@ -17,6 +18,8 @@
   },
   "devDependencies": {
     "@types/node": "^24.13.2",
+    "esbuild": "^0.28.2",
+    "postject": "1.0.0-alpha.6",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3",
     "vitest": "^4.1.10",

@@ -113,6 +113,52 @@ dit draait op verschillende werkcomputers.
   administraties lekt nooit rijen tussen administraties), en
   `laadBeheerparameters` (leest `config/parameters.json` uit de data root,
   valt terug op standaardwaarden als het bestand ontbreekt).
+- **`apps/worker/scripts/build-exe.mjs`** — bouwt de Worker als standalone
+  `bvc-worker.exe` (Node Single Executable Application): geen Node/pnpm-
+  installatie nodig op de doelmachine, zie "Productie-uitvoering" hieronder.
+
+## Productie-uitvoering: standalone .exe, geen Node/pnpm nodig op de server
+
+De bedrijfsomgeving staat geen Node.js/pnpm-installatie op de server toe.
+Daarom wordt de Worker in productie gedraaid als **standalone Windows-
+executable** (`bvc-worker.exe`), gebouwd met Node's ingebouwde
+[Single Executable Applications](https://nodejs.org/api/single-executable-applications.html)
+(SEA) — de Node-runtime zit in het `.exe`-bestand zelf, er hoeft niets
+geïnstalleerd te worden op de doelmachine.
+
+```bash
+pnpm --filter @bvc/worker build:exe
+# → apps/worker/dist/bvc-worker.exe
+```
+
+Werking (zie het script voor de volledige toelichting): esbuild bundelt
+`cli.ts` (incl. alle `@bvc/*`-workspacepakketten) tot één bestand → Node
+genereert daaruit een SEA-blob → die blob wordt met `postject` in een
+kopie van de officiële win-x64 `node.exe` geïnjecteerd (zelfde versie als
+de lokale ontwikkel-Node). **Gevalideerd:** dit is end-to-end getest —
+`node:sqlite`, `xlsx`, `zod` en `decimal.js` werken allemaal correct
+binnen het resulterende `.exe`, inclusief een echte `rebuild-cache`-run
+(xlsx inlezen → valideren → SQLite-cache wegschrijven) zonder dat Node
+op het systeem geïnstalleerd was.
+
+Aandachtspunten:
+- **Ontwikkelen blijft op Node 22** (pnpm, `node:sqlite`) — alleen de
+  productie-uitvoering is Node-onafhankelijk, dit vervangt de
+  ontwikkelworkflow niet.
+- **Ongetekende executable.** Injectie maakt de Authenticode-signature
+  van `node.exe` ongeldig. Windows kan een SmartScreen-waarschuwing tonen
+  bij de eerste keer uitvoeren; een streng AppLocker/WDAC-beleid dat
+  ondertekende executables afdwingt kan het bestand blokkeren. Nog niet
+  getest binnen de daadwerkelijke bedrijfs-IT-omgeving — als dat een
+  probleem blijkt, is zelf (laten) ondertekenen de vervolgstap.
+- **Netwerkschijven/UNC-paden.** `BVC_DATA_ROOT` kan een gemapte
+  schijfletter of UNC-pad zijn — standaard Node `fs`-functies (die de
+  Worker al overal gebruikt) ondersteunen dat zonder aanpassing.
+- **DSN/ODBC later.** Deze packaging-stap raakt niet aan de eerder
+  vastgelegde ontwerpregel dat de bronophaal-stap losstaand vervangbaar
+  moet zijn (CLAUDE.md §4) — een toekomstige ODBC-bron zou wel een
+  ODBC-driver op de doelmachine vereisen, dat is een aparte afweging voor
+  wanneer die overstap concreet wordt.
 
 ## Wat nadrukkelijk nog NIET gebouwd is
 
