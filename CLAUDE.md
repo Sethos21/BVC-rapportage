@@ -73,6 +73,33 @@ naar DSN/SQL geen herontwerp is:
   nog niet gebouwd — vereist een echt DSN-doelsysteem om tegen te
   ontwerpen/testen.
 
+### 4b. Concreet doelsysteem: Informant/PxPlus SQL ODBC (nog niet gebouwd)
+
+Bevestigd (2026-08-13): het toekomstige DSN-doelsysteem is Informant,
+ontsloten via de PxPlus SQL ODBC-driver. Bedrijfsomgeving heeft nu
+PxPlus SQL ODBC Driver **v7.00.02.00, 32-bit** geïnstalleerd; de
+Informant File DSN's gebruiken deze driver, en Excel op diezelfde
+omgeving is ook 32-bit. In `V:\Informant\install\odbc\` staan installers
+voor zowel een 32-bit als een 64-bit variant van de driver.
+
+Expliciete beslissing: **geen 32-bit build en geen ODBC-code nu.** De
+huidige x64 `bvc-worker.exe`-build (`apps/worker/scripts/build-exe.mjs`)
+blijft ongewijzigd. Twee paden worden apart onderzocht (nog geen keuze
+gemaakt):
+1. of de 64-bit PxPlus-driver rechtstreeks vanuit deze x64 Worker
+   bruikbaar is;
+2. zo niet (bv. door Informant/PxPlus Views-compatibiliteit), een kleine
+   aparte 32-bit ODBC-bridge/hulpproces.
+
+Architectuurbewaking voor wanneer die keuze gemaakt is: de toekomstige
+`InformantOdbcSource`/`InformantOdbcBronAdapter` implementeert dezelfde
+`BronAdapter`-interface als `ExcelBronAdapter` (zie `bronAdapter.ts`) —
+ODBC/PxPlus/bitness-details mogen nooit doorlekken naar domain/cache/
+reporting. Een bridge-over-hulpproces is vermoedelijk inherent
+asynchroon (`leesRuweRijen` is nu synchroon); die interfacewijziging
+wordt pas gemaakt zodra de aanpak zelf gebouwd wordt, niet vooraf
+gegokt op een nog onbeslist ontwerp.
+
 ## 5. Eén centrale data root, buiten git
 
 `BVC_DATA_ROOT` (env var, geen hardcoded pad) is de enige plek voor

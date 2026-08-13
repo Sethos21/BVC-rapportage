@@ -134,8 +134,11 @@ dit draait op verschillende werkcomputers.
   pre-flight-testdekking.
 - **`apps/worker/src/bronAdapter.ts`** — `BronAdapter`-interface: `rebuild-
   cache` haalt rauwe rijen per brontype op via een vervangbare adapter
-  (standaard `ExcelBronAdapter`), nooit rechtstreeks via bestandspaden/
-  SheetJS. Voorbereid op een latere DSN/ODBC-bron (CLAUDE.md §4).
+  (standaard `ExcelBronAdapter`, ook wel "ExcelSource"), nooit
+  rechtstreeks via bestandspaden/SheetJS. Voorbereid op een latere
+  `InformantOdbcSource` (Informant/PxPlus SQL ODBC — bevestigd
+  doelsysteem, huidige driver 32-bit; nog geen 32-bit build/ODBC-code,
+  zie CLAUDE.md §4b).
 - **`apps/worker/scripts/build-exe.mjs`** — bouwt de Worker als standalone
   `bvc-worker.exe` (Node Single Executable Application): geen Node/pnpm-
   installatie nodig op de doelmachine, zie "Productie-uitvoering" hieronder.

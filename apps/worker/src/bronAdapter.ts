@@ -21,12 +21,31 @@ import type { BronResolutie } from "./sourceResolver.js";
  * bevraagt gewoon opnieuw) — alleen het "haal de huidige rijen op voor
  * een cache-herbouw"-deel is wat een toekomstige DSN-adapter zou
  * vervangen.
+ *
+ * Concreet toekomstig doelsysteem (bevestigd, nog niet geïmplementeerd):
+ * Informant/PxPlus, ontsloten via de PxPlus SQL ODBC-driver (bedrijfs-
+ * omgeving heeft momenteel v7.00.02.00, 32-bit; Informant File DSN's en
+ * Excel zijn daar ook 32-bit). `ExcelBronAdapter` hieronder komt overeen
+ * met wat elders "ExcelSource" genoemd wordt; een toekomstige
+ * `InformantOdbcSource`/`InformantOdbcBronAdapter` implementeert dezelfde
+ * `BronAdapter`-interface — de rekenlaag (domain/cache/reporting) mag
+ * nooit weten dat die bestaat, laat staan iets van ODBC/PxPlus/bitness.
+ * Nog open (bewust niet vooruitgelopen): of de 64-bit PxPlus-driver
+ * rechtstreeks vanuit deze (x64) Worker bruikbaar is, of dat een aparte
+ * 32-bit ODBC-bridge/hulpproces nodig is (Informant/PxPlus Views-
+ * compatibiliteit onderzocht apart). Die keuze kan gevolgen hebben voor
+ * deze interface — een bridge-over-een-hulpproces is vermoedelijk
+ * inherent asynchroon, terwijl `leesRuweRijen` nu synchroon is; dat wordt
+ * pas aangepast zodra de ODBC-aanpak zelf gebouwd wordt, niet vooraf
+ * gegokt. De huidige x64-executable-build (`scripts/build-exe.mjs`)
+ * blijft ongewijzigd; er wordt voorlopig geen 32-bit build gemaakt en
+ * geen ODBC-code toegevoegd.
  */
 export interface BronAdapter {
   leesRuweRijen(bronResolutie: BronResolutie): Record<string, unknown>[];
 }
 
-/** Huidige (enige) implementatie: leest het eerste tabblad van het gedeelde/eigen xlsx-bestand. */
+/** Huidige (enige) implementatie: leest het eerste tabblad van het gedeelde/eigen xlsx-bestand ("ExcelSource"). */
 export class ExcelBronAdapter implements BronAdapter {
   leesRuweRijen(bronResolutie: BronResolutie): Record<string, unknown>[] {
     return readFirstSheetAsRows(readFileSync(bronResolutie.pad));
