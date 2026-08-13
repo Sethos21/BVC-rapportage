@@ -16,6 +16,7 @@
     "@bvc/config": "workspace:*",
     "@bvc/data-contracts": "workspace:*",
     "@bvc/domain": "workspace:*",
+    "@bvc/reporting": "workspace:*",
     "decimal.js": "^10.6.0"
   },
   "devDependencies": {

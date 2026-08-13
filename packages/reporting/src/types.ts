@@ -89,3 +89,78 @@ export interface KerncijfersInvoer {
   huurPerComplex: HuurComplexRegel[];
   bezettingPerComplex?: BezettingComplexRegel[] | undefined;
 }
+
+/**
+ * Invoer voor het Controlerapport — een rauw, ongemapt brondata-overzicht
+ * (trial-balance-stijl) rechtstreeks uit de cache, bedoeld om regel-voor-
+ * regel te vergelijken met een bestaande rapportage. Bewust GEEN
+ * grootboekmapping toegepast (die bestaat nog niet — zie root-README) en
+ * bewust GEEN servicekosten-uitsluitingsregels (kostensoort 9600 e.d.):
+ * dit rapport dient reconciliatie van de ingelezen brondata, niet een
+ * inhoudelijke KPI-analyse. Alle acht brontypen zijn optioneel — een
+ * ontbrekende/nog niet geladen bron blokkeert het rapport nooit, toont
+ * alleen een duidelijke melding in die sectie.
+ */
+export interface ControlerapportBoekingsregel {
+  grootboeknr: string;
+  bedragDebet: Decimal;
+  bedragCredit: Decimal;
+}
+
+export interface ControlerapportBalansregel {
+  grootboekrekeningnr: string;
+  omschrijving: string | null;
+  eindsaldo: Decimal;
+}
+
+export interface ControlerapportServicekostenregel {
+  kostensoort: string;
+  omschrijving: string | null;
+  bedragDebet: Decimal;
+  bedragCredit: Decimal;
+}
+
+export interface ControlerapportContractregel {
+  contract: string;
+  complexnummer: string | null;
+  unitnummer: string | null;
+  huurdernummer: string | null;
+}
+
+export interface ControlerapportUnitregel {
+  complexnummer: string;
+  unitnummer: string;
+  omschrijving: string | null;
+  vvo: Decimal | null;
+}
+
+export interface ControlerapportRentrollregel {
+  contractnummer: string;
+  complexnummer: string | null;
+  prolongatieBedragJaar: Decimal | null;
+  gehuurdOppervlak: Decimal | null;
+}
+
+export interface ControlerapportComplexTotaalregel {
+  complexnr: string;
+  totaalOppervlakte: Decimal | null;
+  totaalVerhuurd: Decimal | null;
+  totaalLeegstand: Decimal | null;
+}
+
+export interface ControlerapportInvoer {
+  administratieNaam: string;
+  bedrijfsnr: string;
+  gegenereerdOp: Date;
+  boekingen: ControlerapportBoekingsregel[];
+  balansstanden: ControlerapportBalansregel[];
+  servicekosten: ControlerapportServicekostenregel[];
+  contracten: ControlerapportContractregel[];
+  units: ControlerapportUnitregel[];
+  rentroll: ControlerapportRentrollregel[];
+  complexTotalen: ControlerapportComplexTotaalregel[];
+  /** false = tabel is leeg omdat de bron nog niet geladen is (bv. ouderdomsanalyse zonder boekjaar/boekperiode/peildatum). */
+  ouderdomsanalyseGeladen: boolean;
+  /** false = begroting staat nog niet gekoppeld aan de cache (nog geen cache-tabel) — nooit blokkerend. */
+  begrotingGeladen: boolean;
+}

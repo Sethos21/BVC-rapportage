@@ -2,6 +2,7 @@ import { BRON_TYPES, administratieConfigPad, dataRoot, lockPad, type BronType } 
 import { resolveAlleBronnen } from "./sourceResolver.js";
 import { vervangBron, type VervangDoel } from "./replace.js";
 import { rebuildCache } from "./rebuildCache.js";
+import { genereerControlerapport } from "./genereerControlerapport.js";
 import { withLock } from "./lock.js";
 import { AdministratieBestaatAlError, initAdministratie } from "./administratie.js";
 
@@ -13,6 +14,7 @@ function printGebruik(): never {
       "  status <administratieId>",
       "  replace <bronType> <gedeeld|administratieId> <bestandspad> [--boekjaar N --boekperiode P]",
       "  rebuild-cache <administratieId> [--boekjaar N --boekperiode P]  (boekjaar/boekperiode alleen nodig als ouderdomsanalyse aanwezig is)",
+      "  controlerapport <administratieId>  (rauw brondata-overzicht uit de cache, ter vergelijking met een bestaande rapportage)",
       "",
       `bronType is één van: ${BRON_TYPES.join(", ")}`,
       "Vereist BVC_DATA_ROOT.",
@@ -96,6 +98,14 @@ async function main() {
         boekjaarStr && boekperiode ? { boekjaar: Number(boekjaarStr), boekperiode, peildatum: laatsteDagVanBoekperiode(Number(boekjaarStr), boekperiode) } : undefined,
     });
     console.log(JSON.stringify(resultaat, null, 2));
+    return;
+  }
+
+  if (command === "controlerapport") {
+    const [administratieId] = rest;
+    if (!administratieId) printGebruik();
+    const resultaat = genereerControlerapport(root, administratieId);
+    console.log(`Controlerapport geschreven: ${resultaat.pad}`);
     return;
   }
 

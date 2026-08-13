@@ -1,5 +1,24 @@
 # @bvc/reporting
 
+## Controlerapport (rauw brondata-overzicht, geen grootboekmapping)
+
+`renderControlerapportHtml` rendert een trial-balance-achtig overzicht
+rechtstreeks uit de cache: grootboek-totalen per rekening (boekingen),
+balans-eindsaldi, servicekosten per kostensoort, contracten/units/
+rentroll-listing en complex-totalen. **Bewust geen grootboekmapping en
+geen servicekosten-uitsluitingsregels toegepast** — dit rapport dient om
+de ingelezen brondata regel-voor-regel te vergelijken met een bestaande
+rapportage (reconciliatie), niet als KPI-analyse. Blokkeert nooit op een
+ontbrekende/nog niet geladen bron (begroting, ouderdomsanalyse) — toont
+dan een duidelijke melding in die sectie. `apps/worker`'s
+`genereerControlerapport` bouwt de invoer uit de SQLite-cache (leest
+niet uit Excel) en schrijft naar `rapporten/`; CLI: `bvc-worker
+controlerapport <administratieId>`.
+
+Dit is momenteel de **enige** sectie die al tegen een echte, herbouwde
+cache is gevalideerd (zie root-README) — Kerncijfers en P&L hieronder
+zijn dat nog niet, ze wachten op een goedgekeurde grootboekmapping.
+
 ## Kerncijfers (sectie 01 — KPI-dashboard)
 
 `renderKerncijfersHtml` rendert het portefeuille-KPI-dashboard: 6

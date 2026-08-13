@@ -57,6 +57,9 @@ importers:
       '@bvc/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@bvc/reporting':
+        specifier: workspace:*
+        version: link:../../packages/reporting
       decimal.js:
         specifier: ^10.6.0
         version: 10.6.0

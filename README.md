@@ -190,11 +190,15 @@ Aandachtspunten:
 
 - **PDF/DOCX-export** — rapportsecties zijn nu HTML (BVC-huisstijl); export
   volgt in een latere fase.
-- **Koppeling van rapportsecties aan echte data** — de gebouwde secties
-  (P&L, Kerncijfers) zijn tot nu toe alleen tegen synthetische testcases
-  getest, niet tegen een echte `BVC_DATA_ROOT`. Bovendien is gebleken dat
-  vrijwel elke Kerncijfers-KPI (behalve bezettingsgraad) een grootboek-
-  mapping vereist die nog niet bestaat — zie hieronder.
+- **Koppeling van de KPI-/P&L-rapportsecties aan echte data** — Kerncijfers
+  en P&L zijn nog alleen tegen synthetische testcases getest, niet tegen
+  een echte `BVC_DATA_ROOT`, en vrijwel elke Kerncijfers-KPI (behalve
+  bezettingsgraad) vereist een grootboekmapping die nog niet bestaat —
+  zie hieronder. **Wel al gevalideerd tegen echte data**: het
+  Controlerapport (`bvc-worker controlerapport <administratieId>`) — een
+  rauw brondata-overzicht rechtstreeks uit de cache, bewust zonder
+  grootboekmapping, bedoeld om te reconciliëren met een bestaande
+  rapportage. Zie `packages/reporting/README.md`.
 - **`apps/web`** — nog een lege Next.js-scaffold. Wordt het interactieve
   dashboard (met filters), op dezelfde rekenlaag/cache als de HTML/PDF-
   rapporten (CLAUDE.md §3) — nog te bouwen.
@@ -222,9 +226,11 @@ pnpm -r test
 
 # CLI (vereist BVC_DATA_ROOT):
 export BVC_DATA_ROOT=/pad/naar/BVC-FinancieelRapport
+pnpm --filter @bvc/worker cli init-administratie <administratieId> <bedrijfsnr> <weergavenaam>
 pnpm --filter @bvc/worker cli status <administratieId>
 pnpm --filter @bvc/worker cli replace boekingen gedeeld /pad/naar/nieuw-bestand.xlsx
 pnpm --filter @bvc/worker cli rebuild-cache <administratieId>
+pnpm --filter @bvc/worker cli controlerapport <administratieId>   # rauw brondata-overzicht, geschreven naar rapporten/
 ```
 
 ## Herkomst
