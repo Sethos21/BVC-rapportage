@@ -1,13 +1,15 @@
-import { BRON_TYPES, dataRoot, lockPad, type BronType } from "./paths.js";
+import { BRON_TYPES, administratieConfigPad, dataRoot, lockPad, type BronType } from "./paths.js";
 import { resolveAlleBronnen } from "./sourceResolver.js";
 import { vervangBron, type VervangDoel } from "./replace.js";
 import { rebuildCache } from "./rebuildCache.js";
 import { withLock } from "./lock.js";
+import { AdministratieBestaatAlError, initAdministratie } from "./administratie.js";
 
 function printGebruik(): never {
   console.error(
     [
       "Gebruik:",
+      "  init-administratie <administratieId> <bedrijfsnr> <weergavenaam>  (bv. init-administratie 070_Fergagne 070 \"Fergagne BV\")",
       "  status <administratieId>",
       "  replace <bronType> <gedeeld|administratieId> <bestandspad> [--boekjaar N --boekperiode P]",
       "  rebuild-cache <administratieId> [--boekjaar N --boekperiode P]  (boekjaar/boekperiode alleen nodig als ouderdomsanalyse aanwezig is)",
@@ -27,6 +29,25 @@ function parseFlag(args: string[], naam: string): string | undefined {
 async function main() {
   const [command, ...rest] = process.argv.slice(2);
   const root = dataRoot();
+
+  if (command === "init-administratie") {
+    const [administratieId, bedrijfsnr, ...weergavenaamDelen] = rest;
+    const weergavenaam = weergavenaamDelen.join(" ");
+    if (!administratieId || !bedrijfsnr || !weergavenaam) printGebruik();
+    try {
+      const config = initAdministratie(root, administratieId, bedrijfsnr, weergavenaam);
+      console.log(`Administratie "${administratieId}" aangemaakt (${administratieConfigPad(root, administratieId)}):`);
+      console.log(JSON.stringify(config, null, 2));
+    } catch (error) {
+      if (error instanceof AdministratieBestaatAlError) {
+        console.error(error.message);
+        process.exitCode = 1;
+        return;
+      }
+      throw error;
+    }
+    return;
+  }
 
   if (command === "status") {
     const [administratieId] = rest;

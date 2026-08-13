@@ -74,3 +74,22 @@ function valideerConfig(config: AdministratieConfig): void {
 export function bestaatAdministratie(root: string, administratieId: string): boolean {
   return existsSync(administratieDir(root, administratieId));
 }
+
+export class AdministratieBestaatAlError extends Error {}
+
+/**
+ * Initialiseert een nieuwe administratie: schrijft `administratie.json` met
+ * de standaard bronlocaties (alles 'gedeeld' behalve begroting — zie
+ * DEFAULT_BRONLOCATIES), zodat bestaande gedeelde bronbestanden meteen
+ * bruikbaar zijn zonder aparte bronbestanden per administratie. Overschrijft
+ * nooit een bestaande administratie (gebruik schrijfAdministratieConfig
+ * rechtstreeks om een bestaande config aan te passen).
+ */
+export function initAdministratie(root: string, administratieId: string, bedrijfsnr: string, weergavenaam: string): AdministratieConfig {
+  if (bestaatAdministratie(root, administratieId)) {
+    throw new AdministratieBestaatAlError(`Administratie "${administratieId}" bestaat al — init overschrijft nooit een bestaande administratie.json.`);
+  }
+  const config = nieuweAdministratieConfig(bedrijfsnr, weergavenaam);
+  schrijfAdministratieConfig(root, administratieId, config);
+  return config;
+}
