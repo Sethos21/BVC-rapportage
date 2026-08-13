@@ -57,6 +57,21 @@ naar DSN/SQL geen herontwerp is:
 - Bronophaal (`apps/worker`'s sourceResolver/replace-protocol) mag van
   xlsx-bestandspaden uitgaan, maar die stap moet losstaand vervangbaar
   zijn door een andere bronimplementatie zonder de rest te raken.
+- `apps/worker/src/bronAdapter.ts`'s `BronAdapter`-interface is het
+  concrete vervangpunt: `rebuildCache` haalt rauwe rijen per brontype op
+  via een `BronAdapter` (standaard `ExcelBronAdapter`), nooit rechtstreeks
+  via `readFileSync`/SheetJS. Een toekomstige DSN/ODBC-bron is een nieuwe
+  klasse die dezelfde interface implementeert; domain/cache/reporting
+  blijven ongewijzigd. Getest (`rebuildCache.test.ts`): een fake adapter
+  die geen bestand aanraakt bouwt de cache net zo goed op. Bewust
+  buiten scope van deze interface: `valideerBron`/het vervangingsprotocol
+  (replace.ts) — dat is "valideer en vervang een kandidaat-bestand
+  atomisch", een intrinsiek bestandsgericht concept dat voor een live
+  DSN-bron niet bestaat (niets om te vervangen, je bevraagt opnieuw).
+  Excel en een toekomstige DSN-bron parallel per administratie laten
+  draaien (ter vergelijking) is een expliciete wens voor die latere fase,
+  nog niet gebouwd — vereist een echt DSN-doelsysteem om tegen te
+  ontwerpen/testen.
 
 ## 5. Eén centrale data root, buiten git
 

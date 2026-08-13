@@ -1,4 +1,4 @@
-import { readFileSync, statSync } from "node:fs";
+import { statSync } from "node:fs";
 import {
   parseBalans,
   parseBoekingen,
@@ -8,7 +8,6 @@ import {
   parseRentroll,
   parseServicekosten,
   parseUnits,
-  readFirstSheetAsRows,
   type RowIssue,
 } from "@bvc/data-contracts";
 import { CacheBuilder, type CacheData } from "@bvc/cache";
@@ -16,6 +15,7 @@ import { administratieCachePad, type BronType } from "./paths.js";
 import { leesAdministratieConfig } from "./administratie.js";
 import { resolveAlleBronnen } from "./sourceResolver.js";
 import { laadBeheerparameters } from "./parameters.js";
+import { ExcelBronAdapter, type BronAdapter } from "./bronAdapter.js";
 
 export interface RebuildCacheOptions {
   root: string;
@@ -30,6 +30,15 @@ export interface RebuildCacheOptions {
    * te lijken hangen. Tests kunnen dit overschrijven om stil te blijven.
    */
   onVoortgang?: ((bericht: string) => void) | undefined;
+  /**
+   * Levert de rauwe rijen per brontype — standaard `ExcelBronAdapter`
+   * (leest het gedeelde/eigen xlsx-bestand). Overschrijfbaar zodat een
+   * toekomstige DSN/ODBC-bron of een testdouble dezelfde genormaliseerde
+   * datasets kan leveren zonder dat deze functie (of de rest van de
+   * rekenlaag) iets van Excel/SheetJS/bestandspaden hoeft te weten —
+   * zie bronAdapter.ts.
+   */
+  bronAdapter?: BronAdapter | undefined;
 }
 
 export interface RebuildCacheResultaat {
@@ -66,6 +75,7 @@ function standaardLogger(bericht: string): void {
 export function rebuildCache(options: RebuildCacheOptions): RebuildCacheResultaat {
   const { root, administratieId } = options;
   const log = options.onVoortgang ?? standaardLogger;
+  const bronAdapter = options.bronAdapter ?? new ExcelBronAdapter();
   const config = leesAdministratieConfig(root, administratieId);
   const bedrijfsnr = config.bedrijfsnr;
   const bronnen = resolveAlleBronnen(root, administratieId);
@@ -86,10 +96,18 @@ export function rebuildCache(options: RebuildCacheOptions): RebuildCacheResultaa
         continue;
       }
 
+      if (bron.bronType === "begroting") {
+        // Nog geen broncontract/cache-tabel voor begroting (zie validateBron.ts) —
+        // niet nodeloos inlezen/parsen van een meerdere-tabbladen-bestand
+        // waarvan de rijen hier toch niet worden gebruikt.
+        log(`${bron.bronType}: nog geen cache-koppeling, overgeslagen.`);
+        continue;
+      }
+
       const grootteKB = Math.round(statSync(bron.pad).size / 1024);
       log(`${bron.bronType}: lezen ${bron.pad} (${grootteKB} KB)…`);
       const leesStart = Date.now();
-      const ruweRijen = readFirstSheetAsRows(readFileSync(bron.pad));
+      const ruweRijen = bronAdapter.leesRuweRijen(bron);
       log(`${bron.bronType}: ${ruweRijen.length} rijen ingelezen in ${Date.now() - leesStart} ms, valideren/filteren…`);
 
       const verwerkStart = Date.now();
@@ -227,10 +245,6 @@ export function rebuildCache(options: RebuildCacheOptions): RebuildCacheResultaa
           builder.insertOuderdomsanalyse(cacheRijen);
           break;
         }
-        case "begroting":
-          // Nog geen broncontract/cache-tabel voor begroting — zie validateBron.ts.
-          log(`${bron.bronType}: nog geen cache-koppeling, overgeslagen.`);
-          break;
       }
       log(`${bron.bronType}: verwerkt in ${Date.now() - verwerkStart} ms.`);
     }

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import Decimal from "decimal.js";
 import { berekenBegrotingswaarde } from "@bvc/domain";
-import { zCode, zCodeOptional, zDecimalOptional } from "../lib/coerce.js";
+import { zBegrotingsBedragOptional, zCode, zCodeOptional } from "../lib/coerce.js";
 import { readSheetRowsWithHeaderRow } from "../lib/readWorkbook.js";
 import { parseRowsWithSchema, vindDubbeleNatuurlijkeSleutels, type ParseResult, type RowIssue } from "../lib/parseRows.js";
 
@@ -94,12 +94,12 @@ export const BegrotingExploitatieregelBronSchema = z.object({
   rapportregel: zCode,
   tekenregel: z.enum(["POSITIEF", "NEGATIEF"]),
   invoermethode: z.enum(["KWARTAAL", "JAAR"]),
-  q1_invoer: zDecimalOptional,
-  q2_invoer: zDecimalOptional,
-  q3_invoer: zDecimalOptional,
-  q4_invoer: zDecimalOptional,
-  jaar_invoer: zDecimalOptional,
-  budget_fy: zDecimalOptional,
+  q1_invoer: zBegrotingsBedragOptional,
+  q2_invoer: zBegrotingsBedragOptional,
+  q3_invoer: zBegrotingsBedragOptional,
+  q4_invoer: zBegrotingsBedragOptional,
+  jaar_invoer: zBegrotingsBedragOptional,
+  budget_fy: zBegrotingsBedragOptional,
 });
 
 export type BegrotingExploitatieregelBron = z.infer<typeof BegrotingExploitatieregelBronSchema>;
@@ -160,12 +160,12 @@ export const BegrotingServicekostenregelBronSchema = z.object({
   kostensoort: zCode,
   tekenregel: z.enum(["POSITIEF", "NEGATIEF"]),
   invoermethode: z.enum(["KWARTAAL", "JAAR"]),
-  q1_invoer: zDecimalOptional,
-  q2_invoer: zDecimalOptional,
-  q3_invoer: zDecimalOptional,
-  q4_invoer: zDecimalOptional,
-  jaar_invoer: zDecimalOptional,
-  budget_fy: zDecimalOptional,
+  q1_invoer: zBegrotingsBedragOptional,
+  q2_invoer: zBegrotingsBedragOptional,
+  q3_invoer: zBegrotingsBedragOptional,
+  q4_invoer: zBegrotingsBedragOptional,
+  jaar_invoer: zBegrotingsBedragOptional,
+  budget_fy: zBegrotingsBedragOptional,
   toelichting: zCodeOptional,
 });
 

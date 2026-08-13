@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -7,6 +7,8 @@ import { rebuildCache } from "./rebuildCache.js";
 import { nieuweAdministratieConfig, schrijfAdministratieConfig } from "./administratie.js";
 import { administratieCachePad, administratieDir, bronGedeeldDir } from "./paths.js";
 import { schrijfXlsxFixture } from "./test/fixtures.js";
+import type { BronAdapter } from "./bronAdapter.js";
+import type { BronResolutie } from "./sourceResolver.js";
 
 let root: string;
 
@@ -111,5 +113,33 @@ describe("rebuildCache — voortgangslogging", () => {
     } finally {
       spy.mockRestore();
     }
+  });
+});
+
+describe("rebuildCache — bronAdapter is vervangbaar (CLAUDE.md §4: Excel nu, later DSN/SQL)", () => {
+  it("bouwt de cache op uit een bronAdapter die geen Excel/SheetJS aanraakt — bewijst dat de rekenlaag niet aan Excel hangt", () => {
+    // "Bestaat"-check van resolveAlleBronnen kijkt alleen of het pad bestaat; de inhoud
+    // wordt nooit gelezen — de fake adapter levert de rijen rechtstreeks in het geheugen.
+    writeFileSync(join(bronGedeeldDir(root), "units.xlsx"), "dit-is-geen-geldig-xlsx-bestand");
+
+    const fakeAdapter: BronAdapter = {
+      leesRuweRijen(bron: BronResolutie) {
+        if (bron.bronType === "units") {
+          return [
+            { Bedrijfsnr: "002", Complexnummer: "01", Unitnummer: "001", Unitomschrijving: "Uit fake DSN-adapter" },
+            { Bedrijfsnr: "003", Complexnummer: "01", Unitnummer: "001", Unitomschrijving: "Andere administratie" },
+          ];
+        }
+        return [];
+      },
+    };
+
+    const resultaat = rebuildCache({ root, administratieId: "002_fergagne", onVoortgang: () => {}, bronAdapter: fakeAdapter });
+    expect(resultaat.rowCounts["units"]).toBe(1);
+
+    const db = new DatabaseSync(administratieCachePad(root, "002_fergagne"), { readOnly: true });
+    const rijen = db.prepare("SELECT bedrijfsnr, unitomschrijving FROM units").all();
+    db.close();
+    expect(rijen).toEqual([{ bedrijfsnr: "002", unitomschrijving: "Uit fake DSN-adapter" }]);
   });
 });

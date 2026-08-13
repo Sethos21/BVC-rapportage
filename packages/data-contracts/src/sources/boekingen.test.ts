@@ -59,6 +59,14 @@ describe("parseBoekingen", () => {
     expect(issues.some((issue) => issue.ernst === "WAARSCHUWING")).toBe(true);
   });
 
+  it("crasht niet op een #REF!-foutwaarde in Boeking_Saldo (bevestigd aanwezig in de echte export) — negeert het audit-veld i.p.v. de hele import te laten klappen", () => {
+    expect(() => parseBoekingen([ruweBoekingsrij({ Boeking_Saldo: "#REF!" })])).not.toThrow();
+    const { rijen, issues } = parseBoekingen([ruweBoekingsrij({ Boeking_Saldo: "#REF!" })]);
+    expect(rijen).toHaveLength(1);
+    expect(rijen[0]?.boekingSaldo.toString()).toBe("1665.54");
+    expect(issues).toHaveLength(0);
+  });
+
   it("detecteert dubbele natuurlijke sleutels (PAR-DQ-001)", () => {
     const { duplicaatIssues } = parseBoekingen([ruweBoekingsrij(), ruweBoekingsrij()]);
     expect(duplicaatIssues).toHaveLength(1);

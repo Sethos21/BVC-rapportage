@@ -54,7 +54,7 @@ packages/
   data-contracts/   Zod-schema's + parsers per brontype, op de ECHTE kolomnamen van de IDBC-exports
   cache/            Lokale herbouwbare SQLite-cache (geen systeem-van-record)
   reporting/        Rapportsecties (rekenmodule + HTML-renderer per sectie, huisstijl gedeeld) — zie packages/reporting/README.md
-  tests/            Nog leeg — integratie-/e2e-tests volgen in een latere fase
+  tests/            Pre-flight-/integratietests voor apps/worker tegen de echte publieke API (init-administratie/status/rebuild-cache)
 legacy/             Oorspronkelijke single-file HTML-prototype — uitsluitend visuele/functionele
                     referentie (zie CLAUDE.md), nooit technische basis: geen code hiervandaan
                     hergebruikt, alleen CSS-tokens/sectie-indeling bewust overgenomen en elders herbouwd
@@ -123,6 +123,19 @@ dit draait op verschillende werkcomputers.
   geheugenzuinigere celopslag). Benchmark (168 kolommen, 40.000 rijen,
   320 MB — ruim groter dan een 41 MB productiebestand): ~31 s, ~1,7 GB piek,
   met per-fase logging i.p.v. zonder zichtbaar teken van leven.
+- **Robuustheid tegen echte brondata-eigenaardigheden.** Broninventarisatie
+  tegen de echte Drive-bronbestanden bracht twee blokkerende bugs aan het
+  licht (`coerceDecimal` crashte ongevangen op Excel-foutwaarden als
+  `#REF!` — bevestigd in vrijwel elke rij van de echte Boekingen-export;
+  begroting-bronnen gebruiken accounting-notatie — komma als
+  duizendtalscheider, haakjes voor negatief — die de gedeelde
+  decimaalparser verkeerd interpreteerde). Beide gefixt, met regressietests
+  op de exacte echte waarden. Zie `packages/tests` voor het volledige
+  pre-flight-testdekking.
+- **`apps/worker/src/bronAdapter.ts`** — `BronAdapter`-interface: `rebuild-
+  cache` haalt rauwe rijen per brontype op via een vervangbare adapter
+  (standaard `ExcelBronAdapter`), nooit rechtstreeks via bestandspaden/
+  SheetJS. Voorbereid op een latere DSN/ODBC-bron (CLAUDE.md §4).
 - **`apps/worker/scripts/build-exe.mjs`** — bouwt de Worker als standalone
   `bvc-worker.exe` (Node Single Executable Application): geen Node/pnpm-
   installatie nodig op de doelmachine, zie "Productie-uitvoering" hieronder.
