@@ -23,6 +23,7 @@ import {
 } from "./paths.js";
 import { leesAdministratieConfig } from "./administratie.js";
 import { schrijfAudit, type AuditRecord } from "./audit.js";
+import { laadBeheerparameters } from "./parameters.js";
 import { valideerBron, type ValidatieContext } from "./validateBron.js";
 
 export type VervangDoel = { type: "gedeeld" } | { type: "eigen"; administratieId: string };
@@ -62,8 +63,11 @@ export function vervangBron(params: VervangBronParams): VervangBronResultaat {
   const buffer = readFileSync(tmpKopie);
   const hash = createHash("sha256").update(buffer).digest("hex");
 
-  const effectieveContext: ValidatieContext =
-    doel.type === "eigen" ? { ...context, verwachtBedrijfsnr: leesAdministratieConfig(root, doel.administratieId).bedrijfsnr } : context;
+  const effectieveContext: ValidatieContext = {
+    beheerparameters: laadBeheerparameters(root),
+    ...context,
+    ...(doel.type === "eigen" ? { verwachtBedrijfsnr: leesAdministratieConfig(root, doel.administratieId).bedrijfsnr } : {}),
+  };
 
   let validatie;
   try {

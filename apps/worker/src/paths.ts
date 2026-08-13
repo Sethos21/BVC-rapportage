@@ -60,6 +60,11 @@ export function configDir(root: string): string {
   return join(root, "config");
 }
 
+/** CLAUDE.md §3: config-gestuurd — beheerparameters (uitzonderingen/normen) staan hier, niet hardcoded in code. */
+export function parametersPad(root: string): string {
+  return join(configDir(root), "parameters.json");
+}
+
 export function bronGedeeldDir(root: string): string {
   return join(root, "bron_gedeeld");
 }

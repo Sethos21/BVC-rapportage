@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@bvc/cache": "workspace:*",
+    "@bvc/config": "workspace:*",
     "@bvc/data-contracts": "workspace:*",
     "@bvc/domain": "workspace:*",
     "decimal.js": "^10.6.0"

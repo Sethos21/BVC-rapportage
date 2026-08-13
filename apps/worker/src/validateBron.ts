@@ -13,6 +13,7 @@ import {
   readFirstSheetAsRows,
   type RowIssue,
 } from "@bvc/data-contracts";
+import { STANDAARD_PARAMETERS, type Beheerparameters } from "@bvc/config";
 import type { BronType } from "./paths.js";
 
 export interface ValidatieContext {
@@ -25,6 +26,8 @@ export interface ValidatieContext {
    * (CLAUDE_AANVULLENDE_INSTRUCTIES_LOKALE_BRONNEN_v0.1.md §5).
    */
   verwachtBedrijfsnr?: string | undefined;
+  /** Config-gestuurde uitzonderingen/normen (CLAUDE.md §3); standaard STANDAARD_PARAMETERS als niet meegegeven. */
+  beheerparameters?: Beheerparameters | undefined;
 }
 
 export interface ValidatieResultaat {
@@ -89,7 +92,8 @@ export function valideerBron(bronType: BronType, buffer: Buffer, context: Valida
       return { rowCount: rijen.length, issues: [...issues, ...controleerBedrijfsnr(rijen, (r) => r.bedrijfsnr, context.verwachtBedrijfsnr)], duplicaatIssues };
     }
     case "servicekosten": {
-      const { rijen, issues, duplicaatIssues } = parseServicekosten(ruweRijen);
+      const beheerparameters = context.beheerparameters ?? STANDAARD_PARAMETERS;
+      const { rijen, issues, duplicaatIssues } = parseServicekosten(ruweRijen, beheerparameters.servicekosten);
       return { rowCount: rijen.length, issues: [...issues, ...controleerBedrijfsnr(rijen, (r) => r.bedrijfsnr, context.verwachtBedrijfsnr)], duplicaatIssues };
     }
     case "ouderdomsanalyse": {

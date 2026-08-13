@@ -1,5 +1,5 @@
 {
-  "name": "@bvc/data-contracts",
+  "name": "@bvc/config",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -10,14 +10,9 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@bvc/config": "workspace:*",
-    "@bvc/domain": "workspace:*",
-    "decimal.js": "^10.6.0",
-    "xlsx": "^0.18.5",
     "zod": "^4.1.13"
   },
   "devDependencies": {
-    "@types/node": "^24.13.2",
     "typescript": "^5.9.3",
     "vitest": "^4.1.10"
   }

@@ -48,6 +48,9 @@ importers:
       '@bvc/cache':
         specifier: workspace:*
         version: link:../../packages/cache
+      '@bvc/config':
+        specifier: workspace:*
+        version: link:../../packages/config
       '@bvc/data-contracts':
         specifier: workspace:*
         version: link:../../packages/data-contracts
@@ -86,8 +89,24 @@ importers:
         specifier: ^4.1.10
         version: 4.1.10(@types/node@24.13.3)(vite@8.2.1(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12))
 
+  packages/config:
+    dependencies:
+      zod:
+        specifier: ^4.1.13
+        version: 4.4.3
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.10
+        version: 4.1.10(@types/node@24.13.3)(vite@8.2.1(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12))
+
   packages/data-contracts:
     dependencies:
+      '@bvc/config':
+        specifier: workspace:*
+        version: link:../config
       '@bvc/domain':
         specifier: workspace:*
         version: link:../domain

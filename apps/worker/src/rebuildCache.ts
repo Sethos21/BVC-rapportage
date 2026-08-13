@@ -15,6 +15,7 @@ import { buildCache, EMPTY_CACHE_DATA, type CacheData } from "@bvc/cache";
 import { administratieCachePad, type BronType } from "./paths.js";
 import { leesAdministratieConfig } from "./administratie.js";
 import { resolveAlleBronnen } from "./sourceResolver.js";
+import { laadBeheerparameters } from "./parameters.js";
 
 export interface RebuildCacheOptions {
   root: string;
@@ -45,6 +46,7 @@ export function rebuildCache(options: RebuildCacheOptions): RebuildCacheResultaa
   const config = leesAdministratieConfig(root, administratieId);
   const bedrijfsnr = config.bedrijfsnr;
   const bronnen = resolveAlleBronnen(root, administratieId);
+  const beheerparameters = laadBeheerparameters(root);
 
   const data: CacheData = structuredClone(EMPTY_CACHE_DATA);
   const ontbrekendeBronnen: BronType[] = [];
@@ -141,7 +143,7 @@ export function rebuildCache(options: RebuildCacheOptions): RebuildCacheResultaa
         break;
       }
       case "servicekosten": {
-        const { rijen, issues: parseIssues } = parseServicekosten(ruweRijen);
+        const { rijen, issues: parseIssues } = parseServicekosten(ruweRijen, beheerparameters.servicekosten);
         issues.push(...parseIssues);
         data.servicekosten = rijen
           .filter((r) => r.bedrijfsnr === bedrijfsnr)

@@ -1,5 +1,13 @@
 # BVC Rapportage (FinancieelRapport)
 
+> Zie `CLAUDE.md` voor de leidende architectuurprincipes (verplichte
+> leesstof vóór wijzigingen): deze repository is de projectbasis, maar
+> `legacy/index.html` is nooit de technische basis — alleen visuele/
+> functionele referentie. Strikte scheiding data/rekenlaag/presentatie,
+> config-gestuurd (geen hardcoded uitzonderingen), dynamisch (rapport +
+> interactief dashboard op dezelfde rekenlaag), Excel nu maar swappable
+> naar DSN/SQL later.
+
 Financiële vastgoedrapportagetool voor BVC. Inhoudelijk leidend is het
 overdrachtsdossier **Vastgoed-AI_Architectuur_v2.0** (Google Drive,
 eigenaar BVC), aangevuld en op punten overruled door twee latere lokale
@@ -42,18 +50,22 @@ apps/
   worker/           Bronresolver, veilig vervangingsprotocol, cache-herbouw (CLI)
 packages/
   domain/           Centrale berekeningen + geld-/percentageformattering (CAL-FIN-*, CAL-VG-*, CAL-CTR-*, huisstijlregels)
+  config/           Versioned beheerparameters (Zod-schema + standaardwaarden) — uitzonderingen/normen config-gestuurd, nooit hardcoded (CLAUDE.md §3)
   data-contracts/   Zod-schema's + parsers per brontype, op de ECHTE kolomnamen van de IDBC-exports
   cache/            Lokale herbouwbare SQLite-cache (geen systeem-van-record)
-  reporting/        Nog leeg — rapportdefinities/KPI-laag volgt in een latere fase
+  reporting/        Rapportsecties (rekenmodule + HTML-renderer per sectie, huisstijl gedeeld) — zie packages/reporting/README.md
   tests/            Nog leeg — integratie-/e2e-tests volgen in een latere fase
-legacy/             De oorspronkelijke single-file HTML-prototype, bewaard als referentie
+legacy/             Oorspronkelijke single-file HTML-prototype — uitsluitend visuele/functionele
+                    referentie (zie CLAUDE.md), nooit technische basis: geen code hiervandaan
+                    hergebruikt, alleen CSS-tokens/sectie-indeling bewust overgenomen en elders herbouwd
 ```
 
 ### Databronmap (runtime, niet in git)
 
 ```
 <BVC_DATA_ROOT>/
-├── config/                          rapportdefinities/, grootboekmappings/, managementparameters/
+├── config/                          parameters.json (@bvc/config-schema; ontbreekt = standaardwaarden),
+│                                    rapportdefinities/, grootboekmappings/
 ├── bron_gedeeld/                    boekingen.xlsx, balans_per_jaar.xlsx, rentroll.xlsx, ...
 ├── audit/import_log_gedeeld.jsonl
 └── administraties/<Bedrijfsnr>_<naam>/
@@ -84,21 +96,44 @@ dit draait op verschillende werkcomputers.
   (`€ 1.250,75`, centen afronden per stap, nul is geldig, totalen altijd
   controleren).
 - **`packages/cache`** — bouwt en opent de lokale SQLite-cache.
+- **`packages/config`** — versioned beheerparameters (Zod-schema +
+  `STANDAARD_PARAMETERS`): welke servicekosten-kostensoorten altijd worden
+  uitgesloten, welke omschrijvingsvarianten een mogelijke serviceafrekening
+  signaleren. Voorheen hardcoded in `data-contracts/sources/servicekosten.ts`,
+  nu een parameter die de aanroeper meegeeft — zie CLAUDE.md §3.
+- **`packages/reporting`** — rapportsecties, elk met een eigen rekenmodule
+  (los van de renderer) en gedeelde huisstijl (`huisstijl.ts`). Gebouwd:
+  P&L-exploitatierapportage en sectie 01 Kerncijfers (KPI-dashboard). Zie
+  `packages/reporting/README.md` voor de volledige sectie-roadmap.
 - **`apps/worker`** — bronresolver (`gedeeld`/`eigen`, nooit samenvoegen),
   het veilige vervangingsprotocol (kopie → hash+validatie → bij fout niets
   wijzigen → atomisch vervangen → caches ongeldig maken → audit → opruimen),
-  een crash-herstelbare lockfile, en cache-herbouw met verplichte
+  een crash-herstelbare lockfile, cache-herbouw met verplichte
   administratiescheiding (getest: een gedeeld bronbestand met meerdere
-  administraties lekt nooit rijen tussen administraties).
+  administraties lekt nooit rijen tussen administraties), en
+  `laadBeheerparameters` (leest `config/parameters.json` uit de data root,
+  valt terug op standaardwaarden als het bestand ontbreekt).
 
 ## Wat nadrukkelijk nog NIET gebouwd is
 
-- **Rapportpagina's/exports** (HTML/PDF/DOCX in BVC-huisstijl) — `apps/web`
-  is een placeholder. Eerste concrete doel: P&L-exploitatierapportage per
-  vastgoedobject (testcase: object 070 "Rooise Zoom", 2020–2026).
-- **Contract-, huur- en servicekosten-rapportlogica**, grootboekmapping-
-  goedkeuring (alleen `VOORGESTELD` mag Claude registreren, nooit
-  `GOEDGEKEURD`), authenticatie/rollen.
+- **PDF/DOCX-export** — rapportsecties zijn nu HTML (BVC-huisstijl); export
+  volgt in een latere fase.
+- **Koppeling van rapportsecties aan echte data** — de gebouwde secties
+  (P&L, Kerncijfers) zijn tot nu toe alleen tegen synthetische testcases
+  getest, niet tegen een echte `BVC_DATA_ROOT`. Bovendien is gebleken dat
+  vrijwel elke Kerncijfers-KPI (behalve bezettingsgraad) een grootboek-
+  mapping vereist die nog niet bestaat — zie hieronder.
+- **`apps/web`** — nog een lege Next.js-scaffold. Wordt het interactieve
+  dashboard (met filters), op dezelfde rekenlaag/cache als de HTML/PDF-
+  rapporten (CLAUDE.md §3) — nog te bouwen.
+- **Grootboekmapping** — datamodel + opslag voor een `VOORGESTELD`
+  rekening→rapportregel-classificatie (nooit `GOEDGEKEURD` door Claude,
+  dat is een menselijke stap). Blokkeert op dit moment: gerealiseerde
+  huurinkomsten/EBITDA/bankstand/debiteuren/servicekosten-saldo in
+  Kerncijfers, en het bredere rapportmodel. De brondata zelf is geen
+  probleem (`Boekingen`/`Balans`/`Servicekosten` zijn meerjarige "vanaf
+  2024"-bestanden) — het ontbrekende stuk is puur de classificatie.
+- Contract-, huur- en servicekosten-rapportlogica, authenticatie/rollen.
 - **Definitieve locatie** van `BVC_DATA_ROOT` en back-upeigenaar — open punt.
 - Deze repository blijft voorlopig op GitHub (`Sethos21/BVC-rapportage`,
   waar deze sessie al op werkte toen de "geen nieuwe repo zonder

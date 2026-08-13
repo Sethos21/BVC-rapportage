@@ -1,5 +1,6 @@
 import { z } from "zod";
 import Decimal from "decimal.js";
+import type { ServicekostenParameters } from "@bvc/config";
 import { zCode, zCodeOptional, zDecimal } from "../lib/coerce.js";
 import { parseRowsWithSchema, vindDubbeleNatuurlijkeSleutels, type ParseResult, type RowIssue } from "../lib/parseRows.js";
 
@@ -32,20 +33,24 @@ export const ServicekostenregelBronSchema = z.object({
 
 export type ServicekostenregelBron = z.infer<typeof ServicekostenregelBronSchema>;
 
-/** 06_DATA_EN_ODBC_v0.3.md — kostensoort 9600 wordt altijd uitgesloten, andere varianten alleen gesignaleerd. */
+/**
+ * 06_DATA_EN_ODBC_v0.3.md — kostensoort 9600 wordt standaard altijd
+ * uitgesloten, andere varianten alleen gesignaleerd. Welke kostensoorten en
+ * omschrijvingsvarianten dit precies zijn, staat niet hardcoded hier maar
+ * in `servicekostenParams` (CLAUDE.md §3: config-gestuurd, geen hardcoded
+ * uitzonderingen — zie `@bvc/config`).
+ */
 export type ServicekostenUitsluitingsstatus =
   | "GEEN"
   | "UITGESLOTEN_AFREKENING_VORIG_JAAR"
   | "CONTROLE_VEREIST_MOGELIJKE_SERVICEAFREKENING";
 
-const SERVICEAFREKENING_VARIANTEN = ["serviceafrekening", "service afrekening", "service-afrekening", "serviceafrek", "serv.afrek", "afrekening service"];
-
-export function bepaalUitsluitingsstatus(kostensoort: string, omschrijving: string | null): ServicekostenUitsluitingsstatus {
-  if (kostensoort.trim() === "9600") {
+export function bepaalUitsluitingsstatus(kostensoort: string, omschrijving: string | null, servicekostenParams: ServicekostenParameters): ServicekostenUitsluitingsstatus {
+  if (servicekostenParams.uitgeslotenKostensoorten.includes(kostensoort.trim())) {
     return "UITGESLOTEN_AFREKENING_VORIG_JAAR";
   }
   const omschrijvingLower = (omschrijving ?? "").toLowerCase();
-  if (SERVICEAFREKENING_VARIANTEN.some((variant) => omschrijvingLower.includes(variant))) {
+  if (servicekostenParams.serviceafrekeningVarianten.some((variant) => omschrijvingLower.includes(variant))) {
     return "CONTROLE_VEREIST_MOGELIJKE_SERVICEAFREKENING";
   }
   return "GEEN";
@@ -73,7 +78,7 @@ export interface GestaagdeServicekostenregel {
   raw: ServicekostenregelBron;
 }
 
-function naarGestaagdeServicekostenregel(bron: ServicekostenregelBron): GestaagdeServicekostenregel {
+function naarGestaagdeServicekostenregel(bron: ServicekostenregelBron, servicekostenParams: ServicekostenParameters): GestaagdeServicekostenregel {
   return {
     bedrijfsnr: bron.Bedrijfsnr,
     serviceBkBoekjaar: bron.Service_BK_Boekjaar,
@@ -92,7 +97,7 @@ function naarGestaagdeServicekostenregel(bron: ServicekostenregelBron): Gestaagd
     serviceBkBedragCredit: bron.Service_BK_Bedrag_credit,
     serviceBoekingSaldo: bron.Service_BK_Bedrag_debet.minus(bron.Service_BK_Bedrag_credit),
     serviceBkDoorbelasten: bron.Service_BK_Doorbelasten,
-    uitsluitingsstatus: bepaalUitsluitingsstatus(bron.Service_BK_Kostensoort, bron.Service_BK_Omschrijving),
+    uitsluitingsstatus: bepaalUitsluitingsstatus(bron.Service_BK_Kostensoort, bron.Service_BK_Omschrijving, servicekostenParams),
     raw: bron,
   };
 }
@@ -105,9 +110,9 @@ export interface ServicekostenParseResultaat extends ParseResult<GestaagdeServic
   duplicaatIssues: RowIssue[];
 }
 
-export function parseServicekosten(ruweRijen: readonly Record<string, unknown>[]): ServicekostenParseResultaat {
+export function parseServicekosten(ruweRijen: readonly Record<string, unknown>[], servicekostenParams: ServicekostenParameters): ServicekostenParseResultaat {
   const { rijen, issues } = parseRowsWithSchema(ruweRijen, ServicekostenregelBronSchema);
-  const gestaagd = rijen.map(naarGestaagdeServicekostenregel);
+  const gestaagd = rijen.map((rij) => naarGestaagdeServicekostenregel(rij, servicekostenParams));
   const duplicaatIssues = vindDubbeleNatuurlijkeSleutels(gestaagd, servicekostenregelNatuurlijkeSleutel);
   const signaalIssues: RowIssue[] = gestaagd
     .map((rij, index) => ({ rij, index }))
