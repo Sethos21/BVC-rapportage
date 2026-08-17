@@ -6,6 +6,7 @@ export * from "./parameters.js";
 export * from "./grootboekmapping.js";
 export * from "./rebuildCache.js";
 export * from "./genereerControlerapport.js";
+export * from "./genereerPlPeriode.js";
 export * from "./replace.js";
 export * from "./validateBron.js";
 export * from "./lock.js";

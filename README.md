@@ -210,23 +210,30 @@ Aandachtspunten:
   rauw brondata-overzicht rechtstreeks uit de cache, bewust zonder
   grootboekmapping, bedoeld om te reconciliëren met een bestaande
   rapportage. Zie `packages/reporting/README.md`.
+- **P&L-periodeberekening** (`@bvc/reporting`'s `berekenPlPeriode` +
+  `vergelijkMetGereconcilieerd`, `bvc-worker pl-periode
+  <administratieId> --boekjaar N --periodeVan P --periodeTotEnMet P
+  [--verwacht <json>]`) — de eerste koppeling van de goedgekeurde
+  grootboekmapping + expliciete periodeselectie aan een berekening:
+  rapportagepost-totalen voor een expliciete boekjaar/boekperiode-range,
+  met optionele automatische vergelijking tegen eerder handmatig
+  gereconcilieerde bedragen. Bewust alleen rekenkern + vergelijking, geen
+  renderer/HTML. Gebouwd en getest (synthetische fixtures) — nog niet
+  gedraaid tegen de echte cache van `070_Rooise_Zoom`. Zie
+  `packages/reporting/README.md`.
 - **`apps/web`** — nog een lege Next.js-scaffold. Wordt het interactieve
   dashboard (met filters), op dezelfde rekenlaag/cache als de HTML/PDF-
   rapporten (CLAUDE.md §3) — nog te bouwen.
-- **Grootboekmapping — mapping-/configuratielaag en periodefilters
-  gebouwd en (voor `070_Rooise_Zoom`) GOEDGEKEURD, nog niet aan een rapport
-  gekoppeld.** `packages/config`'s grootboekmapping-schema +
-  `@bvc/domain`'s opzoeklogica + `@bvc/cache`'s `periodeSelectie.ts` bestaan
-  nu (zie hierboven); de mapping voor `070_Rooise_Zoom` (14 rekeningen) is
-  door de gebruiker expliciet goedgekeurd, inclusief tekenconventie per
-  rekening. Nog niet gebouwd: het daadwerkelijke P&L-/balansrapport dat
-  deze mapping + periodeselectie gebruikt, en de KPI-koppeling in
-  Kerncijfers (gerealiseerde huurinkomsten/EBITDA/bankstand/debiteuren/
-  servicekosten-saldo). De brondata is geen probleem (`Boekingen`/
-  `Balans`/`Servicekosten` zijn meerjarige "vanaf 2024"-bestanden) — het
-  ontbrekende stuk is de rapportkoppeling; eerstvolgend gepland: één
-  P&L-berekening voor boekjaar 2026 periode 1 t/m 6, automatisch vergeleken
-  met de al handmatig gereconcilieerde bedragen.
+- **Volledig P&L-/balansrapport en KPI-koppeling in Kerncijfers.**
+  Grootboekmapping, periodefilters, en nu ook de eerste P&L-
+  periodeberekening (zie hierboven) staan; wat nog ontbreekt is een
+  renderer/HTML-rapport eromheen en de koppeling in Kerncijfers
+  (gerealiseerde huurinkomsten/EBITDA/bankstand/debiteuren/servicekosten-
+  saldo). De brondata is geen probleem (`Boekingen`/`Balans`/
+  `Servicekosten` zijn meerjarige "vanaf 2024"-bestanden) — het
+  ontbrekende stuk is de rapportkoppeling/-weergave. `resultaat`
+  (nettoresultaat over rapportagecategorieën heen) is bewust nog niet
+  geformaliseerd — zie `packages/reporting/README.md`.
 - Contract-, huur- en servicekosten-rapportlogica, authenticatie/rollen.
 - **Definitieve locatie** van `BVC_DATA_ROOT` en back-upeigenaar — open punt.
 - Deze repository blijft voorlopig op GitHub (`Sethos21/BVC-rapportage`,

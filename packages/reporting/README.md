@@ -15,17 +15,53 @@ dan een duidelijke melding in die sectie. `apps/worker`'s
 niet uit Excel) en schrijft naar `rapporten/`; CLI: `bvc-worker
 controlerapport <administratieId>`.
 
-Dit is momenteel de **enige** sectie die al tegen een echte, herbouwde
-cache is gevalideerd (zie root-README) — Kerncijfers en P&L hieronder
-zijn dat nog niet. De mapping-/configuratielaag zelf (`@bvc/config`'s
-grootboekmapping, `@bvc/domain`'s opzoeklogica, `@bvc/cache`'s expliciete
-periodeselectie) is inmiddels gebouwd, en de mapping voor `070_Rooise_Zoom`
-(14 rekeningen, incl. tekenconventie) is door de gebruiker **GOEDGEKEURD**
-— zie `packages/config/README.md` en `packages/cache/README.md`. Nog niet
-gebouwd: de daadwerkelijke koppeling van deze mapping + periodeselectie aan
-een P&L-/balansrapport (eerstvolgend gepland: één P&L-berekening voor
-boekjaar 2026 periode 1 t/m 6, automatisch vergeleken met de al handmatig
-gereconcilieerde bedragen).
+Dit was de **eerste** sectie die tegen een echte, herbouwde cache is
+gevalideerd (zie root-README); de P&L-periodeberekening hieronder is de
+tweede. Kerncijfers en het bredere P&L-/balansrapport zijn dat nog niet.
+
+## P&L-periodeberekening (`plPeriodeBerekening.ts`) — rekenkern + vergelijking, nog geen renderer
+
+De eerste koppeling van de goedgekeurde grootboekmapping (`@bvc/config`,
+zie `packages/config/README.md`) en de expliciete periodeselectie
+(`@bvc/cache`'s `periodeSelectie.ts`, zie `packages/cache/README.md`) aan
+een daadwerkelijke berekening. Bewust **klein gehouden**: alleen de
+rekenkern en een vergelijkingsfunctie, **geen HTML/renderer** — dat is een
+latere, losse stap.
+
+- **`berekenPlPeriode(boekingen: Boekingsregel[], mappingRegels)`** —
+  neemt een al-periodeselecteerde lijst boekingen (`@bvc/cache`'s
+  `selecteerBoekingen`, buiten deze functie aangeroepen) en de
+  grootboekmapping, en levert per rapportagepost de rapportregelsom
+  (CAL-FIN-003, `rapportbedrag` × CAL-FIN-002 tekenconventie) plus
+  categorietotalen. Rekent bewust **geen gecombineerd nettoresultaat**
+  over categorieën heen uit (Kosten en Opbrengsten kunnen, afhankelijk van
+  hun tekenconventie, allebei als positief bedrag gepresenteerd worden —
+  zoals bij de goedgekeurde `070_Rooise_Zoom`-mapping — dus een blinde som
+  over alle categorieën zou geen betekenisvol resultaat opleveren; welke
+  categorieën optellen/aftrekken voor een resultaatregel is een
+  indelingsvraag die nog niet geformaliseerd is). Grootboekrekeningen met
+  een niet-nul saldo die niet verwerkt konden worden (onbekende rekening,
+  inactieve mapping, onbevestigde tekenconventie) komen in
+  `controleVereist` — nooit stilzwijgend overgeslagen.
+- **`vergelijkMetGereconcilieerd(resultaat, verwachtePerRapportagepost,
+  toleranceEuro)`** — vergelijkt automatisch per rapportagepost met eerder
+  handmatig gereconcilieerde bedragen (hergebruikt CAL-FIN-009/010,
+  `budgetafwijking(Pct)`: "verwacht" = budget, "berekend" = realisatie).
+  Rapportageposten die maar aan één kant voorkomen belanden in
+  `ontbrekendInBerekening`/`onverwachtInBerekening`, nooit als 0
+  vergeleken.
+- **`apps/worker/src/genereerPlPeriode.ts`** — leest de cache
+  (`selecteerBoekingen` op bedrijfsnr + boekjaar + boekperiode-range) en de
+  goedgekeurde grootboekmapping, converteert cacherijen naar
+  `Boekingsregel` (Decimal), en roept `berekenPlPeriode` aan. CLI:
+  `bvc-worker pl-periode <administratieId> --boekjaar N [--periodeVan P
+  --periodeTotEnMet P] [--verwacht <pad-naar-json>] [--tolerantie N]`.
+  `--verwacht` wijst naar een ad-hoc JSON-bestand
+  (`{"<rapportagepost>": "<bedrag>"}`) met de al gereconcilieerde
+  bedragen — geen vaste locatie in de data root, dit is invoer per
+  vergelijking, geen permanente config. Print JSON naar stdout (geen
+  bestand, geen HTML) en zet de exitcode op 1 als `controleVereist`
+  niet leeg is.
 
 ## Kerncijfers (sectie 01 — KPI-dashboard)
 

@@ -1,8 +1,10 @@
+import Decimal from "decimal.js";
 import { BRON_TYPES, administratieConfigPad, dataRoot, lockPad, type BronType } from "./paths.js";
 import { resolveAlleBronnen } from "./sourceResolver.js";
 import { vervangBron, type VervangDoel } from "./replace.js";
 import { rebuildCache } from "./rebuildCache.js";
 import { genereerControlerapport } from "./genereerControlerapport.js";
+import { genereerPlPeriode } from "./genereerPlPeriode.js";
 import { withLock } from "./lock.js";
 import { AdministratieBestaatAlError, initAdministratie } from "./administratie.js";
 
@@ -15,6 +17,8 @@ function printGebruik(): never {
       "  replace <bronType> <gedeeld|administratieId> <bestandspad> [--boekjaar N --boekperiode P]",
       "  rebuild-cache <administratieId> [--boekjaar N --boekperiode P]  (boekjaar/boekperiode alleen nodig als ouderdomsanalyse aanwezig is)",
       "  controlerapport <administratieId>  (rauw brondata-overzicht uit de cache, ter vergelijking met een bestaande rapportage)",
+      "  pl-periode <administratieId> --boekjaar N [--periodeVan P --periodeTotEnMet P] [--verwacht <pad-naar-json>] [--tolerantie N]",
+      "      (P&L-berekening op de goedgekeurde grootboekmapping voor een expliciete periode; --verwacht vergelijkt automatisch met eerder gereconcilieerde bedragen)",
       "",
       `bronType is één van: ${BRON_TYPES.join(", ")}`,
       "Vereist BVC_DATA_ROOT.",
@@ -106,6 +110,23 @@ async function main() {
     if (!administratieId) printGebruik();
     const resultaat = genereerControlerapport(root, administratieId);
     console.log(`Controlerapport geschreven: ${resultaat.pad}`);
+    return;
+  }
+
+  if (command === "pl-periode") {
+    const [administratieId] = rest;
+    const boekjaarStr = parseFlag(rest, "boekjaar");
+    if (!administratieId || !boekjaarStr) printGebruik();
+    const tolerantieStr = parseFlag(rest, "tolerantie");
+    const resultaat = genereerPlPeriode(root, administratieId, {
+      boekjaar: Number(boekjaarStr),
+      boekperiodeVan: parseFlag(rest, "periodeVan"),
+      boekperiodeTotEnMet: parseFlag(rest, "periodeTotEnMet"),
+      verwachtePad: parseFlag(rest, "verwacht"),
+      toleranceEuro: tolerantieStr ? new Decimal(tolerantieStr) : undefined,
+    });
+    console.log(JSON.stringify(resultaat, null, 2));
+    if (resultaat.resultaat.controleVereist.length > 0) process.exitCode = 1;
     return;
   }
 

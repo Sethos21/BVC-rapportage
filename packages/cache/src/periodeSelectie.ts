@@ -19,9 +19,9 @@ export interface BoekingenSelectieCriteria {
    * het boekjaar — dat is een expliciete keuze van de aanroeper ("heel het
    * boekjaar"), geen impliciete fallback.
    */
-  boekperiodeVan?: string;
-  boekperiodeTotEnMet?: string;
-  grootboekrekening?: string;
+  boekperiodeVan?: string | undefined;
+  boekperiodeTotEnMet?: string | undefined;
+  grootboekrekening?: string | undefined;
 }
 
 /**
