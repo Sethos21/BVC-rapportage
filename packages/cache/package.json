@@ -9,6 +9,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
+  "dependencies": {
+    "@bvc/domain": "workspace:*"
+  },
   "devDependencies": {
     "@types/node": "^24.13.2",
     "typescript": "^5.9.3",

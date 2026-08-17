@@ -100,7 +100,18 @@ dit draait op verschillende werkcomputers.
   `STANDAARD_PARAMETERS`): welke servicekosten-kostensoorten altijd worden
   uitgesloten, welke omschrijvingsvarianten een mogelijke serviceafrekening
   signaleren. Voorheen hardcoded in `data-contracts/sources/servicekosten.ts`,
-  nu een parameter die de aanroeper meegeeft — zie CLAUDE.md §3.
+  nu een parameter die de aanroeper meegeeft — zie CLAUDE.md §3. Bevat ook
+  de **grootboekmapping** (Zod-schema, één JSON-bestand per administratie in
+  de data root, `@bvc/domain`'s `zoekMappingRegel`/`presentatiefactorVoorRegel`
+  voor de opzoek-/tekenconventielogica) — zie `packages/config/README.md`
+  voor de volledige toelichting en de bevestigde mapping voor
+  `070_Rooise_Zoom` (14 rekeningen; tekenconventie nog nergens bevestigd).
+- **`@bvc/cache`'s `periodeSelectie.ts`** — expliciete periodeselectie op
+  boekingen (boekjaar + boekperiode-range) en balansstanden (boekjaar),
+  nooit een impliciete eerste/laatste/willekeurige rij. Documenteert
+  expliciet het bekende gat dat de cache geen balans per specifieke
+  boekperiode binnen een jaar kan leveren (alleen jaareindsaldo) — zie
+  `packages/cache/README.md`.
 - **`packages/reporting`** — rapportsecties, elk met een eigen rekenmodule
   (los van de renderer) en gedeelde huisstijl (`huisstijl.ts`). Gebouwd:
   P&L-exploitatierapportage en sectie 01 Kerncijfers (KPI-dashboard). Zie
@@ -202,13 +213,18 @@ Aandachtspunten:
 - **`apps/web`** — nog een lege Next.js-scaffold. Wordt het interactieve
   dashboard (met filters), op dezelfde rekenlaag/cache als de HTML/PDF-
   rapporten (CLAUDE.md §3) — nog te bouwen.
-- **Grootboekmapping** — datamodel + opslag voor een `VOORGESTELD`
-  rekening→rapportregel-classificatie (nooit `GOEDGEKEURD` door Claude,
-  dat is een menselijke stap). Blokkeert op dit moment: gerealiseerde
-  huurinkomsten/EBITDA/bankstand/debiteuren/servicekosten-saldo in
-  Kerncijfers, en het bredere rapportmodel. De brondata zelf is geen
-  probleem (`Boekingen`/`Balans`/`Servicekosten` zijn meerjarige "vanaf
-  2024"-bestanden) — het ontbrekende stuk is puur de classificatie.
+- **Grootboekmapping — mapping-/configuratielaag en periodefilters
+  gebouwd, nog niet aan een rapport gekoppeld.** `packages/config`'s
+  grootboekmapping-schema + `@bvc/domain`'s opzoeklogica + `@bvc/cache`'s
+  `periodeSelectie.ts` bestaan nu (zie hierboven), met een `VOORGESTELD`
+  (nooit `GOEDGEKEURD` door Claude) mapping-voorstel voor `070_Rooise_Zoom`.
+  Nog niet gebouwd: het daadwerkelijke P&L-/balansrapport dat deze mapping
+  + periodeselectie gebruikt, en de KPI-koppeling in Kerncijfers
+  (gerealiseerde huurinkomsten/EBITDA/bankstand/debiteuren/servicekosten-
+  saldo). Ook nog open: tekenconventie per rekening (nergens bevestigd) en
+  menselijke goedkeuring van de mapping zelf. De brondata is geen probleem
+  (`Boekingen`/`Balans`/`Servicekosten` zijn meerjarige "vanaf
+  2024"-bestanden) — het ontbrekende stuk is de rapportkoppeling.
 - Contract-, huur- en servicekosten-rapportlogica, authenticatie/rollen.
 - **Definitieve locatie** van `BVC_DATA_ROOT` en back-upeigenaar — open punt.
 - Deze repository blijft voorlopig op GitHub (`Sethos21/BVC-rapportage`,

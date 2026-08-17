@@ -1,6 +1,7 @@
 import * as XLSX from "xlsx";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import type { GrootboekMappingConfig } from "@bvc/config";
 
 /** Schrijft rijen als een echte .xlsx (geen gefabriceerde bestandsstructuur — een echt SheetJS-workbook). */
 export function schrijfXlsxFixture(pad: string, rijen: Record<string, unknown>[], sheetNaam = "Blad1"): void {
@@ -223,4 +224,48 @@ export function begrotingServicekostenRijen(): Record<string, unknown>[] {
       budget_fy: "(757)", toelichting: "Onderhoud verlichting",
     },
   ];
+}
+
+/**
+ * De grootboekmapping voor `070_Rooise_Zoom`, bevestigd door de gebruiker
+ * door het Controlerapport (rauwe cachedata) te vergelijken met de
+ * bestaande Q2-2026-rapportage (2026-08-17) — zie packages/config/README.md
+ * voor de volledige toelichting per rekening en de nog niet inhoudelijk
+ * bevestigde velden (tekenconventie staat overal op `null`: alleen de
+ * rapportagepost is bevestigd, niet het teken). Dient hier als
+ * representatieve fixture voor tests; is NIET automatisch de mapping die
+ * `070_Rooise_Zoom` in productie gebruikt — dat vereist het bestand
+ * handmatig naar `<BVC_DATA_ROOT>/config/grootboekmappingen/070_Rooise_Zoom.json`
+ * te kopiëren (CLAUDE.md §5: data blijft buiten git).
+ */
+export function rooiseZoomGrootboekMapping(): GrootboekMappingConfig {
+  const rekeningen: [string, string, string][] = [
+    ["4000", "Beheerkosten", "Kosten"],
+    ["4130", "Verzekeringen", "Kosten"],
+    ["4300", "Onderhoud gebouwen", "Kosten"],
+    ["4330", "Onderhoud terrein", "Kosten"],
+    ["4340", "Onderhoud installaties", "Kosten"],
+    ["4350", "Servicekosten eigenaar", "Kosten"],
+    ["4700", "WOZ / OZB", "Kosten"],
+    ["4710", "Gemeentelijke heffingen", "Kosten"],
+    ["4903", "Niet verrekenbare BTW", "Kosten"],
+    ["4990", "Diverse algemene kosten", "Kosten"],
+    ["8800", "Huuropbrengsten belast", "Opbrengsten"],
+    ["8801", "Huuropbrengsten onbelast", "Opbrengsten"],
+    ["8805", "Verleende huurkorting", "Opbrengsten"],
+    ["8815", "Zonnestroom", "Opbrengsten"],
+  ];
+
+  return {
+    versie: "0.1",
+    administratieId: "070_rooisezoom",
+    regels: rekeningen.map(([grootboekrekening, rapportagepost, rapportagecategorie]) => ({
+      grootboekrekening,
+      rapportagepost,
+      rapportagecategorie,
+      tekenconventie: null,
+      actief: true,
+      status: "VOORGESTELD" as const,
+    })),
+  };
 }

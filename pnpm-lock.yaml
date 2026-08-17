@@ -87,6 +87,10 @@ importers:
         version: 0.18.5
 
   packages/cache:
+    dependencies:
+      '@bvc/domain':
+        specifier: workspace:*
+        version: link:../domain
     devDependencies:
       '@types/node':
         specifier: ^24.13.2
@@ -141,6 +145,9 @@ importers:
 
   packages/domain:
     dependencies:
+      '@bvc/config':
+        specifier: workspace:*
+        version: link:../config
       decimal.js:
         specifier: ^10.6.0
         version: 10.6.0

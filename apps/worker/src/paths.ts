@@ -65,6 +65,15 @@ export function parametersPad(root: string): string {
   return join(configDir(root), "parameters.json");
 }
 
+/** CLAUDE.md §3/§6: grootboekmapping per administratie, centraal onder config/ — nooit hardcoded in rapportagecode. */
+export function grootboekmappingenDir(root: string): string {
+  return join(configDir(root), "grootboekmappingen");
+}
+
+export function grootboekmappingPad(root: string, administratieId: string): string {
+  return join(grootboekmappingenDir(root), `${administratieId}.json`);
+}
+
 export function bronGedeeldDir(root: string): string {
   return join(root, "bron_gedeeld");
 }

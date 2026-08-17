@@ -3,6 +3,7 @@ export * from "./administratie.js";
 export * from "./bronAdapter.js";
 export * from "./sourceResolver.js";
 export * from "./parameters.js";
+export * from "./grootboekmapping.js";
 export * from "./rebuildCache.js";
 export * from "./genereerControlerapport.js";
 export * from "./replace.js";

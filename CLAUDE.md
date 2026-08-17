@@ -127,6 +127,26 @@ van bestanden buiten de esbuild-bundel).
   default invullen (`OnbekendOf<T>`-patroon in `@bvc/domain`).
 - Grootboekmapping mag alleen `VOORGESTELD` worden geregistreerd, nooit
   `GOEDGEKEURD` — goedkeuring is een menselijke stap.
+- **Financiële classificatie loopt altijd via de centrale mapping-/
+  configuratielaag** (`@bvc/config`'s grootboekmapping, per administratie
+  onder `config/grootboekmappingen/<administratieId>.json` — zie
+  `packages/config/README.md`), nooit via een losse if/switch op een
+  grootboekrekeningnummer in rapportage- of KPI-code. Dat geldt ook voor de
+  tekenconventie (hoe een brondata-saldo naar het gepresenteerde teken van
+  een rapportagepost vertaalt): die hoort in de mapping/config, niet in
+  presentatiecode. Een niet-gemapte, inactieve, of qua tekenconventie nog
+  onbevestigde rekening levert `OnbekendOf`-`onbekend` op, nooit een
+  aanname of stilzwijgende 0/factor-1.
+- **Periodekeuze is altijd expliciet.** Eén grootboekrekening kan meerdere
+  balansstanden/periodewaarden hebben (bevestigd via het Controlerapport op
+  de echte cache van `070_Rooise_Zoom`) — data-/rapportagecode mag daarom
+  nooit impliciet de eerste/laatste/willekeurige rij gebruiken. Selecteer
+  altijd expliciet op minimaal administratie + boekjaar + boekperiode(-range)
+  + grootboekrekening (zie `@bvc/cache`'s `periodeSelectie.ts`). Kan de
+  gevraagde periodegranulariteit (nog) niet betrouwbaar geleverd worden
+  (bv. balans op een specifieke boekperiode — de cache heeft alleen een
+  jaareindsaldo), dan is het antwoord expliciet `onbekend`, nooit een
+  stilzwijgende benadering met een andere periode.
 
 Zie `README.md` voor de actuele bouwstatus per package en het
 overdrachtsdossier voor de volledige historische besluitvorming.
