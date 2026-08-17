@@ -17,14 +17,15 @@ controlerapport <administratieId>`.
 
 Dit is momenteel de **enige** sectie die al tegen een echte, herbouwde
 cache is gevalideerd (zie root-README) — Kerncijfers en P&L hieronder
-zijn dat nog niet, ze wachten op een goedgekeurde grootboekmapping. De
-mapping-/configuratielaag zelf (`@bvc/config`'s grootboekmapping,
-`@bvc/domain`'s opzoeklogica, `@bvc/cache`'s expliciete periodeselectie)
-is inmiddels gebouwd — zie `packages/config/README.md` en
-`packages/cache/README.md` — maar nog niet aan deze rapportsecties
-gekoppeld, en de mapping voor `070_Rooise_Zoom` staat nog op
-`VOORGESTELD` (menselijke goedkeuring + bevestiging van de tekenconventie
-per rekening ontbreken nog).
+zijn dat nog niet. De mapping-/configuratielaag zelf (`@bvc/config`'s
+grootboekmapping, `@bvc/domain`'s opzoeklogica, `@bvc/cache`'s expliciete
+periodeselectie) is inmiddels gebouwd, en de mapping voor `070_Rooise_Zoom`
+(14 rekeningen, incl. tekenconventie) is door de gebruiker **GOEDGEKEURD**
+— zie `packages/config/README.md` en `packages/cache/README.md`. Nog niet
+gebouwd: de daadwerkelijke koppeling van deze mapping + periodeselectie aan
+een P&L-/balansrapport (eerstvolgend gepland: één P&L-berekening voor
+boekjaar 2026 periode 1 t/m 6, automatisch vergeleken met de al handmatig
+gereconcilieerde bedragen).
 
 ## Kerncijfers (sectie 01 — KPI-dashboard)
 

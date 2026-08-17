@@ -104,8 +104,8 @@ dit draait op verschillende werkcomputers.
   de **grootboekmapping** (Zod-schema, één JSON-bestand per administratie in
   de data root, `@bvc/domain`'s `zoekMappingRegel`/`presentatiefactorVoorRegel`
   voor de opzoek-/tekenconventielogica) — zie `packages/config/README.md`
-  voor de volledige toelichting en de bevestigde mapping voor
-  `070_Rooise_Zoom` (14 rekeningen; tekenconventie nog nergens bevestigd).
+  voor de volledige toelichting en de **goedgekeurde** mapping voor
+  `070_Rooise_Zoom` (14 rekeningen, incl. tekenconventie per rekening).
 - **`@bvc/cache`'s `periodeSelectie.ts`** — expliciete periodeselectie op
   boekingen (boekjaar + boekperiode-range) en balansstanden (boekjaar),
   nooit een impliciete eerste/laatste/willekeurige rij. Documenteert
@@ -214,17 +214,19 @@ Aandachtspunten:
   dashboard (met filters), op dezelfde rekenlaag/cache als de HTML/PDF-
   rapporten (CLAUDE.md §3) — nog te bouwen.
 - **Grootboekmapping — mapping-/configuratielaag en periodefilters
-  gebouwd, nog niet aan een rapport gekoppeld.** `packages/config`'s
-  grootboekmapping-schema + `@bvc/domain`'s opzoeklogica + `@bvc/cache`'s
-  `periodeSelectie.ts` bestaan nu (zie hierboven), met een `VOORGESTELD`
-  (nooit `GOEDGEKEURD` door Claude) mapping-voorstel voor `070_Rooise_Zoom`.
-  Nog niet gebouwd: het daadwerkelijke P&L-/balansrapport dat deze mapping
-  + periodeselectie gebruikt, en de KPI-koppeling in Kerncijfers
-  (gerealiseerde huurinkomsten/EBITDA/bankstand/debiteuren/servicekosten-
-  saldo). Ook nog open: tekenconventie per rekening (nergens bevestigd) en
-  menselijke goedkeuring van de mapping zelf. De brondata is geen probleem
-  (`Boekingen`/`Balans`/`Servicekosten` zijn meerjarige "vanaf
-  2024"-bestanden) — het ontbrekende stuk is de rapportkoppeling.
+  gebouwd en (voor `070_Rooise_Zoom`) GOEDGEKEURD, nog niet aan een rapport
+  gekoppeld.** `packages/config`'s grootboekmapping-schema +
+  `@bvc/domain`'s opzoeklogica + `@bvc/cache`'s `periodeSelectie.ts` bestaan
+  nu (zie hierboven); de mapping voor `070_Rooise_Zoom` (14 rekeningen) is
+  door de gebruiker expliciet goedgekeurd, inclusief tekenconventie per
+  rekening. Nog niet gebouwd: het daadwerkelijke P&L-/balansrapport dat
+  deze mapping + periodeselectie gebruikt, en de KPI-koppeling in
+  Kerncijfers (gerealiseerde huurinkomsten/EBITDA/bankstand/debiteuren/
+  servicekosten-saldo). De brondata is geen probleem (`Boekingen`/
+  `Balans`/`Servicekosten` zijn meerjarige "vanaf 2024"-bestanden) — het
+  ontbrekende stuk is de rapportkoppeling; eerstvolgend gepland: één
+  P&L-berekening voor boekjaar 2026 periode 1 t/m 6, automatisch vergeleken
+  met de al handmatig gereconcilieerde bedragen.
 - Contract-, huur- en servicekosten-rapportlogica, authenticatie/rollen.
 - **Definitieve locatie** van `BVC_DATA_ROOT` en back-upeigenaar — open punt.
 - Deze repository blijft voorlopig op GitHub (`Sethos21/BVC-rapportage`,

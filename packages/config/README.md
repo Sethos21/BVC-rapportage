@@ -46,9 +46,9 @@ bestand/regels, zonder codewijziging.
       "grootboekrekening": "4000",       // grootboekrekeningnummer uit de bron
       "rapportagepost": "Beheerkosten",  // specifieke rapportregel
       "rapportagecategorie": "Kosten",   // bredere groepering
-      "tekenconventie": null,            // "ZOALS_BRON" | "OMGEKEERD" | null (nog niet bevestigd)
+      "tekenconventie": "ZOALS_BRON",     // "ZOALS_BRON" | "OMGEKEERD" | null (nog niet bevestigd)
       "actief": true,                    // operationele aan/uit-schakelaar
-      "status": "VOORGESTELD"            // "VOORGESTELD" | "GOEDGEKEURD" — GOEDGEKEURD is een menselijke stap
+      "status": "GOEDGEKEURD"            // "VOORGESTELD" | "GOEDGEKEURD" — GOEDGEKEURD is een menselijke stap
     }
   ]
 }
@@ -77,68 +77,69 @@ inactieve regel hetzelfde als een onbekende rekening (`OnbekendOf`
   `presentatiefactorVoorRegel` geeft dan `OnbekendOf`-`onbekend` terug —
   nooit stilzwijgend `"ZOALS_BRON"`/factor 1 aannemen.
 
-### Bevestigde mapping voor `070_Rooise_Zoom` (14 rekeningen)
+### Goedgekeurde mapping voor `070_Rooise_Zoom` (14 rekeningen)
 
 Afgeleid door de gebruiker uit vergelijking van het Controlerapport tegen
-de bestaande Q2-2026-rapportage (2026-08-17). `rapportagepost` is
-bevestigd; `rapportagecategorie` is hier mechanisch afgeleid uit de
-standaard grootboek-nummerconventie (4xxx = Kosten, 8xxx = Opbrengsten —
-een structurele afleiding, geen inhoudelijke aanname) en dus **een open
-punt** als een fijnere indeling gewenst is. `tekenconventie` is voor **geen
-enkele** van deze 14 rekeningen expliciet bevestigd (de gebruiker gaf de
-doel-rapportagepost, niet het teken) en staat daarom overal op `null` —
-zie "Nog niet inhoudelijk bevestigd" hieronder. Alle regels: `"actief":
-true`, `"status": "VOORGESTELD"` (nooit `GOEDGEKEURD` door een AI-sessie).
+de bestaande Q2-2026-rapportage, en vervolgens expliciet **GOEDGEKEURD**
+door de gebruiker inclusief tekenconventie per rekening (2026-08-17,
+menselijke goedkeuring — CLAUDE.md §6). `rapportagecategorie` is hier
+mechanisch afgeleid uit de standaard grootboek-nummerconventie (4xxx =
+Kosten, 8xxx = Opbrengsten); een fijnere indeling is voorlopig bewust niet
+gewenst (zie "Bewust uitgesteld" hieronder). Alle regels: `"actief": true`,
+`"status": "GOEDGEKEURD"`.
 
-| grootboekrekening | rapportagepost | rapportagecategorie |
-|---|---|---|
-| 4000 | Beheerkosten | Kosten |
-| 4130 | Verzekeringen | Kosten |
-| 4300 | Onderhoud gebouwen | Kosten |
-| 4330 | Onderhoud terrein | Kosten |
-| 4340 | Onderhoud installaties | Kosten |
-| 4350 | Servicekosten eigenaar | Kosten |
-| 4700 | WOZ / OZB | Kosten |
-| 4710 | Gemeentelijke heffingen | Kosten |
-| 4903 | Niet verrekenbare BTW | Kosten |
-| 4990 | Diverse algemene kosten | Kosten |
-| 8800 | Huuropbrengsten belast | Opbrengsten |
-| 8801 | Huuropbrengsten onbelast | Opbrengsten |
-| 8805 | Verleende huurkorting | Opbrengsten |
-| 8815 | Zonnestroom | Opbrengsten |
+| grootboekrekening | rapportagepost | rapportagecategorie | tekenconventie |
+|---|---|---|---|
+| 4000 | Beheerkosten | Kosten | ZOALS_BRON |
+| 4130 | Verzekeringen | Kosten | ZOALS_BRON |
+| 4300 | Onderhoud gebouwen | Kosten | ZOALS_BRON |
+| 4330 | Onderhoud terrein | Kosten | ZOALS_BRON |
+| 4340 | Onderhoud installaties | Kosten | ZOALS_BRON |
+| 4350 | Servicekosten eigenaar | Kosten | ZOALS_BRON |
+| 4700 | WOZ / OZB | Kosten | ZOALS_BRON |
+| 4710 | Gemeentelijke heffingen | Kosten | ZOALS_BRON |
+| 4903 | Niet verrekenbare BTW | Kosten | ZOALS_BRON |
+| 4990 | Diverse algemene kosten | Kosten | ZOALS_BRON |
+| 8800 | Huuropbrengsten belast | Opbrengsten | OMGEKEERD |
+| 8801 | Huuropbrengsten onbelast | Opbrengsten | OMGEKEERD |
+| 8805 | Verleende huurkorting | Opbrengsten | OMGEKEERD |
+| 8815 | Zonnestroom | Opbrengsten | OMGEKEERD |
 
 Het kant-en-klare JSON-bestand voor deze 14 regels staat in
 `packages/tests/src/fixtures.ts`'s `rooiseZoomGrootboekMapping()` (gebruikt
-door de tests als representatieve fixture — zie hieronder) en in de
-Oplevering van deze bouwstap. Omdat `BVC_DATA_ROOT` buiten git staat
-(CLAUDE.md §5), moet de gebruiker dit bestand zelf naar
+door de tests als representatieve fixture — zie hieronder). Omdat
+`BVC_DATA_ROOT` buiten git staat (CLAUDE.md §5), moet de gebruiker dit
+bestand zelf naar
 `<BVC_DATA_ROOT>/config/grootboekmappingen/070_Rooise_Zoom.json` kopiëren
 om het daadwerkelijk te gebruiken — dit gebeurt niet automatisch.
 
-### Nog niet inhoudelijk bevestigd (open punten voor de gebruiker)
+### Bewust uitgesteld (geen open keuze, expliciet besluit)
 
-- **Tekenconventie per rekening** — voor alle 14 rekeningen hierboven op
-  `null`. Met name `8800`/`8801`/`8815` (opbrengsten, vermoedelijk
-  `"OMGEKEERD"`) en `8805` (huurkorting — een aftrekpost, teken hangt af van
-  hoe de bron die boekt) hebben expliciete bevestiging nodig voordat
-  rapportbedragen ermee berekend mogen worden.
-- **Rapportagecategorie-granulariteit** — nu alleen Kosten/Opbrengsten
-  (structureel afgeleid); een fijnere indeling (Beheer/Onderhoud/
-  Belastingen en heffingen/Servicekosten/Huuropbrengsten/Overige
-  opbrengsten) is mogelijk gewenst maar niet door de gebruiker bevestigd.
-- **Verhouding tot het bestaande `GrootboekMapping`-type in
-  `@bvc/domain`** (`types.ts`, met `balansOfResultaat`/`rapportcode`/
-  `presentatiefactor`/`geldigVanaf`/`status`/`versie`, gebruikt door
-  `finance.ts`'s `rapportbedrag`/`nietGemapteRekeningenMetSaldo`) — dat is
-  een eerder, uitgebreider model uit een extern dossierdocument
-  (`GROOTBOEKMAPPING_SPEC_v0.1.md`, niet in deze repository) met een
-  geldigheids-/goedkeuringsmodel per periode, tot nu toe zonder
-  opslag-/laadlaag. Deze bouwstap introduceert bewust een **apart,
-  eenvoudiger** schema (`GrootboekMappingRegel`) dat exact de vier
-  gevraagde velden dekt (rapportagepost/rapportagecategorie/tekenconventie/
-  actief), zonder de bestaande `finance.ts`-functies aan te passen. Of/hoe
-  deze twee modellen op termijn worden samengevoegd is niet door de
-  gebruiker besloten — een latere, expliciete keuze.
+- **Rapportagecategorie-granulariteit** — voorlopig bewust alleen Kosten/
+  Opbrengsten; een fijnere indeling (Beheer/Onderhoud/Belastingen en
+  heffingen/Servicekosten/Huuropbrengsten/Overige opbrengsten) komt pas
+  later als daar behoefte aan is.
+
+### Technisch aandachtspunt: verhouding tot het bestaande `GrootboekMapping`-type in `@bvc/domain`
+
+`@bvc/domain`'s `types.ts` bevat een ouder, uitgebreider `GrootboekMapping`-
+type (`balansOfResultaat`/`rapportcode`/`presentatiefactor`/`geldigVanaf`/
+`status`/`versie`, gebruikt door `finance.ts`'s
+`rapportbedrag`/`nietGemapteRekeningenMetSaldo`), afkomstig uit een extern
+dossierdocument (`GROOTBOEKMAPPING_SPEC_v0.1.md`, niet in deze repository)
+met een geldigheids-/goedkeuringsmodel per periode, tot nu toe zonder
+opslag-/laadlaag. Deze bouwstap introduceert bewust een **apart,
+eenvoudiger** schema (`GrootboekMappingRegel`) dat exact de gevraagde
+velden dekt (rapportagepost/rapportagecategorie/tekenconventie/actief),
+zonder de bestaande `finance.ts`-functies aan te passen. Op expliciet
+verzoek van de gebruiker blijft dit zo: **geen samenvoeging en geen
+verwijdering nu** — dit is een bewust uitgestelde beslissing, geen open
+vraag die om een antwoord vraagt. Twee `GrootboekMapping`-achtige modellen
+naast elkaar in de codebase is de bekende, geaccepteerde staat totdat een
+latere sessie hier expliciet een beslissing over neemt.
+
+### Nog niet inhoudelijk bevestigd
+
 - **Balans op een specifieke boekperiode** (zie `@bvc/cache`'s
   `periodeSelectie.ts`) kan de huidige cache niet leveren — een bekend gat,
   geen aanname.

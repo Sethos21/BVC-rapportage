@@ -24,10 +24,10 @@ describe("de bevestigde 070_Rooise_Zoom-grootboekmapping (representatieve fixtur
     expect(parseGrootboekMapping(viaJson)).toEqual(mapping);
   });
 
-  it("bevat alle 14 bevestigde rekeningen, elk actief en VOORGESTELD", () => {
+  it("bevat alle 14 bevestigde rekeningen, elk actief en GOEDGEKEURD", () => {
     const mapping = rooiseZoomGrootboekMapping();
     expect(mapping.regels).toHaveLength(14);
-    expect(mapping.regels.every((r) => r.actief && r.status === "VOORGESTELD")).toBe(true);
+    expect(mapping.regels.every((r) => r.actief && r.status === "GOEDGEKEURD")).toBe(true);
   });
 
   it("kan volledig geladen worden via de echte Worker-loader nadat het bestand in de data root is geplaatst", () => {
@@ -53,11 +53,21 @@ describe("de bevestigde 070_Rooise_Zoom-grootboekmapping (representatieve fixtur
     expect(resultaat.type).toBe("onbekend");
   });
 
-  it("levert onbekend op voor de presentatiefactor van elke bevestigde rekening — tekenconventie is nog nergens bevestigd", () => {
+  it("geeft factor 1 (ZOALS_BRON) voor de kostenrekeningen (4xxx)", () => {
     const mapping = rooiseZoomGrootboekMapping();
-    for (const regel of mapping.regels) {
-      const resultaat = presentatiefactorVoorRegel(regel);
-      expect(resultaat.type).toBe("onbekend");
+    const kostenregels = mapping.regels.filter((r) => r.rapportagecategorie === "Kosten");
+    expect(kostenregels).toHaveLength(10);
+    for (const regel of kostenregels) {
+      expect(presentatiefactorVoorRegel(regel)).toEqual({ type: "bekend", waarde: 1 });
+    }
+  });
+
+  it("geeft factor -1 (OMGEKEERD) voor de opbrengstrekeningen (8xxx)", () => {
+    const mapping = rooiseZoomGrootboekMapping();
+    const opbrengstregels = mapping.regels.filter((r) => r.rapportagecategorie === "Opbrengsten");
+    expect(opbrengstregels).toHaveLength(4);
+    for (const regel of opbrengstregels) {
+      expect(presentatiefactorVoorRegel(regel)).toEqual({ type: "bekend", waarde: -1 });
     }
   });
 });
