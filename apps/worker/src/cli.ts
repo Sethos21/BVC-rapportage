@@ -5,6 +5,7 @@ import { vervangBron, type VervangDoel } from "./replace.js";
 import { rebuildCache } from "./rebuildCache.js";
 import { genereerControlerapport } from "./genereerControlerapport.js";
 import { genereerPlPeriode } from "./genereerPlPeriode.js";
+import { genereerGrootboekInventarisatie } from "./genereerGrootboekInventarisatie.js";
 import { withLock } from "./lock.js";
 import { AdministratieBestaatAlError, initAdministratie } from "./administratie.js";
 
@@ -19,6 +20,8 @@ function printGebruik(): never {
       "  controlerapport <administratieId>  (rauw brondata-overzicht uit de cache, ter vergelijking met een bestaande rapportage)",
       "  pl-periode <administratieId> --boekjaar N [--periodeVan P --periodeTotEnMet P] [--verwacht <pad-naar-json>] [--tolerantie N]",
       "      (P&L-berekening op de goedgekeurde grootboekmapping voor een expliciete periode; --verwacht vergelijkt automatisch met eerder gereconcilieerde bedragen)",
+      "  grootboek-inventarisatie",
+      "      (alleen-lezen: inventariseert grootboekrekeninggebruik over ALLE administraties in de gedeelde bron boekingen/balans_per_jaar — voorbereiding op een centrale mastermapping, past niets toe)",
       "",
       `bronType is één van: ${BRON_TYPES.join(", ")}`,
       "Vereist BVC_DATA_ROOT.",
@@ -127,6 +130,15 @@ async function main() {
     });
     console.log(JSON.stringify(resultaat, null, 2));
     if (resultaat.resultaat.controleVereist.length > 0) process.exitCode = 1;
+    return;
+  }
+
+  if (command === "grootboek-inventarisatie") {
+    const resultaat = genereerGrootboekInventarisatie(root);
+    console.error(
+      `Ingelezen: ${resultaat.boekingenIssues.length} issues in boekingen, ${resultaat.balansIssues.length} issues in balans_per_jaar (zie stderr niet meegenomen in de JSON-uitvoer op stdout).`,
+    );
+    console.log(JSON.stringify(resultaat.inventarisatie, null, 2));
     return;
   }
 

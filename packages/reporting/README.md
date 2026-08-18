@@ -74,6 +74,40 @@ latere, losse stap.
   permanente config. Print JSON naar stdout (geen bestand, geen HTML) en
   zet de exitcode op 1 als `controleVereist` niet leeg is.
 
+## Grootboek-inventarisatie (`grootboekInventarisatie.ts`) — voorbereiding op een centrale mastermapping
+
+Puur diagnostisch, alleen-lezen: past geen mapping toe, verandert niets.
+Voorbereidende stap voor schaalbaarheid van de grootboekmapping naar
+meerdere administraties (tot nu toe was `070_Rooise_Zoom` de enige, volledig
+handmatig doorlopen administratie).
+
+- **`inventariseerGrootboekrekeningen(boekingen, balansomschrijvingen)`** —
+  groepeert grootboekrekeninggebruik per Bedrijfsnr (aantal boekingen,
+  rauw saldototaal) en koppelt de omschrijving + ruwe `Balans_vw`-waarde uit
+  de `balans_per_jaar`-bron (meest recente boekjaar per Bedrijfsnr+rekening).
+  Per rekeningnummer: `consistent: true` alleen als omschrijving én
+  `balansVw` exact gelijk zijn bij elk Bedrijfsnr dat de rekening gebruikt —
+  dat is de enige basis om een rekening automatisch als "betrouwbaar gelijk
+  over administraties" te bestempelen; bij de kleinste afwijking `false`,
+  nooit gegokt.
+- **`apps/worker/src/genereerGrootboekInventarisatie.ts`** — leest
+  `bron_gedeeld/boekingen.xlsx` en `bron_gedeeld/balans_per_jaar.xlsx`
+  rechtstreeks en ongefilterd (alle Bedrijfsnr-waarden die in het bestand
+  voorkomen), niet via een per-administratie cache. CLI: `bvc-worker
+  grootboek-inventarisatie` (geen `administratieId`, geen `BVC_DATA_ROOT`-
+  administratie nodig — werkt direct op de gedeelde bron). Beperking: dekt
+  alleen bronnen die op `'gedeeld'` staan (de standaardinstelling); een
+  administratie met `'eigen'` boekingen/balans_per_jaar zit hier nog niet
+  in.
+- **Nog onbevestigd:** of de brondata-kolom `Balans_vw` daadwerkelijk
+  Bal/V&W aangeeft (zoals de "Srt"-kolom in het handmatig aangeleverde
+  rekeningschema van `070_Rooise_Zoom`) — dat blijkt pas uit de echte
+  waarden die `grootboek-inventarisatie` teruggeeft. Als dat bevestigd
+  wordt, kan de `soort`-classificatie (zie `packages/config/README.md`)
+  mogelijk rechtstreeks uit deze gedeelde bron afgeleid worden i.p.v. per
+  administratie een apart rekeningschema te moeten aanleveren — nog niet
+  aangenomen, alleen een mogelijkheid om te verifiëren.
+
 ## Kerncijfers (sectie 01 — KPI-dashboard)
 
 `renderKerncijfersHtml` rendert het portefeuille-KPI-dashboard: 6

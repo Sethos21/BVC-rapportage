@@ -6,4 +6,5 @@ export * from "./renderKerncijfers.js";
 export * from "./controlerapport.js";
 export * from "./renderControlerapport.js";
 export * from "./plPeriodeBerekening.js";
+export * from "./grootboekInventarisatie.js";
 export { HUISSTIJL_CSS, escapeHtml, formatBedragHtml, renderRapportDocument } from "./huisstijl.js";
