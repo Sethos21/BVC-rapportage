@@ -1,4 +1,4 @@
-import type { GrootboekMappingRegel } from "@bvc/config";
+import type { GrootboekMappingRegel, ResultaatRegel } from "@bvc/config";
 import type { OnbekendOf } from "./types.js";
 
 /**
@@ -17,21 +17,25 @@ export function zoekMappingRegel(
     return { type: "onbekend", reden: `Grootboekrekening "${grootboekrekening}" komt niet voor in de grootboekmapping — Controle vereist.` };
   }
   if (!regel.actief) {
+    const omschrijving = regel.soort === "RESULTAAT" ? ` (rapportagepost "${regel.rapportagepost}")` : " (BALANS-rekening)";
     return {
       type: "onbekend",
-      reden: `Grootboekrekening "${grootboekrekening}" heeft een inactieve mapping (rapportagepost "${regel.rapportagepost}") — Controle vereist.`,
+      reden: `Grootboekrekening "${grootboekrekening}" heeft een inactieve mapping${omschrijving} — Controle vereist.`,
     };
   }
   return { type: "bekend", waarde: regel };
 }
 
 /**
- * Vertaalt de tekenconventie van een mappingregel naar de presentatiefactor
- * (1 of -1) die op een brondata-saldo toegepast moet worden. Een nog niet
- * bevestigde tekenconventie (`null`) levert `onbekend` op — nooit stilzwijgend
- * "ZOALS_BRON" (factor 1) aannemen.
+ * Vertaalt de tekenconventie van een RESULTAAT-mappingregel naar de
+ * presentatiefactor (1 of -1) die op een brondata-saldo toegepast moet
+ * worden. Een nog niet bevestigde tekenconventie (`null`) levert `onbekend`
+ * op — nooit stilzwijgend "ZOALS_BRON" (factor 1) aannemen. Niet van
+ * toepassing op BALANS-regels (die hebben geen tekenconventie — een
+ * BALANS-rekening hoort nooit door deze functie te lopen, zie
+ * `@bvc/reporting`'s `berekenPlPeriode`, dat BALANS-regels al eerder negeert).
  */
-export function presentatiefactorVoorRegel(regel: Pick<GrootboekMappingRegel, "tekenconventie">): OnbekendOf<1 | -1> {
+export function presentatiefactorVoorRegel(regel: Pick<ResultaatRegel, "tekenconventie">): OnbekendOf<1 | -1> {
   if (regel.tekenconventie === null) {
     return {
       type: "onbekend",

@@ -229,17 +229,20 @@ export function begrotingServicekostenRijen(): Record<string, unknown>[] {
 /**
  * De grootboekmapping voor `070_Rooise_Zoom`, bevestigd door de gebruiker
  * door het Controlerapport (rauwe cachedata) te vergelijken met de
- * bestaande Q2-2026-rapportage, en vervolgens expliciet GOEDGEKEURD met een
- * bevestigde tekenconventie per rekening (2026-08-17) — zie
- * packages/config/README.md voor de volledige toelichting per rekening.
- * Dient hier als representatieve fixture voor tests; is NIET automatisch de
- * mapping die `070_Rooise_Zoom` in productie gebruikt — dat vereist het
- * bestand handmatig naar
+ * bestaande Q2-2026-rapportage, vervolgens expliciet GOEDGEKEURD met een
+ * bevestigde tekenconventie per rekening (2026-08-17), en aangevuld met de
+ * BALANS-rekeningen die `pl-periode` in de praktijk als `controleVereist`
+ * naar boven bracht — bevestigd tegen het echte rekeningschema
+ * ("Rekeningschema basisgegevens", Srt-kolom Bal/V&W) van bedrijf 070
+ * (2026-08-18). Zie packages/config/README.md voor de volledige toelichting
+ * per rekening. Dient hier als representatieve fixture voor tests; is NIET
+ * automatisch de mapping die `070_Rooise_Zoom` in productie gebruikt — dat
+ * vereist het bestand handmatig naar
  * `<BVC_DATA_ROOT>/config/grootboekmappingen/070_Rooise_Zoom.json` te
  * kopiëren (CLAUDE.md §5: data blijft buiten git).
  */
 export function rooiseZoomGrootboekMapping(): GrootboekMappingConfig {
-  const rekeningen: [string, string, string, "ZOALS_BRON" | "OMGEKEERD"][] = [
+  const resultaatRekeningen: [string, string, string, "ZOALS_BRON" | "OMGEKEERD"][] = [
     ["4000", "Beheerkosten", "Kosten", "ZOALS_BRON"],
     ["4130", "Verzekeringen", "Kosten", "ZOALS_BRON"],
     ["4300", "Onderhoud gebouwen", "Kosten", "ZOALS_BRON"],
@@ -256,16 +259,42 @@ export function rooiseZoomGrootboekMapping(): GrootboekMappingConfig {
     ["8815", "Zonnestroom", "Opbrengsten", "OMGEKEERD"],
   ];
 
+  // Rekeningnummer + omschrijving uit het rekeningschema, uitsluitend ter documentatie in deze fixture.
+  const balansRekeningen: [string, string][] = [
+    ["0840", "Ontrekkingen - Uitkeringen"],
+    ["0901", "Voorziening onderhoud Zoom 1"],
+    ["0902", "Voorziening onderhoud Zoom 2"],
+    ["0903", "Voorziening onderhoud Zoom 3"],
+    ["1010", "Bank NL44RABO 0337 7344 45"],
+    ["1310", "Huurdebiteuren"],
+    ["1400", "Te ontvangen vergoedingen"],
+    ["1410", "Vooruitbetaalde kosten"],
+    ["1506", "Afdrachten BTW"],
+    ["1600", "Crediteuren"],
+    ["1700", "Te betalen kosten"],
+    ["1711", "Tussenrekening servicekst"],
+    ["1712", "Betaalde Service kosten"],
+  ];
+
   return {
     versie: "0.1",
     administratieId: "070_rooisezoom",
-    regels: rekeningen.map(([grootboekrekening, rapportagepost, rapportagecategorie, tekenconventie]) => ({
-      grootboekrekening,
-      rapportagepost,
-      rapportagecategorie,
-      tekenconventie,
-      actief: true,
-      status: "GOEDGEKEURD" as const,
-    })),
+    regels: [
+      ...resultaatRekeningen.map(([grootboekrekening, rapportagepost, rapportagecategorie, tekenconventie]) => ({
+        grootboekrekening,
+        soort: "RESULTAAT" as const,
+        rapportagepost,
+        rapportagecategorie,
+        tekenconventie,
+        actief: true,
+        status: "GOEDGEKEURD" as const,
+      })),
+      ...balansRekeningen.map(([grootboekrekening]) => ({
+        grootboekrekening,
+        soort: "BALANS" as const,
+        actief: true,
+        status: "GOEDGEKEURD" as const,
+      })),
+    ],
   };
 }

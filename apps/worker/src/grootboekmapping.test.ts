@@ -28,15 +28,17 @@ describe("leesGrootboekMapping", () => {
         versie: "0.1",
         administratieId: "070_rooisezoom",
         regels: [
-          { grootboekrekening: "4000", rapportagepost: "Beheerkosten", rapportagecategorie: "Kosten", tekenconventie: null, actief: true, status: "VOORGESTELD" },
+          { grootboekrekening: "4000", soort: "RESULTAAT", rapportagepost: "Beheerkosten", rapportagecategorie: "Kosten", tekenconventie: null, actief: true, status: "VOORGESTELD" },
+          { grootboekrekening: "1010", soort: "BALANS", actief: true, status: "VOORGESTELD" },
         ],
       }),
       "utf-8",
     );
 
     const mapping = leesGrootboekMapping(root, "070_rooisezoom");
-    expect(mapping.regels).toHaveLength(1);
-    expect(mapping.regels[0]?.rapportagepost).toBe("Beheerkosten");
+    expect(mapping.regels).toHaveLength(2);
+    const resultaatRegel = mapping.regels.find((r) => r.soort === "RESULTAAT");
+    expect(resultaatRegel).toMatchObject({ rapportagepost: "Beheerkosten" });
   });
 
   it("faalt hard op een ongeldig mappingbestand, geen stilzwijgende correctie", () => {

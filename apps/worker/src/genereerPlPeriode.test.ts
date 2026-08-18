@@ -45,6 +45,8 @@ beforeEach(() => {
     boekingRij({ Boekstuk_Sleutel: "0704020024004", Boeking_Boekstuknr: "024004", Boeking_Volgnr: "000004", Boeking_Boekperiode: "07", Boeking_Grootboeknr: "4000", Boeking_Bedrag_Debet: 9999, Boeking_Bedrag_Credit: 0 }),
     // een nog niet gemapte rekening met een niet-nul saldo binnen periode 1-6 — moet als controleVereist verschijnen
     boekingRij({ Boekstuk_Sleutel: "0704020024005", Boeking_Boekstuknr: "024005", Boeking_Volgnr: "000005", Boeking_Boekperiode: "02", Boeking_Grootboeknr: "9999", Boeking_Bedrag_Debet: 30, Boeking_Bedrag_Credit: 0 }),
+    // een bekende BALANS-rekening (bank) met saldo — mag NIET in controleVereist verschijnen
+    boekingRij({ Boekstuk_Sleutel: "0704020024006", Boeking_Boekstuknr: "024006", Boeking_Volgnr: "000006", Boeking_Boekperiode: "03", Boeking_Grootboeknr: "1010", Boeking_Bedrag_Debet: 500, Boeking_Bedrag_Credit: 0 }),
   ]);
   schrijfXlsxFixture(join(bronGedeeldDir(root), "balans_per_jaar.xlsx"), []);
   schrijfXlsxFixture(join(bronGedeeldDir(root), "servicekosten.xlsx"), []);
@@ -56,8 +58,9 @@ beforeEach(() => {
       versie: "0.1",
       administratieId: "070_rooisezoom",
       regels: [
-        { grootboekrekening: "4000", rapportagepost: "Beheerkosten", rapportagecategorie: "Kosten", tekenconventie: "ZOALS_BRON", actief: true, status: "GOEDGEKEURD" },
-        { grootboekrekening: "8800", rapportagepost: "Huuropbrengsten belast", rapportagecategorie: "Opbrengsten", tekenconventie: "OMGEKEERD", actief: true, status: "GOEDGEKEURD" },
+        { grootboekrekening: "4000", soort: "RESULTAAT", rapportagepost: "Beheerkosten", rapportagecategorie: "Kosten", tekenconventie: "ZOALS_BRON", actief: true, status: "GOEDGEKEURD" },
+        { grootboekrekening: "8800", soort: "RESULTAAT", rapportagepost: "Huuropbrengsten belast", rapportagecategorie: "Opbrengsten", tekenconventie: "OMGEKEERD", actief: true, status: "GOEDGEKEURD" },
+        { grootboekrekening: "1010", soort: "BALANS", actief: true, status: "GOEDGEKEURD" },
       ],
     }),
     "utf-8",
@@ -92,6 +95,15 @@ describe("genereerPlPeriode", () => {
     expect(resultaat.controleVereist).toHaveLength(1);
     expect(resultaat.controleVereist[0]).toMatchObject({ grootboekrekening: "9999", saldo: expect.objectContaining({}) });
     expect(resultaat.controleVereist[0]?.saldo.toString()).toBe("30");
+  });
+
+  it("negeert de bekende BALANS-rekening 1010 stil (geen post, geen controleVereist)", () => {
+    rebuildCache({ root, administratieId: "070_rooisezoom", onVoortgang: () => {} });
+
+    const { resultaat } = genereerPlPeriode(root, "070_rooisezoom", { boekjaar: 2026, boekperiodeVan: "01", boekperiodeTotEnMet: "06" });
+
+    expect(resultaat.posten.some((p) => p.rapportagepost === "1010")).toBe(false);
+    expect(resultaat.controleVereist.some((c) => c.grootboekrekening === "1010")).toBe(false);
   });
 
   it("draait zonder --verwacht (geen vergelijking) zonder te falen", () => {

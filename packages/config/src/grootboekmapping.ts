@@ -44,19 +44,51 @@ export type Tekenconventie = z.infer<typeof TekenconventieSchema>;
 export const MappingStatusSchema = z.enum(["VOORGESTELD", "GOEDGEKEURD"]);
 export type MappingStatus = z.infer<typeof MappingStatusSchema>;
 
-export const GrootboekMappingRegelSchema = z.object({
-  /** Grootboekrekeningnummer zoals in de bron (Boeking_Grootboeknr / Grootboekrekeningnr), bv. "4000". */
-  grootboekrekening: z.string().min(1),
-  /** Specifieke rapportregel, bv. "Beheerkosten". */
-  rapportagepost: z.string().min(1),
-  /** Bredere groepering van rapportageposten, bv. "Kosten" / "Opbrengsten". */
-  rapportagecategorie: z.string().min(1),
-  tekenconventie: TekenconventieSchema.nullable(),
-  /** Operationele aan/uit-schakelaar, los van de goedkeuringsstatus. */
-  actief: z.boolean(),
-  status: MappingStatusSchema,
-});
+/**
+ * Direct overgenomen uit de "Srt"-kolom van het echte rekeningschema
+ * (PxPlus/Informant, "Rekeningschema basisgegevens" per administratie) —
+ * geen zelfbedachte categorie. BALANS-rekeningen (Bal) horen per definitie
+ * niet op een P&L thuis; RESULTAAT-rekeningen (V&W) wel.
+ */
+export const RekeningSoortSchema = z.enum(["BALANS", "RESULTAAT"]);
+export type RekeningSoort = z.infer<typeof RekeningSoortSchema>;
+
+/**
+ * Een BALANS-regel markeert een grootboekrekening als bekend en bewust
+ * buiten de P&L-scope (bv. bank, debiteuren/crediteuren, voorzieningen,
+ * tussenrekeningen) — géén rapportagepost/-categorie/tekenconventie nodig,
+ * want die rekening komt nooit in een P&L-uitkomst terecht. Dit is iets
+ * anders dan een onbekende/niet-gemapte rekening: `berekenPlPeriode`
+ * (`@bvc/reporting`) negeert een bekende BALANS-rekening stil, terwijl een
+ * écht onbekende rekening met saldo in `controleVereist` verschijnt.
+ */
+export const BalansRegelSchema = z
+  .object({
+    grootboekrekening: z.string().min(1),
+    soort: z.literal("BALANS"),
+    actief: z.boolean(),
+    status: MappingStatusSchema,
+  })
+  .strict();
+
+export const ResultaatRegelSchema = z
+  .object({
+    grootboekrekening: z.string().min(1),
+    soort: z.literal("RESULTAAT"),
+    /** Specifieke rapportregel, bv. "Beheerkosten". */
+    rapportagepost: z.string().min(1),
+    /** Bredere groepering van rapportageposten, bv. "Kosten" / "Opbrengsten". */
+    rapportagecategorie: z.string().min(1),
+    tekenconventie: TekenconventieSchema.nullable(),
+    actief: z.boolean(),
+    status: MappingStatusSchema,
+  })
+  .strict();
+
+export const GrootboekMappingRegelSchema = z.discriminatedUnion("soort", [BalansRegelSchema, ResultaatRegelSchema]);
 export type GrootboekMappingRegel = z.infer<typeof GrootboekMappingRegelSchema>;
+export type BalansRegel = z.infer<typeof BalansRegelSchema>;
+export type ResultaatRegel = z.infer<typeof ResultaatRegelSchema>;
 
 export const GrootboekMappingSchema = z.object({
   versie: z.string(),

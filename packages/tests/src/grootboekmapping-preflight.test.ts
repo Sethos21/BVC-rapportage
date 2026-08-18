@@ -24,9 +24,11 @@ describe("de bevestigde 070_Rooise_Zoom-grootboekmapping (representatieve fixtur
     expect(parseGrootboekMapping(viaJson)).toEqual(mapping);
   });
 
-  it("bevat alle 14 bevestigde rekeningen, elk actief en GOEDGEKEURD", () => {
+  it("bevat 14 RESULTAAT- en 13 BALANS-rekeningen, elk actief en GOEDGEKEURD", () => {
     const mapping = rooiseZoomGrootboekMapping();
-    expect(mapping.regels).toHaveLength(14);
+    expect(mapping.regels).toHaveLength(27);
+    expect(mapping.regels.filter((r) => r.soort === "RESULTAAT")).toHaveLength(14);
+    expect(mapping.regels.filter((r) => r.soort === "BALANS")).toHaveLength(13);
     expect(mapping.regels.every((r) => r.actief && r.status === "GOEDGEKEURD")).toBe(true);
   });
 
@@ -35,19 +37,28 @@ describe("de bevestigde 070_Rooise_Zoom-grootboekmapping (representatieve fixtur
     writeFileSync(grootboekmappingPad(root, "070_rooisezoom"), JSON.stringify(rooiseZoomGrootboekMapping()), "utf-8");
 
     const geladen = leesGrootboekMapping(root, "070_rooisezoom");
-    expect(geladen.regels).toHaveLength(14);
+    expect(geladen.regels).toHaveLength(27);
   });
 
-  it("levert een bekende regel op voor een bevestigde rekening (bv. 8800 Huuropbrengsten belast)", () => {
+  it("levert een bekende RESULTAAT-regel op voor een bevestigde rekening (bv. 8800 Huuropbrengsten belast)", () => {
     const mapping = rooiseZoomGrootboekMapping();
     const resultaat = zoekMappingRegel(mapping.regels, "8800");
     expect(resultaat.type).toBe("bekend");
-    if (resultaat.type === "bekend") {
+    if (resultaat.type === "bekend" && resultaat.waarde.soort === "RESULTAAT") {
       expect(resultaat.waarde.rapportagepost).toBe("Huuropbrengsten belast");
     }
   });
 
-  it("levert onbekend op voor een rekening die niet in de bevestigde mapping voorkomt (bv. 1300 Bank — een balansrekening, nog niet gemapt)", () => {
+  it("levert een bekende BALANS-regel op voor een bevestigde balansrekening (bv. 1010 Bank)", () => {
+    const mapping = rooiseZoomGrootboekMapping();
+    const resultaat = zoekMappingRegel(mapping.regels, "1010");
+    expect(resultaat.type).toBe("bekend");
+    if (resultaat.type === "bekend") {
+      expect(resultaat.waarde.soort).toBe("BALANS");
+    }
+  });
+
+  it("levert onbekend op voor een rekening die niet in de bevestigde mapping voorkomt (bv. 1300 Debiteuren — nog niet gemapt)", () => {
     const mapping = rooiseZoomGrootboekMapping();
     const resultaat = zoekMappingRegel(mapping.regels, "1300");
     expect(resultaat.type).toBe("onbekend");
@@ -55,18 +66,20 @@ describe("de bevestigde 070_Rooise_Zoom-grootboekmapping (representatieve fixtur
 
   it("geeft factor 1 (ZOALS_BRON) voor de kostenrekeningen (4xxx)", () => {
     const mapping = rooiseZoomGrootboekMapping();
-    const kostenregels = mapping.regels.filter((r) => r.rapportagecategorie === "Kosten");
+    const kostenregels = mapping.regels.filter((r) => r.soort === "RESULTAAT" && r.rapportagecategorie === "Kosten");
     expect(kostenregels).toHaveLength(10);
     for (const regel of kostenregels) {
+      if (regel.soort !== "RESULTAAT") continue;
       expect(presentatiefactorVoorRegel(regel)).toEqual({ type: "bekend", waarde: 1 });
     }
   });
 
   it("geeft factor -1 (OMGEKEERD) voor de opbrengstrekeningen (8xxx)", () => {
     const mapping = rooiseZoomGrootboekMapping();
-    const opbrengstregels = mapping.regels.filter((r) => r.rapportagecategorie === "Opbrengsten");
+    const opbrengstregels = mapping.regels.filter((r) => r.soort === "RESULTAAT" && r.rapportagecategorie === "Opbrengsten");
     expect(opbrengstregels).toHaveLength(4);
     for (const regel of opbrengstregels) {
+      if (regel.soort !== "RESULTAAT") continue;
       expect(presentatiefactorVoorRegel(regel)).toEqual({ type: "bekend", waarde: -1 });
     }
   });

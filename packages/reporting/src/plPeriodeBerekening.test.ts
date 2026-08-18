@@ -1,15 +1,26 @@
-import type { GrootboekMappingRegel } from "@bvc/config";
+import type { BalansRegel, ResultaatRegel } from "@bvc/config";
 import type { Boekingsregel } from "@bvc/domain";
 import Decimal from "decimal.js";
 import { describe, expect, it } from "vitest";
 import { berekenPlPeriode, vergelijkMetGereconcilieerd } from "./plPeriodeBerekening.js";
 
-function mappingRegel(overrides: Partial<GrootboekMappingRegel> = {}): GrootboekMappingRegel {
+function mappingRegel(overrides: Partial<ResultaatRegel> = {}): ResultaatRegel {
   return {
     grootboekrekening: "4000",
+    soort: "RESULTAAT",
     rapportagepost: "Beheerkosten",
     rapportagecategorie: "Kosten",
     tekenconventie: "ZOALS_BRON",
+    actief: true,
+    status: "GOEDGEKEURD",
+    ...overrides,
+  };
+}
+
+function balansRegel(overrides: Partial<BalansRegel> = {}): BalansRegel {
+  return {
+    grootboekrekening: "1010",
+    soort: "BALANS",
     actief: true,
     status: "GOEDGEKEURD",
     ...overrides,
@@ -127,6 +138,26 @@ describe("berekenPlPeriode", () => {
     expect(resultaat.posten).toEqual([]);
     expect(resultaat.categorieTotalen).toEqual([]);
     expect(resultaat.controleVereist).toEqual([]);
+  });
+
+  it("negeert een bekende BALANS-rekening met saldo stil: geen post, geen controleVereist (bv. bank/debiteuren/crediteuren)", () => {
+    const resultaat = berekenPlPeriode(
+      [
+        boeking({ grootboeknr: "1010", bedragDebet: new Decimal("71430.87"), bedragCredit: new Decimal("0") }),
+        boeking({ grootboeknr: "4000", bedragDebet: new Decimal("100"), bedragCredit: new Decimal("0") }),
+      ],
+      [balansRegel({ grootboekrekening: "1010" }), mappingRegel({ grootboekrekening: "4000" })],
+    );
+    expect(resultaat.posten).toEqual([{ rapportagepost: "Beheerkosten", rapportagecategorie: "Kosten", bedrag: new Decimal("100") }]);
+    expect(resultaat.controleVereist).toEqual([]);
+  });
+
+  it("markeert een inactieve BALANS-mapping met saldo alsnog als controleVereist (inactief = niet meer bekend)", () => {
+    const resultaat = berekenPlPeriode(
+      [boeking({ grootboeknr: "1010", bedragDebet: new Decimal("50"), bedragCredit: new Decimal("0") })],
+      [balansRegel({ grootboekrekening: "1010", actief: false })],
+    );
+    expect(resultaat.controleVereist).toHaveLength(1);
   });
 });
 

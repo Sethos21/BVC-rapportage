@@ -1,10 +1,11 @@
-import type { GrootboekMappingRegel } from "@bvc/config";
+import type { BalansRegel, ResultaatRegel } from "@bvc/config";
 import { describe, expect, it } from "vitest";
 import { presentatiefactorVoorRegel, zoekMappingRegel } from "./grootboekmapping.js";
 
-function regel(overrides: Partial<GrootboekMappingRegel> = {}): GrootboekMappingRegel {
+function regel(overrides: Partial<ResultaatRegel> = {}): ResultaatRegel {
   return {
     grootboekrekening: "4000",
+    soort: "RESULTAAT",
     rapportagepost: "Beheerkosten",
     rapportagecategorie: "Kosten",
     tekenconventie: null,
@@ -14,12 +15,30 @@ function regel(overrides: Partial<GrootboekMappingRegel> = {}): GrootboekMapping
   };
 }
 
+function balansRegel(overrides: Partial<BalansRegel> = {}): BalansRegel {
+  return {
+    grootboekrekening: "1010",
+    soort: "BALANS",
+    actief: true,
+    status: "VOORGESTELD",
+    ...overrides,
+  };
+}
+
 describe("zoekMappingRegel", () => {
-  it("vindt een actieve regel op grootboekrekening", () => {
+  it("vindt een actieve RESULTAAT-regel op grootboekrekening", () => {
     const resultaat = zoekMappingRegel([regel()], "4000");
     expect(resultaat.type).toBe("bekend");
-    if (resultaat.type === "bekend") {
+    if (resultaat.type === "bekend" && resultaat.waarde.soort === "RESULTAAT") {
       expect(resultaat.waarde.rapportagepost).toBe("Beheerkosten");
+    }
+  });
+
+  it("vindt een actieve BALANS-regel op grootboekrekening", () => {
+    const resultaat = zoekMappingRegel([balansRegel()], "1010");
+    expect(resultaat.type).toBe("bekend");
+    if (resultaat.type === "bekend") {
+      expect(resultaat.waarde.soort).toBe("BALANS");
     }
   });
 
@@ -31,8 +50,16 @@ describe("zoekMappingRegel", () => {
     }
   });
 
-  it("is onbekend voor een inactieve mapping, ook al bestaat de regel", () => {
+  it("is onbekend voor een inactieve RESULTAAT-mapping, ook al bestaat de regel", () => {
     const resultaat = zoekMappingRegel([regel({ actief: false })], "4000");
+    expect(resultaat.type).toBe("onbekend");
+    if (resultaat.type === "onbekend") {
+      expect(resultaat.reden).toContain("inactieve mapping");
+    }
+  });
+
+  it("is onbekend voor een inactieve BALANS-mapping", () => {
+    const resultaat = zoekMappingRegel([balansRegel({ actief: false })], "1010");
     expect(resultaat.type).toBe("onbekend");
     if (resultaat.type === "onbekend") {
       expect(resultaat.reden).toContain("inactieve mapping");

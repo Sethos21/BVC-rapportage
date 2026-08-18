@@ -60,7 +60,10 @@ export interface PlPeriodeResultaat {
    * `posten` verwerkt konden worden: onbekende rekening, inactieve mapping,
    * of een nog niet bevestigde tekenconventie. Nooit stilzwijgend op 0
    * gezet of overgeslagen (CLAUDE.md §6, PAR-MAP-001-achtig) — dit
-   * P&L-resultaat is pas compleet te noemen als deze lijst leeg is.
+   * P&L-resultaat is pas compleet te noemen als deze lijst leeg is. Een
+   * bekende BALANS-regel (soort "BALANS", bv. bank/debiteuren/crediteuren)
+   * komt hier bewust NIET in terecht — die is al herkend als terecht buiten
+   * de P&L, geen ontbrekende classificatie.
    */
   controleVereist: PlPeriodeControleVereist[];
 }
@@ -82,6 +85,11 @@ export function berekenPlPeriode(
     const regelResultaat = zoekMappingRegel(mappingRegels, boeking.grootboeknr);
     if (regelResultaat.type === "onbekend") {
       voegControleToe(controlePerRekening, boeking.grootboeknr, saldo, regelResultaat.reden);
+      continue;
+    }
+
+    if (regelResultaat.waarde.soort === "BALANS") {
+      // Bekende, bewust buiten P&L-scope (Srt "Bal" in het bronrekeningschema) — geen post, geen controleVereist.
       continue;
     }
 

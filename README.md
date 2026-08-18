@@ -105,7 +105,8 @@ dit draait op verschillende werkcomputers.
   de data root, `@bvc/domain`'s `zoekMappingRegel`/`presentatiefactorVoorRegel`
   voor de opzoek-/tekenconventielogica) — zie `packages/config/README.md`
   voor de volledige toelichting en de **goedgekeurde** mapping voor
-  `070_Rooise_Zoom` (14 rekeningen, incl. tekenconventie per rekening).
+  `070_Rooise_Zoom` (27 rekeningen: 14 RESULTAAT met tekenconventie + 13
+  BALANS, bevestigd tegen het echte rekeningschema van de bron).
 - **`@bvc/cache`'s `periodeSelectie.ts`** — expliciete periodeselectie op
   boekingen (boekjaar + boekperiode-range) en balansstanden (boekjaar),
   nooit een impliciete eerste/laatste/willekeurige rij. Documenteert
