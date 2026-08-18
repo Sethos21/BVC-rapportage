@@ -47,21 +47,32 @@ latere, losse stap.
   toleranceEuro)`** — vergelijkt automatisch per rapportagepost met eerder
   handmatig gereconcilieerde bedragen (hergebruikt CAL-FIN-009/010,
   `budgetafwijking(Pct)`: "verwacht" = budget, "berekend" = realisatie).
-  Rapportageposten die maar aan één kant voorkomen belanden in
-  `ontbrekendInBerekening`/`onverwachtInBerekening`, nooit als 0
-  vergeleken.
+  `verwachtePerRapportagepost` is een `Map<string, OnbekendOf<Decimal>>` —
+  een verwacht bedrag kan zelf `OnbekendOf`-`onbekend` zijn (bv. "deze post
+  wordt pas aan het einde van het boekjaar bepaald en geboekt"); zo'n regel
+  belandt in `nogNietBekend`, nooit in `ontbrekendInBerekening` of als
+  fout. Dit is een generieke, per rapportagepost in de invoerdata
+  aangeleverde uitzondering (CLAUDE.md §3) — geen hardcoded uitzondering
+  voor een specifiek grootboekrekeningnummer in code. Rapportageposten die
+  verder maar aan één kant voorkomen belanden in
+  `ontbrekendInBerekening`/`onverwachtInBerekening`, nooit als 0 vergeleken.
 - **`apps/worker/src/genereerPlPeriode.ts`** — leest de cache
   (`selecteerBoekingen` op bedrijfsnr + boekjaar + boekperiode-range) en de
   goedgekeurde grootboekmapping, converteert cacherijen naar
   `Boekingsregel` (Decimal), en roept `berekenPlPeriode` aan. CLI:
   `bvc-worker pl-periode <administratieId> --boekjaar N [--periodeVan P
   --periodeTotEnMet P] [--verwacht <pad-naar-json>] [--tolerantie N]`.
-  `--verwacht` wijst naar een ad-hoc JSON-bestand
-  (`{"<rapportagepost>": "<bedrag>"}`) met de al gereconcilieerde
-  bedragen — geen vaste locatie in de data root, dit is invoer per
-  vergelijking, geen permanente config. Print JSON naar stdout (geen
-  bestand, geen HTML) en zet de exitcode op 1 als `controleVereist`
-  niet leeg is.
+  `--verwacht` wijst naar een ad-hoc JSON-bestand met de al gereconcilieerde
+  bedragen, per rapportagepost een `OnbekendOf<Decimal>` in JSON-vorm:
+  ```jsonc
+  {
+    "Beheerkosten": { "type": "bekend", "waarde": "6446" },
+    "Niet verrekenbare BTW": { "type": "onbekend", "reden": "Wordt pas aan het einde van het boekjaar bepaald en geboekt" }
+  }
+  ```
+  Geen vaste locatie in de data root, dit is invoer per vergelijking, geen
+  permanente config. Print JSON naar stdout (geen bestand, geen HTML) en
+  zet de exitcode op 1 als `controleVereist` niet leeg is.
 
 ## Kerncijfers (sectie 01 — KPI-dashboard)
 

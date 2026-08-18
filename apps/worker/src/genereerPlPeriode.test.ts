@@ -115,7 +115,14 @@ describe("genereerPlPeriode", () => {
   it("vergelijkt automatisch met een opgegeven verwachte-bedragenbestand", () => {
     rebuildCache({ root, administratieId: "070_rooisezoom", onVoortgang: () => {} });
     const verwachtePad = join(root, "verwacht.json");
-    writeFileSync(verwachtePad, JSON.stringify({ "Beheerkosten": "150", "Huuropbrengsten belast": "450" }), "utf-8");
+    writeFileSync(
+      verwachtePad,
+      JSON.stringify({
+        "Beheerkosten": { type: "bekend", waarde: "150" },
+        "Huuropbrengsten belast": { type: "bekend", waarde: "450" },
+      }),
+      "utf-8",
+    );
 
     const { vergelijking } = genereerPlPeriode(root, "070_rooisezoom", {
       boekjaar: 2026,
@@ -130,6 +137,42 @@ describe("genereerPlPeriode", () => {
     expect(beheerkosten?.sluitBinnenTolerantie).toBe(true);
     expect(huuropbrengsten?.sluitBinnenTolerantie).toBe(false);
     expect(huuropbrengsten?.verschil.toString()).toBe("50");
+  });
+
+  it("zet een expliciet onbekend verwacht bedrag in nogNietBekend, nooit als fout (bv. een post die pas eind boekjaar bepaald wordt)", () => {
+    rebuildCache({ root, administratieId: "070_rooisezoom", onVoortgang: () => {} });
+    const verwachtePad = join(root, "verwacht.json");
+    writeFileSync(
+      verwachtePad,
+      JSON.stringify({
+        "Beheerkosten": { type: "bekend", waarde: "150" },
+        "Huuropbrengsten belast": { type: "onbekend", reden: "Wordt pas aan het einde van het boekjaar bepaald en geboekt" },
+      }),
+      "utf-8",
+    );
+
+    const { vergelijking } = genereerPlPeriode(root, "070_rooisezoom", {
+      boekjaar: 2026,
+      boekperiodeVan: "01",
+      boekperiodeTotEnMet: "06",
+      verwachtePad,
+    });
+
+    expect(vergelijking?.regels.some((r) => r.rapportagepost === "Huuropbrengsten belast")).toBe(false);
+    expect(vergelijking?.ontbrekendInBerekening).toEqual([]);
+    expect(vergelijking?.nogNietBekend).toEqual([
+      { rapportagepost: "Huuropbrengsten belast", reden: "Wordt pas aan het einde van het boekjaar bepaald en geboekt" },
+    ]);
+  });
+
+  it("gooit een duidelijke fout op een ongeldig verwachte-bedragenbestand (oud, plat formaat wordt niet meer geaccepteerd)", () => {
+    rebuildCache({ root, administratieId: "070_rooisezoom", onVoortgang: () => {} });
+    const verwachtePad = join(root, "verwacht.json");
+    writeFileSync(verwachtePad, JSON.stringify({ "Beheerkosten": "150" }), "utf-8");
+
+    expect(() =>
+      genereerPlPeriode(root, "070_rooisezoom", { boekjaar: 2026, boekperiodeVan: "01", boekperiodeTotEnMet: "06", verwachtePad }),
+    ).toThrow(/moet een object zijn/);
   });
 
   it("gooit een duidelijke fout als de grootboekmapping ontbreekt", () => {

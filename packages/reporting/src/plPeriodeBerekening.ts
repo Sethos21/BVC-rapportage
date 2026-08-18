@@ -160,12 +160,28 @@ export interface PlPeriodeVergelijkingsregel {
   sluitBinnenTolerantie: boolean;
 }
 
+export interface PlPeriodeNogNietBekend {
+  rapportagepost: string;
+  /** Waarom het verwachte bedrag voor deze periode bewust nog niet bekend/van toepassing is. */
+  reden: string;
+}
+
 export interface PlPeriodeVergelijkingsResultaat {
   regels: PlPeriodeVergelijkingsregel[];
   /** Rapportageposten met een verwacht (gereconcilieerd) bedrag, maar zonder berekend bedrag deze periode. */
   ontbrekendInBerekening: string[];
   /** Rapportageposten met een berekend bedrag, maar zonder verwacht (gereconcilieerd) bedrag opgegeven. */
   onverwachtInBerekening: string[];
+  /**
+   * Rapportageposten waarvan het verwachte bedrag expliciet als `onbekend`
+   * is opgegeven (CLAUDE.md §6, `OnbekendOf<T>`) — bv. een post die pas aan
+   * het einde van het boekjaar wordt berekend/geboekt en dus terecht nog
+   * geen boekingen heeft in een tussentijdse periode. Nooit als
+   * `ontbrekendInBerekening`/fout behandeld: dit is een bewuste, per
+   * rapportagepost aangeleverde uitzondering in `verwacht.json` zelf, geen
+   * hardcoded uitzondering in code.
+   */
+  nogNietBekend: PlPeriodeNogNietBekend[];
 }
 
 /**
@@ -175,11 +191,13 @@ export interface PlPeriodeVergelijkingsResultaat {
  * "verwacht" speelt hier de rol van budget, "berekend" de rol van
  * realisatie. Een ontbrekende kant wordt nooit als 0 ingevuld: die
  * rapportageposten staan apart in `ontbrekendInBerekening`/
- * `onverwachtInBerekening`.
+ * `onverwachtInBerekening`. Een verwacht bedrag dat zelf `OnbekendOf`-
+ * `onbekend` is (bv. "wordt pas aan het einde van het boekjaar bepaald")
+ * komt in `nogNietBekend` terecht — nooit als fout/ontbrekend.
  */
 export function vergelijkMetGereconcilieerd(
   resultaat: PlPeriodeResultaat,
-  verwachtePerRapportagepost: ReadonlyMap<string, Decimal>,
+  verwachtePerRapportagepost: ReadonlyMap<string, OnbekendOf<Decimal>>,
   toleranceEuro: Decimal,
 ): PlPeriodeVergelijkingsResultaat {
   const berekendePerPost = new Map(resultaat.posten.map((post) => [post.rapportagepost, post.bedrag]));
@@ -188,13 +206,18 @@ export function vergelijkMetGereconcilieerd(
   const regels: PlPeriodeVergelijkingsregel[] = [];
   const ontbrekendInBerekening: string[] = [];
   const onverwachtInBerekening: string[] = [];
+  const nogNietBekend: PlPeriodeNogNietBekend[] = [];
 
   for (const rapportagepost of alleRapportageposten) {
     const berekend = berekendePerPost.get(rapportagepost);
-    const verwacht = verwachtePerRapportagepost.get(rapportagepost);
+    const verwachtResultaat = verwachtePerRapportagepost.get(rapportagepost);
 
-    if (verwacht === undefined) {
+    if (verwachtResultaat === undefined) {
       onverwachtInBerekening.push(rapportagepost);
+      continue;
+    }
+    if (verwachtResultaat.type === "onbekend") {
+      nogNietBekend.push({ rapportagepost, reden: verwachtResultaat.reden });
       continue;
     }
     if (berekend === undefined) {
@@ -202,16 +225,17 @@ export function vergelijkMetGereconcilieerd(
       continue;
     }
 
+    const verwacht = verwachtResultaat.waarde;
     const verschil = budgetafwijking(berekend, verwacht);
     regels.push({
       rapportagepost,
       berekend,
       verwacht,
       verschil,
-      verschilPct: budgetafwijkingPct(berekend, { type: "bekend", waarde: verwacht }),
+      verschilPct: budgetafwijkingPct(berekend, verwachtResultaat),
       sluitBinnenTolerantie: verschil.abs().lessThanOrEqualTo(toleranceEuro),
     });
   }
 
-  return { regels, ontbrekendInBerekening, onverwachtInBerekening };
+  return { regels, ontbrekendInBerekening, onverwachtInBerekening, nogNietBekend };
 }

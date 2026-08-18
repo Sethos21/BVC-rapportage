@@ -1,5 +1,5 @@
 import type { BalansRegel, ResultaatRegel } from "@bvc/config";
-import type { Boekingsregel } from "@bvc/domain";
+import type { Boekingsregel, OnbekendOf } from "@bvc/domain";
 import Decimal from "decimal.js";
 import { describe, expect, it } from "vitest";
 import { berekenPlPeriode, vergelijkMetGereconcilieerd } from "./plPeriodeBerekening.js";
@@ -169,9 +169,13 @@ describe("vergelijkMetGereconcilieerd", () => {
     );
   }
 
+  function bekend(waarde: string): OnbekendOf<Decimal> {
+    return { type: "bekend", waarde: new Decimal(waarde) };
+  }
+
   it("markeert een regel binnen tolerantie als sluitend", () => {
     const resultaat = resultaatMetEenPost("100.00");
-    const vergelijking = vergelijkMetGereconcilieerd(resultaat, new Map([["Beheerkosten", new Decimal("100.00")]]), new Decimal("0.01"));
+    const vergelijking = vergelijkMetGereconcilieerd(resultaat, new Map([["Beheerkosten", bekend("100.00")]]), new Decimal("0.01"));
     expect(vergelijking.regels).toHaveLength(1);
     expect(vergelijking.regels[0]?.sluitBinnenTolerantie).toBe(true);
     expect(vergelijking.regels[0]?.verschil.toString()).toBe("0");
@@ -179,14 +183,14 @@ describe("vergelijkMetGereconcilieerd", () => {
 
   it("markeert een regel buiten tolerantie als niet-sluitend, met het verschil", () => {
     const resultaat = resultaatMetEenPost("100.00");
-    const vergelijking = vergelijkMetGereconcilieerd(resultaat, new Map([["Beheerkosten", new Decimal("95.87")]]), new Decimal("0.01"));
+    const vergelijking = vergelijkMetGereconcilieerd(resultaat, new Map([["Beheerkosten", bekend("95.87")]]), new Decimal("0.01"));
     expect(vergelijking.regels[0]?.sluitBinnenTolerantie).toBe(false);
     expect(vergelijking.regels[0]?.verschil.toString()).toBe("4.13");
   });
 
   it("zet een rapportagepost met een verwacht bedrag maar zonder berekend bedrag in ontbrekendInBerekening, nooit als 0 vergeleken", () => {
     const resultaat = berekenPlPeriode([], [mappingRegel()]);
-    const vergelijking = vergelijkMetGereconcilieerd(resultaat, new Map([["Beheerkosten", new Decimal("100")]]), new Decimal("0.01"));
+    const vergelijking = vergelijkMetGereconcilieerd(resultaat, new Map([["Beheerkosten", bekend("100")]]), new Decimal("0.01"));
     expect(vergelijking.regels).toEqual([]);
     expect(vergelijking.ontbrekendInBerekening).toEqual(["Beheerkosten"]);
   });
@@ -196,5 +200,28 @@ describe("vergelijkMetGereconcilieerd", () => {
     const vergelijking = vergelijkMetGereconcilieerd(resultaat, new Map(), new Decimal("0.01"));
     expect(vergelijking.regels).toEqual([]);
     expect(vergelijking.onverwachtInBerekening).toEqual(["Beheerkosten"]);
+  });
+
+  it("zet een expliciet onbekend verwacht bedrag in nogNietBekend, nooit in ontbrekendInBerekening of regels (bv. een post die pas eind boekjaar wordt bepaald)", () => {
+    const resultaat = berekenPlPeriode([], [mappingRegel()]);
+    const vergelijking = vergelijkMetGereconcilieerd(
+      resultaat,
+      new Map([["Beheerkosten", { type: "onbekend", reden: "Wordt pas aan het einde van het boekjaar bepaald en geboekt" }]]),
+      new Decimal("0.01"),
+    );
+    expect(vergelijking.regels).toEqual([]);
+    expect(vergelijking.ontbrekendInBerekening).toEqual([]);
+    expect(vergelijking.nogNietBekend).toEqual([{ rapportagepost: "Beheerkosten", reden: "Wordt pas aan het einde van het boekjaar bepaald en geboekt" }]);
+  });
+
+  it("zet een post ook in nogNietBekend als er wél al een berekend bedrag is (nooit alsnog vergelijken)", () => {
+    const resultaat = resultaatMetEenPost("30.00");
+    const vergelijking = vergelijkMetGereconcilieerd(
+      resultaat,
+      new Map([["Beheerkosten", { type: "onbekend", reden: "Nog niet definitief" }]]),
+      new Decimal("0.01"),
+    );
+    expect(vergelijking.regels).toEqual([]);
+    expect(vergelijking.nogNietBekend).toHaveLength(1);
   });
 });
