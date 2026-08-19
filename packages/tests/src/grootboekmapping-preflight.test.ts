@@ -24,12 +24,25 @@ describe("de bevestigde 070_Rooise_Zoom-grootboekmapping (representatieve fixtur
     expect(parseGrootboekMapping(viaJson)).toEqual(mapping);
   });
 
-  it("bevat 14 RESULTAAT- en 13 BALANS-rekeningen, elk actief en GOEDGEKEURD", () => {
+  it("bevat 14 RESULTAAT- en 13 BALANS-rekeningen, allemaal actief", () => {
     const mapping = rooiseZoomGrootboekMapping();
     expect(mapping.regels).toHaveLength(27);
     expect(mapping.regels.filter((r) => r.soort === "RESULTAAT")).toHaveLength(14);
     expect(mapping.regels.filter((r) => r.soort === "BALANS")).toHaveLength(13);
-    expect(mapping.regels.every((r) => r.actief && r.status === "GOEDGEKEURD")).toBe(true);
+    expect(mapping.regels.every((r) => r.actief)).toBe(true);
+  });
+
+  it("is GOEDGEKEURD voor alle RESULTAAT-regels en de 10 BALANS-regels met een bevestigde balanszijde; VOORGESTELD voor de 3 met een nog onbevestigde balanszijde", () => {
+    const mapping = rooiseZoomGrootboekMapping();
+    const balansRegels = mapping.regels.filter((r) => r.soort === "BALANS");
+    const metBalanszijde = balansRegels.filter((r) => r.soort === "BALANS" && r.balanszijde !== null);
+    const zonderBalanszijde = balansRegels.filter((r) => r.soort === "BALANS" && r.balanszijde === null);
+    expect(metBalanszijde).toHaveLength(10);
+    expect(zonderBalanszijde).toHaveLength(3);
+    expect(zonderBalanszijde.map((r) => r.grootboekrekening).sort()).toEqual(["1506", "1711", "1712"]);
+    expect(mapping.regels.filter((r) => r.soort === "RESULTAAT").every((r) => r.status === "GOEDGEKEURD")).toBe(true);
+    expect(metBalanszijde.every((r) => r.status === "GOEDGEKEURD")).toBe(true);
+    expect(zonderBalanszijde.every((r) => r.status === "VOORGESTELD")).toBe(true);
   });
 
   it("kan volledig geladen worden via de echte Worker-loader nadat het bestand in de data root is geplaatst", () => {

@@ -77,8 +77,8 @@ beforeEach(() => {
       versie: "0.1",
       administratieId: "070_rooisezoom",
       regels: [
-        { grootboekrekening: "1010", soort: "BALANS", actief: true, status: "GOEDGEKEURD" },
-        { grootboekrekening: "1711", soort: "BALANS", actief: true, status: "GOEDGEKEURD" },
+        { grootboekrekening: "1010", soort: "BALANS", balanszijde: "ACTIVA", actief: true, status: "GOEDGEKEURD" },
+        { grootboekrekening: "1711", soort: "BALANS", balanszijde: "PASSIVA", actief: true, status: "GOEDGEKEURD" },
         { grootboekrekening: "8800", soort: "RESULTAAT", rapportagepost: "Huuropbrengsten belast", rapportagecategorie: "Opbrengsten", tekenconventie: "OMGEKEERD", actief: true, status: "GOEDGEKEURD" },
       ],
     }),
@@ -98,15 +98,15 @@ describe("genereerBalansPeriode", () => {
 
     const bank = resultaat.posten.find((p) => p.grootboekrekening === "1010");
     expect(bank?.saldo.toString()).toBe("700"); // 200 beginbalans + 500 (periode 01), NIET periode 07 (9999)
-    expect(bank?.rapportagecategorie).toBe("Activa");
+    expect(bank?.rapportagecategorie).toBe("ACTIVA");
   });
 
-  it("classificeert een netto-creditrekening structureel als Passiva", () => {
+  it("gebruikt de vaste balanszijde uit de mapping voor 1711 (PASSIVA), niet het saldoteken", () => {
     rebuildCache({ root, administratieId: "070_rooisezoom", onVoortgang: () => {} });
     const { resultaat } = genereerBalansPeriode(root, "070_rooisezoom", { boekjaar: 2026, boekperiodeTotEnMet: "06" });
 
     const crediteuren = resultaat.posten.find((p) => p.grootboekrekening === "1711");
-    expect(crediteuren?.rapportagecategorie).toBe("Passiva");
+    expect(crediteuren?.rapportagecategorie).toBe("PASSIVA");
     expect(crediteuren?.saldo.toString()).toBe("-230"); // -200 beginbalans - 30 mutatie (periode 02)
   });
 
@@ -134,6 +134,56 @@ describe("genereerBalansPeriode", () => {
     // resterende afwijking komt volledig van de niet-gemapte 9999-mutatie (+30) -> verschil = -30.
     expect(resultaat.aansluiting.verschil.toString()).toBe("-30");
     expect(resultaat.aansluiting.sluitBinnenTolerantie).toBe(false);
+  });
+
+  it("houdt 1010 (Bank, ACTIVA) op Activa ook als het saldo op de peildatum negatief zou zijn", () => {
+    writeFileSync(
+      grootboekmappingPad(root, "070_rooisezoom"),
+      JSON.stringify({
+        versie: "0.1",
+        administratieId: "070_rooisezoom",
+        regels: [
+          { grootboekrekening: "1010", soort: "BALANS", balanszijde: "ACTIVA", actief: true, status: "GOEDGEKEURD" },
+          { grootboekrekening: "1711", soort: "BALANS", balanszijde: "PASSIVA", actief: true, status: "GOEDGEKEURD" },
+          { grootboekrekening: "8800", soort: "RESULTAAT", rapportagepost: "Huuropbrengsten belast", rapportagecategorie: "Opbrengsten", tekenconventie: "OMGEKEERD", actief: true, status: "GOEDGEKEURD" },
+        ],
+      }),
+      "utf-8",
+    );
+    // Beginbalans 1010 nu negatief (credit-overschot) — 1010 blijft desondanks een ACTIVA-rekening.
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "balans_per_jaar.xlsx"), [
+      balansRij({ Grootboekrekeningnr: "1010", Beginbalans_debet: 0, Beginbalans_credit: 800, Rekening_omschrijving: "Bank" }),
+      balansRij({ Grootboekrekeningnr: "1711", Beginbalans_debet: 0, Beginbalans_credit: 200, Rekening_omschrijving: "Crediteuren" }),
+    ]);
+    rebuildCache({ root, administratieId: "070_rooisezoom", onVoortgang: () => {} });
+
+    const { resultaat } = genereerBalansPeriode(root, "070_rooisezoom", { boekjaar: 2026, boekperiodeTotEnMet: "06" });
+
+    const bank = resultaat.posten.find((p) => p.grootboekrekening === "1010");
+    expect(bank?.saldo.toString()).toBe("-300"); // -800 beginbalans + 500 (periode 01) = -300, nog steeds negatief
+    expect(bank?.rapportagecategorie).toBe("ACTIVA"); // blijft Activa, verhuist niet naar Passiva
+  });
+
+  it("markeert een BALANS-rekening met een nog niet bevestigde balanszijde (null) als controleVereist", () => {
+    writeFileSync(
+      grootboekmappingPad(root, "070_rooisezoom"),
+      JSON.stringify({
+        versie: "0.1",
+        administratieId: "070_rooisezoom",
+        regels: [
+          { grootboekrekening: "1010", soort: "BALANS", balanszijde: null, actief: true, status: "VOORGESTELD" },
+          { grootboekrekening: "1711", soort: "BALANS", balanszijde: "PASSIVA", actief: true, status: "GOEDGEKEURD" },
+          { grootboekrekening: "8800", soort: "RESULTAAT", rapportagepost: "Huuropbrengsten belast", rapportagecategorie: "Opbrengsten", tekenconventie: "OMGEKEERD", actief: true, status: "GOEDGEKEURD" },
+        ],
+      }),
+      "utf-8",
+    );
+    rebuildCache({ root, administratieId: "070_rooisezoom", onVoortgang: () => {} });
+
+    const { resultaat } = genereerBalansPeriode(root, "070_rooisezoom", { boekjaar: 2026, boekperiodeTotEnMet: "06" });
+
+    expect(resultaat.posten.some((p) => p.grootboekrekening === "1010")).toBe(false);
+    expect(resultaat.controleVereist.some((c) => c.grootboekrekening === "1010")).toBe(true);
   });
 
   it("gooit een duidelijke fout als de grootboekmapping ontbreekt", () => {

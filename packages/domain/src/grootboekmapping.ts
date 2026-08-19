@@ -1,4 +1,4 @@
-import type { GrootboekMappingRegel, ResultaatRegel } from "@bvc/config";
+import type { Balanszijde, BalansRegel, GrootboekMappingRegel, ResultaatRegel } from "@bvc/config";
 import type { OnbekendOf } from "./types.js";
 
 /**
@@ -43,6 +43,23 @@ export function presentatiefactorVoorRegel(regel: Pick<ResultaatRegel, "tekencon
     };
   }
   return { type: "bekend", waarde: regel.tekenconventie === "ZOALS_BRON" ? 1 : -1 };
+}
+
+/**
+ * Vertaalt de balanszijde van een BALANS-mappingregel naar `OnbekendOf`.
+ * Een nog niet bevestigde balanszijde (`null`) levert `onbekend` op — nooit
+ * stilzwijgend op het actuele saldoteken terugvallen (dat zou de balanszijde
+ * weer impliciet uit het saldo afleiden, precies wat dit veld voorkomt).
+ * Niet van toepassing op RESULTAAT-regels (die hebben geen balanszijde).
+ */
+export function balanszijdeVoorRegel(regel: Pick<BalansRegel, "balanszijde">): OnbekendOf<Balanszijde> {
+  if (regel.balanszijde === null) {
+    return {
+      type: "onbekend",
+      reden: "Balanszijde (Activa/Passiva) nog niet bevestigd voor deze grootboekrekening — Controle vereist, geen aanname op basis van het saldoteken toegestaan.",
+    };
+  }
+  return { type: "bekend", waarde: regel.balanszijde };
 }
 
 /**

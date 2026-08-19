@@ -100,15 +100,52 @@ geen parallelle berekening. Regressie-administratie: `070_Rooise_Zoom`
   rekeningen en BALANS-rekeningen zonder bepaalbare beginbalans belanden —
   net als bij `berekenPlPeriode` — in `controleVereist`, nooit
   stilzwijgend weggelaten.
-- **Activa/Passiva: structureel, niet geraden.** Geen nieuwe
-  grootboekmapping-classificatie deze bouwstap (expliciete scope-grens) en
-  geen classificatie op basis van rekeningomschrijving. In plaats daarvan
-  is de indeling zuiver het netto debet/creditkarakter van het berekende
-  saldo: netto-debet = Activa, netto-credit = Passiva. Dat is precies de
-  boekhoudkundige betekenis van "debet/credit blijven gescheiden"
-  (CLAUDE.md §6) toegepast op balanszijde-bepaling — geen tekst-heuristiek.
-  `rapportagepost`/omschrijving komt rechtstreeks uit de bron
-  (`Rekening_omschrijving`), ook geen classificatie, alleen doorgegeven.
+- **Activa/Passiva: een vaste eigenschap van de rekening, nooit het
+  saldoteken (ontwerpwijziging 2026-08-19).** Eerdere versie leidde
+  Activa/Passiva af uit het netto debet/creditkarakter van het BEREKENDE
+  saldo — een echte productie-run voor `070_Rooise_Zoom` liet zien dat dit
+  fout is: een rekening als Huurdebiteuren blijft Activa ook met een
+  tijdelijk creditsaldo (een vooruitbetalende huurder), en een voorziening
+  blijft Passiva ongeacht het actuele teken. `rapportagecategorie` komt nu
+  rechtstreeks uit `@bvc/config`'s `BalansRegel.balanszijde`
+  (`"ACTIVA"|"PASSIVA"|null`, zie `packages/config/README.md`'s
+  "Balanszijde") — een vaste classificatie in de grootboekmapping zelf, nooit
+  uit het saldoteken herleid. Ontbreekt de balanszijde nog (`null`, nog niet
+  bevestigd), dan komt de rekening in `controleVereist` — nooit gegokt op
+  basis van rekeningomschrijving (CLAUDE.md §3/§6) en nooit op saldoteken.
+  `saldo` behoudt zijn werkelijke teken, ook als dat afwijkt van wat je op
+  die balanszijde zou verwachten — precies de structuur die een latere
+  balanstoelichting nodig heeft (zie hieronder). `rapportagepost`/
+  omschrijving komt rechtstreeks uit de bron (`Rekening_omschrijving`), ook
+  geen classificatie, alleen doorgegeven.
+- **Bron-kolom `Boeking_Saldo`: bewust NIET gebruikt als primair signed
+  bedrag (onderzocht, geen wijziging nodig).** `boekingen` bevat een
+  bronkolom `Boeking_Saldo` naast Debet/Credit. Onderzoek (2026-08-19)
+  bevestigt dat dit al vóór de balansmodule was opgelost, en dat de
+  balansmodule dezelfde conventie volgt als de al bewezen P&L: elke
+  boekingsregel wordt centraal herberekend als `debet - credit`
+  (`@bvc/domain`'s `boekingSaldo`, CAL-FIN-001) — de bronkolom
+  `Boeking_Saldo` wordt uitsluitend voor audit gebruikt via
+  `parseBoekingen`'s `controleerBronsaldoAfwijking`
+  (`@bvc/data-contracts`), dat een WAARSCHUWING (niet-blokkerend) geeft
+  wanneer de bron zelf afwijkt van de herberekende waarde. Een
+  onparseerbare bronwaarde (bevestigd: Excel-foutwaarden als `#REF!` komen
+  in de praktijk voor in deze kolom) wordt door `coerceDecimal`
+  (`packages/data-contracts/src/lib/coerce.ts`) als `null` behandeld —
+  nooit een crash, nooit een gok — en blijft dan simpelweg buiten de
+  audit-vergelijking, zonder de herberekende `debet - credit` te
+  beïnvloeden. Debet en Credit blijven daarnaast altijd los beschikbaar
+  (audit trail); de introductie van deze balansmodule vervangt die
+  informatie niet.
+- **Balanstoelichting: nog niet gebouwd, wel voorbereid.** Er is bewust
+  geen automatische toelichtingslogica gebouwd op basis van aannames (bv.
+  "een negatief saldo op Huurdebiteuren betekent een vooruitbetalende
+  huurder"). Wat de rekenmodule wél teruggeeft — een `rapportagecategorie`
+  die nooit van het saldoteken afhangt, plus het werkelijke (mogelijk
+  negatieve) `saldo` — is precies de structuur die een latere toelichting
+  nodig heeft om zulke gevallen te signaleren (`saldo.isNegative() &&
+  rapportagecategorie === "ACTIVA"` bijvoorbeeld), zonder dat deze
+  bouwstap daar al een uitspraak over doet.
 - **Aansluitingscontrole (`aansluiting`).** `activaTotaal + passivaTotaal
   (signed, bewust geen `.abs()`) + resultaatTotaal` hoort ~0 te zijn bij
   een complete, correct gemapte balans waarvan de beginbalans van alle

@@ -1,6 +1,6 @@
 import Decimal from "decimal.js";
-import type { GrootboekMappingRegel } from "@bvc/config";
-import { boekingSaldo, rapportregelsom, zoekMappingRegel, type Balansstand, type Boekingsregel, type OnbekendOf } from "@bvc/domain";
+import type { Balanszijde, GrootboekMappingRegel } from "@bvc/config";
+import { balanszijdeVoorRegel, boekingSaldo, rapportregelsom, zoekMappingRegel, type Balansstand, type Boekingsregel, type OnbekendOf } from "@bvc/domain";
 
 /**
  * Balans-periodeberekening op een expliciet al-geselecteerde periode
@@ -15,27 +15,45 @@ import { boekingSaldo, rapportregelsom, zoekMappingRegel, type Balansstand, type
  * saldo per rekening op de peildatum = beginbalans (jaarstart) + som van
  * alle boekingen in de periode 1 t/m de opgegeven boekperiode. Dit is
  * zuivere optelling op al-gevalideerde bronvelden, geen aanname over een
- * boekperiode-kolom die niet in de cache bestaat.
+ * boekperiode-kolom die niet in de cache bestaat. De optelling gebruikt
+ * uitsluitend `@bvc/domain`'s `boekingSaldo` (debet - credit, centraal
+ * herberekend) — nooit de bron-kolom `Boeking_Saldo` (die blijft
+ * audit-only, zie `parseBoekingen`'s `controleerBronsaldoAfwijking` in
+ * `@bvc/data-contracts`), exact dezelfde conventie als de al bewezen
+ * P&L-periodeberekening.
  *
- * Activa/Passiva wordt NIET geraden op basis van rekeningomschrijving
- * (CLAUDE.md §6/§3) — dat zou een nieuwe grootboekmapping-classificatie
- * zijn, expliciet buiten scope van deze bouwstap. In plaats daarvan is de
- * indeling zuiver structureel, op basis van de netto debet/credit-aard van
- * het saldo (CLAUDE.md's eigen regel: "debet/credit blijven gescheiden" is
- * precies de technische definitie van activa- vs. passivazijde in
- * boekhouding — een netto-debetsaldo is Activa, een netto-creditsaldo is
- * Passiva).
+ * Activa/Passiva ("balanszijde") is een VASTE eigenschap van de
+ * grootboekrekening zelf, herkomstig uit de goedgekeurde grootboekmapping
+ * (`@bvc/config`'s `BalansRegel.balanszijde`) — NOOIT afgeleid uit het
+ * actuele teken van het berekende saldo. Een rekening met een tijdelijk
+ * afwijkend saldoteken (bv. een vooruitbetalende debiteur, of een
+ * voorziening die tijdelijk overschreden is) blijft op zijn toegewezen
+ * kant staan, met een zichtbaar negatief bedrag — zie `saldo` hieronder.
+ * Ontbreekt de balanszijde nog (`null`, nog niet bevestigd), dan komt de
+ * rekening in `controleVereist` terecht, nooit gegokt op het saldoteken.
  */
 
-export type BalansRapportageCategorie = "Activa" | "Passiva";
+export type BalansRapportageCategorie = Balanszijde;
 
 export interface BalansPeriodePost {
   grootboekrekening: string;
   /** Rechtstreeks uit de bron (Rekening_omschrijving) — geen classificatie, alleen doorgegeven tekst. */
   omschrijving: string | null;
-  /** Structureel bepaald op basis van het netto debet/credit-saldo, zie moduledoc hierboven. */
+  /**
+   * De vaste balanszijde uit de grootboekmapping (nooit het saldoteken) —
+   * zie moduledoc hierboven.
+   */
   rapportagecategorie: BalansRapportageCategorie;
-  /** Netto saldo op de peildatum (beginbalans + mutaties t/m de opgegeven periode), debet - credit. */
+  /**
+   * Netto saldo op de peildatum (beginbalans + mutaties t/m de opgegeven
+   * periode), debet - credit, MET het werkelijke teken — kan negatief zijn
+   * op een normaal positieve balanszijde (bv. Activa). Bewust ongewijzigd
+   * doorgegeven: geen abs()/tekenomkering, ook niet voor presentatie (zie
+   * renderBalansPeriode.ts). Dit teken, samen met `rapportagecategorie`,
+   * is precies de structuur die een latere balanstoelichting nodig heeft
+   * om bijzondere gevallen (negatief saldo op Activa/Passiva) te
+   * signaleren — die toelichtingslogica wordt hier bewust nog niet gebouwd.
+   */
   saldo: Decimal;
 }
 
@@ -46,15 +64,20 @@ export interface BalansPeriodeCategorieTotaal {
 
 export interface BalansPeriodeControleVereist {
   grootboekrekening: string;
-  /** Rauwe mutatie in de periode (debet - credit), ONGEWIJZIGD — het volledige saldo kon niet betrouwbaar bepaald worden, zie reden. */
+  /**
+   * Het best bekende bedrag voor deze rekening: het volledige saldo
+   * (beginbalans + mutatie) als dat berekenbaar was maar de balanszijde
+   * ontbreekt, anders de rauwe mutatie in de periode (debet - credit) als
+   * zelfs het saldo niet volledig bepaald kon worden — zie `reden`.
+   */
   saldo: Decimal;
   reden: string;
 }
 
 export interface BalansAansluitingscontrole {
-  /** Som van alle Activa-posten (netto-debetsaldo's, elk >= 0). */
+  /** Som van alle Activa-posten, SIGNED — een individuele post kan negatief zijn (zie moduledoc), bewust geen abs(). */
   activaTotaal: Decimal;
-  /** Som van alle Passiva-posten, SIGNED (netto-creditsaldo's, elk <= 0) — bewust geen abs(), zie moduledoc. */
+  /** Som van alle Passiva-posten, SIGNED — bewust geen abs(), zie moduledoc. */
   passivaTotaal: Decimal;
   /** Rauwe netto mutatie (debet - credit) van alle RESULTAAT-boekingen in de periode — geen tekenconventie/presentatiefactor toegepast, puur dubbel-boekhoudkundig feit. */
   resultaatTotaal: Decimal;
@@ -151,11 +174,18 @@ export function berekenBalansPeriode(
     }
 
     const saldo = beginbalansResultaat.waarde.plus(mutatie);
-    const rapportagecategorie: BalansRapportageCategorie = saldo.isNegative() ? "Passiva" : "Activa";
+    const balanszijdeResultaat = balanszijdeVoorRegel(mappingResultaat.waarde);
+    if (balanszijdeResultaat.type === "onbekend") {
+      if (!saldo.isZero()) {
+        controleVereist.push({ grootboekrekening, saldo, reden: balanszijdeResultaat.reden });
+      }
+      continue;
+    }
+
     posten.push({
       grootboekrekening,
       omschrijving: standRow?.rekeningOmschrijving ?? null,
-      rapportagecategorie,
+      rapportagecategorie: balanszijdeResultaat.waarde,
       saldo,
     });
   }
@@ -163,11 +193,11 @@ export function berekenBalansPeriode(
   posten.sort((a, b) => a.grootboekrekening.localeCompare(b.grootboekrekening));
   controleVereist.sort((a, b) => a.grootboekrekening.localeCompare(b.grootboekrekening));
 
-  const activaTotaal = rapportregelsom(posten.filter((p) => p.rapportagecategorie === "Activa").map((p) => p.saldo));
-  const passivaTotaal = rapportregelsom(posten.filter((p) => p.rapportagecategorie === "Passiva").map((p) => p.saldo));
+  const activaTotaal = rapportregelsom(posten.filter((p) => p.rapportagecategorie === "ACTIVA").map((p) => p.saldo));
+  const passivaTotaal = rapportregelsom(posten.filter((p) => p.rapportagecategorie === "PASSIVA").map((p) => p.saldo));
   const categorieTotalen: BalansPeriodeCategorieTotaal[] = [
-    { rapportagecategorie: "Activa", bedrag: activaTotaal },
-    { rapportagecategorie: "Passiva", bedrag: passivaTotaal },
+    { rapportagecategorie: "ACTIVA", bedrag: activaTotaal },
+    { rapportagecategorie: "PASSIVA", bedrag: passivaTotaal },
   ];
 
   const verschil = activaTotaal.plus(passivaTotaal).plus(resultaatTotaal);

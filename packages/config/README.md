@@ -70,14 +70,78 @@ geen zelfbedachte categorie.
   "status": "GOEDGEKEURD"            // "VOORGESTELD" | "GOEDGEKEURD" — GOEDGEKEURD is een menselijke stap
 }
 
-// BALANS-regel: geen rapportagepost/-categorie/tekenconventie — niet van toepassing
+// BALANS-regel: geen rapportagepost/-categorie/tekenconventie — niet van toepassing.
+// balanszijde is WEL verplicht aanwezig (mag `null` zijn = nog niet bevestigd) — zie
+// "Balanszijde" hieronder. Dit is een vaste eigenschap van de rekening, nooit afgeleid
+// uit het actuele saldoteken.
 {
   "grootboekrekening": "1010",       // Bank NL44RABO 0337 7344 45
   "soort": "BALANS",
+  "balanszijde": "ACTIVA",           // "ACTIVA" | "PASSIVA" | null (nog niet bevestigd)
   "actief": true,
   "status": "GOEDGEKEURD"
 }
 ```
+
+### Balanszijde (`balanszijde`, alleen BALANS-regels)
+
+Toegevoegd 2026-08-19 na een echte productie-run van `balans-periode` voor
+`070_Rooise_Zoom` (zie root-README/packages/reporting/README.md voor de
+volledige toelichting bij de balansmodule). Eerdere versie leidde Activa/
+Passiva af uit het teken van het berekende saldo — dat bleek fout: een
+balanszijde is een **vaste eigenschap van de rekening zelf** (bank en
+debiteuren horen bij Activa, crediteuren/voorzieningen/eigen vermogen bij
+Passiva), nooit een gevolg van een tijdelijk saldoteken. Een debiteuren-
+rekening met een vooruitbetalende huurder (creditsaldo) blijft Activa, met
+een zichtbaar negatief bedrag — verhuist niet naar Passiva.
+
+`balanszijde` is *nullable, niet optioneel*: het veld moet aanwezig zijn,
+maar mag `null` zijn zolang de kant nog niet is vastgesteld — exact
+hetzelfde patroon als `tekenconventie` bij RESULTAAT-regels.
+`@bvc/domain`'s `balanszijdeVoorRegel` geeft dan `OnbekendOf`-`onbekend`
+terug; `berekenBalansPeriode` zet zo'n rekening in `controleVereist`, nooit
+een kant gokt op het saldoteken.
+
+#### Balanszijde `070_Rooise_Zoom` (2026-08-19)
+
+Van de 13 BALANS-rekeningen van 070 zijn er 10 vastgelegd op basis van
+ondubbelzinnige boekhoudkundige terminologie (nooit gegokt op vrije
+omschrijvingstekst — "te ontvangen"/"vooruitbetaald" betekent per definitie
+een vordering/vooruitbetaling = Activa, "te betalen" per definitie een
+schuld = Passiva) en de door de gebruiker zelf gegeven categorieregels
+(bank/debiteuren → Activa; crediteuren/voorzieningen/eigen vermogen →
+Passiva):
+
+| grootboekrekening | omschrijving | balanszijde | motivatie |
+|---|---|---|---|
+| 1010 | Bank NL44RABO 0337 7344 45 | ACTIVA | bankrekening (gebruiker) |
+| 1310 | Huurdebiteuren | ACTIVA | debiteuren (gebruiker, expliciet genoemd voorbeeld) |
+| 1400 | Te ontvangen vergoedingen | ACTIVA | "te ontvangen" = vordering |
+| 1410 | Vooruitbetaalde kosten | ACTIVA | vooruitbetaling = vordering |
+| 1600 | Crediteuren | PASSIVA | crediteuren (gebruiker, expliciet genoemd voorbeeld) |
+| 1700 | Te betalen kosten | PASSIVA | "te betalen" = schuld |
+| 0840 | Ontrekkingen - Uitkeringen | PASSIVA | eigen vermogen/onttrekkingen (gebruiker) |
+| 0901 | Voorziening onderhoud Zoom 1 | PASSIVA | voorziening (gebruiker) |
+| 0902 | Voorziening onderhoud Zoom 2 | PASSIVA | voorziening (gebruiker) |
+| 0903 | Voorziening onderhoud Zoom 3 | PASSIVA | voorziening (gebruiker) |
+
+**Nog `null` (nog niet bevestigd, bewust niet gegokt) — 3 rekeningen:**
+
+| grootboekrekening | omschrijving | waarom onduidelijk |
+|---|---|---|
+| 1506 | Afdrachten BTW | "Afdracht" is niet ondubbelzinnig vordering óf schuld zonder de exacte boekingsconventie van BVC te kennen (anders dan "Te vorderen"/"Te betalen BTW") — kan een af te dragen schuld óf een verrekenrekening zijn. |
+| 1711 | Tussenrekening servicekst | Een "tussenrekening" is per definitie een verrekenrekening zonder vaste normale zijde — het teken hangt af van de timing van doorbelasting vs. ontvangst, niet van de rekening zelf. |
+| 1712 | Betaalde Service kosten | Kan een vooruitbetaling (Activa) zijn die later via servicekosten wordt verrekend, maar dat is een aanname over BVC's specifieke proces — niet zonder bevestiging vast te stellen. |
+
+Deze 3 rekeningen hebben in de fixture (`packages/tests/src/fixtures.ts`)
+en in de aangeleverde `070_Rooise_Zoom.json`/`grootboekmapping_master.json`
+`"balanszijde": null` en `"status": "VOORGESTELD"` (in plaats van het
+eerder goedgekeurde `GOEDGEKEURD`) — het toevoegen van een balanszijde aan
+een al goedgekeurde regel is een nieuwe classificatieclaim die niet
+stilzwijgend GOEDGEKEURD kan blijven totdat een mens de kant bevestigt
+(CLAUDE.md §6). Tot die bevestiging verschijnen deze rekeningen bij een
+niet-nul saldo zichtbaar in `controleVereist`, nooit stilzwijgend
+weggelaten en nooit gegokt.
 
 Een grootboekrekening mag maar één keer in `regels` voorkomen —
 `parseGrootboekMapping` wijst dubbele nummers af (ambigue mapping), ook

@@ -8,6 +8,7 @@ function balansRegel(overrides: Partial<BalansRegel> = {}): BalansRegel {
   return {
     grootboekrekening: "1010",
     soort: "BALANS",
+    balanszijde: "ACTIVA",
     actief: true,
     status: "GOEDGEKEURD",
     ...overrides,
@@ -60,27 +61,59 @@ function boeking(overrides: Partial<Boekingsregel> = {}): Boekingsregel {
 }
 
 describe("berekenBalansPeriode", () => {
-  it("telt beginbalans + mutaties op tot het saldo op de peildatum en classificeert een netto-debetsaldo als Activa", () => {
+  it("telt beginbalans + mutaties op tot het saldo op de peildatum en gebruikt de vaste balanszijde uit de mapping", () => {
     const resultaat = berekenBalansPeriode(
       [stand({ grootboekrekeningnr: "1010", beginbalansDebet: new Decimal("1000"), beginbalansCredit: new Decimal(0) })],
       [boeking({ grootboeknr: "1010", bedragDebet: new Decimal("500"), bedragCredit: new Decimal(0) })],
-      [balansRegel({ grootboekrekening: "1010" })],
+      [balansRegel({ grootboekrekening: "1010", balanszijde: "ACTIVA" })],
     );
     expect(resultaat.posten).toEqual([
-      { grootboekrekening: "1010", omschrijving: "Bank", rapportagecategorie: "Activa", saldo: new Decimal("1500") },
+      { grootboekrekening: "1010", omschrijving: "Bank", rapportagecategorie: "ACTIVA", saldo: new Decimal("1500") },
     ]);
     expect(resultaat.controleVereist).toEqual([]);
   });
 
-  it("classificeert een netto-creditsaldo structureel als Passiva, nooit op basis van omschrijving", () => {
+  it("houdt een PASSIVA-rekening op Passiva ook als het berekende saldo positief is (geen classificatie op saldoteken)", () => {
     const resultaat = berekenBalansPeriode(
-      [stand({ grootboekrekeningnr: "1711", beginbalansDebet: new Decimal(0), beginbalansCredit: new Decimal("2000"), rekeningOmschrijving: "Crediteuren" })],
+      [stand({ grootboekrekeningnr: "1600", beginbalansDebet: new Decimal("300"), beginbalansCredit: new Decimal(0), rekeningOmschrijving: "Crediteuren" })],
       [],
-      [balansRegel({ grootboekrekening: "1711" })],
+      [balansRegel({ grootboekrekening: "1600", balanszijde: "PASSIVA" })],
+    );
+    // Saldo is hier +300 (netto debet), maar 1600 is en blijft een PASSIVA-rekening (crediteuren).
+    expect(resultaat.posten).toEqual([
+      { grootboekrekening: "1600", omschrijving: "Crediteuren", rapportagecategorie: "PASSIVA", saldo: new Decimal("300") },
+    ]);
+  });
+
+  it("houdt een ACTIVA-rekening op Activa ook als het berekende saldo negatief is (bv. een vooruitbetalende debiteur)", () => {
+    const resultaat = berekenBalansPeriode(
+      [stand({ grootboekrekeningnr: "1310", beginbalansDebet: new Decimal(0), beginbalansCredit: new Decimal("10000"), rekeningOmschrijving: "Huurdebiteuren" })],
+      [],
+      [balansRegel({ grootboekrekening: "1310", balanszijde: "ACTIVA" })],
     );
     expect(resultaat.posten).toEqual([
-      { grootboekrekening: "1711", omschrijving: "Crediteuren", rapportagecategorie: "Passiva", saldo: new Decimal("-2000") },
+      { grootboekrekening: "1310", omschrijving: "Huurdebiteuren", rapportagecategorie: "ACTIVA", saldo: new Decimal("-10000") },
     ]);
+  });
+
+  it("markeert een BALANS-rekening met een nog niet bevestigde balanszijde (null) als controleVereist, verzint geen kant op basis van het saldoteken", () => {
+    const resultaat = berekenBalansPeriode(
+      [stand({ grootboekrekeningnr: "1506", beginbalansDebet: new Decimal("100"), beginbalansCredit: new Decimal(0), rekeningOmschrijving: "Afdrachten BTW" })],
+      [],
+      [balansRegel({ grootboekrekening: "1506", balanszijde: null })],
+    );
+    expect(resultaat.posten).toEqual([]);
+    expect(resultaat.controleVereist).toEqual([{ grootboekrekening: "1506", saldo: new Decimal("100"), reden: expect.any(String) }]);
+    expect(resultaat.controleVereist[0]?.reden).toMatch(/[Bb]alanszijde/);
+  });
+
+  it("laat een BALANS-rekening met onbevestigde balanszijde weg uit controleVereist als het saldo nul is", () => {
+    const resultaat = berekenBalansPeriode(
+      [stand({ grootboekrekeningnr: "1506", beginbalansDebet: new Decimal(0), beginbalansCredit: new Decimal(0) })],
+      [],
+      [balansRegel({ grootboekrekening: "1506", balanszijde: null })],
+    );
+    expect(resultaat.controleVereist).toEqual([]);
   });
 
   it("markeert een onbekende grootboekrekening met niet-nul mutatie als controleVereist, nooit stilzwijgend genegeerd", () => {
@@ -163,10 +196,10 @@ describe("berekenBalansPeriode", () => {
         stand({ grootboekrekeningnr: "1711", beginbalansDebet: new Decimal(0), beginbalansCredit: new Decimal("400") }),
       ],
       [],
-      [balansRegel({ grootboekrekening: "1010" }), balansRegel({ grootboekrekening: "1711" })],
+      [balansRegel({ grootboekrekening: "1010", balanszijde: "ACTIVA" }), balansRegel({ grootboekrekening: "1711", balanszijde: "PASSIVA" })],
     );
-    const activa = resultaat.categorieTotalen.find((c) => c.rapportagecategorie === "Activa");
-    const passiva = resultaat.categorieTotalen.find((c) => c.rapportagecategorie === "Passiva");
+    const activa = resultaat.categorieTotalen.find((c) => c.rapportagecategorie === "ACTIVA");
+    const passiva = resultaat.categorieTotalen.find((c) => c.rapportagecategorie === "PASSIVA");
     expect(activa?.bedrag.toString()).toBe("1000");
     expect(passiva?.bedrag.toString()).toBe("-400");
   });

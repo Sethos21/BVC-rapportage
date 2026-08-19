@@ -7,7 +7,12 @@ import type { BalansPeriodePost } from "./balansPeriodeBerekening.js";
  * HTML-renderer voor de balans-periodesectie. Rendert uitsluitend de
  * al-berekende `BalansPeriodeResultaat` (balansPeriodeBerekening.ts) —
  * geen eigen berekeningen, geen eigen classificatie (CLAUDE.md, "rekenlaag
- * los van renderer/UI"). Toont rekening, omschrijving, rapportagecategorie,
+ * los van renderer/UI"). Gebruikt uitsluitend de al-toegewezen
+ * `rapportagecategorie` (de vaste balanszijde uit de grootboekmapping) om
+ * te bepalen in welke tabel een rekening verschijnt — nooit het saldoteken.
+ * Het saldo wordt vervolgens ongewijzigd (geen abs(), geen tekenomkering)
+ * weergegeven: een negatief bedrag op een normaal positieve balanszijde
+ * blijft zichtbaar. Toont rekening, omschrijving, rapportagecategorie,
  * saldo en subtotalen (Activa/Passiva), plus altijd zichtbare controles
  * voor niet-verwerkte rekeningen en de aansluitingscontrole — nooit
  * stilzwijgend weggelaten.
@@ -80,14 +85,15 @@ export function renderBalansPeriodeHtml(invoer: BalansPeriodeInvoer): string {
       <div class="periode">Boekjaar ${invoer.boekjaar}, t/m periode ${escapeHtml(invoer.boekperiodeTotEnMet)} — gegenereerd op ${escapeHtml(invoer.gegenereerdOp.toISOString().slice(0, 19).replace("T", " "))}</div>
     </div>`;
 
-  const activaPosten = invoer.resultaat.posten.filter((p) => p.rapportagecategorie === "Activa");
-  const passivaPosten = invoer.resultaat.posten.filter((p) => p.rapportagecategorie === "Passiva");
+  const activaPosten = invoer.resultaat.posten.filter((p) => p.rapportagecategorie === "ACTIVA");
+  const passivaPosten = invoer.resultaat.posten.filter((p) => p.rapportagecategorie === "PASSIVA");
 
   const body = `
     <div class="toelichting" style="margin-bottom:24px">
       Balans op peildatum boekjaar ${invoer.boekjaar}, t/m boekperiode ${escapeHtml(invoer.boekperiodeTotEnMet)}: beginbalans + boekingen
-      t/m die periode, op de goedgekeurde master+override-grootboekmapping. Activa/Passiva is structureel bepaald op het
-      netto debet/creditsaldo, niet op de rekeningomschrijving.
+      t/m die periode, op de goedgekeurde master+override-grootboekmapping. Activa/Passiva is de VASTE balanszijde uit
+      die mapping — nooit afgeleid uit het actuele saldoteken; een negatief bedrag op een normaal positieve zijde
+      (bv. een vooruitbetalende debiteur) blijft daar zichtbaar staan, verhuist niet naar de andere kolom.
     </div>
     ${renderPostenTabel("Activa", activaPosten, invoer.resultaat.aansluiting.activaTotaal)}
     ${renderPostenTabel("Passiva", passivaPosten, invoer.resultaat.aansluiting.passivaTotaal)}

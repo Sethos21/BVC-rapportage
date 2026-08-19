@@ -234,8 +234,15 @@ export function begrotingServicekostenRijen(): Record<string, unknown>[] {
  * BALANS-rekeningen die `pl-periode` in de praktijk als `controleVereist`
  * naar boven bracht — bevestigd tegen het echte rekeningschema
  * ("Rekeningschema basisgegevens", Srt-kolom Bal/V&W) van bedrijf 070
- * (2026-08-18). Zie packages/config/README.md voor de volledige toelichting
- * per rekening. Dient hier als representatieve fixture voor tests; is NIET
+ * (2026-08-18), en per 2026-08-19 aangevuld met een vaste `balanszijde`
+ * (ACTIVA/PASSIVA) per BALANS-regel — 10 van de 13 op basis van
+ * ondubbelzinnige boekhoudkundige terminologie/de door de gebruiker
+ * gegeven categorieregels (bank/debiteuren→ACTIVA,
+ * crediteuren/voorzieningen/eigen vermogen→PASSIVA), 3 nog `null`
+ * (Afdrachten BTW/Tussenrekening servicekst/Betaalde Service kosten —
+ * genuine onduidelijk, niet geraden). Zie packages/config/README.md voor de
+ * volledige toelichting per rekening. Dient hier als representatieve
+ * fixture voor tests; is NIET
  * automatisch de mapping die `070_Rooise_Zoom` in productie gebruikt — dat
  * vereist het bestand handmatig naar
  * `<BVC_DATA_ROOT>/config/grootboekmappingen/070_Rooise_Zoom.json` te
@@ -259,21 +266,24 @@ export function rooiseZoomGrootboekMapping(): GrootboekMappingConfig {
     ["8815", "Zonnestroom", "Opbrengsten", "OMGEKEERD"],
   ];
 
-  // Rekeningnummer + omschrijving uit het rekeningschema, uitsluitend ter documentatie in deze fixture.
-  const balansRekeningen: [string, string][] = [
-    ["0840", "Ontrekkingen - Uitkeringen"],
-    ["0901", "Voorziening onderhoud Zoom 1"],
-    ["0902", "Voorziening onderhoud Zoom 2"],
-    ["0903", "Voorziening onderhoud Zoom 3"],
-    ["1010", "Bank NL44RABO 0337 7344 45"],
-    ["1310", "Huurdebiteuren"],
-    ["1400", "Te ontvangen vergoedingen"],
-    ["1410", "Vooruitbetaalde kosten"],
-    ["1506", "Afdrachten BTW"],
-    ["1600", "Crediteuren"],
-    ["1700", "Te betalen kosten"],
-    ["1711", "Tussenrekening servicekst"],
-    ["1712", "Betaalde Service kosten"],
+  // Rekeningnummer + omschrijving (documentatie) + balanszijde uit het rekeningschema.
+  // balanszijde `null` = nog niet bevestigd (geen classificatie geraden op omschrijving,
+  // zie packages/config/README.md's "Balanszijde 070_Rooise_Zoom" voor de per-rekening
+  // onderbouwing/openstaande vragen).
+  const balansRekeningen: [string, string, "ACTIVA" | "PASSIVA" | null][] = [
+    ["0840", "Ontrekkingen - Uitkeringen", "PASSIVA"],
+    ["0901", "Voorziening onderhoud Zoom 1", "PASSIVA"],
+    ["0902", "Voorziening onderhoud Zoom 2", "PASSIVA"],
+    ["0903", "Voorziening onderhoud Zoom 3", "PASSIVA"],
+    ["1010", "Bank NL44RABO 0337 7344 45", "ACTIVA"],
+    ["1310", "Huurdebiteuren", "ACTIVA"],
+    ["1400", "Te ontvangen vergoedingen", "ACTIVA"],
+    ["1410", "Vooruitbetaalde kosten", "ACTIVA"],
+    ["1506", "Afdrachten BTW", null],
+    ["1600", "Crediteuren", "PASSIVA"],
+    ["1700", "Te betalen kosten", "PASSIVA"],
+    ["1711", "Tussenrekening servicekst", null],
+    ["1712", "Betaalde Service kosten", null],
   ];
 
   return {
@@ -289,11 +299,12 @@ export function rooiseZoomGrootboekMapping(): GrootboekMappingConfig {
         actief: true,
         status: "GOEDGEKEURD" as const,
       })),
-      ...balansRekeningen.map(([grootboekrekening]) => ({
+      ...balansRekeningen.map(([grootboekrekening, , balanszijde]) => ({
         grootboekrekening,
         soort: "BALANS" as const,
+        balanszijde,
         actief: true,
-        status: "GOEDGEKEURD" as const,
+        status: balanszijde === null ? ("VOORGESTELD" as const) : ("GOEDGEKEURD" as const),
       })),
     ],
   };

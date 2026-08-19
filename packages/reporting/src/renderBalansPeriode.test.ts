@@ -7,12 +7,12 @@ import type { BalansPeriodeResultaat } from "./balansPeriodeBerekening.js";
 function resultaat(overrides: Partial<BalansPeriodeResultaat> = {}): BalansPeriodeResultaat {
   return {
     posten: [
-      { grootboekrekening: "1010", omschrijving: "Bank", rapportagecategorie: "Activa", saldo: new Decimal("700") },
-      { grootboekrekening: "1711", omschrijving: "Crediteuren", rapportagecategorie: "Passiva", saldo: new Decimal("-230") },
+      { grootboekrekening: "1010", omschrijving: "Bank", rapportagecategorie: "ACTIVA", saldo: new Decimal("700") },
+      { grootboekrekening: "1711", omschrijving: "Crediteuren", rapportagecategorie: "PASSIVA", saldo: new Decimal("-230") },
     ],
     categorieTotalen: [
-      { rapportagecategorie: "Activa", bedrag: new Decimal("700") },
-      { rapportagecategorie: "Passiva", bedrag: new Decimal("-230") },
+      { rapportagecategorie: "ACTIVA", bedrag: new Decimal("700") },
+      { rapportagecategorie: "PASSIVA", bedrag: new Decimal("-230") },
     ],
     controleVereist: [],
     aansluiting: {

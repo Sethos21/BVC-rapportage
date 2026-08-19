@@ -1,6 +1,6 @@
 import type { BalansRegel, ResultaatRegel } from "@bvc/config";
 import { describe, expect, it } from "vitest";
-import { presentatiefactorVoorRegel, resolveerGrootboekMapping, zoekMappingRegel } from "./grootboekmapping.js";
+import { balanszijdeVoorRegel, presentatiefactorVoorRegel, resolveerGrootboekMapping, zoekMappingRegel } from "./grootboekmapping.js";
 
 function regel(overrides: Partial<ResultaatRegel> = {}): ResultaatRegel {
   return {
@@ -19,6 +19,7 @@ function balansRegel(overrides: Partial<BalansRegel> = {}): BalansRegel {
   return {
     grootboekrekening: "1010",
     soort: "BALANS",
+    balanszijde: "ACTIVA",
     actief: true,
     status: "VOORGESTELD",
     ...overrides,
@@ -116,6 +117,18 @@ describe("presentatiefactorVoorRegel", () => {
 
   it("is onbekend bij een nog niet bevestigde tekenconventie (null), verzint geen factor", () => {
     const resultaat = presentatiefactorVoorRegel({ tekenconventie: null });
+    expect(resultaat.type).toBe("onbekend");
+  });
+});
+
+describe("balanszijdeVoorRegel", () => {
+  it("geeft ACTIVA/PASSIVA door zoals vastgelegd in de mapping", () => {
+    expect(balanszijdeVoorRegel({ balanszijde: "ACTIVA" })).toEqual({ type: "bekend", waarde: "ACTIVA" });
+    expect(balanszijdeVoorRegel({ balanszijde: "PASSIVA" })).toEqual({ type: "bekend", waarde: "PASSIVA" });
+  });
+
+  it("is onbekend bij een nog niet bevestigde balanszijde (null), verzint geen kant op basis van het saldoteken", () => {
+    const resultaat = balanszijdeVoorRegel({ balanszijde: null });
     expect(resultaat.type).toBe("onbekend");
   });
 });

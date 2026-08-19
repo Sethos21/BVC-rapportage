@@ -54,18 +54,40 @@ export const RekeningSoortSchema = z.enum(["BALANS", "RESULTAAT"]);
 export type RekeningSoort = z.infer<typeof RekeningSoortSchema>;
 
 /**
+ * Balanszijde: een VASTE eigenschap van de grootboekrekening zelf (bank en
+ * debiteuren horen bij Activa, crediteuren/voorzieningen/eigen vermogen bij
+ * Passiva), nooit afgeleid uit het actuele teken van het saldo. Een
+ * debiteurenrekening die tijdelijk een creditsaldo heeft (bv. een
+ * vooruitbetalende huurder) blijft Activa, met een negatief bedrag — de
+ * balanszijde en het saldoteken zijn twee onafhankelijke dingen
+ * (CLAUDE.md §6, "debet/credit blijven gescheiden").
+ *
+ * Nullable: `null` betekent expliciet "nog niet bevestigd" — nooit een
+ * standaardwaarde aannemen. `@bvc/domain`'s `balanszijdeVoorRegel` geeft dan
+ * `OnbekendOf`-`onbekend` terug; `berekenBalansPeriode`
+ * (`@bvc/reporting`) zet zo'n rekening in `controleVereist`, nooit een kant
+ * gokt.
+ */
+export const BalanszijdeSchema = z.enum(["ACTIVA", "PASSIVA"]);
+export type Balanszijde = z.infer<typeof BalanszijdeSchema>;
+
+/**
  * Een BALANS-regel markeert een grootboekrekening als bekend en bewust
  * buiten de P&L-scope (bv. bank, debiteuren/crediteuren, voorzieningen,
  * tussenrekeningen) — géén rapportagepost/-categorie/tekenconventie nodig,
  * want die rekening komt nooit in een P&L-uitkomst terecht. Dit is iets
  * anders dan een onbekende/niet-gemapte rekening: `berekenPlPeriode`
  * (`@bvc/reporting`) negeert een bekende BALANS-rekening stil, terwijl een
- * écht onbekende rekening met saldo in `controleVereist` verschijnt.
+ * écht onbekende rekening met saldo in `controleVereist` verschijnt. Wél
+ * verplicht aanwezig (als veld, zie hierboven voor de `null`-betekenis):
+ * `balanszijde` — de balansrenderer bepaalt hiermee uitsluitend in welke
+ * tabel (Activa/Passiva) een rekening verschijnt, nooit op het saldoteken.
  */
 export const BalansRegelSchema = z
   .object({
     grootboekrekening: z.string().min(1),
     soort: z.literal("BALANS"),
+    balanszijde: BalanszijdeSchema.nullable(),
     actief: z.boolean(),
     status: MappingStatusSchema,
   })

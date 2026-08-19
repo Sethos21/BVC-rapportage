@@ -21,6 +21,7 @@ function balansRegel(overrides: Partial<BalansRegel> = {}): BalansRegel {
   return {
     grootboekrekening: "1010",
     soort: "BALANS",
+    balanszijde: "ACTIVA",
     actief: true,
     status: "GOEDGEKEURD",
     ...overrides,

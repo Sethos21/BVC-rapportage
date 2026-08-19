@@ -18,6 +18,7 @@ function balansRegel(overrides: Partial<BalansRegel> = {}): BalansRegel {
   return {
     grootboekrekening: "1010",
     soort: "BALANS",
+    balanszijde: "ACTIVA",
     actief: true,
     status: "VOORGESTELD",
     ...overrides,
@@ -76,6 +77,26 @@ describe("parseGrootboekMapping — BALANS-regels", () => {
 
   it("wijst een BALANS-regel met een rapportagepost-veld af (strict schema, hoort niet bij BALANS)", () => {
     expect(() => parseGrootboekMapping(mapping([{ ...balansRegel(), rapportagepost: "Iets" }]))).toThrow();
+  });
+
+  it("accepteert PASSIVA als balanszijde", () => {
+    const ruw = mapping([balansRegel({ balanszijde: "PASSIVA" })]);
+    expect(parseGrootboekMapping(ruw).regels[0]).toMatchObject({ balanszijde: "PASSIVA" });
+  });
+
+  it("accepteert een expliciet nog niet bevestigde balanszijde (null), verzint er geen", () => {
+    const ruw = mapping([balansRegel({ balanszijde: null })]);
+    expect(parseGrootboekMapping(ruw).regels[0]).toMatchObject({ balanszijde: null });
+  });
+
+  it("wijst een BALANS-regel zonder balanszijde-veld af (verplicht aanwezig, mag wel null zijn)", () => {
+    const zonderVeld: Record<string, unknown> = { ...balansRegel() };
+    delete zonderVeld["balanszijde"];
+    expect(() => parseGrootboekMapping(mapping([zonderVeld]))).toThrow();
+  });
+
+  it("wijst een ongeldige balanszijde-waarde af", () => {
+    expect(() => parseGrootboekMapping(mapping([{ ...balansRegel(), balanszijde: "ACTIEF" }]))).toThrow();
   });
 
   it("staat RESULTAAT- en BALANS-regels naast elkaar toe in dezelfde mapping", () => {
