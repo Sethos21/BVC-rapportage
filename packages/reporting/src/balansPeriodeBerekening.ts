@@ -77,10 +77,12 @@ export interface BalansPeriodeControleVereist {
   grootboekrekening: string;
   /**
    * Het best bekende bedrag voor deze rekening: het volledige (rauwe)
-   * saldo (beginbalans + mutatie) als dat berekenbaar was maar balanszijde
-   * of tekenconventie ontbreekt, anders de rauwe mutatie in de periode
-   * (debet - credit) als zelfs het saldo niet volledig bepaald kon worden
-   * — zie `reden`. Nooit met een geraden tekenconventie gepresenteerd.
+   * saldo (beginbalans + mutatie) als een beginbalans bepaalbaar was —
+   * ook voor een volledig onbekende/ongemapte rekening, zodat een grote
+   * stilstaande beginbalans (0 mutatie deze periode) nooit stilzwijgend
+   * buiten beeld blijft — anders de rauwe mutatie in de periode
+   * (debet - credit) als zelfs het saldo niet bepaald kon worden. Nooit
+   * met een geraden tekenconventie gepresenteerd.
    */
   saldo: Decimal;
   reden: string;
@@ -165,11 +167,17 @@ export function berekenBalansPeriode(
 
   for (const grootboekrekening of alleRekeningen) {
     const mutatie = mutatiePerRekening.get(grootboekrekening) ?? new Decimal(0);
+    const standRow = standPerRekening.get(grootboekrekening);
     const mappingResultaat = zoekMappingRegel(mappingRegels, grootboekrekening);
 
     if (mappingResultaat.type === "onbekend") {
-      if (!mutatie.isZero()) {
-        controleVereist.push({ grootboekrekening, saldo: mutatie, reden: mappingResultaat.reden });
+      // Best bekende bedrag: beginbalans (indien bepaalbaar) + mutatie — nooit alleen de mutatie, anders
+      // blijft een rekening met een grote, stilstaande beginbalans (0 mutatie deze periode) stilzwijgend
+      // buiten beeld, terwijl die wél meetelt in de balans (CLAUDE.md §6).
+      const beginbalansResultaatOnbekend = beginbalansSaldo(standRow);
+      const bestBekendSaldo = beginbalansResultaatOnbekend.type === "bekend" ? beginbalansResultaatOnbekend.waarde.plus(mutatie) : mutatie;
+      if (!bestBekendSaldo.isZero() || standRow !== undefined) {
+        controleVereist.push({ grootboekrekening, saldo: bestBekendSaldo, reden: mappingResultaat.reden });
       }
       continue;
     }
@@ -179,7 +187,6 @@ export function berekenBalansPeriode(
       continue;
     }
 
-    const standRow = standPerRekening.get(grootboekrekening);
     const beginbalansResultaat = beginbalansSaldo(standRow);
     if (beginbalansResultaat.type === "onbekend") {
       if (!mutatie.isZero() || standRow !== undefined) {

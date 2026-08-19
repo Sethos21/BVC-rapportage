@@ -103,6 +103,20 @@ geen parallelle berekening. Regressie-administratie: `070_Rooise_Zoom`
   rekeningen en BALANS-rekeningen zonder bepaalbare beginbalans/
   balanszijde/tekenconventie belanden — net als bij `berekenPlPeriode` —
   in `controleVereist`, nooit stilzwijgend weggelaten.
+- **Bugfix (2026-08-20, gevonden via een echte productie-run): een
+  volledig ongemapte rekening met een grote, stilstaande beginbalans (geen
+  mutatie deze periode) verdween stilzwijgend uit de uitkomst.** De
+  "onbekende mapping"-tak in `berekenBalansPeriode` keek alleen naar de
+  periodemutatie (`!mutatie.isZero()`) om te bepalen of een ongemapte
+  rekening in `controleVereist` moest — een rekening als "Resultaat vorig
+  boekjaar" (een grote, jaarlijks vaste post die dit boekjaar terecht geen
+  mutatie heeft) werd daardoor volledig onzichtbaar, ook al droeg hij wél
+  bij aan de echte balans. Dit was de hoofdoorzaak van een groot deel van
+  een aansluitingsverschil bij een echte 070-run. Gefixt door ook de
+  beginbalans mee te nemen in de "best bekende"-waarde en de aanwezigheid
+  van een balansstand-rij te laten meetellen — exact dezelfde logica die de
+  "beginbalans onbekend"-tak al had voor bekende-maar-onvolledige
+  rekeningen, nu ook toegepast op volledig ongemapte rekeningen.
 - **Drie onafhankelijke concepten (ontwerpcorrectie 2026-08-20, na een
   echte productie-run):**
   1. **`balanszijde`** (ACTIVA/PASSIVA) — een vaste eigenschap van de

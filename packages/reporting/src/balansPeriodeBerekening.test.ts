@@ -195,6 +195,21 @@ describe("berekenBalansPeriode", () => {
     expect(resultaat.controleVereist).toEqual([]);
   });
 
+  it("markeert een volledig ongemapte rekening met een stilstaande maar niet-nul BEGINBALANS als controleVereist, ook zonder mutatie deze periode (bugfix: was stilzwijgend onzichtbaar)", () => {
+    const resultaat = berekenBalansPeriode(
+      [stand({ grootboekrekeningnr: "9999", beginbalansDebet: new Decimal(0), beginbalansCredit: new Decimal("2329272"), rekeningOmschrijving: "Resultaat vorig boekjaar" })],
+      [],
+      [balansRegel({ grootboekrekening: "1010" })],
+      onbekendResultaat,
+    );
+    expect(resultaat.controleVereist).toEqual([{ grootboekrekening: "9999", saldo: new Decimal("-2329272"), reden: expect.any(String) }]);
+  });
+
+  it("laat een volledig ongemapte rekening weg uit controleVereist als er noch een balansstand-rij noch een mutatie is", () => {
+    const resultaat = berekenBalansPeriode([], [], [balansRegel({ grootboekrekening: "1010" })], onbekendResultaat);
+    expect(resultaat.controleVereist).toEqual([]);
+  });
+
   it("markeert een BALANS-rekening zonder balansstand-rij (geen beginbalans bekend) met mutatie als controleVereist, nooit als 0 aangenomen", () => {
     const resultaat = berekenBalansPeriode(
       [],
