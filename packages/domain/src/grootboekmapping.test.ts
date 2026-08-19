@@ -20,6 +20,7 @@ function balansRegel(overrides: Partial<BalansRegel> = {}): BalansRegel {
     grootboekrekening: "1010",
     soort: "BALANS",
     balanszijde: "ACTIVA",
+    tekenconventie: "ZOALS_BRON",
     actief: true,
     status: "VOORGESTELD",
     ...overrides,
@@ -118,6 +119,11 @@ describe("presentatiefactorVoorRegel", () => {
   it("is onbekend bij een nog niet bevestigde tekenconventie (null), verzint geen factor", () => {
     const resultaat = presentatiefactorVoorRegel({ tekenconventie: null });
     expect(resultaat.type).toBe("onbekend");
+  });
+
+  it("werkt structureel ook voor een BALANS-regel (tekenconventie is nu een apart, onafhankelijk veld van balanszijde)", () => {
+    const balans = balansRegel({ tekenconventie: "OMGEKEERD" });
+    expect(presentatiefactorVoorRegel(balans)).toEqual({ type: "bekend", waarde: -1 });
   });
 });
 

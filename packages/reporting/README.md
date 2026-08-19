@@ -93,31 +93,65 @@ geen parallelle berekening. Regressie-administratie: `070_Rooise_Zoom`
   dan is het saldo expliciet niet te bepalen — nooit stilzwijgend 0
   aangenomen (CLAUDE.md §6).
 - **`berekenBalansPeriode(balansstanden, boekingen, mappingRegels,
-  toleranceEuro?)`** — per BALANS-soort rekening: beginbalans + mutaties
-  in de periode. RESULTAAT-soort rekeningen (die horen in de P&L) worden
-  hier bewust genegeerd in `posten`/`controleVereist`, maar hun rauwe
-  mutatie telt mee in `aansluiting.resultaatTotaal`. Onbekende/inactieve
-  rekeningen en BALANS-rekeningen zonder bepaalbare beginbalans belanden —
-  net als bij `berekenPlPeriode` — in `controleVereist`, nooit
-  stilzwijgend weggelaten.
-- **Activa/Passiva: een vaste eigenschap van de rekening, nooit het
-  saldoteken (ontwerpwijziging 2026-08-19).** Eerdere versie leidde
-  Activa/Passiva af uit het netto debet/creditkarakter van het BEREKENDE
-  saldo — een echte productie-run voor `070_Rooise_Zoom` liet zien dat dit
-  fout is: een rekening als Huurdebiteuren blijft Activa ook met een
-  tijdelijk creditsaldo (een vooruitbetalende huurder), en een voorziening
-  blijft Passiva ongeacht het actuele teken. `rapportagecategorie` komt nu
-  rechtstreeks uit `@bvc/config`'s `BalansRegel.balanszijde`
-  (`"ACTIVA"|"PASSIVA"|null`, zie `packages/config/README.md`'s
-  "Balanszijde") — een vaste classificatie in de grootboekmapping zelf, nooit
-  uit het saldoteken herleid. Ontbreekt de balanszijde nog (`null`, nog niet
-  bevestigd), dan komt de rekening in `controleVereist` — nooit gegokt op
-  basis van rekeningomschrijving (CLAUDE.md §3/§6) en nooit op saldoteken.
-  `saldo` behoudt zijn werkelijke teken, ook als dat afwijkt van wat je op
-  die balanszijde zou verwachten — precies de structuur die een latere
-  balanstoelichting nodig heeft (zie hieronder). `rapportagepost`/
-  omschrijving komt rechtstreeks uit de bron (`Rekening_omschrijving`), ook
-  geen classificatie, alleen doorgegeven.
+  resultaatHuidigBoekjaar, toleranceEuro?)`** — per BALANS-soort rekening:
+  beginbalans + mutaties in de periode (rauw saldo), gepresenteerd met de
+  rekening-eigen tekenconventie (zie hieronder). RESULTAAT-soort
+  rekeningen (die horen in de P&L) worden hier volledig genegeerd — geen
+  post, geen `controleVereist`; hun bijdrage komt via het apart
+  aangeleverde `resultaatHuidigBoekjaar` (zie "Resultaat huidig boekjaar"
+  hieronder), niet via een interne herberekening. Onbekende/inactieve
+  rekeningen en BALANS-rekeningen zonder bepaalbare beginbalans/
+  balanszijde/tekenconventie belanden — net als bij `berekenPlPeriode` —
+  in `controleVereist`, nooit stilzwijgend weggelaten.
+- **Drie onafhankelijke concepten (ontwerpcorrectie 2026-08-20, na een
+  echte productie-run):**
+  1. **`balanszijde`** (ACTIVA/PASSIVA) — een vaste eigenschap van de
+     rekening (`@bvc/config`'s `BalansRegel.balanszijde`), nooit uit het
+     saldoteken afgeleid. Een rekening als Huurdebiteuren blijft Activa
+     ook met een tijdelijk creditsaldo (vooruitbetalende huurder); een
+     voorziening blijft Passiva ongeacht het actuele teken.
+  2. **Het werkelijk berekende saldo** (beginbalans + mutaties, debet -
+     credit) — de rauwe boekhoudkundige waarheid.
+  3. **`tekenconventie`** (ZOALS_BRON/OMGEKEERD, óók op `BalansRegel`, apart
+     veld van `balanszijde`) — bepaalt hoe (2) BINNEN (1) getoond wordt.
+     Eerdere versie toonde simpelweg het rauwe saldo (impliciet
+     ZOALS_BRON voor alles); een echte productie-run liet zien dat dat
+     verkeerd overkomt — vrijwel elke Passiva-rekening (credit-normaal)
+     kwam daardoor negatief uit, terwijl een balans schulden/voorzieningen
+     normaliter als positief bedrag toont. De oplossing is NIET één
+     generieke regel per balanszijde (bv. "alle Passiva OMGEKEERD") — dat
+     zou dezelfde soort fout in de andere richting zijn — maar een
+     onafhankelijk, per-rekening bevestigd veld, exact hetzelfde
+     schema/patroon als RESULTAAT's `tekenconventie`
+     (`@bvc/domain`'s `presentatiefactorVoorRegel` werkt nu structureel op
+     beide regeltypen). Zie `packages/config/README.md`'s "Balanszijde ≠
+     presentatieteken" voor de per-rekening stand bij `070_Rooise_Zoom` —
+     op dit moment hebben de meeste Passiva-rekeningen bewust nog GEEN
+     bevestigde tekenconventie (geen aanname), dus verschijnen ze in
+     `controleVereist` totdat bevestigd.
+  Beide (1) en (3) zijn onafhankelijk nullable; ontbreekt er één, dan komt
+  de rekening in `controleVereist` — nooit gegokt op basis van
+  rekeningomschrijving (CLAUDE.md §3/§6) en nooit op het saldoteken.
+  `saldo` in `BalansPeriodePost` is het GETOONDE bedrag (na
+  tekenconventie) en behoudt zijn werkelijke teken, ook als dat afwijkt
+  van wat je op die balanszijde zou verwachten — precies de structuur die
+  een latere balanstoelichting nodig heeft (zie hieronder).
+  `rapportagepost`/omschrijving komt rechtstreeks uit de bron
+  (`Rekening_omschrijving`), ook geen classificatie, alleen doorgegeven.
+- **Resultaat huidig boekjaar (`berekenNettoResultaat`,
+  `plPeriodeBerekening.ts`).** Er bestaat geen eigen grootboekrekening voor
+  "resultaat lopend boekjaar" — dat bedrag wordt afgeleid van de P&L
+  (`berekenPlPeriode`'s `categorieTotalen`, die zelf bewust GEEN
+  gecombineerd nettoresultaat berekent, zie hierboven). `berekenNettoResultaat
+  (categorieTotalen, tekenPerCategorie)` lost dat hier expliciet op zonder
+  zelf een aanname te hardcoden: de aanroeper geeft het optel-/aftrekteken
+  per rapportagecategorie mee. `apps/worker/src/genereerBalansPeriode.ts`
+  gebruikt daarvoor `STANDAARD_TEKEN_PER_CATEGORIE` (Opbrengsten +1, Kosten
+  -1 — Resultaat = Opbrengsten - Kosten, de enige twee rapportagecategorieën
+  die nu system-breed bestaan) als expliciete, overrideable standaard op de
+  Worker-orkestratielaag — bewust niet in `@bvc/domain`/`@bvc/reporting`
+  gehardcodeerd. Een categorie zonder bevestigd teken maakt het resultaat
+  `OnbekendOf`-`onbekend`, nooit een aanname.
 - **Bron-kolom `Boeking_Saldo`: bewust NIET gebruikt als primair signed
   bedrag (onderzocht, geen wijziging nodig).** `boekingen` bevat een
   bronkolom `Boeking_Saldo` naast Debet/Credit. Onderzoek (2026-08-19)
@@ -146,29 +180,36 @@ geen parallelle berekening. Regressie-administratie: `070_Rooise_Zoom`
   nodig heeft om zulke gevallen te signaleren (`saldo.isNegative() &&
   rapportagecategorie === "ACTIVA"` bijvoorbeeld), zonder dat deze
   bouwstap daar al een uitspraak over doet.
-- **Aansluitingscontrole (`aansluiting`).** `activaTotaal + passivaTotaal
-  (signed, bewust geen `.abs()`) + resultaatTotaal` hoort ~0 te zijn bij
-  een complete, correct gemapte balans waarvan de beginbalans van alle
-  BALANS-rekeningen zelf al op 0 sluit (activa = passiva + eigen vermogen
-  bij jaarbegin — dubbel boekhouden). Een afwijking is dan exact herleidbaar
-  tot de som van de `controleVereist`-mutaties (zie
-  `genereerBalansPeriode.test.ts` voor een doorgerekend voorbeeld);
-  ontbreekt die beginbalans-sluiting zelf (onvolledige/foutieve brondata),
-  dan schuift dat mee door in `verschil` — bewust geen stilzwijgende
-  correctie.
+- **Aansluitingscontrole (`aansluiting`), herzien naar de standaard
+  balansvergelijking.** `verschil = activaTotaal - passivaTotaal -
+  resultaatHuidigBoekjaar` (activa/passiva zijn de GETOONDE, dus
+  tekenconventie-toegepaste totalen — signed, bewust geen `.abs()`), hoort
+  ~0 te zijn: Activa = Passiva + Resultaat huidig boekjaar. `verschil` is
+  zelf `OnbekendOf<Decimal>` — is `resultaatHuidigBoekjaar` onbekend (een
+  P&L-categorie zonder bevestigd teken), dan is de aansluiting simpelweg
+  niet te bepalen, nooit een gok; `sluitBinnenTolerantie` is dan `false`
+  (een onbekende aansluiting is nooit stilzwijgend "sluitend"). Dit
+  verving de eerdere "raw debet-credit sommeert tot 0"-truc (die alleen
+  werkte zolang nergens een tekenconventie werd toegepast) — nu een
+  herkenbare, echte boekhoudkundige vergelijking.
 - **`apps/worker/src/genereerBalansPeriode.ts`** — leest de cache
   (`boekingen` via `selecteerBoekingen` met alleen `boekperiodeTotEnMet`,
   `balansstanden` op bedrijfsnr+jaar) en dezelfde goedgekeurde
-  master+override-mapping als `genereerPlPeriode`. CLI: `bvc-worker
-  balans-periode <administratieId> --boekjaar N --periodeTotEnMet P
-  [--tolerantie N]`. Exitcode 1 bij niet-lege `controleVereist` of een
-  niet-sluitende aansluitingscontrole.
+  master+override-mapping als `genereerPlPeriode`; draait daarnaast
+  `berekenPlPeriode` + `berekenNettoResultaat` op dezelfde
+  boekingenselectie voor `resultaatHuidigBoekjaar` (geen parallelle
+  P&L-herberekening — twee outputs van dezelfde rekenlaag). CLI:
+  `bvc-worker balans-periode <administratieId> --boekjaar N
+  --periodeTotEnMet P [--tolerantie N]`. Exitcode 1 bij niet-lege
+  `controleVereist` of een niet-sluitende (of onbekende) aansluitingscontrole.
 - **`renderBalansPeriodeHtml`** — rendert uitsluitend de al-berekende
-  `BalansPeriodeResultaat` (geen eigen berekening): Activa-/Passiva-
-  tabellen met rekening/omschrijving/saldo + subtotaalrij, de
-  aansluitingscontrole, en een altijd zichtbare "Controle vereist"-sectie
-  (ook als leeg — dan een expliciete "geen"-melding, geen weggelaten
-  sectie).
+  `BalansPeriodeResultaat` (geen eigen berekening, geen eigen
+  tekenconventie): Activa-/Passiva-tabellen met rekening/omschrijving/
+  saldo + subtotaalrij, het resultaat huidig boekjaar, de
+  aansluitingscontrole (toont "Onbekend — ⟨reden⟩" i.p.v. een bedrag als
+  `resultaatHuidigBoekjaar`/`verschil` `OnbekendOf`-`onbekend` is), en een
+  altijd zichtbare "Controle vereist"-sectie (ook als leeg — dan een
+  expliciete "geen"-melding, geen weggelaten sectie).
 - **Gedeelde row-mappers.** `apps/worker/src/rowMappers.ts`
   (`naarBoekingsregel`, `naarBalansstand`) is uit `genereerPlPeriode.ts`
   getrokken zodat beide Worker-commando's dezelfde cacherij→domeintype-

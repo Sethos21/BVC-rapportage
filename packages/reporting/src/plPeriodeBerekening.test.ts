@@ -2,7 +2,7 @@ import type { BalansRegel, ResultaatRegel } from "@bvc/config";
 import type { Boekingsregel, OnbekendOf } from "@bvc/domain";
 import Decimal from "decimal.js";
 import { describe, expect, it } from "vitest";
-import { berekenPlPeriode, vergelijkMetGereconcilieerd } from "./plPeriodeBerekening.js";
+import { berekenNettoResultaat, berekenPlPeriode, vergelijkMetGereconcilieerd, type NettoResultaatTeken } from "./plPeriodeBerekening.js";
 
 function mappingRegel(overrides: Partial<ResultaatRegel> = {}): ResultaatRegel {
   return {
@@ -22,6 +22,7 @@ function balansRegel(overrides: Partial<BalansRegel> = {}): BalansRegel {
     grootboekrekening: "1010",
     soort: "BALANS",
     balanszijde: "ACTIVA",
+    tekenconventie: "ZOALS_BRON",
     actief: true,
     status: "GOEDGEKEURD",
     ...overrides,
@@ -224,5 +225,41 @@ describe("vergelijkMetGereconcilieerd", () => {
     );
     expect(vergelijking.regels).toEqual([]);
     expect(vergelijking.nogNietBekend).toHaveLength(1);
+  });
+});
+
+describe("berekenNettoResultaat", () => {
+  it("combineert categorieTotalen tot één resultaat met een expliciet opgegeven teken per categorie (Opbrengsten - Kosten)", () => {
+    const tekens: ReadonlyMap<string, NettoResultaatTeken> = new Map([
+      ["Kosten", -1],
+      ["Opbrengsten", 1],
+    ]);
+    const resultaat = berekenNettoResultaat(
+      [
+        { rapportagecategorie: "Kosten", bedrag: new Decimal("125") },
+        { rapportagecategorie: "Opbrengsten", bedrag: new Decimal("500") },
+      ],
+      tekens,
+    );
+    expect(resultaat).toEqual({ type: "bekend", waarde: new Decimal("375") });
+  });
+
+  it("is onbekend als een categorie geen bevestigd teken heeft, verzint er geen", () => {
+    const resultaat = berekenNettoResultaat(
+      [
+        { rapportagecategorie: "Kosten", bedrag: new Decimal("100") },
+        { rapportagecategorie: "Onbekende categorie", bedrag: new Decimal("50") },
+      ],
+      new Map([["Kosten", -1]]),
+    );
+    expect(resultaat.type).toBe("onbekend");
+    if (resultaat.type === "onbekend") {
+      expect(resultaat.reden).toContain("Onbekende categorie");
+    }
+  });
+
+  it("geeft 0 terug voor een lege categorieTotalen-lijst", () => {
+    const resultaat = berekenNettoResultaat([], new Map());
+    expect(resultaat).toEqual({ type: "bekend", waarde: new Decimal(0) });
   });
 });

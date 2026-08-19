@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import Decimal from "decimal.js";
 import { genereerBalansPeriode } from "./genereerBalansPeriode.js";
 import { rebuildCache } from "./rebuildCache.js";
 import { nieuweAdministratieConfig, schrijfAdministratieConfig } from "./administratie.js";
@@ -45,6 +46,20 @@ function balansRij(overrides: Record<string, unknown> = {}): Record<string, unkn
   };
 }
 
+function basisMapping(overrides: Record<string, unknown>[] = []): Record<string, unknown> {
+  const basis = [
+    { grootboekrekening: "1010", soort: "BALANS", balanszijde: "ACTIVA", tekenconventie: "ZOALS_BRON", actief: true, status: "GOEDGEKEURD" },
+    { grootboekrekening: "1711", soort: "BALANS", balanszijde: "PASSIVA", tekenconventie: "ZOALS_BRON", actief: true, status: "GOEDGEKEURD" },
+    { grootboekrekening: "8800", soort: "RESULTAAT", rapportagepost: "Huuropbrengsten belast", rapportagecategorie: "Opbrengsten", tekenconventie: "OMGEKEERD", actief: true, status: "GOEDGEKEURD" },
+  ];
+  const overrideRekeningen = new Set(overrides.map((r) => r["grootboekrekening"]));
+  return {
+    versie: "0.1",
+    administratieId: "070_rooisezoom",
+    regels: [...basis.filter((r) => !overrideRekeningen.has(r.grootboekrekening)), ...overrides],
+  };
+}
+
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), "bvc-balans-periode-"));
   mkdirSync(bronGedeeldDir(root), { recursive: true });
@@ -59,31 +74,15 @@ beforeEach(() => {
     boekingRij({ Boekstuk_Sleutel: "0704020024003", Boeking_Boekstuknr: "024003", Boeking_Volgnr: "000003", Boeking_Boekperiode: "07", Boeking_Grootboeknr: "1010", Boeking_Bedrag_Debet: 9999, Boeking_Bedrag_Credit: 0 }),
     // een nog niet gemapte rekening met een niet-nul mutatie — moet als controleVereist verschijnen
     boekingRij({ Boekstuk_Sleutel: "0704020024004", Boeking_Boekstuknr: "024004", Boeking_Volgnr: "000004", Boeking_Boekperiode: "02", Boeking_Grootboeknr: "9999", Boeking_Bedrag_Debet: 30, Boeking_Bedrag_Credit: 0 }),
-    boekingRij({ Boekstuk_Sleutel: "0704020024005", Boeking_Boekstuknr: "024005", Boeking_Volgnr: "000005", Boeking_Boekperiode: "02", Boeking_Grootboeknr: "1711", Boeking_Bedrag_Debet: 0, Boeking_Bedrag_Credit: 30 }),
   ]);
   schrijfXlsxFixture(join(bronGedeeldDir(root), "balans_per_jaar.xlsx"), [
-    // Beginbalans van de gemapte BALANS-rekeningen samen op 0 (200 - 200) — zoals een echte, op jaarbegin
-    // reeds sluitende balans (activa = passiva + eigen vermogen); dat maakt de aansluitingscontrole hieronder
-    // demonstreerbaar zonder een niet-gemapte rekening als 0 te moeten aannemen.
-    balansRij({ Grootboekrekeningnr: "1010", Beginbalans_debet: 200, Beginbalans_credit: 0, Rekening_omschrijving: "Bank" }),
-    balansRij({ Grootboekrekeningnr: "1711", Beginbalans_debet: 0, Beginbalans_credit: 200, Rekening_omschrijving: "Crediteuren" }),
+    balansRij({ Grootboekrekeningnr: "1010", Beginbalans_debet: 1000, Beginbalans_credit: 0, Rekening_omschrijving: "Bank" }),
+    balansRij({ Grootboekrekeningnr: "1711", Beginbalans_debet: 0, Beginbalans_credit: 300, Rekening_omschrijving: "Crediteuren" }),
   ]);
   schrijfXlsxFixture(join(bronGedeeldDir(root), "servicekosten.xlsx"), []);
 
   mkdirSync(grootboekmappingenDir(root), { recursive: true });
-  writeFileSync(
-    grootboekmappingPad(root, "070_rooisezoom"),
-    JSON.stringify({
-      versie: "0.1",
-      administratieId: "070_rooisezoom",
-      regels: [
-        { grootboekrekening: "1010", soort: "BALANS", balanszijde: "ACTIVA", actief: true, status: "GOEDGEKEURD" },
-        { grootboekrekening: "1711", soort: "BALANS", balanszijde: "PASSIVA", actief: true, status: "GOEDGEKEURD" },
-        { grootboekrekening: "8800", soort: "RESULTAAT", rapportagepost: "Huuropbrengsten belast", rapportagecategorie: "Opbrengsten", tekenconventie: "OMGEKEERD", actief: true, status: "GOEDGEKEURD" },
-      ],
-    }),
-    "utf-8",
-  );
+  writeFileSync(grootboekmappingPad(root, "070_rooisezoom"), JSON.stringify(basisMapping()), "utf-8");
 });
 
 afterEach(() => {
@@ -91,13 +90,13 @@ afterEach(() => {
 });
 
 describe("genereerBalansPeriode", () => {
-  it("telt beginbalans + boekingen t/m de opgegeven periode op tot het saldo op de peildatum", () => {
+  it("telt beginbalans + boekingen t/m de opgegeven periode op tot het (met ZOALS_BRON ongewijzigd getoonde) saldo", () => {
     rebuildCache({ root, administratieId: "070_rooisezoom", onVoortgang: () => {} });
 
     const { resultaat } = genereerBalansPeriode(root, "070_rooisezoom", { boekjaar: 2026, boekperiodeTotEnMet: "06" });
 
     const bank = resultaat.posten.find((p) => p.grootboekrekening === "1010");
-    expect(bank?.saldo.toString()).toBe("700"); // 200 beginbalans + 500 (periode 01), NIET periode 07 (9999)
+    expect(bank?.saldo.toString()).toBe("1500"); // 1000 beginbalans + 500 (periode 01), NIET periode 07 (9999)
     expect(bank?.rapportagecategorie).toBe("ACTIVA");
   });
 
@@ -107,7 +106,7 @@ describe("genereerBalansPeriode", () => {
 
     const crediteuren = resultaat.posten.find((p) => p.grootboekrekening === "1711");
     expect(crediteuren?.rapportagecategorie).toBe("PASSIVA");
-    expect(crediteuren?.saldo.toString()).toBe("-230"); // -200 beginbalans - 30 mutatie (periode 02)
+    expect(crediteuren?.saldo.toString()).toBe("-300"); // ZOALS_BRON: ongewijzigd getoond
   });
 
   it("markeert de niet-gemapte rekening 9999 als controleVereist, nooit stilzwijgend weggelaten", () => {
@@ -117,43 +116,36 @@ describe("genereerBalansPeriode", () => {
     expect(resultaat.controleVereist.some((c) => c.grootboekrekening === "9999")).toBe(true);
   });
 
-  it("negeert de bekende RESULTAAT-rekening 8800 in posten/controleVereist maar telt mee in de aansluitingscontrole", () => {
+  it("negeert de bekende RESULTAAT-rekening 8800 volledig in posten/controleVereist (die hoort in de P&L)", () => {
     rebuildCache({ root, administratieId: "070_rooisezoom", onVoortgang: () => {} });
     const { resultaat } = genereerBalansPeriode(root, "070_rooisezoom", { boekjaar: 2026, boekperiodeTotEnMet: "06" });
 
     expect(resultaat.posten.some((p) => p.grootboekrekening === "8800")).toBe(false);
     expect(resultaat.controleVereist.some((c) => c.grootboekrekening === "8800")).toBe(false);
-    expect(resultaat.aansluiting.resultaatTotaal.toString()).toBe("-500");
   });
 
-  it("toont een aansluitingsafwijking exact gelijk aan de niet-gemapte 9999-mutatie", () => {
+  it("berekent resultaatHuidigBoekjaar via dezelfde boekingen met de P&L-module (@bvc/reporting's berekenPlPeriode + berekenNettoResultaat)", () => {
+    rebuildCache({ root, administratieId: "070_rooisezoom", onVoortgang: () => {} });
+    const { resultaatHuidigBoekjaar } = genereerBalansPeriode(root, "070_rooisezoom", { boekjaar: 2026, boekperiodeTotEnMet: "06" });
+
+    // 8800 raw saldo = 0 - 500 = -500; OMGEKEERD -> gepresenteerd +500 (Opbrengsten); standaard teken Opbrengsten = +1.
+    expect(resultaatHuidigBoekjaar).toEqual({ type: "bekend", waarde: new Decimal("500") });
+  });
+
+  it("de aansluitingscontrole gebruikt activaTotaal - passivaTotaal - resultaatHuidigBoekjaar", () => {
     rebuildCache({ root, administratieId: "070_rooisezoom", onVoortgang: () => {} });
     const { resultaat } = genereerBalansPeriode(root, "070_rooisezoom", { boekjaar: 2026, boekperiodeTotEnMet: "06" });
 
-    // Beginbalans van de gemapte BALANS-rekeningen sluit zelf op 0 (zie fixture hierboven), dus elke
-    // resterende afwijking komt volledig van de niet-gemapte 9999-mutatie (+30) -> verschil = -30.
-    expect(resultaat.aansluiting.verschil.toString()).toBe("-30");
+    // activaTotaal 1500 (1010), passivaTotaal -300 (1711), resultaat 500 -> verschil = 1500 - (-300) - 500 = 1300.
+    expect(resultaat.aansluiting.verschil).toEqual({ type: "bekend", waarde: new Decimal("1300") });
     expect(resultaat.aansluiting.sluitBinnenTolerantie).toBe(false);
   });
 
   it("houdt 1010 (Bank, ACTIVA) op Activa ook als het saldo op de peildatum negatief zou zijn", () => {
-    writeFileSync(
-      grootboekmappingPad(root, "070_rooisezoom"),
-      JSON.stringify({
-        versie: "0.1",
-        administratieId: "070_rooisezoom",
-        regels: [
-          { grootboekrekening: "1010", soort: "BALANS", balanszijde: "ACTIVA", actief: true, status: "GOEDGEKEURD" },
-          { grootboekrekening: "1711", soort: "BALANS", balanszijde: "PASSIVA", actief: true, status: "GOEDGEKEURD" },
-          { grootboekrekening: "8800", soort: "RESULTAAT", rapportagepost: "Huuropbrengsten belast", rapportagecategorie: "Opbrengsten", tekenconventie: "OMGEKEERD", actief: true, status: "GOEDGEKEURD" },
-        ],
-      }),
-      "utf-8",
-    );
     // Beginbalans 1010 nu negatief (credit-overschot) — 1010 blijft desondanks een ACTIVA-rekening.
     schrijfXlsxFixture(join(bronGedeeldDir(root), "balans_per_jaar.xlsx"), [
       balansRij({ Grootboekrekeningnr: "1010", Beginbalans_debet: 0, Beginbalans_credit: 800, Rekening_omschrijving: "Bank" }),
-      balansRij({ Grootboekrekeningnr: "1711", Beginbalans_debet: 0, Beginbalans_credit: 200, Rekening_omschrijving: "Crediteuren" }),
+      balansRij({ Grootboekrekeningnr: "1711", Beginbalans_debet: 0, Beginbalans_credit: 300, Rekening_omschrijving: "Crediteuren" }),
     ]);
     rebuildCache({ root, administratieId: "070_rooisezoom", onVoortgang: () => {} });
 
@@ -167,15 +159,25 @@ describe("genereerBalansPeriode", () => {
   it("markeert een BALANS-rekening met een nog niet bevestigde balanszijde (null) als controleVereist", () => {
     writeFileSync(
       grootboekmappingPad(root, "070_rooisezoom"),
-      JSON.stringify({
-        versie: "0.1",
-        administratieId: "070_rooisezoom",
-        regels: [
-          { grootboekrekening: "1010", soort: "BALANS", balanszijde: null, actief: true, status: "VOORGESTELD" },
-          { grootboekrekening: "1711", soort: "BALANS", balanszijde: "PASSIVA", actief: true, status: "GOEDGEKEURD" },
-          { grootboekrekening: "8800", soort: "RESULTAAT", rapportagepost: "Huuropbrengsten belast", rapportagecategorie: "Opbrengsten", tekenconventie: "OMGEKEERD", actief: true, status: "GOEDGEKEURD" },
-        ],
-      }),
+      JSON.stringify(
+        basisMapping([{ grootboekrekening: "1010", soort: "BALANS", balanszijde: null, tekenconventie: null, actief: true, status: "VOORGESTELD" }]),
+      ),
+      "utf-8",
+    );
+    rebuildCache({ root, administratieId: "070_rooisezoom", onVoortgang: () => {} });
+
+    const { resultaat } = genereerBalansPeriode(root, "070_rooisezoom", { boekjaar: 2026, boekperiodeTotEnMet: "06" });
+
+    expect(resultaat.posten.some((p) => p.grootboekrekening === "1010")).toBe(false);
+    expect(resultaat.controleVereist.some((c) => c.grootboekrekening === "1010")).toBe(true);
+  });
+
+  it("markeert een BALANS-rekening met bevestigde balanszijde maar onbevestigde tekenconventie (null) als controleVereist", () => {
+    writeFileSync(
+      grootboekmappingPad(root, "070_rooisezoom"),
+      JSON.stringify(
+        basisMapping([{ grootboekrekening: "1010", soort: "BALANS", balanszijde: "ACTIVA", tekenconventie: null, actief: true, status: "VOORGESTELD" }]),
+      ),
       "utf-8",
     );
     rebuildCache({ root, administratieId: "070_rooisezoom", onVoortgang: () => {} });

@@ -82,12 +82,28 @@ export type Balanszijde = z.infer<typeof BalanszijdeSchema>;
  * verplicht aanwezig (als veld, zie hierboven voor de `null`-betekenis):
  * `balanszijde` — de balansrenderer bepaalt hiermee uitsluitend in welke
  * tabel (Activa/Passiva) een rekening verschijnt, nooit op het saldoteken.
+ *
+ * `tekenconventie` is een TWEEDE, onafhankelijke classificatie (ontwerp-
+ * correctie 2026-08-19, na een echte productie-run): balanszijde bepaalt
+ * WELKE tabel, tekenconventie bepaalt hoe het werkelijk berekende saldo
+ * (debet - credit) in die tabel WORDT GETOOND. Zonder deze scheiding zou
+ * een enkele generieke tekenregel per balanszijde toegepast moeten worden
+ * (bv. "alle Passiva tonen als negatief") — en dat klopt niet: sommige
+ * PASSIVA-rekeningen horen positief te tonen (bv. een schuld als Crediteuren),
+ * andere negatief (bv. Onttrekkingen, die het eigen vermogen verminderen).
+ * Hergebruikt exact hetzelfde schema/patroon als RESULTAAT's
+ * `tekenconventie` (zie `@bvc/domain`'s `presentatiefactorVoorRegel`, die
+ * generiek werkt op elk object met dit veld). Nullable: `null` = nog niet
+ * bevestigd — nooit "ZOALS_BRON" aannemen als standaard. Een BALANS-regel
+ * met een bevestigde `balanszijde` maar een onbevestigde `tekenconventie`
+ * (of omgekeerd) komt nog steeds in `controleVereist` terecht.
  */
 export const BalansRegelSchema = z
   .object({
     grootboekrekening: z.string().min(1),
     soort: z.literal("BALANS"),
     balanszijde: BalanszijdeSchema.nullable(),
+    tekenconventie: TekenconventieSchema.nullable(),
     actief: z.boolean(),
     status: MappingStatusSchema,
   })

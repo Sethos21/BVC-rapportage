@@ -29,7 +29,7 @@ describe("leesGrootboekMapping", () => {
         administratieId: "070_rooisezoom",
         regels: [
           { grootboekrekening: "4000", soort: "RESULTAAT", rapportagepost: "Beheerkosten", rapportagecategorie: "Kosten", tekenconventie: null, actief: true, status: "VOORGESTELD" },
-          { grootboekrekening: "1010", soort: "BALANS", balanszijde: "ACTIVA", actief: true, status: "VOORGESTELD" },
+          { grootboekrekening: "1010", soort: "BALANS", balanszijde: "ACTIVA", tekenconventie: "ZOALS_BRON", actief: true, status: "VOORGESTELD" },
         ],
       }),
       "utf-8",

@@ -18,8 +18,8 @@ function resultaat(overrides: Partial<BalansPeriodeResultaat> = {}): BalansPerio
     aansluiting: {
       activaTotaal: new Decimal("700"),
       passivaTotaal: new Decimal("-230"),
-      resultaatTotaal: new Decimal("-470"),
-      verschil: new Decimal("0"),
+      resultaatHuidigBoekjaar: { type: "bekend", waarde: new Decimal("930") },
+      verschil: { type: "bekend", waarde: new Decimal("0") },
       sluitBinnenTolerantie: true,
     },
     ...overrides,
@@ -62,9 +62,38 @@ describe("renderBalansPeriodeHtml", () => {
 
   it("toont de aansluitingscontrole als NIET sluitend bij een verschil", () => {
     const html = renderBalansPeriodeHtml(
-      invoer({ resultaat: resultaat({ aansluiting: { activaTotaal: new Decimal("700"), passivaTotaal: new Decimal("-230"), resultaatTotaal: new Decimal("-440"), verschil: new Decimal("30"), sluitBinnenTolerantie: false } }) }),
+      invoer({
+        resultaat: resultaat({
+          aansluiting: {
+            activaTotaal: new Decimal("700"),
+            passivaTotaal: new Decimal("-230"),
+            resultaatHuidigBoekjaar: { type: "bekend", waarde: new Decimal("900") },
+            verschil: { type: "bekend", waarde: new Decimal("30") },
+            sluitBinnenTolerantie: false,
+          },
+        }),
+      }),
     );
     expect(html).toContain("Sluit NIET</strong>");
+  });
+
+  it("toont de aansluitingscontrole als NIET sluitend wanneer het resultaat huidig boekjaar zelf onbekend is", () => {
+    const html = renderBalansPeriodeHtml(
+      invoer({
+        resultaat: resultaat({
+          aansluiting: {
+            activaTotaal: new Decimal("700"),
+            passivaTotaal: new Decimal("-230"),
+            resultaatHuidigBoekjaar: { type: "onbekend", reden: "Geen bevestigd teken voor categorie Opbrengsten." },
+            verschil: { type: "onbekend", reden: "Resultaat huidig boekjaar onbekend: Geen bevestigd teken voor categorie Opbrengsten." },
+            sluitBinnenTolerantie: false,
+          },
+        }),
+      }),
+    );
+    expect(html).toContain("Sluit NIET</strong>");
+    expect(html).toContain("Onbekend");
+    expect(html).toContain("Geen bevestigd teken voor categorie Opbrengsten.");
   });
 
   it("toont controleVereist-rekeningen altijd zichtbaar, nooit stilzwijgend weggelaten", () => {

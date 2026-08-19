@@ -1,21 +1,28 @@
 import type Decimal from "decimal.js";
+import type { OnbekendOf } from "@bvc/domain";
 import { escapeHtml, formatBedragHtml, renderRapportDocument } from "./huisstijl.js";
 import type { BalansPeriodeInvoer } from "./types.js";
 import type { BalansPeriodePost } from "./balansPeriodeBerekening.js";
 
+function formatOnbekendOfBedragHtml(waarde: OnbekendOf<Decimal>): string {
+  return waarde.type === "bekend" ? formatBedragHtml(waarde.waarde) : `<span class="negatief">Onbekend — ${escapeHtml(waarde.reden)}</span>`;
+}
+
 /**
  * HTML-renderer voor de balans-periodesectie. Rendert uitsluitend de
  * al-berekende `BalansPeriodeResultaat` (balansPeriodeBerekening.ts) —
- * geen eigen berekeningen, geen eigen classificatie (CLAUDE.md, "rekenlaag
- * los van renderer/UI"). Gebruikt uitsluitend de al-toegewezen
- * `rapportagecategorie` (de vaste balanszijde uit de grootboekmapping) om
- * te bepalen in welke tabel een rekening verschijnt — nooit het saldoteken.
- * Het saldo wordt vervolgens ongewijzigd (geen abs(), geen tekenomkering)
- * weergegeven: een negatief bedrag op een normaal positieve balanszijde
- * blijft zichtbaar. Toont rekening, omschrijving, rapportagecategorie,
- * saldo en subtotalen (Activa/Passiva), plus altijd zichtbare controles
- * voor niet-verwerkte rekeningen en de aansluitingscontrole — nooit
- * stilzwijgend weggelaten.
+ * geen eigen berekeningen, geen eigen classificatie, geen eigen
+ * tekenconventie (CLAUDE.md, "rekenlaag los van renderer/UI"). Gebruikt
+ * uitsluitend de al-toegewezen `rapportagecategorie` (de vaste balanszijde
+ * uit de grootboekmapping) om te bepalen in welke tabel een rekening
+ * verschijnt — nooit het saldoteken. `saldo` is al het GETOONDE bedrag
+ * (rekenlaag heeft de rekening-eigen tekenconventie al toegepast) en wordt
+ * hier ongewijzigd weergegeven (geen abs(), geen extra tekenomkering): een
+ * negatief bedrag op een normaal positieve balanszijde blijft zichtbaar.
+ * Toont rekening, omschrijving, rapportagecategorie, saldo, subtotalen
+ * (Activa/Passiva), het resultaat huidig boekjaar (uit de P&L) en de
+ * aansluitingscontrole, plus een altijd zichtbare "Controle vereist"-
+ * sectie — nooit stilzwijgend weggelaten.
  */
 
 function renderPostenTabel(titel: string, posten: readonly BalansPeriodePost[], totaal: Decimal): string {
@@ -69,11 +76,11 @@ function renderAansluiting(invoer: BalansPeriodeInvoer): string {
       <tbody>
         <tr><td>Totaal Activa</td><td>${formatBedragHtml(aansluiting.activaTotaal)}</td></tr>
         <tr><td>Totaal Passiva</td><td>${formatBedragHtml(aansluiting.passivaTotaal)}</td></tr>
-        <tr><td>Resultaat lopend boekjaar (t/m periode ${escapeHtml(invoer.boekperiodeTotEnMet)})</td><td>${formatBedragHtml(aansluiting.resultaatTotaal)}</td></tr>
-        <tr class="totaalrij"><td>Verschil (activa + passiva + resultaat)</td><td>${formatBedragHtml(aansluiting.verschil)}</td></tr>
+        <tr><td>Resultaat huidig boekjaar (t/m periode ${escapeHtml(invoer.boekperiodeTotEnMet)}, uit de P&amp;L)</td><td>${formatOnbekendOfBedragHtml(aansluiting.resultaatHuidigBoekjaar)}</td></tr>
+        <tr class="totaalrij"><td>Verschil (activa - passiva - resultaat)</td><td>${formatOnbekendOfBedragHtml(aansluiting.verschil)}</td></tr>
       </tbody>
     </table>
-    <div class="toelichting"><strong class="${statusKlasse}">${statusTekst}</strong> binnen de gehanteerde tolerantie. Een verschil is een technisch signaal, meestal veroorzaakt door rekeningen in "Controle vereist" hieronder.</div>`;
+    <div class="toelichting"><strong class="${statusKlasse}">${statusTekst}</strong> binnen de gehanteerde tolerantie. Een verschil is een technisch signaal, meestal veroorzaakt door rekeningen in "Controle vereist" hieronder of een nog niet bevestigd resultaat huidig boekjaar.</div>`;
 }
 
 export function renderBalansPeriodeHtml(invoer: BalansPeriodeInvoer): string {

@@ -141,6 +141,36 @@ export function berekenPlPeriode(
   };
 }
 
+export type NettoResultaatTeken = 1 | -1;
+
+/**
+ * Combineert `categorieTotalen` tot één "resultaat huidig boekjaar"-bedrag
+ * — bv. om als aparte regel op de balans te tonen (geen eigen
+ * grootboekrekening; twee outputs van dezelfde rekenlaag, CLAUDE.md §2).
+ * `berekenPlPeriode` berekent dit bewust NIET zelf (zie
+ * `PlPeriodeResultaat.categorieTotalen`'s toelichting: welke categorieën
+ * optellen/aftrekken is een indelingsvraag). Deze functie lost dat
+ * expliciet op, maar hardcodeert zelf GEEN aanname over welke
+ * rapportagecategorie optelt of aftrekt: de aanroeper geeft dat teken per
+ * categorie expliciet mee (`tekenPerCategorie`). Een categorie die in
+ * `categorieTotalen` voorkomt maar geen bevestigd teken heeft levert
+ * `onbekend` op — nooit stilzwijgend overgeslagen of op 0 verondersteld.
+ */
+export function berekenNettoResultaat(
+  categorieTotalen: readonly PlPeriodeCategorieTotaal[],
+  tekenPerCategorie: ReadonlyMap<string, NettoResultaatTeken>,
+): OnbekendOf<Decimal> {
+  const onbekendeCategorieen = categorieTotalen.filter((c) => !tekenPerCategorie.has(c.rapportagecategorie));
+  if (onbekendeCategorieen.length > 0) {
+    return {
+      type: "onbekend",
+      reden: `Geen bevestigd teken (optellen/aftrekken voor het nettoresultaat) voor rapportagecategorie(ën): ${onbekendeCategorieen.map((c) => c.rapportagecategorie).join(", ")} — Controle vereist, geen aanname toegestaan.`,
+    };
+  }
+  const bedragen = categorieTotalen.map((c) => c.bedrag.times(tekenPerCategorie.get(c.rapportagecategorie)!));
+  return { type: "bekend", waarde: rapportregelsom(bedragen) };
+}
+
 function voegControleToe(map: Map<string, ControleAccumulator>, grootboekrekening: string, saldo: Decimal, reden: string): void {
   const bestaand = map.get(grootboekrekening);
   if (bestaand) {

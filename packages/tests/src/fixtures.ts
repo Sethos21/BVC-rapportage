@@ -234,15 +234,23 @@ export function begrotingServicekostenRijen(): Record<string, unknown>[] {
  * BALANS-rekeningen die `pl-periode` in de praktijk als `controleVereist`
  * naar boven bracht — bevestigd tegen het echte rekeningschema
  * ("Rekeningschema basisgegevens", Srt-kolom Bal/V&W) van bedrijf 070
- * (2026-08-18), en per 2026-08-19 aangevuld met een vaste `balanszijde`
- * (ACTIVA/PASSIVA) per BALANS-regel — 10 van de 13 op basis van
- * ondubbelzinnige boekhoudkundige terminologie/de door de gebruiker
- * gegeven categorieregels (bank/debiteuren→ACTIVA,
- * crediteuren/voorzieningen/eigen vermogen→PASSIVA), 3 nog `null`
- * (Afdrachten BTW/Tussenrekening servicekst/Betaalde Service kosten —
- * genuine onduidelijk, niet geraden). Zie packages/config/README.md voor de
- * volledige toelichting per rekening. Dient hier als representatieve
- * fixture voor tests; is NIET
+ * (2026-08-18), per 2026-08-19 aangevuld met een vaste `balanszijde`
+ * (ACTIVA/PASSIVA) per BALANS-regel, en per 2026-08-20 (ontwerpcorrectie na
+ * een echte productie-run) aangevuld met een APART, onafhankelijk
+ * `tekenconventie`-veld op BALANS-regels (bepaalt hoe het berekende saldo
+ * BINNEN een balanszijde getoond wordt — bewust geen generieke
+ * tekenomkering per balanszijde). Van de 13 BALANS-rekeningen: 12 hebben nu
+ * een bevestigde balanszijde (1711/1712 zijn per 2026-08-20 alsnog
+ * bevestigd; alleen 1506 Afdrachten BTW blijft expliciet niet
+ * geclassificeerd), maar slechts 5 hebben ook een bevestigde
+ * tekenconventie (1010/1310/1400/1410 ZOALS_BRON — expliciet zo bevestigd;
+ * 0840 OMGEKEERD — beste-inschatting o.b.v. standaard boekhoudkundige
+ * terminologie, expliciet als voorlopig gemarkeerd in
+ * packages/config/README.md, nog te verifiëren tegen de echte cijfers). De
+ * overige 7 (0901/0902/0903/1600/1700/1711/1712) hebben bewust nog geen
+ * tekenconventie — geen aanname, blijven `controleVereist` tot bevestigd.
+ * Zie packages/config/README.md voor de volledige toelichting per
+ * rekening. Dient hier als representatieve fixture voor tests; is NIET
  * automatisch de mapping die `070_Rooise_Zoom` in productie gebruikt — dat
  * vereist het bestand handmatig naar
  * `<BVC_DATA_ROOT>/config/grootboekmappingen/070_Rooise_Zoom.json` te
@@ -266,24 +274,27 @@ export function rooiseZoomGrootboekMapping(): GrootboekMappingConfig {
     ["8815", "Zonnestroom", "Opbrengsten", "OMGEKEERD"],
   ];
 
-  // Rekeningnummer + omschrijving (documentatie) + balanszijde uit het rekeningschema.
-  // balanszijde `null` = nog niet bevestigd (geen classificatie geraden op omschrijving,
-  // zie packages/config/README.md's "Balanszijde 070_Rooise_Zoom" voor de per-rekening
-  // onderbouwing/openstaande vragen).
-  const balansRekeningen: [string, string, "ACTIVA" | "PASSIVA" | null][] = [
-    ["0840", "Ontrekkingen - Uitkeringen", "PASSIVA"],
-    ["0901", "Voorziening onderhoud Zoom 1", "PASSIVA"],
-    ["0902", "Voorziening onderhoud Zoom 2", "PASSIVA"],
-    ["0903", "Voorziening onderhoud Zoom 3", "PASSIVA"],
-    ["1010", "Bank NL44RABO 0337 7344 45", "ACTIVA"],
-    ["1310", "Huurdebiteuren", "ACTIVA"],
-    ["1400", "Te ontvangen vergoedingen", "ACTIVA"],
-    ["1410", "Vooruitbetaalde kosten", "ACTIVA"],
-    ["1506", "Afdrachten BTW", null],
-    ["1600", "Crediteuren", "PASSIVA"],
-    ["1700", "Te betalen kosten", "PASSIVA"],
-    ["1711", "Tussenrekening servicekst", null],
-    ["1712", "Betaalde Service kosten", null],
+  // Rekeningnummer + omschrijving (documentatie) + balanszijde + tekenconventie (het
+  // GETOONDE teken binnen die balanszijde — apart, onafhankelijk veld, zie
+  // packages/config/README.md's "Balanszijde/tekenconventie 070_Rooise_Zoom" voor de
+  // per-rekening onderbouwing/openstaande vragen). `null` = nog niet bevestigd, nooit
+  // geraden. Bijgewerkt 2026-08-20 (ontwerpcorrectie: geen generieke tekenomkering per
+  // balanszijde) — 1711/1712 kregen alsnog een bevestigde balanszijde, maar de meeste
+  // Passiva-rekeningen hebben nog GEEN bevestigde tekenconventie (bewust, geen aanname).
+  const balansRekeningen: [string, string, "ACTIVA" | "PASSIVA" | null, "ZOALS_BRON" | "OMGEKEERD" | null][] = [
+    ["0840", "Ontrekkingen - Uitkeringen", "PASSIVA", "OMGEKEERD"],
+    ["0901", "Voorziening onderhoud Zoom 1", "PASSIVA", null],
+    ["0902", "Voorziening onderhoud Zoom 2", "PASSIVA", null],
+    ["0903", "Voorziening onderhoud Zoom 3", "PASSIVA", null],
+    ["1010", "Bank NL44RABO 0337 7344 45", "ACTIVA", "ZOALS_BRON"],
+    ["1310", "Huurdebiteuren", "ACTIVA", "ZOALS_BRON"],
+    ["1400", "Te ontvangen vergoedingen", "ACTIVA", "ZOALS_BRON"],
+    ["1410", "Vooruitbetaalde kosten", "ACTIVA", "ZOALS_BRON"],
+    ["1506", "Afdrachten BTW", null, null],
+    ["1600", "Crediteuren", "PASSIVA", null],
+    ["1700", "Te betalen kosten", "PASSIVA", null],
+    ["1711", "Tussenrekening servicekst", "PASSIVA", null],
+    ["1712", "Betaalde Service kosten", "ACTIVA", null],
   ];
 
   return {
@@ -299,12 +310,13 @@ export function rooiseZoomGrootboekMapping(): GrootboekMappingConfig {
         actief: true,
         status: "GOEDGEKEURD" as const,
       })),
-      ...balansRekeningen.map(([grootboekrekening, , balanszijde]) => ({
+      ...balansRekeningen.map(([grootboekrekening, , balanszijde, tekenconventie]) => ({
         grootboekrekening,
         soort: "BALANS" as const,
         balanszijde,
+        tekenconventie,
         actief: true,
-        status: balanszijde === null ? ("VOORGESTELD" as const) : ("GOEDGEKEURD" as const),
+        status: balanszijde === null || tekenconventie === null ? ("VOORGESTELD" as const) : ("GOEDGEKEURD" as const),
       })),
     ],
   };

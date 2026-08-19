@@ -1,14 +1,15 @@
 import Decimal from "decimal.js";
 import type { Balanszijde, GrootboekMappingRegel } from "@bvc/config";
-import { balanszijdeVoorRegel, boekingSaldo, rapportregelsom, zoekMappingRegel, type Balansstand, type Boekingsregel, type OnbekendOf } from "@bvc/domain";
+import { balanszijdeVoorRegel, boekingSaldo, presentatiefactorVoorRegel, rapportregelsom, zoekMappingRegel, type Balansstand, type Boekingsregel, type OnbekendOf } from "@bvc/domain";
 
 /**
  * Balans-periodeberekening op een expliciet al-geselecteerde periode
  * boekingen (zie `@bvc/cache`'s `selecteerBoekingen` — periodeselectie
  * gebeurt daar, niet hier) plus de beginbalans per rekening (jaarstand bij
- * boekjaarbegin), en de goedgekeurde grootboekmapping. Bewust ALLEEN de
- * rekenlaag: geen renderer/HTML, geen eigen periodeselectie- of
- * mappinglogica.
+ * boekjaarbegin), de goedgekeurde grootboekmapping, en het netto
+ * P&L-resultaat van het huidige boekjaar (van buitenaf aangeleverd — zie
+ * `resultaatHuidigBoekjaar` hieronder). Bewust ALLEEN de rekenlaag: geen
+ * renderer/HTML, geen eigen periodeselectie- of mappinglogica.
  *
  * Aanpak (levert een reproduceerbare balans op elke expliciete
  * boekjaar+boekperiode-peildatum, zonder Worker-cache-schemawijziging):
@@ -22,15 +23,24 @@ import { balanszijdeVoorRegel, boekingSaldo, rapportregelsom, zoekMappingRegel, 
  * `@bvc/data-contracts`), exact dezelfde conventie als de al bewezen
  * P&L-periodeberekening.
  *
- * Activa/Passiva ("balanszijde") is een VASTE eigenschap van de
- * grootboekrekening zelf, herkomstig uit de goedgekeurde grootboekmapping
- * (`@bvc/config`'s `BalansRegel.balanszijde`) — NOOIT afgeleid uit het
- * actuele teken van het berekende saldo. Een rekening met een tijdelijk
- * afwijkend saldoteken (bv. een vooruitbetalende debiteur, of een
- * voorziening die tijdelijk overschreden is) blijft op zijn toegewezen
- * kant staan, met een zichtbaar negatief bedrag — zie `saldo` hieronder.
- * Ontbreekt de balanszijde nog (`null`, nog niet bevestigd), dan komt de
- * rekening in `controleVereist` terecht, nooit gegokt op het saldoteken.
+ * DRIE onafhankelijke concepten (ontwerpcorrectie 2026-08-19, na een echte
+ * productie-run — zie packages/reporting/README.md):
+ * 1. `balanszijde` (ACTIVA/PASSIVA) — een VASTE eigenschap van de
+ *    grootboekrekening zelf (`@bvc/config`'s `BalansRegel.balanszijde`),
+ *    NOOIT afgeleid uit het actuele teken van het berekende saldo. Bepaalt
+ *    uitsluitend in welke tabel een rekening verschijnt.
+ * 2. Het werkelijk berekende saldo (beginbalans + mutaties), debet - credit
+ *    — de rauwe boekhoudkundige waarheid, ongewijzigd.
+ * 3. `tekenconventie` (ZOALS_BRON/OMGEKEERD, ook op `BalansRegel` — apart
+ *    veld van `balanszijde`) — bepaalt hoe (2) binnen (1) GETOOND wordt.
+ *    Bewust GEEN generieke tekenomkering per balanszijde (bv. "alle
+ *    Passiva negatief"): sommige PASSIVA-rekeningen horen positief te
+ *    tonen (bv. Crediteuren, een schuld), andere negatief (bv.
+ *    Onttrekkingen, die het eigen vermogen verminderen) — dat verschil zit
+ *    per rekening in `tekenconventie`, nooit in een formule op
+ *    `balanszijde`.
+ * Beide (1) en (3) zijn onafhankelijk nullable: `null` = nog niet
+ * bevestigd, nooit geraden — de rekening komt dan in `controleVereist`.
  */
 
 export type BalansRapportageCategorie = Balanszijde;
@@ -45,14 +55,15 @@ export interface BalansPeriodePost {
    */
   rapportagecategorie: BalansRapportageCategorie;
   /**
-   * Netto saldo op de peildatum (beginbalans + mutaties t/m de opgegeven
-   * periode), debet - credit, MET het werkelijke teken — kan negatief zijn
-   * op een normaal positieve balanszijde (bv. Activa). Bewust ongewijzigd
-   * doorgegeven: geen abs()/tekenomkering, ook niet voor presentatie (zie
-   * renderBalansPeriode.ts). Dit teken, samen met `rapportagecategorie`,
-   * is precies de structuur die een latere balanstoelichting nodig heeft
-   * om bijzondere gevallen (negatief saldo op Activa/Passiva) te
-   * signaleren — die toelichtingslogica wordt hier bewust nog niet gebouwd.
+   * Het GETOONDE bedrag: werkelijk berekend saldo (beginbalans + mutaties
+   * t/m de opgegeven periode, debet - credit) MET de rekening-eigen
+   * `tekenconventie` toegepast (CAL-FIN-002-achtig, zie
+   * `presentatiefactorVoorRegel`). Kan negatief zijn op een normaal
+   * positieve balanszijde (bv. een vooruitbetalende debiteur op Activa) —
+   * bewust niet verborgen. Dit teken, samen met `rapportagecategorie`, is
+   * precies de structuur die een latere balanstoelichting nodig heeft om
+   * bijzondere gevallen te signaleren — die toelichtingslogica wordt hier
+   * bewust nog niet gebouwd.
    */
   saldo: Decimal;
 }
@@ -65,34 +76,39 @@ export interface BalansPeriodeCategorieTotaal {
 export interface BalansPeriodeControleVereist {
   grootboekrekening: string;
   /**
-   * Het best bekende bedrag voor deze rekening: het volledige saldo
-   * (beginbalans + mutatie) als dat berekenbaar was maar de balanszijde
-   * ontbreekt, anders de rauwe mutatie in de periode (debet - credit) als
-   * zelfs het saldo niet volledig bepaald kon worden — zie `reden`.
+   * Het best bekende bedrag voor deze rekening: het volledige (rauwe)
+   * saldo (beginbalans + mutatie) als dat berekenbaar was maar balanszijde
+   * of tekenconventie ontbreekt, anders de rauwe mutatie in de periode
+   * (debet - credit) als zelfs het saldo niet volledig bepaald kon worden
+   * — zie `reden`. Nooit met een geraden tekenconventie gepresenteerd.
    */
   saldo: Decimal;
   reden: string;
 }
 
 export interface BalansAansluitingscontrole {
-  /** Som van alle Activa-posten, SIGNED — een individuele post kan negatief zijn (zie moduledoc), bewust geen abs(). */
+  /** Som van alle Activa-posten (getoonde bedragen, SIGNED) — bewust geen abs(). */
   activaTotaal: Decimal;
-  /** Som van alle Passiva-posten, SIGNED — bewust geen abs(), zie moduledoc. */
+  /** Som van alle Passiva-posten (getoonde bedragen, SIGNED) — bewust geen abs(). */
   passivaTotaal: Decimal;
-  /** Rauwe netto mutatie (debet - credit) van alle RESULTAAT-boekingen in de periode — geen tekenconventie/presentatiefactor toegepast, puur dubbel-boekhoudkundig feit. */
-  resultaatTotaal: Decimal;
   /**
-   * activaTotaal + passivaTotaal + resultaatTotaal — hoort ~0 te zijn bij
-   * een complete, correct gemapte balans WAARVAN de beginbalans van alle
-   * BALANS-rekeningen samen zelf al op 0 sluit (dubbel boekhouden: activa =
-   * passiva + eigen vermogen bij jaarbegin). Onder die voorwaarde is een
-   * afwijking exact gelijk aan (min) de som van de `controleVereist`-
-   * mutaties: een niet-gemapte of anderszins niet meegenomen rekening. Sluit
-   * de beginbalans zelf niet (bv. onvolledige testdata of een echte
-   * datafout uit een eerder boekjaar), dan schuift die begin-afwijking mee
-   * door in `verschil` — dat is juist gewenst: geen stilzwijgende correctie.
+   * Netto resultaat van het huidige boekjaar t/m de opgegeven periode, van
+   * buitenaf aangeleverd (@bvc/reporting's `berekenPlPeriode` +
+   * `berekenNettoResultaat`) — hiervoor bestaat geen eigen
+   * grootboekrekening, het is een afgeleid P&L-bedrag (twee outputs van
+   * dezelfde rekenlaag, CLAUDE.md §2). `onbekend` als de P&L-kant het zelf
+   * nog niet kan bepalen (bv. een categorie zonder bevestigd optel-/
+   * aftrekteken) — nooit als 0 aangenomen.
    */
-  verschil: Decimal;
+  resultaatHuidigBoekjaar: OnbekendOf<Decimal>;
+  /**
+   * De standaard balansvergelijking: activaTotaal - passivaTotaal -
+   * resultaatHuidigBoekjaar, hoort ~0 te zijn (Activa = Passiva + Resultaat
+   * huidig boekjaar). `onbekend` als `resultaatHuidigBoekjaar` dat is —
+   * dan is de aansluiting simpelweg niet te bepalen, nooit een gok.
+   */
+  verschil: OnbekendOf<Decimal>;
+  /** `false` als `verschil` zelf onbekend is — een onbekende aansluiting is nooit stilzwijgend "sluitend". */
   sluitBinnenTolerantie: boolean;
 }
 
@@ -132,6 +148,7 @@ export function berekenBalansPeriode(
   balansstanden: readonly Balansstand[],
   boekingen: readonly Boekingsregel[],
   mappingRegels: readonly GrootboekMappingRegel[],
+  resultaatHuidigBoekjaar: OnbekendOf<Decimal>,
   toleranceEuro: Decimal = new Decimal("0.01"),
 ): BalansPeriodeResultaat {
   const mutatiePerRekening = new Map<string, Decimal>();
@@ -145,7 +162,6 @@ export function berekenBalansPeriode(
 
   const posten: BalansPeriodePost[] = [];
   const controleVereist: BalansPeriodeControleVereist[] = [];
-  let resultaatTotaal = new Decimal(0);
 
   for (const grootboekrekening of alleRekeningen) {
     const mutatie = mutatiePerRekening.get(grootboekrekening) ?? new Decimal(0);
@@ -159,8 +175,7 @@ export function berekenBalansPeriode(
     }
 
     if (mappingResultaat.waarde.soort === "RESULTAAT") {
-      // Bekend, bewust buiten de balans (hoort in de P&L — @bvc/reporting's berekenPlPeriode); meegeteld in de aansluitingscontrole.
-      resultaatTotaal = resultaatTotaal.plus(mutatie);
+      // Bekend, bewust buiten de balans (hoort in de P&L — @bvc/reporting's berekenPlPeriode).
       continue;
     }
 
@@ -173,11 +188,20 @@ export function berekenBalansPeriode(
       continue;
     }
 
-    const saldo = beginbalansResultaat.waarde.plus(mutatie);
+    const rauwSaldo = beginbalansResultaat.waarde.plus(mutatie);
+
     const balanszijdeResultaat = balanszijdeVoorRegel(mappingResultaat.waarde);
     if (balanszijdeResultaat.type === "onbekend") {
-      if (!saldo.isZero()) {
-        controleVereist.push({ grootboekrekening, saldo, reden: balanszijdeResultaat.reden });
+      if (!rauwSaldo.isZero()) {
+        controleVereist.push({ grootboekrekening, saldo: rauwSaldo, reden: balanszijdeResultaat.reden });
+      }
+      continue;
+    }
+
+    const factorResultaat = presentatiefactorVoorRegel(mappingResultaat.waarde);
+    if (factorResultaat.type === "onbekend") {
+      if (!rauwSaldo.isZero()) {
+        controleVereist.push({ grootboekrekening, saldo: rauwSaldo, reden: factorResultaat.reden });
       }
       continue;
     }
@@ -186,7 +210,7 @@ export function berekenBalansPeriode(
       grootboekrekening,
       omschrijving: standRow?.rekeningOmschrijving ?? null,
       rapportagecategorie: balanszijdeResultaat.waarde,
-      saldo,
+      saldo: rauwSaldo.times(factorResultaat.waarde),
     });
   }
 
@@ -200,13 +224,17 @@ export function berekenBalansPeriode(
     { rapportagecategorie: "PASSIVA", bedrag: passivaTotaal },
   ];
 
-  const verschil = activaTotaal.plus(passivaTotaal).plus(resultaatTotaal);
+  const verschil: OnbekendOf<Decimal> =
+    resultaatHuidigBoekjaar.type === "onbekend"
+      ? { type: "onbekend", reden: `Resultaat huidig boekjaar onbekend: ${resultaatHuidigBoekjaar.reden}` }
+      : { type: "bekend", waarde: activaTotaal.minus(passivaTotaal).minus(resultaatHuidigBoekjaar.waarde) };
+
   const aansluiting: BalansAansluitingscontrole = {
     activaTotaal,
     passivaTotaal,
-    resultaatTotaal,
+    resultaatHuidigBoekjaar,
     verschil,
-    sluitBinnenTolerantie: verschil.abs().lessThanOrEqualTo(toleranceEuro),
+    sluitBinnenTolerantie: verschil.type === "bekend" && verschil.waarde.abs().lessThanOrEqualTo(toleranceEuro),
   };
 
   return { posten, categorieTotalen, controleVereist, aansluiting };

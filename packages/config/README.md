@@ -70,14 +70,16 @@ geen zelfbedachte categorie.
   "status": "GOEDGEKEURD"            // "VOORGESTELD" | "GOEDGEKEURD" — GOEDGEKEURD is een menselijke stap
 }
 
-// BALANS-regel: geen rapportagepost/-categorie/tekenconventie — niet van toepassing.
-// balanszijde is WEL verplicht aanwezig (mag `null` zijn = nog niet bevestigd) — zie
-// "Balanszijde" hieronder. Dit is een vaste eigenschap van de rekening, nooit afgeleid
-// uit het actuele saldoteken.
+// BALANS-regel: geen rapportagepost/-categorie — niet van toepassing.
+// balanszijde EN tekenconventie zijn WEL verplicht aanwezig (mogen elk apart `null`
+// zijn = nog niet bevestigd) — zie "Balanszijde ≠ presentatieteken" hieronder.
+// balanszijde = vaste eigenschap van de rekening; tekenconventie = hoe het saldo
+// BINNEN die zijde getoond wordt — twee onafhankelijke velden.
 {
   "grootboekrekening": "1010",       // Bank NL44RABO 0337 7344 45
   "soort": "BALANS",
   "balanszijde": "ACTIVA",           // "ACTIVA" | "PASSIVA" | null (nog niet bevestigd)
+  "tekenconventie": "ZOALS_BRON",    // "ZOALS_BRON" | "OMGEKEERD" | null (nog niet bevestigd)
   "actief": true,
   "status": "GOEDGEKEURD"
 }
@@ -102,46 +104,65 @@ hetzelfde patroon als `tekenconventie` bij RESULTAAT-regels.
 terug; `berekenBalansPeriode` zet zo'n rekening in `controleVereist`, nooit
 een kant gokt op het saldoteken.
 
-#### Balanszijde `070_Rooise_Zoom` (2026-08-19)
+#### Balanszijde ≠ presentatieteken (ontwerpcorrectie 2026-08-20)
 
-Van de 13 BALANS-rekeningen van 070 zijn er 10 vastgelegd op basis van
-ondubbelzinnige boekhoudkundige terminologie (nooit gegokt op vrije
-omschrijvingstekst — "te ontvangen"/"vooruitbetaald" betekent per definitie
-een vordering/vooruitbetaling = Activa, "te betalen" per definitie een
-schuld = Passiva) en de door de gebruiker zelf gegeven categorieregels
-(bank/debiteuren → Activa; crediteuren/voorzieningen/eigen vermogen →
-Passiva):
+Een echte productie-run liet zien dat de eerdere aanpak — Activa/Passiva
+plus impliciet "toon het rauwe saldo, geen tekenomkering" — verkeerd
+overkwam: vrijwel alle Passiva-rekeningen kwamen daardoor negatief uit
+(credit-normaal), terwijl een balans normaliter schulden/voorzieningen als
+POSITIEF bedrag toont. De fout zat niet in `balanszijde` zelf (dat blijft
+correct: een vaste eigenschap, nooit uit het saldoteken afgeleid), maar in
+het ontbreken van een DERDE, apart concept: hoe het werkelijk berekende
+saldo BINNEN die balanszijde getoond wordt. Vandaar `tekenconventie` — nu
+óók op `BalansRegel`, exact hetzelfde schema/patroon als bij RESULTAAT-
+regels (`"ZOALS_BRON" | "OMGEKEERD" | null`, nullable, nooit een default
+aangenomen). Bewust GEEN generieke regel per balanszijde (bv. "alle Passiva
+OMGEKEERD"): welke conventie een rekening nodig heeft, staat per rekening
+vast, niet per zijde — zie de tabel hieronder waar twee Passiva-rekeningen
+bewust HETZELFDE tekenconventie-veld (`OMGEKEERD`) hebben maar een
+TEGENGESTELD getoond teken opleveren, puur als gevolg van hun eigen rauwe
+saldo (0840 is namelijk debet-normaal, de andere Passiva-rekeningen zijn
+credit-normaal) — dat is geen speciale uitzonderingsregel in code, gewoon
+het resultaat van dezelfde formule op verschillende brondata.
+
+#### Balanszijde/tekenconventie `070_Rooise_Zoom` (bijgewerkt 2026-08-20)
+
+**Balanszijde** — 12 van de 13 BALANS-rekeningen zijn nu vastgelegd
+(1711/1712 zijn deze ronde alsnog bevestigd door de gebruiker; alleen 1506
+blijft expliciet ongeclassificeerd):
 
 | grootboekrekening | omschrijving | balanszijde | motivatie |
 |---|---|---|---|
 | 1010 | Bank NL44RABO 0337 7344 45 | ACTIVA | bankrekening (gebruiker) |
-| 1310 | Huurdebiteuren | ACTIVA | debiteuren (gebruiker, expliciet genoemd voorbeeld) |
+| 1310 | Huurdebiteuren | ACTIVA | debiteuren (gebruiker) |
 | 1400 | Te ontvangen vergoedingen | ACTIVA | "te ontvangen" = vordering |
 | 1410 | Vooruitbetaalde kosten | ACTIVA | vooruitbetaling = vordering |
-| 1600 | Crediteuren | PASSIVA | crediteuren (gebruiker, expliciet genoemd voorbeeld) |
+| 1712 | Betaalde Service kosten | ACTIVA | gebruiker (2026-08-20) |
+| 1600 | Crediteuren | PASSIVA | crediteuren (gebruiker) |
 | 1700 | Te betalen kosten | PASSIVA | "te betalen" = schuld |
+| 1711 | Tussenrekening servicekst | PASSIVA | gebruiker (2026-08-20) |
 | 0840 | Ontrekkingen - Uitkeringen | PASSIVA | eigen vermogen/onttrekkingen (gebruiker) |
-| 0901 | Voorziening onderhoud Zoom 1 | PASSIVA | voorziening (gebruiker) |
-| 0902 | Voorziening onderhoud Zoom 2 | PASSIVA | voorziening (gebruiker) |
-| 0903 | Voorziening onderhoud Zoom 3 | PASSIVA | voorziening (gebruiker) |
+| 0901/0902/0903 | Voorziening onderhoud Zoom 1/2/3 | PASSIVA | voorziening (gebruiker) |
 
-**Nog `null` (nog niet bevestigd, bewust niet gegokt) — 3 rekeningen:**
+**Nog `null`:** `1506` Afdrachten BTW — de gebruiker heeft expliciet
+gevraagd deze nog niet te classificeren.
 
-| grootboekrekening | omschrijving | waarom onduidelijk |
+**Tekenconventie** — hier is de dekking veel kleiner: slechts 5 van de 13
+rekeningen hebben een bevestigde tekenconventie. De gebruiker gaf alleen
+voor 0840 een expliciete economische verwachting (negatief tonen); voor
+1010/1310/1400/1410 volgt de conventie direct uit "mag daar negatief zijn"
+(= toon ongewijzigd, geen aanname nodig). Voor de overige 7 Passiva-
+rekeningen is GEEN aanname gedaan:
+
+| grootboekrekening | tekenconventie | onderbouwing |
 |---|---|---|
-| 1506 | Afdrachten BTW | "Afdracht" is niet ondubbelzinnig vordering óf schuld zonder de exacte boekingsconventie van BVC te kennen (anders dan "Te vorderen"/"Te betalen BTW") — kan een af te dragen schuld óf een verrekenrekening zijn. |
-| 1711 | Tussenrekening servicekst | Een "tussenrekening" is per definitie een verrekenrekening zonder vaste normale zijde — het teken hangt af van de timing van doorbelasting vs. ontvangst, niet van de rekening zelf. |
-| 1712 | Betaalde Service kosten | Kan een vooruitbetaling (Activa) zijn die later via servicekosten wordt verrekend, maar dat is een aanname over BVC's specifieke proces — niet zonder bevestiging vast te stellen. |
+| 1010, 1310, 1400, 1410 | ZOALS_BRON | expliciet: "mag daar negatief zijn" — geen omkering, toon het rauwe saldo |
+| 0840 | OMGEKEERD | **voorlopig, beste inschatting** — onttrekkingen worden doorgaans debet geboekt (vermindert het credit-normale eigen vermogen); ZOALS_BRON zou dan positief tonen, terwijl de gebruiker expliciet negatief wil zien. Dit is een aanname over de richting van de boeking, geen bevestigd gegeven — **verifiëren zodra het echte rauwe saldo van 0840 bekend is** (is het inderdaad debet-normaal, dan klopt OMGEKEERD; is het credit-normaal, dan is ZOALS_BRON juist en moet dit teruggedraaid worden). |
+| 0901, 0902, 0903, 1600, 1700, 1711, 1712 | `null` | geen expliciete instructie ontvangen — een generieke regel ("alle Passiva OMGEKEERD") zou precies de fout zijn die deze ontwerpcorrectie oplost. Deze rekeningen komen dus (bij een niet-nul saldo) in `controleVereist` totdat de gebruiker per rekening bevestigt welk teken getoond moet worden. |
 
-Deze 3 rekeningen hebben in de fixture (`packages/tests/src/fixtures.ts`)
-en in de aangeleverde `070_Rooise_Zoom.json`/`grootboekmapping_master.json`
-`"balanszijde": null` en `"status": "VOORGESTELD"` (in plaats van het
-eerder goedgekeurde `GOEDGEKEURD`) — het toevoegen van een balanszijde aan
-een al goedgekeurde regel is een nieuwe classificatieclaim die niet
-stilzwijgend GOEDGEKEURD kan blijven totdat een mens de kant bevestigt
-(CLAUDE.md §6). Tot die bevestiging verschijnen deze rekeningen bij een
-niet-nul saldo zichtbaar in `controleVereist`, nooit stilzwijgend
-weggelaten en nooit gegokt.
+Onvolledig bevestigde BALANS-regels (balanszijde en/of tekenconventie
+`null`) staan op `"status": "VOORGESTELD"`, nooit stilzwijgend
+`GOEDGEKEURD` — zie CLAUDE.md §6.
 
 Een grootboekrekening mag maar één keer in `regels` voorkomen —
 `parseGrootboekMapping` wijst dubbele nummers af (ambigue mapping), ook

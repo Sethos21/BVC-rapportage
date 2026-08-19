@@ -1,4 +1,4 @@
-import type { Balanszijde, BalansRegel, GrootboekMappingRegel, ResultaatRegel } from "@bvc/config";
+import type { Balanszijde, BalansRegel, GrootboekMappingRegel, Tekenconventie } from "@bvc/config";
 import type { OnbekendOf } from "./types.js";
 
 /**
@@ -27,15 +27,16 @@ export function zoekMappingRegel(
 }
 
 /**
- * Vertaalt de tekenconventie van een RESULTAAT-mappingregel naar de
- * presentatiefactor (1 of -1) die op een brondata-saldo toegepast moet
- * worden. Een nog niet bevestigde tekenconventie (`null`) levert `onbekend`
- * op — nooit stilzwijgend "ZOALS_BRON" (factor 1) aannemen. Niet van
- * toepassing op BALANS-regels (die hebben geen tekenconventie — een
- * BALANS-rekening hoort nooit door deze functie te lopen, zie
- * `@bvc/reporting`'s `berekenPlPeriode`, dat BALANS-regels al eerder negeert).
+ * Vertaalt een tekenconventie naar de presentatiefactor (1 of -1) die op
+ * een werkelijk berekend saldo (debet - credit) toegepast moet worden.
+ * Werkt structureel op elk mappingtype met dit veld — zowel RESULTAAT- als
+ * BALANS-regels (BALANS-regels kregen `tekenconventie` als apart,
+ * onafhankelijk veld van `balanszijde` — zie `@bvc/config`'s
+ * `BalansRegelSchema`). Een nog niet bevestigde tekenconventie (`null`)
+ * levert `onbekend` op — nooit stilzwijgend "ZOALS_BRON" (factor 1)
+ * aannemen.
  */
-export function presentatiefactorVoorRegel(regel: Pick<ResultaatRegel, "tekenconventie">): OnbekendOf<1 | -1> {
+export function presentatiefactorVoorRegel(regel: { tekenconventie: Tekenconventie | null }): OnbekendOf<1 | -1> {
   if (regel.tekenconventie === null) {
     return {
       type: "onbekend",

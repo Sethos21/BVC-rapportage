@@ -32,17 +32,32 @@ describe("de bevestigde 070_Rooise_Zoom-grootboekmapping (representatieve fixtur
     expect(mapping.regels.every((r) => r.actief)).toBe(true);
   });
 
-  it("is GOEDGEKEURD voor alle RESULTAAT-regels en de 10 BALANS-regels met een bevestigde balanszijde; VOORGESTELD voor de 3 met een nog onbevestigde balanszijde", () => {
+  it("heeft 12 van de 13 BALANS-regels met een bevestigde balanszijde (alleen 1506 Afdrachten BTW nog niet)", () => {
     const mapping = rooiseZoomGrootboekMapping();
     const balansRegels = mapping.regels.filter((r) => r.soort === "BALANS");
     const metBalanszijde = balansRegels.filter((r) => r.soort === "BALANS" && r.balanszijde !== null);
     const zonderBalanszijde = balansRegels.filter((r) => r.soort === "BALANS" && r.balanszijde === null);
-    expect(metBalanszijde).toHaveLength(10);
-    expect(zonderBalanszijde).toHaveLength(3);
-    expect(zonderBalanszijde.map((r) => r.grootboekrekening).sort()).toEqual(["1506", "1711", "1712"]);
+    expect(metBalanszijde).toHaveLength(12);
+    expect(zonderBalanszijde.map((r) => r.grootboekrekening)).toEqual(["1506"]);
+  });
+
+  it("heeft slechts 5 BALANS-regels met een bevestigde tekenconventie (bewust geen aanname voor de rest)", () => {
+    const mapping = rooiseZoomGrootboekMapping();
+    const metTekenconventie = mapping.regels.filter((r) => r.soort === "BALANS" && r.tekenconventie !== null);
+    const zonderTekenconventie = mapping.regels.filter((r) => r.soort === "BALANS" && r.tekenconventie === null);
+    expect(metTekenconventie.map((r) => r.grootboekrekening).sort()).toEqual(["0840", "1010", "1310", "1400", "1410"]);
+    expect(zonderTekenconventie.map((r) => r.grootboekrekening).sort()).toEqual(["0901", "0902", "0903", "1506", "1600", "1700", "1711", "1712"]);
+  });
+
+  it("is GOEDGEKEURD voor alle RESULTAAT-regels; voor BALANS-regels alleen als ZOWEL balanszijde als tekenconventie bevestigd zijn", () => {
+    const mapping = rooiseZoomGrootboekMapping();
     expect(mapping.regels.filter((r) => r.soort === "RESULTAAT").every((r) => r.status === "GOEDGEKEURD")).toBe(true);
-    expect(metBalanszijde.every((r) => r.status === "GOEDGEKEURD")).toBe(true);
-    expect(zonderBalanszijde.every((r) => r.status === "VOORGESTELD")).toBe(true);
+    const balansRegels = mapping.regels.filter((r) => r.soort === "BALANS");
+    for (const regel of balansRegels) {
+      if (regel.soort !== "BALANS") continue;
+      const volledigBevestigd = regel.balanszijde !== null && regel.tekenconventie !== null;
+      expect(regel.status).toBe(volledigBevestigd ? "GOEDGEKEURD" : "VOORGESTELD");
+    }
   });
 
   it("kan volledig geladen worden via de echte Worker-loader nadat het bestand in de data root is geplaatst", () => {
