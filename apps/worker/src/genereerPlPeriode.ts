@@ -6,6 +6,7 @@ import { berekenPlPeriode, vergelijkMetGereconcilieerd, type PlPeriodeResultaat,
 import { administratieCachePad } from "./paths.js";
 import { leesAdministratieConfig } from "./administratie.js";
 import { leesGrootboekMapping } from "./grootboekmapping.js";
+import { naarBoekingsregel } from "./rowMappers.js";
 
 /**
  * Draait de P&L-periodeberekening (`@bvc/reporting`'s `berekenPlPeriode`)
@@ -66,25 +67,6 @@ export function genereerPlPeriode(root: string, administratieId: string, opties:
   } finally {
     db.close();
   }
-}
-
-function naarBoekingsregel(row: BoekingRow): Boekingsregel {
-  return {
-    bedrijfsnr: row.bedrijfsnr,
-    boekjaar: row.boekjaar,
-    dagboeknr: row.dagboeknr,
-    boekstuknr: row.boekstuknr,
-    volgnr: row.volgnr,
-    boekstukSleutel: row.boekstuk_sleutel,
-    grootboeknr: row.grootboeknr,
-    boekdatum: new Date(row.boekdatum),
-    omschrijving: row.omschrijving ?? "",
-    bedragDebet: new Decimal(row.bedrag_debet),
-    bedragCredit: new Decimal(row.bedrag_credit),
-    complexnr: row.complexnr ?? undefined,
-    unitnr: row.unitnr ?? undefined,
-    contractnr: row.contractnr ?? undefined,
-  };
 }
 
 /**

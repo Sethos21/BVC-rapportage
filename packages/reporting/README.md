@@ -74,6 +74,69 @@ latere, losse stap.
   permanente config. Print JSON naar stdout (geen bestand, geen HTML) en
   zet de exitcode op 1 als `controleVereist` niet leeg is.
 
+## Balans-periodeberekening (`balansPeriodeBerekening.ts` + `renderBalansPeriode.ts`)
+
+Tweede koppeling van dezelfde bewezen keten (goedgekeurde master+override-
+grootboekmapping + expliciete periodeselectie) aan een balans, náást de
+P&L hierboven — beide zijn outputs van dezelfde rekenlaag (CLAUDE.md §2),
+geen parallelle berekening. Regressie-administratie: `070_Rooise_Zoom`
+(de al bewezen P&L-uitkomst blijft ongewijzigd, zie `genereerPlPeriode.test.ts`).
+
+- **Peildatum zonder cache-schemawijziging.** De cache bevat geen
+  boekperiode-kolom in `balansstanden` (alleen een jaareindsaldo — zie
+  `selecteerBalansOpBoekperiode`'s "bekend, nog niet opgelost gat"). Het
+  saldo op een expliciete boekjaar+boekperiode-peildatum is desondanks
+  reproduceerbaar zonder Worker-importarchitectuurwijziging: `saldo =
+  beginbalans (jaarstart, uit `balansstanden`) + som van boekingen t/m de
+  opgegeven boekperiode` (`@bvc/cache`'s `selecteerBoekingen`, zoals de
+  P&L-periodeselectie). Ontbreekt de beginbalans (beide velden `null`),
+  dan is het saldo expliciet niet te bepalen — nooit stilzwijgend 0
+  aangenomen (CLAUDE.md §6).
+- **`berekenBalansPeriode(balansstanden, boekingen, mappingRegels,
+  toleranceEuro?)`** — per BALANS-soort rekening: beginbalans + mutaties
+  in de periode. RESULTAAT-soort rekeningen (die horen in de P&L) worden
+  hier bewust genegeerd in `posten`/`controleVereist`, maar hun rauwe
+  mutatie telt mee in `aansluiting.resultaatTotaal`. Onbekende/inactieve
+  rekeningen en BALANS-rekeningen zonder bepaalbare beginbalans belanden —
+  net als bij `berekenPlPeriode` — in `controleVereist`, nooit
+  stilzwijgend weggelaten.
+- **Activa/Passiva: structureel, niet geraden.** Geen nieuwe
+  grootboekmapping-classificatie deze bouwstap (expliciete scope-grens) en
+  geen classificatie op basis van rekeningomschrijving. In plaats daarvan
+  is de indeling zuiver het netto debet/creditkarakter van het berekende
+  saldo: netto-debet = Activa, netto-credit = Passiva. Dat is precies de
+  boekhoudkundige betekenis van "debet/credit blijven gescheiden"
+  (CLAUDE.md §6) toegepast op balanszijde-bepaling — geen tekst-heuristiek.
+  `rapportagepost`/omschrijving komt rechtstreeks uit de bron
+  (`Rekening_omschrijving`), ook geen classificatie, alleen doorgegeven.
+- **Aansluitingscontrole (`aansluiting`).** `activaTotaal + passivaTotaal
+  (signed, bewust geen `.abs()`) + resultaatTotaal` hoort ~0 te zijn bij
+  een complete, correct gemapte balans waarvan de beginbalans van alle
+  BALANS-rekeningen zelf al op 0 sluit (activa = passiva + eigen vermogen
+  bij jaarbegin — dubbel boekhouden). Een afwijking is dan exact herleidbaar
+  tot de som van de `controleVereist`-mutaties (zie
+  `genereerBalansPeriode.test.ts` voor een doorgerekend voorbeeld);
+  ontbreekt die beginbalans-sluiting zelf (onvolledige/foutieve brondata),
+  dan schuift dat mee door in `verschil` — bewust geen stilzwijgende
+  correctie.
+- **`apps/worker/src/genereerBalansPeriode.ts`** — leest de cache
+  (`boekingen` via `selecteerBoekingen` met alleen `boekperiodeTotEnMet`,
+  `balansstanden` op bedrijfsnr+jaar) en dezelfde goedgekeurde
+  master+override-mapping als `genereerPlPeriode`. CLI: `bvc-worker
+  balans-periode <administratieId> --boekjaar N --periodeTotEnMet P
+  [--tolerantie N]`. Exitcode 1 bij niet-lege `controleVereist` of een
+  niet-sluitende aansluitingscontrole.
+- **`renderBalansPeriodeHtml`** — rendert uitsluitend de al-berekende
+  `BalansPeriodeResultaat` (geen eigen berekening): Activa-/Passiva-
+  tabellen met rekening/omschrijving/saldo + subtotaalrij, de
+  aansluitingscontrole, en een altijd zichtbare "Controle vereist"-sectie
+  (ook als leeg — dan een expliciete "geen"-melding, geen weggelaten
+  sectie).
+- **Gedeelde row-mappers.** `apps/worker/src/rowMappers.ts`
+  (`naarBoekingsregel`, `naarBalansstand`) is uit `genereerPlPeriode.ts`
+  getrokken zodat beide Worker-commando's dezelfde cacherij→domeintype-
+  conversie gebruiken — geen duplicatie.
+
 ## Grootboek-inventarisatie (`grootboekInventarisatie.ts`) — voorbereiding op een centrale mastermapping
 
 Puur diagnostisch, alleen-lezen: past geen mapping toe, verandert niets.
@@ -163,7 +226,7 @@ Nog te porten secties (met bronregels in `legacy/index.html`):
 | 01 | Kerncijfers (KPI-dashboard: huurinkomen, EBITDA, uitbetalingsratio, bankstand, debiteuren, servicekosten-saldo + bezettingsgraad) | `renderOverzicht` | ~1502 | ✅ gebouwd (`kerncijfers.ts` + `renderKerncijfers.ts`) |
 | 02 | Resultaat P&L per kwartaal | `renderPnl` | ~1580 | deels gebouwd (ander datamodel/CSS: jaarcijfers i.p.v. kwartaal+begroting) |
 | 03 | Kasstroom | `renderCashflow` | ~1647 | nog te bouwen |
-| 04 | Balans | `renderBalans` | ~1725 | nog te bouwen |
+| 04 | Balans | `renderBalans` | ~1725 | ✅ gebouwd (`balansPeriodeBerekening.ts` + `renderBalansPeriode.ts`) — zie sectie hieronder |
 | 05 | Servicekosten (incl. stijgers/dalers, signaalbadges) | `renderServicekosten` | ~1859 | nog te bouwen |
 | 06 | Verhuur / huuroverzicht (contracttabel, statusbadges op resterende looptijd) | `renderRentroll` | ~1897 | nog te bouwen |
 | 07 | Onderhoud & investeringen | `renderOnderhoud` | ~1983 | nog te bouwen |

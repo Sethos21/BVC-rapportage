@@ -30,6 +30,15 @@ export interface Balansstand {
   saldoDebet: Decimal;
   saldoCredit: Decimal;
   eindsaldo: Decimal;
+  /**
+   * Stand bij jaarbegin (bron: "Beginbalans_debet"/"Beginbalans_credit").
+   * Optioneel en onafhankelijk nullable — een ontbrekende beginbalans is
+   * geen 0 (CLAUDE.md §6): pas als `null` als beide velden ontbreken, nooit
+   * stilzwijgend aangenomen.
+   */
+  beginbalansDebet?: Decimal | null;
+  beginbalansCredit?: Decimal | null;
+  rekeningOmschrijving?: string | null;
 }
 
 /** Rapportmapping-status; zie GROOTBOEKMAPPING_SPEC_v0.1.md. Alleen GOEDGEKEURD mag in definitieve output. */

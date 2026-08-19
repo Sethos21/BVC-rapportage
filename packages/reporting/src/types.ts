@@ -1,4 +1,5 @@
 import type Decimal from "decimal.js";
+import type { BalansPeriodeResultaat } from "./balansPeriodeBerekening.js";
 
 /**
  * Invoer voor de P&L-exploitatierapportage per vastgoedobject
@@ -163,4 +164,19 @@ export interface ControlerapportInvoer {
   ouderdomsanalyseGeladen: boolean;
   /** false = begroting staat nog niet gekoppeld aan de cache (nog geen cache-tabel) — nooit blokkerend. */
   begrotingGeladen: boolean;
+}
+
+/**
+ * Invoer voor de balans-periodesectie: de al-berekende
+ * `BalansPeriodeResultaat` (@bvc/reporting's `berekenBalansPeriode`) plus
+ * de weergavecontext (administratie, peildatum). Rendert alleen — rekent
+ * niets uit (zie balansPeriodeBerekening.ts / renderBalansPeriode.ts).
+ */
+export interface BalansPeriodeInvoer {
+  administratieNaam: string;
+  bedrijfsnr: string;
+  boekjaar: number;
+  boekperiodeTotEnMet: string;
+  gegenereerdOp: Date;
+  resultaat: BalansPeriodeResultaat;
 }

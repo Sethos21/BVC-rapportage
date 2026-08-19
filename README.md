@@ -222,6 +222,17 @@ Aandachtspunten:
   renderer/HTML. Gebouwd en getest (synthetische fixtures) — nog niet
   gedraaid tegen de echte cache van `070_Rooise_Zoom`. Zie
   `packages/reporting/README.md`.
+- **Balans-periodeberekening** (`@bvc/reporting`'s `berekenBalansPeriode` +
+  `renderBalansPeriodeHtml`, `bvc-worker balans-periode <administratieId>
+  --boekjaar N --periodeTotEnMet P [--tolerantie N]`) — tweede output van
+  dezelfde bewezen keten (goedgekeurde master+override-grootboekmapping +
+  expliciete periodeselectie), náást de P&L: balans op een expliciete
+  boekjaar/boekperiode-peildatum (beginbalans + boekingen t/m die
+  periode), met een aansluitingscontrole activa/passiva/resultaat en een
+  altijd zichtbare controle voor niet-verwerkte rekeningen. Activa/Passiva
+  is structureel bepaald (netto debet/credit), niet geraden op
+  omschrijving. Regressie-administratie `070_Rooise_Zoom`: de al bewezen
+  P&L-uitkomst blijft ongewijzigd. Zie `packages/reporting/README.md`.
 - **`apps/web`** — nog een lege Next.js-scaffold. Wordt het interactieve
   dashboard (met filters), op dezelfde rekenlaag/cache als de HTML/PDF-
   rapporten (CLAUDE.md §3) — nog te bouwen.
