@@ -118,12 +118,13 @@ saldo BINNEN die balanszijde getoond wordt. Vandaar `tekenconventie` — nu
 regels (`"ZOALS_BRON" | "OMGEKEERD" | null`, nullable, nooit een default
 aangenomen). Bewust GEEN generieke regel per balanszijde (bv. "alle Passiva
 OMGEKEERD"): welke conventie een rekening nodig heeft, staat per rekening
-vast, niet per zijde — zie de tabel hieronder waar twee Passiva-rekeningen
-bewust HETZELFDE tekenconventie-veld (`OMGEKEERD`) hebben maar een
-TEGENGESTELD getoond teken opleveren, puur als gevolg van hun eigen rauwe
-saldo (0840 is namelijk debet-normaal, de andere Passiva-rekeningen zijn
-credit-normaal) — dat is geen speciale uitzonderingsregel in code, gewoon
-het resultaat van dezelfde formule op verschillende brondata.
+vast, niet per zijde — zie de tabel hieronder waar twee PASSIVA-
+voorzieningsrekeningen (0902/0903, credit-normaal, rauw saldo negatief) wél
+`OMGEKEERD` nodig hebben om positief te tonen, maar hun zusterrekening 0901
+(dezelfde soort, maar rauw saldo positief in deze dataset) juist
+`ZOALS_BRON` nodig heeft — een generieke regel per balanszijde (of zelfs
+per "soort" rekening) had dit niet correct kunnen dekken, exact het punt
+van deze correctie.
 
 #### Balanszijde/tekenconventie `070_Rooise_Zoom` (bijgewerkt 2026-08-20)
 
@@ -148,16 +149,15 @@ blijft expliciet ongeclassificeerd):
 gevraagd deze nog niet te classificeren.
 
 **Tekenconventie** — hier is de dekking veel kleiner: slechts 5 van de 13
-rekeningen hebben een bevestigde tekenconventie. De gebruiker gaf alleen
-voor 0840 een expliciete economische verwachting (negatief tonen); voor
-1010/1310/1400/1410 volgt de conventie direct uit "mag daar negatief zijn"
-(= toon ongewijzigd, geen aanname nodig). Voor de overige 7 Passiva-
-rekeningen is GEEN aanname gedaan:
+rekeningen hebben een bevestigde tekenconventie. Voor 1010/1310/1400/1410
+volgt de conventie direct uit "mag daar negatief zijn" (= toon ongewijzigd,
+geen aanname nodig). Voor de overige 7 Passiva-rekeningen is GEEN aanname
+gedaan:
 
 | grootboekrekening | tekenconventie | onderbouwing |
 |---|---|---|
 | 1010, 1310, 1400, 1410 | ZOALS_BRON | expliciet: "mag daar negatief zijn" — geen omkering, toon het rauwe saldo |
-| 0840 | OMGEKEERD | **voorlopig, beste inschatting** — onttrekkingen worden doorgaans debet geboekt (vermindert het credit-normale eigen vermogen); ZOALS_BRON zou dan positief tonen, terwijl de gebruiker expliciet negatief wil zien. Dit is een aanname over de richting van de boeking, geen bevestigd gegeven — **verifiëren zodra het echte rauwe saldo van 0840 bekend is** (is het inderdaad debet-normaal, dan klopt OMGEKEERD; is het credit-normaal, dan is ZOALS_BRON juist en moet dit teruggedraaid worden). |
+| 0840 | ZOALS_BRON | **bevestigd tegen een echte productie-run (2026-08-20).** Een eerste inschatting (OMGEKEERD) bleek onjuist: het rauwe (ongewijzigde) saldo van 0840 (+2.703.646,45) matchte exact de "Algemene Reserve"-waarde uit de bestaande Q2-rapportage (+2.703.646) — 0840 voert dus de cumulatieve reservestand, geen kleine jaarmutatie. De gebruiker bevestigde dit: 0840 ("Ontrekkingen - Uitkeringen") ís het Algemene Reserve-grootboek, bewust hernoemd bij 070; toekomstige winsten worden voortaan apart op grootboekrekening `0850` geboekt (nog niet in deze mapping — komt vanzelf als `controleVereist` naar boven zodra die rekening boekingen heeft). **Dit is expliciet een 070-specifieke herstructurering, (nog) niet bij andere administraties** — precies waarom dit in de override (`070_Rooise_Zoom.json`) staat en niet in `grootboekmapping_master.json`; geen aanleiding om deze rekeningnaam/-indeling elders te veronderstellen. |
 | 0901, 0902, 0903, 1600, 1700, 1711, 1712 | `null` | geen expliciete instructie ontvangen — een generieke regel ("alle Passiva OMGEKEERD") zou precies de fout zijn die deze ontwerpcorrectie oplost. Deze rekeningen komen dus (bij een niet-nul saldo) in `controleVereist` totdat de gebruiker per rekening bevestigt welk teken getoond moet worden. |
 
 Onvolledig bevestigde BALANS-regels (balanszijde en/of tekenconventie

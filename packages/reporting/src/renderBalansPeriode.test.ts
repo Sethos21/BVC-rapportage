@@ -7,8 +7,8 @@ import type { BalansPeriodeResultaat } from "./balansPeriodeBerekening.js";
 function resultaat(overrides: Partial<BalansPeriodeResultaat> = {}): BalansPeriodeResultaat {
   return {
     posten: [
-      { grootboekrekening: "1010", omschrijving: "Bank", rapportagecategorie: "ACTIVA", saldo: new Decimal("700") },
-      { grootboekrekening: "1711", omschrijving: "Crediteuren", rapportagecategorie: "PASSIVA", saldo: new Decimal("-230") },
+      { grootboekrekening: "1010", omschrijving: "Bank", rapportagecategorie: "ACTIVA", ruwSaldo: new Decimal("700"), tekenconventie: "ZOALS_BRON", saldo: new Decimal("700"), herkomst: "ADMINISTRATIE_OVERRIDE" },
+      { grootboekrekening: "1711", omschrijving: "Crediteuren", rapportagecategorie: "PASSIVA", ruwSaldo: new Decimal("-230"), tekenconventie: "ZOALS_BRON", saldo: new Decimal("-230"), herkomst: "ADMINISTRATIE_OVERRIDE" },
     ],
     categorieTotalen: [
       { rapportagecategorie: "ACTIVA", bedrag: new Decimal("700") },
@@ -98,7 +98,7 @@ describe("renderBalansPeriodeHtml", () => {
 
   it("toont controleVereist-rekeningen altijd zichtbaar, nooit stilzwijgend weggelaten", () => {
     const html = renderBalansPeriodeHtml(
-      invoer({ resultaat: resultaat({ controleVereist: [{ grootboekrekening: "9999", saldo: new Decimal("30"), reden: "Onbekende grootboekrekening 9999." }] }) }),
+      invoer({ resultaat: resultaat({ controleVereist: [{ grootboekrekening: "9999", saldo: new Decimal("30"), reden: "Onbekende grootboekrekening 9999.", herkomst: "ONBEKEND" }] }) }),
     );
     expect(html).toContain("Controle vereist");
     expect(html).toContain("9999");

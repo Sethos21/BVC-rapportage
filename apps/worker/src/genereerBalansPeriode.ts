@@ -1,10 +1,10 @@
 import Decimal from "decimal.js";
 import { openCacheReadonly, selecteerBoekingen, type BalansstandRow, type BoekingRow } from "@bvc/cache";
-import type { Balansstand, Boekingsregel, OnbekendOf } from "@bvc/domain";
+import { resolveerGrootboekMapping, type Balansstand, type Boekingsregel, type OnbekendOf } from "@bvc/domain";
 import { berekenBalansPeriode, berekenNettoResultaat, berekenPlPeriode, type BalansPeriodeResultaat, type NettoResultaatTeken } from "@bvc/reporting";
 import { administratieCachePad } from "./paths.js";
 import { leesAdministratieConfig } from "./administratie.js";
-import { leesGrootboekMapping } from "./grootboekmapping.js";
+import { leesGrootboekMappingGesplitst } from "./grootboekmapping.js";
 import { naarBalansstand, naarBoekingsregel } from "./rowMappers.js";
 
 /**
@@ -59,7 +59,8 @@ export interface GenereerBalansPeriodeResultaat {
 
 export function genereerBalansPeriode(root: string, administratieId: string, opties: GenereerBalansPeriodeOpties): GenereerBalansPeriodeResultaat {
   const config = leesAdministratieConfig(root, administratieId);
-  const mapping = leesGrootboekMapping(root, administratieId);
+  const mapping = leesGrootboekMappingGesplitst(root, administratieId);
+  const mappingRegels = resolveerGrootboekMapping(mapping.master, mapping.override);
   const db = openCacheReadonly(administratieCachePad(root, administratieId));
 
   try {
@@ -78,10 +79,17 @@ export function genereerBalansPeriode(root: string, administratieId: string, opt
       .all(config.bedrijfsnr, opties.boekjaar) as unknown as BalansstandRow[];
     const balansstanden: Balansstand[] = balansstandRijen.map(naarBalansstand);
 
-    const plResultaat = berekenPlPeriode(boekingsregels, mapping.regels);
+    const plResultaat = berekenPlPeriode(boekingsregels, mappingRegels);
     const resultaatHuidigBoekjaar = berekenNettoResultaat(plResultaat.categorieTotalen, opties.tekenPerCategorie ?? STANDAARD_TEKEN_PER_CATEGORIE);
 
-    const resultaat = berekenBalansPeriode(balansstanden, boekingsregels, mapping.regels, resultaatHuidigBoekjaar, opties.toleranceEuro ?? new Decimal("0.01"));
+    const resultaat = berekenBalansPeriode(
+      balansstanden,
+      boekingsregels,
+      mapping.master,
+      mapping.override,
+      resultaatHuidigBoekjaar,
+      opties.toleranceEuro ?? new Decimal("0.01"),
+    );
     return { resultaat, resultaatHuidigBoekjaar };
   } finally {
     db.close();

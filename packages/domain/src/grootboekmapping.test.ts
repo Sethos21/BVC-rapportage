@@ -1,6 +1,6 @@
 import type { BalansRegel, ResultaatRegel } from "@bvc/config";
 import { describe, expect, it } from "vitest";
-import { balanszijdeVoorRegel, presentatiefactorVoorRegel, resolveerGrootboekMapping, zoekMappingRegel } from "./grootboekmapping.js";
+import { balanszijdeVoorRegel, herkomstVoorRekening, presentatiefactorVoorRegel, resolveerGrootboekMapping, zoekMappingRegel } from "./grootboekmapping.js";
 
 function regel(overrides: Partial<ResultaatRegel> = {}): ResultaatRegel {
   return {
@@ -136,5 +136,22 @@ describe("balanszijdeVoorRegel", () => {
   it("is onbekend bij een nog niet bevestigde balanszijde (null), verzint geen kant op basis van het saldoteken", () => {
     const resultaat = balanszijdeVoorRegel({ balanszijde: null });
     expect(resultaat.type).toBe("onbekend");
+  });
+});
+
+describe("herkomstVoorRekening", () => {
+  it("geeft ADMINISTRATIE_OVERRIDE als de rekening in de override staat, ook als hij ook in de master staat", () => {
+    const master = [regel({ grootboekrekening: "4000" })];
+    const override = [regel({ grootboekrekening: "4000" })];
+    expect(herkomstVoorRekening(master, override, "4000")).toBe("ADMINISTRATIE_OVERRIDE");
+  });
+
+  it("geeft MASTER als de rekening alleen in de master staat", () => {
+    const master = [regel({ grootboekrekening: "4130" })];
+    expect(herkomstVoorRekening(master, [], "4130")).toBe("MASTER");
+  });
+
+  it("geeft ONBEKEND als de rekening in geen van beide staat", () => {
+    expect(herkomstVoorRekening([], [], "9999")).toBe("ONBEKEND");
   });
 });

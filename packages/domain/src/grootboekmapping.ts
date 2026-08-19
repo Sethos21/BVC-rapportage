@@ -64,6 +64,38 @@ export function balanszijdeVoorRegel(regel: Pick<BalansRegel, "balanszijde">): O
 }
 
 /**
+ * Herkomst van een classificatie/presentatiekeuze (balanszijde, tekenconventie)
+ * voor één grootboekrekening — voorbereiding op de toekomstige interactieve
+ * balansrapportage (nog niet gebouwd, zie packages/reporting/README.md):
+ * een gebruiker moet later per post kunnen zien/kiezen of een waarde uit de
+ * centrale master komt, uit de administratie-eigen override, uit een
+ * toekomstige per-rapport correctie, of nergens uit (nog onbekend).
+ * `RAPPORT_OVERRIDE` bestaat nu nog niet als opslagmechanisme — die waarde
+ * is alvast in de type-unie opgenomen zodat de rekenlaag er later op kan
+ * uitbreiden zonder een breaking change.
+ */
+export type MappingHerkomst = "MASTER" | "ADMINISTRATIE_OVERRIDE" | "RAPPORT_OVERRIDE" | "ONBEKEND";
+
+/**
+ * Bepaalt de herkomst van de mapping-regel voor één grootboekrekening: wint
+ * de override (`ADMINISTRATIE_OVERRIDE`), staat hij alleen in de master
+ * (`MASTER`), of komt hij nergens voor (`ONBEKEND`). Zelfde
+ * winstprioriteit als `resolveerGrootboekMapping` — bewust een aparte,
+ * kleine functie in plaats van die functie te laten muteren, zodat
+ * bestaande aanroepers (bv. `berekenPlPeriode`) ongewijzigd blijven werken
+ * met de platte, samengevoegde regelset.
+ */
+export function herkomstVoorRekening(
+  master: readonly GrootboekMappingRegel[],
+  override: readonly GrootboekMappingRegel[],
+  grootboekrekening: string,
+): MappingHerkomst {
+  if (override.some((regel) => regel.grootboekrekening === grootboekrekening)) return "ADMINISTRATIE_OVERRIDE";
+  if (master.some((regel) => regel.grootboekrekening === grootboekrekening)) return "MASTER";
+  return "ONBEKEND";
+}
+
+/**
  * Combineert de centrale master-grootboekmapping met een administratie-
  * eigen override tot één effectieve regelset: per grootboekrekening wint
  * de override-regel als die bestaat, anders geldt de master-regel. Een

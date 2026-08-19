@@ -92,8 +92,10 @@ geen parallelle berekening. Regressie-administratie: `070_Rooise_Zoom`
   P&L-periodeselectie). Ontbreekt de beginbalans (beide velden `null`),
   dan is het saldo expliciet niet te bepalen — nooit stilzwijgend 0
   aangenomen (CLAUDE.md §6).
-- **`berekenBalansPeriode(balansstanden, boekingen, mappingRegels,
-  resultaatHuidigBoekjaar, toleranceEuro?)`** — per BALANS-soort rekening:
+- **`berekenBalansPeriode(balansstanden, boekingen, master, override,
+  resultaatHuidigBoekjaar, toleranceEuro?)`** (master/override apart sinds
+  2026-08-20, zie "Voorbereiding op interactieve correctie" hieronder) —
+  per BALANS-soort rekening:
   beginbalans + mutaties in de periode (rauw saldo), gepresenteerd met de
   rekening-eigen tekenconventie (zie hieronder). RESULTAAT-soort
   rekeningen (die horen in de P&L) worden hier volledig genegeerd — geen
@@ -185,6 +187,31 @@ geen parallelle berekening. Regressie-administratie: `070_Rooise_Zoom`
   beïnvloeden. Debet en Credit blijven daarnaast altijd los beschikbaar
   (audit trail); de introductie van deze balansmodule vervangt die
   informatie niet.
+- **Voorbereiding op interactieve correctie (2026-08-20, nog GEEN UI
+  gebouwd).** Een toekomstige stap moet een gebruiker per balanspost
+  `balanszijde`/`tekenconventie` laten overschrijven — nooit de brondata of
+  het rauwe saldo, uitsluitend classificatie/presentatie — met een
+  onderscheid tussen "alleen dit rapport" en "opslaan als
+  administratie-override" (nooit automatisch de master aanpassen: die
+  verandert alleen via een expliciete, losse mapping-bouwstap, nooit als
+  bijeffect van een rapportcorrectie). Om die workflow straks niet te
+  blokkeren, geeft `BalansPeriodePost` nu al elk van de vier onderliggende
+  waarden apart terug: `ruwSaldo` (vóór tekenconventie), `tekenconventie`
+  (de toegepaste conventie), `saldo` (= rapportageBedrag, ná
+  tekenconventie) en `herkomst` (`@bvc/domain`'s `MappingHerkomst`:
+  `"MASTER" | "ADMINISTRATIE_OVERRIDE" | "RAPPORT_OVERRIDE" |
+  "ONBEKEND"` — `RAPPORT_OVERRIDE` bestaat als opslagmechanisme nog niet,
+  alvast gereserveerd in de type-unie). `BalansPeriodeControleVereist`
+  draagt `herkomst` ook. Vandaar dat `berekenBalansPeriode` `master` en
+  `override` nu APART aanneemt (`@bvc/domain`'s `herkomstVoorRekening`) in
+  plaats van al samengevoegd — zonder die scheiding is herkomst niet te
+  bepalen. Dit is bewust ALLEEN de rekenlaag-voorbereiding: geen UI, geen
+  opslagmechanisme voor een rapport-correctie, geen wijziging aan
+  `resolveerGrootboekMapping`'s bestaande contract (nog steeds gebruikt
+  door `berekenPlPeriode`, ongewijzigd). Hetzelfde mechanisme (automatische
+  classificatie + menselijke correctie + gecontroleerd opslaan, nooit de
+  master stilzwijgend) is bedoeld om later ook voor de kostensoorten-
+  module te hergebruiken — nog niet gebouwd, wel het ontwerpdoel.
 - **Balanstoelichting: nog niet gebouwd, wel voorbereid.** Er is bewust
   geen automatische toelichtingslogica gebouwd op basis van aannames (bv.
   "een negatief saldo op Huurdebiteuren betekent een vooruitbetalende
@@ -208,8 +235,11 @@ geen parallelle berekening. Regressie-administratie: `070_Rooise_Zoom`
   herkenbare, echte boekhoudkundige vergelijking.
 - **`apps/worker/src/genereerBalansPeriode.ts`** — leest de cache
   (`boekingen` via `selecteerBoekingen` met alleen `boekperiodeTotEnMet`,
-  `balansstanden` op bedrijfsnr+jaar) en dezelfde goedgekeurde
-  master+override-mapping als `genereerPlPeriode`; draait daarnaast
+  `balansstanden` op bedrijfsnr+jaar) en `leesGrootboekMappingGesplitst`
+  (`apps/worker/src/grootboekmapping.ts`, nieuw sinds 2026-08-20) —
+  master en override apart, nodig voor `herkomst` in de balansuitvoer;
+  `leesGrootboekMapping` (samengevoegd) blijft ongewijzigd bestaan voor
+  `genereerPlPeriode`. Draait daarnaast
   `berekenPlPeriode` + `berekenNettoResultaat` op dezelfde
   boekingenselectie voor `resultaatHuidigBoekjaar` (geen parallelle
   P&L-herberekening — twee outputs van dezelfde rekenlaag). CLI:

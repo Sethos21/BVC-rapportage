@@ -1,12 +1,25 @@
 import Decimal from "decimal.js";
-import type { Balanszijde, GrootboekMappingRegel } from "@bvc/config";
-import { balanszijdeVoorRegel, boekingSaldo, presentatiefactorVoorRegel, rapportregelsom, zoekMappingRegel, type Balansstand, type Boekingsregel, type OnbekendOf } from "@bvc/domain";
+import type { Balanszijde, GrootboekMappingRegel, Tekenconventie } from "@bvc/config";
+import {
+  balanszijdeVoorRegel,
+  boekingSaldo,
+  herkomstVoorRekening,
+  presentatiefactorVoorRegel,
+  rapportregelsom,
+  resolveerGrootboekMapping,
+  zoekMappingRegel,
+  type Balansstand,
+  type Boekingsregel,
+  type MappingHerkomst,
+  type OnbekendOf,
+} from "@bvc/domain";
 
 /**
  * Balans-periodeberekening op een expliciet al-geselecteerde periode
  * boekingen (zie `@bvc/cache`'s `selecteerBoekingen` — periodeselectie
  * gebeurt daar, niet hier) plus de beginbalans per rekening (jaarstand bij
- * boekjaarbegin), de goedgekeurde grootboekmapping, en het netto
+ * boekjaarbegin), de goedgekeurde grootboekmapping (master + administratie-
+ * override, apart aangeleverd — zie "Herkomst" hieronder), en het netto
  * P&L-resultaat van het huidige boekjaar (van buitenaf aangeleverd — zie
  * `resultaatHuidigBoekjaar` hieronder). Bewust ALLEEN de rekenlaag: geen
  * renderer/HTML, geen eigen periodeselectie- of mappinglogica.
@@ -23,24 +36,40 @@ import { balanszijdeVoorRegel, boekingSaldo, presentatiefactorVoorRegel, rapport
  * `@bvc/data-contracts`), exact dezelfde conventie als de al bewezen
  * P&L-periodeberekening.
  *
- * DRIE onafhankelijke concepten (ontwerpcorrectie 2026-08-19, na een echte
+ * DRIE onafhankelijke concepten (ontwerpcorrectie 2026-08-20, na een echte
  * productie-run — zie packages/reporting/README.md):
  * 1. `balanszijde` (ACTIVA/PASSIVA) — een VASTE eigenschap van de
  *    grootboekrekening zelf (`@bvc/config`'s `BalansRegel.balanszijde`),
  *    NOOIT afgeleid uit het actuele teken van het berekende saldo. Bepaalt
  *    uitsluitend in welke tabel een rekening verschijnt.
  * 2. Het werkelijk berekende saldo (beginbalans + mutaties), debet - credit
- *    — de rauwe boekhoudkundige waarheid, ongewijzigd.
+ *    — de rauwe boekhoudkundige waarheid, ongewijzigd (`ruwSaldo`
+ *    hieronder).
  * 3. `tekenconventie` (ZOALS_BRON/OMGEKEERD, ook op `BalansRegel` — apart
- *    veld van `balanszijde`) — bepaalt hoe (2) binnen (1) GETOOND wordt.
- *    Bewust GEEN generieke tekenomkering per balanszijde (bv. "alle
- *    Passiva negatief"): sommige PASSIVA-rekeningen horen positief te
- *    tonen (bv. Crediteuren, een schuld), andere negatief (bv.
- *    Onttrekkingen, die het eigen vermogen verminderen) — dat verschil zit
- *    per rekening in `tekenconventie`, nooit in een formule op
- *    `balanszijde`.
+ *    veld van `balanszijde`) — bepaalt hoe (2) binnen (1) GETOOND wordt
+ *    (`saldo`/rapportageBedrag hieronder). Bewust GEEN generieke
+ *    tekenomkering per balanszijde (bv. "alle Passiva negatief"): sommige
+ *    PASSIVA-rekeningen horen positief te tonen (bv. Crediteuren, een
+ *    schuld), andere negatief (bv. Onttrekkingen, die het eigen vermogen
+ *    verminderen) — dat verschil zit per rekening in `tekenconventie`,
+ *    nooit in een formule op `balanszijde`.
  * Beide (1) en (3) zijn onafhankelijk nullable: `null` = nog niet
  * bevestigd, nooit geraden — de rekening komt dan in `controleVereist`.
+ *
+ * Herkomst (voorbereiding op de toekomstige interactieve balansrapportage,
+ * nog niet gebouwd): elke `BalansPeriodePost`/`BalansPeriodeControleVereist`
+ * draagt `herkomst` (`@bvc/domain`'s `MappingHerkomst`) — komt de
+ * classificatie uit de centrale master, de administratie-eigen override, of
+ * is de rekening nergens gemapt. Vandaar dat deze functie `master` en
+ * `override` APART aanneemt (niet al samengevoegd via
+ * `resolveerGrootboekMapping`, hoewel die intern wel gebruikt wordt voor de
+ * daadwerkelijke classificatie) — zonder die scheiding kan de herkomst niet
+ * worden bepaald. Een toekomstige per-rapport correctielaag
+ * (`RAPPORT_OVERRIDE`, nog niet gebouwd) kan hier later bovenop: die zou
+ * vóór de classificatie-lookup een eigen, apart opgeslagen wijziging
+ * toepassen, ZONDER de brondata (`boekingen`/`balansstanden`) of de
+ * master/override-bestanden zelf aan te raken — een rapport-only correctie
+ * mag nooit automatisch de master aanpassen.
  */
 
 export type BalansRapportageCategorie = Balanszijde;
@@ -51,21 +80,26 @@ export interface BalansPeriodePost {
   omschrijving: string | null;
   /**
    * De vaste balanszijde uit de grootboekmapping (nooit het saldoteken) —
-   * zie moduledoc hierboven.
+   * zie moduledoc hierboven. Identiek aan `rapportagecategorie`.
    */
   rapportagecategorie: BalansRapportageCategorie;
+  /** Werkelijk berekend saldo (beginbalans + mutaties t/m de opgegeven periode), debet - credit — VÓÓR tekenconventie, de rauwe boekhoudkundige waarheid. */
+  ruwSaldo: Decimal;
+  /** De rekening-eigen presentatieconventie die op `ruwSaldo` is toegepast om `saldo` te krijgen. Nooit `null` hier — een onbevestigde tekenconventie blokkeert deze post (zie `controleVereist`). */
+  tekenconventie: Tekenconventie;
   /**
-   * Het GETOONDE bedrag: werkelijk berekend saldo (beginbalans + mutaties
-   * t/m de opgegeven periode, debet - credit) MET de rekening-eigen
-   * `tekenconventie` toegepast (CAL-FIN-002-achtig, zie
-   * `presentatiefactorVoorRegel`). Kan negatief zijn op een normaal
-   * positieve balanszijde (bv. een vooruitbetalende debiteur op Activa) —
-   * bewust niet verborgen. Dit teken, samen met `rapportagecategorie`, is
-   * precies de structuur die een latere balanstoelichting nodig heeft om
-   * bijzondere gevallen te signaleren — die toelichtingslogica wordt hier
-   * bewust nog niet gebouwd.
+   * Het GETOONDE bedrag (= rapportageBedrag): `ruwSaldo` MET `tekenconventie`
+   * toegepast (CAL-FIN-002-achtig, zie `presentatiefactorVoorRegel`). Kan
+   * negatief zijn op een normaal positieve balanszijde (bv. een
+   * vooruitbetalende debiteur op Activa) — bewust niet verborgen. Dit
+   * teken, samen met `rapportagecategorie`, is precies de structuur die
+   * een latere balanstoelichting nodig heeft om bijzondere gevallen te
+   * signaleren — die toelichtingslogica wordt hier bewust nog niet
+   * gebouwd.
    */
   saldo: Decimal;
+  /** Herkomst van de balanszijde/tekenconventie-classificatie — zie moduledoc "Herkomst". */
+  herkomst: MappingHerkomst;
 }
 
 export interface BalansPeriodeCategorieTotaal {
@@ -86,6 +120,8 @@ export interface BalansPeriodeControleVereist {
    */
   saldo: Decimal;
   reden: string;
+  /** Herkomst van de (onvolledige of ontbrekende) classificatie — zie moduledoc "Herkomst". */
+  herkomst: MappingHerkomst;
 }
 
 export interface BalansAansluitingscontrole {
@@ -149,10 +185,13 @@ function beginbalansSaldo(stand: Balansstand | undefined): OnbekendOf<Decimal> {
 export function berekenBalansPeriode(
   balansstanden: readonly Balansstand[],
   boekingen: readonly Boekingsregel[],
-  mappingRegels: readonly GrootboekMappingRegel[],
+  master: readonly GrootboekMappingRegel[],
+  override: readonly GrootboekMappingRegel[],
   resultaatHuidigBoekjaar: OnbekendOf<Decimal>,
   toleranceEuro: Decimal = new Decimal("0.01"),
 ): BalansPeriodeResultaat {
+  const mappingRegels = resolveerGrootboekMapping(master, override);
+
   const mutatiePerRekening = new Map<string, Decimal>();
   for (const boeking of boekingen) {
     const saldo = boekingSaldo(boeking);
@@ -169,6 +208,7 @@ export function berekenBalansPeriode(
     const mutatie = mutatiePerRekening.get(grootboekrekening) ?? new Decimal(0);
     const standRow = standPerRekening.get(grootboekrekening);
     const mappingResultaat = zoekMappingRegel(mappingRegels, grootboekrekening);
+    const herkomst = herkomstVoorRekening(master, override, grootboekrekening);
 
     if (mappingResultaat.type === "onbekend") {
       // Best bekende bedrag: beginbalans (indien bepaalbaar) + mutatie — nooit alleen de mutatie, anders
@@ -177,7 +217,7 @@ export function berekenBalansPeriode(
       const beginbalansResultaatOnbekend = beginbalansSaldo(standRow);
       const bestBekendSaldo = beginbalansResultaatOnbekend.type === "bekend" ? beginbalansResultaatOnbekend.waarde.plus(mutatie) : mutatie;
       if (!bestBekendSaldo.isZero() || standRow !== undefined) {
-        controleVereist.push({ grootboekrekening, saldo: bestBekendSaldo, reden: mappingResultaat.reden });
+        controleVereist.push({ grootboekrekening, saldo: bestBekendSaldo, reden: mappingResultaat.reden, herkomst });
       }
       continue;
     }
@@ -190,25 +230,25 @@ export function berekenBalansPeriode(
     const beginbalansResultaat = beginbalansSaldo(standRow);
     if (beginbalansResultaat.type === "onbekend") {
       if (!mutatie.isZero() || standRow !== undefined) {
-        controleVereist.push({ grootboekrekening, saldo: mutatie, reden: beginbalansResultaat.reden });
+        controleVereist.push({ grootboekrekening, saldo: mutatie, reden: beginbalansResultaat.reden, herkomst });
       }
       continue;
     }
 
-    const rauwSaldo = beginbalansResultaat.waarde.plus(mutatie);
+    const ruwSaldo = beginbalansResultaat.waarde.plus(mutatie);
 
     const balanszijdeResultaat = balanszijdeVoorRegel(mappingResultaat.waarde);
     if (balanszijdeResultaat.type === "onbekend") {
-      if (!rauwSaldo.isZero()) {
-        controleVereist.push({ grootboekrekening, saldo: rauwSaldo, reden: balanszijdeResultaat.reden });
+      if (!ruwSaldo.isZero()) {
+        controleVereist.push({ grootboekrekening, saldo: ruwSaldo, reden: balanszijdeResultaat.reden, herkomst });
       }
       continue;
     }
 
     const factorResultaat = presentatiefactorVoorRegel(mappingResultaat.waarde);
     if (factorResultaat.type === "onbekend") {
-      if (!rauwSaldo.isZero()) {
-        controleVereist.push({ grootboekrekening, saldo: rauwSaldo, reden: factorResultaat.reden });
+      if (!ruwSaldo.isZero()) {
+        controleVereist.push({ grootboekrekening, saldo: ruwSaldo, reden: factorResultaat.reden, herkomst });
       }
       continue;
     }
@@ -217,7 +257,10 @@ export function berekenBalansPeriode(
       grootboekrekening,
       omschrijving: standRow?.rekeningOmschrijving ?? null,
       rapportagecategorie: balanszijdeResultaat.waarde,
-      saldo: rauwSaldo.times(factorResultaat.waarde),
+      ruwSaldo,
+      tekenconventie: mappingResultaat.waarde.tekenconventie as Tekenconventie,
+      saldo: ruwSaldo.times(factorResultaat.waarde),
+      herkomst,
     });
   }
 

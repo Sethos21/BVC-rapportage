@@ -1,7 +1,27 @@
 import { existsSync, readFileSync } from "node:fs";
-import { parseGrootboekMapping, parseGrootboekMappingMaster, type GrootboekMappingConfig } from "@bvc/config";
+import { parseGrootboekMapping, parseGrootboekMappingMaster, type GrootboekMappingConfig, type GrootboekMappingRegel } from "@bvc/config";
 import { resolveerGrootboekMapping } from "@bvc/domain";
 import { grootboekmappingMasterPad, grootboekmappingPad } from "./paths.js";
+
+export interface GesplitsteGrootboekMapping {
+  administratieId: string;
+  master: GrootboekMappingRegel[];
+  override: GrootboekMappingRegel[];
+}
+
+/**
+ * Laadt master en administratie-override AFZONDERLIJK (niet samengevoegd) —
+ * nodig voor `@bvc/reporting`'s `berekenBalansPeriode`, die de herkomst
+ * (MASTER/ADMINISTRATIE_OVERRIDE) per rekening moet kunnen bepalen
+ * (voorbereiding op de toekomstige interactieve balansrapportage, zie
+ * packages/reporting/README.md). Zelfde bestanden/optionaliteit/
+ * foutafhandeling als `leesGrootboekMapping` hieronder — bewust geen
+ * duplicatie, zie `leesBeideBestanden`.
+ */
+export function leesGrootboekMappingGesplitst(root: string, administratieId: string): GesplitsteGrootboekMapping {
+  const { master, override } = leesBeideBestanden(root, administratieId);
+  return { administratieId, master: master.regels, override: override.regels };
+}
 
 /**
  * Laadt de effectieve grootboekmapping van één administratie: de centrale
@@ -20,6 +40,15 @@ import { grootboekmappingMasterPad, grootboekmappingPad } from "./paths.js";
  * ongeldig, dan faalt dit hard — geen stilzwijgende correctie.
  */
 export function leesGrootboekMapping(root: string, administratieId: string): GrootboekMappingConfig {
+  const { master, override } = leesBeideBestanden(root, administratieId);
+  return {
+    versie: override.versie,
+    administratieId,
+    regels: resolveerGrootboekMapping(master.regels, override.regels),
+  };
+}
+
+function leesBeideBestanden(root: string, administratieId: string) {
   const masterPad = grootboekmappingMasterPad(root);
   const overridePad = grootboekmappingPad(root, administratieId);
   const masterBestaat = existsSync(masterPad);
@@ -36,9 +65,5 @@ export function leesGrootboekMapping(root: string, administratieId: string): Gro
     ? parseGrootboekMapping(JSON.parse(readFileSync(overridePad, "utf-8")))
     : { versie: master.versie, administratieId, regels: [] };
 
-  return {
-    versie: override.versie,
-    administratieId,
-    regels: resolveerGrootboekMapping(master.regels, override.regels),
-  };
+  return { master, override };
 }

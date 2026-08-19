@@ -67,35 +67,52 @@ function bekendResultaat(waarde: string): OnbekendOf<Decimal> {
 
 const onbekendResultaat: OnbekendOf<Decimal> = { type: "onbekend", reden: "test: nog geen P&L-resultaat aangeleverd" };
 
+/** Gemakshelper: roept berekenBalansPeriode aan met een lege master (regels als override — de gebruikelijke testopstelling). */
+function berekenMetOverride(
+  balansstanden: readonly Balansstand[],
+  boekingen: readonly Boekingsregel[],
+  override: readonly (BalansRegel | ResultaatRegel)[],
+  resultaatHuidigBoekjaar: OnbekendOf<Decimal>,
+) {
+  return berekenBalansPeriode(balansstanden, boekingen, [], override, resultaatHuidigBoekjaar);
+}
+
 describe("berekenBalansPeriode", () => {
   it("telt beginbalans + mutaties op tot het rauwe saldo en toont dat ongewijzigd bij tekenconventie ZOALS_BRON", () => {
-    const resultaat = berekenBalansPeriode(
+    const resultaat = berekenMetOverride(
       [stand({ grootboekrekeningnr: "1010", beginbalansDebet: new Decimal("1000"), beginbalansCredit: new Decimal(0) })],
       [boeking({ grootboeknr: "1010", bedragDebet: new Decimal("500"), bedragCredit: new Decimal(0) })],
       [balansRegel({ grootboekrekening: "1010", balanszijde: "ACTIVA", tekenconventie: "ZOALS_BRON" })],
       onbekendResultaat,
     );
     expect(resultaat.posten).toEqual([
-      { grootboekrekening: "1010", omschrijving: "Bank", rapportagecategorie: "ACTIVA", saldo: new Decimal("1500") },
+      {
+        grootboekrekening: "1010",
+        omschrijving: "Bank",
+        rapportagecategorie: "ACTIVA",
+        ruwSaldo: new Decimal("1500"),
+        tekenconventie: "ZOALS_BRON",
+        saldo: new Decimal("1500"),
+        herkomst: "ADMINISTRATIE_OVERRIDE",
+      },
     ]);
     expect(resultaat.controleVereist).toEqual([]);
   });
 
   it("keert het teken om bij OMGEKEERD, bv. een credit-normale Passiva-rekening die als positief schuldbedrag getoond moet worden", () => {
-    const resultaat = berekenBalansPeriode(
+    const resultaat = berekenMetOverride(
       [stand({ grootboekrekeningnr: "1600", beginbalansDebet: new Decimal(0), beginbalansCredit: new Decimal("2000"), rekeningOmschrijving: "Crediteuren" })],
       [],
       [balansRegel({ grootboekrekening: "1600", balanszijde: "PASSIVA", tekenconventie: "OMGEKEERD" })],
       onbekendResultaat,
     );
     // Rauw saldo is -2000 (credit-heavy); met OMGEKEERD getoond als +2000 (schuldbedrag).
-    expect(resultaat.posten).toEqual([
-      { grootboekrekening: "1600", omschrijving: "Crediteuren", rapportagecategorie: "PASSIVA", saldo: new Decimal("2000") },
-    ]);
+    expect(resultaat.posten[0]?.ruwSaldo.toString()).toBe("-2000");
+    expect(resultaat.posten[0]?.saldo.toString()).toBe("2000");
   });
 
   it("voert GEEN generieke tekenomkering per balanszijde uit: twee PASSIVA-rekeningen met verschillende tekenconventie tonen verschillend", () => {
-    const resultaat = berekenBalansPeriode(
+    const resultaat = berekenMetOverride(
       [
         stand({ grootboekrekeningnr: "1600", beginbalansDebet: new Decimal(0), beginbalansCredit: new Decimal("2000"), rekeningOmschrijving: "Crediteuren" }),
         stand({ grootboekrekeningnr: "0840", beginbalansDebet: new Decimal("500"), beginbalansCredit: new Decimal(0), rekeningOmschrijving: "Onttrekkingen - Uitkeringen" }),
@@ -103,19 +120,19 @@ describe("berekenBalansPeriode", () => {
       [],
       [
         balansRegel({ grootboekrekening: "1600", balanszijde: "PASSIVA", tekenconventie: "OMGEKEERD" }),
-        balansRegel({ grootboekrekening: "0840", balanszijde: "PASSIVA", tekenconventie: "OMGEKEERD" }),
+        balansRegel({ grootboekrekening: "0840", balanszijde: "PASSIVA", tekenconventie: "ZOALS_BRON" }),
       ],
       onbekendResultaat,
     );
     const crediteuren = resultaat.posten.find((p) => p.grootboekrekening === "1600");
     const onttrekkingen = resultaat.posten.find((p) => p.grootboekrekening === "0840");
-    // Zelfde tekenconventie (OMGEKEERD), maar tegengesteld getoond teken — puur een gevolg van hun eigen rauwe saldo, geen categorie-brede regel.
+    // Verschillende tekenconventie per rekening, geen categorie-brede regel.
     expect(crediteuren?.saldo.toString()).toBe("2000");
-    expect(onttrekkingen?.saldo.toString()).toBe("-500");
+    expect(onttrekkingen?.saldo.toString()).toBe("500");
   });
 
   it("houdt een PASSIVA-rekening op Passiva ook als het GETOONDE saldo positief is (geen classificatie op saldoteken)", () => {
-    const resultaat = berekenBalansPeriode(
+    const resultaat = berekenMetOverride(
       [stand({ grootboekrekeningnr: "1600", beginbalansDebet: new Decimal(0), beginbalansCredit: new Decimal("300"), rekeningOmschrijving: "Crediteuren" })],
       [],
       [balansRegel({ grootboekrekening: "1600", balanszijde: "PASSIVA", tekenconventie: "OMGEKEERD" })],
@@ -126,43 +143,46 @@ describe("berekenBalansPeriode", () => {
   });
 
   it("houdt een ACTIVA-rekening op Activa ook als het saldo negatief is (bv. een vooruitbetalende debiteur)", () => {
-    const resultaat = berekenBalansPeriode(
+    const resultaat = berekenMetOverride(
       [stand({ grootboekrekeningnr: "1310", beginbalansDebet: new Decimal(0), beginbalansCredit: new Decimal("10000"), rekeningOmschrijving: "Huurdebiteuren" })],
       [],
       [balansRegel({ grootboekrekening: "1310", balanszijde: "ACTIVA", tekenconventie: "ZOALS_BRON" })],
       onbekendResultaat,
     );
-    expect(resultaat.posten).toEqual([
-      { grootboekrekening: "1310", omschrijving: "Huurdebiteuren", rapportagecategorie: "ACTIVA", saldo: new Decimal("-10000") },
-    ]);
+    expect(resultaat.posten[0]?.rapportagecategorie).toBe("ACTIVA");
+    expect(resultaat.posten[0]?.saldo.toString()).toBe("-10000");
   });
 
   it("markeert een BALANS-rekening met een nog niet bevestigde balanszijde (null) als controleVereist, verzint geen kant op basis van het saldoteken", () => {
-    const resultaat = berekenBalansPeriode(
+    const resultaat = berekenMetOverride(
       [stand({ grootboekrekeningnr: "1506", beginbalansDebet: new Decimal("100"), beginbalansCredit: new Decimal(0), rekeningOmschrijving: "Afdrachten BTW" })],
       [],
       [balansRegel({ grootboekrekening: "1506", balanszijde: null, tekenconventie: null })],
       onbekendResultaat,
     );
     expect(resultaat.posten).toEqual([]);
-    expect(resultaat.controleVereist).toEqual([{ grootboekrekening: "1506", saldo: new Decimal("100"), reden: expect.any(String) }]);
+    expect(resultaat.controleVereist).toEqual([
+      { grootboekrekening: "1506", saldo: new Decimal("100"), reden: expect.any(String), herkomst: "ADMINISTRATIE_OVERRIDE" },
+    ]);
     expect(resultaat.controleVereist[0]?.reden).toMatch(/[Bb]alanszijde/);
   });
 
   it("markeert een BALANS-rekening met bevestigde balanszijde maar onbevestigde tekenconventie als controleVereist", () => {
-    const resultaat = berekenBalansPeriode(
+    const resultaat = berekenMetOverride(
       [stand({ grootboekrekeningnr: "1711", beginbalansDebet: new Decimal(0), beginbalansCredit: new Decimal("300"), rekeningOmschrijving: "Tussenrekening servicekst" })],
       [],
       [balansRegel({ grootboekrekening: "1711", balanszijde: "PASSIVA", tekenconventie: null })],
       onbekendResultaat,
     );
     expect(resultaat.posten).toEqual([]);
-    expect(resultaat.controleVereist).toEqual([{ grootboekrekening: "1711", saldo: new Decimal("-300"), reden: expect.any(String) }]);
+    expect(resultaat.controleVereist).toEqual([
+      { grootboekrekening: "1711", saldo: new Decimal("-300"), reden: expect.any(String), herkomst: "ADMINISTRATIE_OVERRIDE" },
+    ]);
     expect(resultaat.controleVereist[0]?.reden).toMatch(/[Tt]ekenconventie/);
   });
 
   it("laat een BALANS-rekening met onbevestigde balanszijde weg uit controleVereist als het saldo nul is", () => {
-    const resultaat = berekenBalansPeriode(
+    const resultaat = berekenMetOverride(
       [stand({ grootboekrekeningnr: "1506", beginbalansDebet: new Decimal(0), beginbalansCredit: new Decimal(0) })],
       [],
       [balansRegel({ grootboekrekening: "1506", balanszijde: null, tekenconventie: null })],
@@ -172,18 +192,20 @@ describe("berekenBalansPeriode", () => {
   });
 
   it("markeert een onbekende grootboekrekening met niet-nul mutatie als controleVereist, nooit stilzwijgend genegeerd", () => {
-    const resultaat = berekenBalansPeriode(
+    const resultaat = berekenMetOverride(
       [],
       [boeking({ grootboeknr: "9999", bedragDebet: new Decimal("50"), bedragCredit: new Decimal(0) })],
       [balansRegel({ grootboekrekening: "1010" })],
       onbekendResultaat,
     );
     expect(resultaat.posten).toEqual([]);
-    expect(resultaat.controleVereist).toEqual([{ grootboekrekening: "9999", saldo: new Decimal("50"), reden: expect.any(String) }]);
+    expect(resultaat.controleVereist).toEqual([
+      { grootboekrekening: "9999", saldo: new Decimal("50"), reden: expect.any(String), herkomst: "ONBEKEND" },
+    ]);
   });
 
   it("laat een niet-gemapte rekening weg uit controleVereist als de mutatie in de periode per saldo nul is", () => {
-    const resultaat = berekenBalansPeriode(
+    const resultaat = berekenMetOverride(
       [],
       [
         boeking({ grootboeknr: "9999", bedragDebet: new Decimal("50"), bedragCredit: new Decimal(0) }),
@@ -196,22 +218,24 @@ describe("berekenBalansPeriode", () => {
   });
 
   it("markeert een volledig ongemapte rekening met een stilstaande maar niet-nul BEGINBALANS als controleVereist, ook zonder mutatie deze periode (bugfix: was stilzwijgend onzichtbaar)", () => {
-    const resultaat = berekenBalansPeriode(
+    const resultaat = berekenMetOverride(
       [stand({ grootboekrekeningnr: "9999", beginbalansDebet: new Decimal(0), beginbalansCredit: new Decimal("2329272"), rekeningOmschrijving: "Resultaat vorig boekjaar" })],
       [],
       [balansRegel({ grootboekrekening: "1010" })],
       onbekendResultaat,
     );
-    expect(resultaat.controleVereist).toEqual([{ grootboekrekening: "9999", saldo: new Decimal("-2329272"), reden: expect.any(String) }]);
+    expect(resultaat.controleVereist).toEqual([
+      { grootboekrekening: "9999", saldo: new Decimal("-2329272"), reden: expect.any(String), herkomst: "ONBEKEND" },
+    ]);
   });
 
   it("laat een volledig ongemapte rekening weg uit controleVereist als er noch een balansstand-rij noch een mutatie is", () => {
-    const resultaat = berekenBalansPeriode([], [], [balansRegel({ grootboekrekening: "1010" })], onbekendResultaat);
+    const resultaat = berekenMetOverride([], [], [balansRegel({ grootboekrekening: "1010" })], onbekendResultaat);
     expect(resultaat.controleVereist).toEqual([]);
   });
 
   it("markeert een BALANS-rekening zonder balansstand-rij (geen beginbalans bekend) met mutatie als controleVereist, nooit als 0 aangenomen", () => {
-    const resultaat = berekenBalansPeriode(
+    const resultaat = berekenMetOverride(
       [],
       [boeking({ grootboeknr: "1010", bedragDebet: new Decimal("100"), bedragCredit: new Decimal(0) })],
       [balansRegel({ grootboekrekening: "1010" })],
@@ -223,7 +247,7 @@ describe("berekenBalansPeriode", () => {
   });
 
   it("markeert een BALANS-rekening waarvan beide beginbalanskanten ontbreken (null) als controleVereist", () => {
-    const resultaat = berekenBalansPeriode(
+    const resultaat = berekenMetOverride(
       [stand({ grootboekrekeningnr: "1010", beginbalansDebet: null, beginbalansCredit: null })],
       [boeking({ grootboeknr: "1010", bedragDebet: new Decimal("100"), bedragCredit: new Decimal(0) })],
       [balansRegel({ grootboekrekening: "1010" })],
@@ -235,7 +259,7 @@ describe("berekenBalansPeriode", () => {
   });
 
   it("behandelt een eenzijdig ontbrekende beginbalanskant (andere kant wél aangeleverd) als 0, geen datagat", () => {
-    const resultaat = berekenBalansPeriode(
+    const resultaat = berekenMetOverride(
       [stand({ grootboekrekeningnr: "1010", beginbalansDebet: new Decimal("300"), beginbalansCredit: null })],
       [],
       [balansRegel({ grootboekrekening: "1010" })],
@@ -245,7 +269,7 @@ describe("berekenBalansPeriode", () => {
   });
 
   it("markeert een inactieve BALANS-mapping met mutatie alsnog als controleVereist", () => {
-    const resultaat = berekenBalansPeriode(
+    const resultaat = berekenMetOverride(
       [stand({ grootboekrekeningnr: "1010" })],
       [boeking({ grootboeknr: "1010", bedragDebet: new Decimal("50"), bedragCredit: new Decimal(0) })],
       [balansRegel({ grootboekrekening: "1010", actief: false })],
@@ -255,7 +279,7 @@ describe("berekenBalansPeriode", () => {
   });
 
   it("negeert een RESULTAAT-rekening volledig in posten/controleVereist (die hoort in de P&L, niet hier)", () => {
-    const resultaat = berekenBalansPeriode(
+    const resultaat = berekenMetOverride(
       [],
       [boeking({ grootboeknr: "4000", bedragDebet: new Decimal("75"), bedragCredit: new Decimal(0) })],
       [resultaatRegel({ grootboekrekening: "4000" })],
@@ -266,7 +290,7 @@ describe("berekenBalansPeriode", () => {
   });
 
   it("groepeert posten per categorie in categorieTotalen (Activa en Passiva apart, geen abs())", () => {
-    const resultaat = berekenBalansPeriode(
+    const resultaat = berekenMetOverride(
       [
         stand({ grootboekrekeningnr: "1010", beginbalansDebet: new Decimal("1000"), beginbalansCredit: new Decimal(0) }),
         stand({ grootboekrekeningnr: "1711", beginbalansDebet: new Decimal(0), beginbalansCredit: new Decimal("400") }),
@@ -284,9 +308,34 @@ describe("berekenBalansPeriode", () => {
     expect(passiva?.bedrag.toString()).toBe("-400");
   });
 
+  describe("herkomst (master vs. administratie-override)", () => {
+    it("markeert een rekening die alleen in de master staat als herkomst MASTER", () => {
+      const resultaat = berekenBalansPeriode(
+        [stand({ grootboekrekeningnr: "1400", beginbalansDebet: new Decimal("100"), beginbalansCredit: new Decimal(0) })],
+        [],
+        [balansRegel({ grootboekrekening: "1400", balanszijde: "ACTIVA", tekenconventie: "ZOALS_BRON" })],
+        [],
+        onbekendResultaat,
+      );
+      expect(resultaat.posten[0]?.herkomst).toBe("MASTER");
+    });
+
+    it("laat de administratie-override winnen (herkomst ADMINISTRATIE_OVERRIDE) voor een rekening die in beide voorkomt", () => {
+      const resultaat = berekenBalansPeriode(
+        [stand({ grootboekrekeningnr: "1010", beginbalansDebet: new Decimal("100"), beginbalansCredit: new Decimal(0) })],
+        [],
+        [balansRegel({ grootboekrekening: "1010", balanszijde: "ACTIVA", tekenconventie: "OMGEKEERD" })],
+        [balansRegel({ grootboekrekening: "1010", balanszijde: "ACTIVA", tekenconventie: "ZOALS_BRON" })],
+        onbekendResultaat,
+      );
+      expect(resultaat.posten[0]?.herkomst).toBe("ADMINISTRATIE_OVERRIDE");
+      expect(resultaat.posten[0]?.tekenconventie).toBe("ZOALS_BRON");
+    });
+  });
+
   describe("aansluitingscontrole (activaTotaal - passivaTotaal - resultaatHuidigBoekjaar)", () => {
     it("sluit wanneer activa, passiva (getoond) en het aangeleverde resultaat aan elkaar gelijk zijn", () => {
-      const resultaat = berekenBalansPeriode(
+      const resultaat = berekenMetOverride(
         [stand({ grootboekrekeningnr: "1010", beginbalansDebet: new Decimal("500"), beginbalansCredit: new Decimal(0) })],
         [],
         [balansRegel({ grootboekrekening: "1010", balanszijde: "ACTIVA", tekenconventie: "ZOALS_BRON" })],
@@ -297,7 +346,7 @@ describe("berekenBalansPeriode", () => {
     });
 
     it("toont een echt verschil wanneer activa/passiva niet overeenkomen met het resultaat", () => {
-      const resultaat = berekenBalansPeriode(
+      const resultaat = berekenMetOverride(
         [stand({ grootboekrekeningnr: "1010", beginbalansDebet: new Decimal("500"), beginbalansCredit: new Decimal(0) })],
         [],
         [balansRegel({ grootboekrekening: "1010", balanszijde: "ACTIVA", tekenconventie: "ZOALS_BRON" })],
@@ -308,14 +357,14 @@ describe("berekenBalansPeriode", () => {
     });
 
     it("is onbekend (nooit stilzwijgend sluitend) als het resultaat huidig boekjaar zelf onbekend is", () => {
-      const resultaat = berekenBalansPeriode([], [], [balansRegel()], onbekendResultaat);
+      const resultaat = berekenMetOverride([], [], [balansRegel()], onbekendResultaat);
       expect(resultaat.aansluiting.verschil.type).toBe("onbekend");
       expect(resultaat.aansluiting.sluitBinnenTolerantie).toBe(false);
     });
   });
 
   it("geeft een leeg resultaat voor lege invoer (sluit bij resultaat 0)", () => {
-    const resultaat = berekenBalansPeriode([], [], [balansRegel()], bekendResultaat("0"));
+    const resultaat = berekenMetOverride([], [], [balansRegel()], bekendResultaat("0"));
     expect(resultaat.posten).toEqual([]);
     expect(resultaat.controleVereist).toEqual([]);
     expect(resultaat.aansluiting.verschil).toEqual({ type: "bekend", waarde: new Decimal("0") });

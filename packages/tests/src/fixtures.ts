@@ -243,10 +243,12 @@ export function begrotingServicekostenRijen(): Record<string, unknown>[] {
  * een bevestigde balanszijde (1711/1712 zijn per 2026-08-20 alsnog
  * bevestigd; alleen 1506 Afdrachten BTW blijft expliciet niet
  * geclassificeerd), maar slechts 5 hebben ook een bevestigde
- * tekenconventie (1010/1310/1400/1410 ZOALS_BRON — expliciet zo bevestigd;
- * 0840 OMGEKEERD — beste-inschatting o.b.v. standaard boekhoudkundige
- * terminologie, expliciet als voorlopig gemarkeerd in
- * packages/config/README.md, nog te verifiëren tegen de echte cijfers). De
+ * tekenconventie (1010/1310/1400/1410/0840 ZOALS_BRON — allemaal expliciet
+ * zo bevestigd door de gebruiker; 0840 pas per 2026-08-20 na een echte
+ * productie-run: het rauwe (ongewijzigde) saldo van 0840 matchte exact de
+ * vertrouwde "Algemene Reserve"-waarde uit de bestaande Q2-rapportage,
+ * wat suggereert dat 0840 de cumulatieve reservestand voert, niet een
+ * kleine jaarmutatie — de eerdere OMGEKEERD-inschatting bleek onjuist). De
  * overige 7 (0901/0902/0903/1600/1700/1711/1712) hebben bewust nog geen
  * tekenconventie — geen aanname, blijven `controleVereist` tot bevestigd.
  * Zie packages/config/README.md voor de volledige toelichting per
@@ -282,7 +284,7 @@ export function rooiseZoomGrootboekMapping(): GrootboekMappingConfig {
   // balanszijde) — 1711/1712 kregen alsnog een bevestigde balanszijde, maar de meeste
   // Passiva-rekeningen hebben nog GEEN bevestigde tekenconventie (bewust, geen aanname).
   const balansRekeningen: [string, string, "ACTIVA" | "PASSIVA" | null, "ZOALS_BRON" | "OMGEKEERD" | null][] = [
-    ["0840", "Ontrekkingen - Uitkeringen", "PASSIVA", "OMGEKEERD"],
+    ["0840", "Ontrekkingen - Uitkeringen", "PASSIVA", "ZOALS_BRON"],
     ["0901", "Voorziening onderhoud Zoom 1", "PASSIVA", null],
     ["0902", "Voorziening onderhoud Zoom 2", "PASSIVA", null],
     ["0903", "Voorziening onderhoud Zoom 3", "PASSIVA", null],
