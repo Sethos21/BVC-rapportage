@@ -1,6 +1,6 @@
 import type { BalansRegel, ResultaatRegel } from "@bvc/config";
 import { describe, expect, it } from "vitest";
-import { presentatiefactorVoorRegel, zoekMappingRegel } from "./grootboekmapping.js";
+import { presentatiefactorVoorRegel, resolveerGrootboekMapping, zoekMappingRegel } from "./grootboekmapping.js";
 
 function regel(overrides: Partial<ResultaatRegel> = {}): ResultaatRegel {
   return {
@@ -64,6 +64,42 @@ describe("zoekMappingRegel", () => {
     if (resultaat.type === "onbekend") {
       expect(resultaat.reden).toContain("inactieve mapping");
     }
+  });
+});
+
+describe("resolveerGrootboekMapping", () => {
+  it("gebruikt de master-regel als er geen override voor die rekening is", () => {
+    const resultaat = resolveerGrootboekMapping([regel({ grootboekrekening: "4130", rapportagepost: "Verzekeringen" })], []);
+    expect(resultaat).toHaveLength(1);
+    expect(resultaat[0]).toMatchObject({ grootboekrekening: "4130", rapportagepost: "Verzekeringen" });
+  });
+
+  it("laat de override winnen voor een rekening die in beide voorkomt", () => {
+    const resultaat = resolveerGrootboekMapping(
+      [regel({ grootboekrekening: "4000", rapportagepost: "Master-versie" })],
+      [regel({ grootboekrekening: "4000", rapportagepost: "Override-versie" })],
+    );
+    expect(resultaat).toHaveLength(1);
+    expect(resultaat[0]).toMatchObject({ rapportagepost: "Override-versie" });
+  });
+
+  it("voegt een override-only rekening toe die niet in de master staat", () => {
+    const resultaat = resolveerGrootboekMapping([], [balansRegel({ grootboekrekening: "0840" })]);
+    expect(resultaat).toHaveLength(1);
+    expect(resultaat[0]).toMatchObject({ grootboekrekening: "0840", soort: "BALANS" });
+  });
+
+  it("combineert master- en override-only rekeningen zonder overlap", () => {
+    const resultaat = resolveerGrootboekMapping(
+      [regel({ grootboekrekening: "4130" })],
+      [balansRegel({ grootboekrekening: "1010" })],
+    );
+    expect(resultaat.map((r) => r.grootboekrekening).sort()).toEqual(["1010", "4130"]);
+  });
+
+  it("geeft de master ongewijzigd terug bij een lege override (administratie leunt volledig op de master)", () => {
+    const master = [regel({ grootboekrekening: "4130" }), balansRegel({ grootboekrekening: "1600" })];
+    expect(resolveerGrootboekMapping(master, [])).toEqual(master);
   });
 });
 

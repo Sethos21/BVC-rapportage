@@ -74,6 +74,11 @@ export function grootboekmappingPad(root: string, administratieId: string): stri
   return join(grootboekmappingenDir(root), `${administratieId}.json`);
 }
 
+/** Centrale master-grootboekmapping, één bestand voor alle administraties — zie packages/config/README.md. */
+export function grootboekmappingMasterPad(root: string): string {
+  return join(configDir(root), "grootboekmapping_master.json");
+}
+
 export function bronGedeeldDir(root: string): string {
   return join(root, "bron_gedeeld");
 }

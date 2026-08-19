@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseGrootboekMapping, type BalansRegel, type ResultaatRegel } from "./grootboekmapping.js";
+import { parseGrootboekMapping, parseGrootboekMappingMaster, type BalansRegel, type ResultaatRegel } from "./grootboekmapping.js";
 
 function regel(overrides: Partial<ResultaatRegel> = {}): ResultaatRegel {
   return {
@@ -95,5 +95,26 @@ describe("parseGrootboekMapping — algemeen", () => {
   it("staat meerdere verschillende rekeningen toe", () => {
     const ruw = mapping([regel({ grootboekrekening: "4000" }), regel({ grootboekrekening: "4130", rapportagepost: "Verzekeringen" })]);
     expect(parseGrootboekMapping(ruw).regels).toHaveLength(2);
+  });
+
+  it("accepteert een lege regels-lijst (override die volledig op de master leunt)", () => {
+    const ruw = mapping([]);
+    expect(parseGrootboekMapping(ruw).regels).toEqual([]);
+  });
+});
+
+describe("parseGrootboekMappingMaster", () => {
+  it("accepteert een geldige master-mapping zonder administratieId", () => {
+    const ruw = { versie: "0.1", regels: [regel({ grootboekrekening: "4130" }), balansRegel({ grootboekrekening: "1600" })] };
+    expect(parseGrootboekMappingMaster(ruw)).toEqual(ruw);
+  });
+
+  it("wijst dubbele grootboekrekeningnummers in de master af", () => {
+    const ruw = { versie: "0.1", regels: [regel({ grootboekrekening: "4130" }), regel({ grootboekrekening: "4130" })] };
+    expect(() => parseGrootboekMappingMaster(ruw)).toThrow(/dubbele grootboekrekening/);
+  });
+
+  it("wijst een ongeldige structuur af", () => {
+    expect(() => parseGrootboekMappingMaster({ versie: "0.1" })).toThrow();
   });
 });

@@ -23,17 +23,32 @@ classificatie mag staan (CLAUDE.md: "financiële classificatie loopt altijd
 via de centrale mapping/configuratielaag"). Rapportage-/KPI-code leest
 deze mapping, bepaalt hem nooit zelf.
 
-### Opslag: één bestand per administratie
+### Opslag: centrale master + administratie-override
 
-`config/grootboekmappingen/<administratieId>.json` in de data root (pad:
-`apps/worker/src/paths.ts`'s `grootboekmappingPad`). Bewust **geen**
-centrale standaardmapping/fallback: ontbreekt het bestand voor een
-administratie, dan gooit `apps/worker/src/grootboekmapping.ts`'s
-`leesGrootboekMapping` een duidelijke fout ("nog niet geconfigureerd") —
-nooit stilzwijgend de mapping van een andere administratie hergebruiken of
-met een lege mapping doorgaan. Dit ondersteunt direct de eis "later per
-administratie aan te passen": elke administratie heeft haar eigen
-bestand/regels, zonder codewijziging.
+Twee lagen, samengevoegd door `resolveerGrootboekMapping` (`@bvc/domain`):
+
+- **Master** — `config/grootboekmapping_master.json` (één bestand, geen
+  `administratieId`, pad: `apps/worker/src/paths.ts`'s
+  `grootboekmappingMasterPad`). Rekeningen waarvan de classificatie
+  **betrouwbaar gelijk is over ≥2 administraties** — bevestigd via
+  `@bvc/reporting`'s `inventariseerGrootboekrekeningen` (CLI: `bvc-worker
+  grootboek-inventarisatie`), nooit een rekening die maar bij één
+  Bedrijfsnr voorkomt (zie "Migratie" hieronder voor waarom).
+- **Override** — `config/grootboekmappingen/<administratieId>.json` (pad:
+  `grootboekmappingPad`). Mag **partieel** zijn: alleen de regels die voor
+  die administratie afwijken van (of ontbreken in) de master. Een
+  administratie zonder afwijkingen hoeft geen eigen regels te hebben — een
+  lege `regels`-lijst (of het hele bestand afwezig) betekent "volg de
+  master volledig".
+
+Bij het laden (`apps/worker/src/grootboekmapping.ts`'s `leesGrootboekMapping`)
+wint de override-regel per grootboekrekening als die bestaat, anders geldt
+de master-regel. Beide bestanden zijn los OPTIONEEL (ontbreekt er één, dan
+wordt die als leeg behandeld); zijn ze ALLEBEI afwezig voor een
+administratie, dan gooit `leesGrootboekMapping` een duidelijke fout ("nog
+niet geconfigureerd") — nooit stilzwijgend met een lege mapping doorgaan.
+Dit ondersteunt direct de eis "niet elke administratie volledig apart
+hoeven mappen, alleen afwijkingen en onbekende rekeningen beoordelen".
 
 ### Structuur
 
@@ -100,74 +115,90 @@ inactieve regel hetzelfde als een onbekende rekening (`OnbekendOf`
   `presentatiefactorVoorRegel` geeft dan `OnbekendOf`-`onbekend` terug —
   nooit stilzwijgend `"ZOALS_BRON"`/factor 1 aannemen.
 
-### Goedgekeurde mapping voor `070_Rooise_Zoom` (27 rekeningen: 14 RESULTAAT + 13 BALANS)
+### Migratie: van 27 regels bij `070_Rooise_Zoom` naar master + override (2026-08-19)
 
-**RESULTAAT (14)** — afgeleid door de gebruiker uit vergelijking van het
-Controlerapport tegen de bestaande Q2-2026-rapportage, en vervolgens
-expliciet **GOEDGEKEURD** inclusief tekenconventie per rekening
-(2026-08-17). `rapportagecategorie` is hier mechanisch afgeleid uit de
-standaard grootboek-nummerconventie (4xxx = Kosten, 8xxx = Opbrengsten);
-een fijnere indeling is voorlopig bewust niet gewenst (zie "Bewust
-uitgesteld" hieronder).
+`070_Rooise_Zoom` bevestigde eerder 27 regels (14 RESULTAAT + 13 BALANS,
+alle `"status": "GOEDGEKEURD"`). Een volledige `grootboek-inventarisatie`
+over alle administraties (292 unieke grootboekrekeningen, 122 bij ≥2
+Bedrijfsnr's, waarvan 66 daarbinnen consistent) leverde per rekening op of
+die betrouwbaar gelijk is over administraties. **Promotie naar de master
+vereist beide**: `consistent: true` ÉN gebruikt door ≥2 Bedrijfsnr's — een
+rekening die (nog) maar bij één administratie voorkomt is per definitie
+geen bewijs van cross-administratie-consistentie, ook al scoort hij zelf
+`consistent: true` (dat bewijst dan alleen interne consistentie binnen dat
+ene Bedrijfsnr).
 
-| grootboekrekening | rapportagepost | rapportagecategorie | tekenconventie |
+**Naar `grootboekmapping_master.json` gepromoveerd (15 regels)** — status
+**`VOORGESTELD`**, niet `GOEDGEKEURD`: promotie naar de master is een
+nieuwe claim (deze classificatie geldt voor àlle administraties die deze
+rekening gebruiken, niet alleen 070) die een AI-sessie niet zelf mag
+goedkeuren (CLAUDE.md §6), ook niet als de onderliggende regel bij 070 al
+goedgekeurd was:
+
+| grootboekrekening | soort | rapportagepost/omschrijving | bevestigd bij Bedrijfsnr's |
 |---|---|---|---|
-| 4000 | Beheerkosten | Kosten | ZOALS_BRON |
-| 4130 | Verzekeringen | Kosten | ZOALS_BRON |
-| 4300 | Onderhoud gebouwen | Kosten | ZOALS_BRON |
-| 4330 | Onderhoud terrein | Kosten | ZOALS_BRON |
-| 4340 | Onderhoud installaties | Kosten | ZOALS_BRON |
-| 4350 | Servicekosten eigenaar | Kosten | ZOALS_BRON |
-| 4700 | WOZ / OZB | Kosten | ZOALS_BRON |
-| 4710 | Gemeentelijke heffingen | Kosten | ZOALS_BRON |
-| 4903 | Niet verrekenbare BTW | Kosten | ZOALS_BRON |
-| 4990 | Diverse algemene kosten | Kosten | ZOALS_BRON |
-| 8800 | Huuropbrengsten belast | Opbrengsten | OMGEKEERD |
-| 8801 | Huuropbrengsten onbelast | Opbrengsten | OMGEKEERD |
-| 8805 | Verleende huurkorting | Opbrengsten | OMGEKEERD |
-| 8815 | Zonnestroom | Opbrengsten | OMGEKEERD |
+| 4130 | RESULTAAT | Verzekeringen | 002,003,005,007,013,070,074 (7) |
+| 4300 | RESULTAAT | Onderhoud gebouwen | 002,070,071,072,073,074 (6) |
+| 4330 | RESULTAAT | Onderhoud terrein | 002,070,071 (3) |
+| 4340 | RESULTAAT | Onderhoud installaties | 070,071,074 (3) |
+| 4700 | RESULTAAT | WOZ / OZB | 002,070,074 (3) |
+| 4710 | RESULTAAT | Gemeentelijke heffingen | 002,070,074 (3) |
+| 4903 | RESULTAAT | Niet verrekenbare BTW | 002,070 (2) |
+| 4990 | RESULTAAT | Diverse algemene kosten | 13 Bedrijfsnr's |
+| 8801 | RESULTAAT | Huuropbrengsten onbelast | 002,013,070,071,073,074 (6) |
+| 1400 | BALANS | Te ontvangen vergoedingen | 10 Bedrijfsnr's |
+| 1410 | BALANS | Vooruitbetaalde kosten | 6 Bedrijfsnr's |
+| 1506 | BALANS | Afdrachten BTW | 9 Bedrijfsnr's |
+| 1600 | BALANS | Crediteuren | 15 Bedrijfsnr's |
+| 1700 | BALANS | Te betalen kosten | 14 Bedrijfsnr's |
+| 1712 | BALANS | Betaalde Service kosten | 10 Bedrijfsnr's |
 
-**BALANS (13)** — bevestigd tegen het officiële rekeningschema van bedrijf
-070 ("Rekeningschema basisgegevens", Srt-kolom Bal/V&W, 2026-08-18) nadat
-een eerste `pl-periode`-run op boekjaar 2026 periode 1 t/m 6 deze exacte 13
-rekeningen als `controleVereist` naar boven bracht (elke boeking raakt ook
-een balansrekening — bank, debiteuren/crediteuren, tussenrekeningen). Geen
-enkele bleek een V&W-rekening.
+**Blijft als override in `070_Rooise_Zoom.json` (12 regels)** — ongewijzigd,
+nog steeds `"status": "GOEDGEKEURD"`:
 
-| grootboekrekening | omschrijving |
-|---|---|
-| 0840 | Ontrekkingen - Uitkeringen |
-| 0901 | Voorziening onderhoud Zoom 1 |
-| 0902 | Voorziening onderhoud Zoom 2 |
-| 0903 | Voorziening onderhoud Zoom 3 |
-| 1010 | Bank NL44RABO 0337 7344 45 |
-| 1310 | Huurdebiteuren |
-| 1400 | Te ontvangen vergoedingen |
-| 1410 | Vooruitbetaalde kosten |
-| 1506 | Afdrachten BTW |
-| 1600 | Crediteuren |
-| 1700 | Te betalen kosten |
-| 1711 | Tussenrekening servicekst |
-| 1712 | Betaalde Service kosten |
+| grootboekrekening | soort | rapportagepost/omschrijving | reden voor niet-promotie |
+|---|---|---|---|
+| 4000 | RESULTAAT | Beheerkosten | inconsistent — omschrijving varieert (Beheerkosten/Beheer vergoeding/Beheerskosten/Beheervergoeding) |
+| 4350 | RESULTAAT | Servicekosten eigenaar | alleen bij 070 gezien (`consistent: true` maar single-admin — geen bewijs, zie boven) |
+| 8800 | RESULTAAT | Huuropbrengsten belast | inconsistent — omschrijving varieert (Huuropbrengsten Belast/Huuropbrengsten) |
+| 8805 | RESULTAAT | Verleende huurkorting | alleen bij 070 gezien |
+| 8815 | RESULTAAT | Zonnestroom | alleen bij 070 gezien |
+| 0840 | BALANS | Ontrekkingen - Uitkeringen | inconsistent — 070's omschrijving wijkt af van "Algemene Reserve" elders |
+| 0901 | BALANS | Voorziening onderhoud Zoom 1 | inconsistent — omschrijving varieert per administratie |
+| 0902 | BALANS | Voorziening onderhoud Zoom 2 | inconsistent — omschrijving varieert |
+| 0903 | BALANS | Voorziening onderhoud Zoom 3 | inconsistent — omschrijving varieert |
+| 1010 | BALANS | Bank NL44RABO 0337 7344 45 | inconsistent — elke administratie heeft een andere bankrekening (verwacht) |
+| 1310 | BALANS | Huurdebiteuren | inconsistent — één administratie (069) noemt dit "Eigenarendebiteuren" |
+| 1711 | BALANS | Tussenrekening servicekst | inconsistent — sommige administraties noemen dit "Voorschotten servicekst" |
 
-Alle 27 regels: `"actief": true`, `"status": "GOEDGEKEURD"`.
+**Kanttekening (bewust niet automatisch toegepast):** bij 0901/0902/0903
+is uitsluitend de omschrijving-tekst inconsistent — de onderliggende
+`Balans_vw`-waarde is bij alle betrokken Bedrijfsnr's identiek `"Balans"`.
+Voor een BALANS-classificatie (die geen omschrijving opslaat) zou je
+kunnen beargumenteren dat dat al genoeg is. Dit is bewust NIET als
+promotiecriterium gebruikt — de strikte regel (omschrijving én
+`Balans_vw` moeten beide gelijk zijn) is wat is afgesproken, dus deze drie
+blijven voorlopig override bij 070.
 
-Het kant-en-klare JSON-bestand voor deze 27 regels staat in
-`packages/tests/src/fixtures.ts`'s `rooiseZoomGrootboekMapping()` (gebruikt
-door de tests als representatieve fixture — zie hieronder). Omdat
-`BVC_DATA_ROOT` buiten git staat (CLAUDE.md §5), moet de gebruiker dit
-bestand zelf naar
-`<BVC_DATA_ROOT>/config/grootboekmappingen/070_Rooise_Zoom.json` kopiëren
-om het daadwerkelijk te gebruiken — dit gebeurt niet automatisch.
+**Bijvangst:** de bronkolom `Balans_vw` bevat in de praktijk consistent
+`"Balans"` of `"V & W"` — bevestigt het vermoeden dat deze kolom
+rechtstreeks bruikbaar is als Bal/V&W-signaal, gelijk aan de "Srt"-kolom
+uit het eerder handmatig aangeleverde rekeningschema van 070.
 
-Nog niet in de mapping (nog geen boekingen-activiteit gezien in periode 1
-t/m 6 van 2026, dus nog niet als `controleVereist` naar boven gekomen, maar
-wél bekend uit het rekeningschema als V&W-rekening): `8810` (Opbr.
-administratiekosten), `9100` (Mutatie voorzieningen), en overige
-V&W-rekeningen die niet in de eerste 14 stonden (`8820`, `9400`, `9800`,
-`9900`). Zodra die in een toekomstige periode saldo hebben, brengt
-`pl-periode` ze vanzelf naar boven — dan classificeren we ze op dezelfde
-manier, niet vooraf gokken.
+Nog niet in master of override (nog geen boekingen-activiteit gezien bij
+070 in periode 1 t/m 6 van 2026, dus nog niet beoordeeld): `8810` (Opbr.
+administratiekosten — wél bij meerdere Bedrijfsnr's gezien maar
+inconsistent qua omschrijving), `9100` (Mutatie voorzieningen — alleen bij
+070). Zodra deze in een toekomstige periode saldo hebben bij 070, brengt
+`pl-periode` ze als `controleVereist` naar boven.
+
+Het kant-en-klare JSON-bestand voor de oorspronkelijke 27 regels (vóór
+migratie) staat nog in `packages/tests/src/fixtures.ts`'s
+`rooiseZoomGrootboekMapping()`, gebruikt als representatieve fixture in
+tests. Omdat `BVC_DATA_ROOT` buiten git staat (CLAUDE.md §5), plaatst de
+gebruiker de gemigreerde bestanden zelf: `grootboekmapping_master.json` in
+`<BVC_DATA_ROOT>/config/` en de bijgewerkte (12-regel) override in
+`<BVC_DATA_ROOT>/config/grootboekmappingen/070_Rooise_Zoom.json`.
 
 ### Bewust uitgesteld (geen open keuze, expliciet besluit)
 

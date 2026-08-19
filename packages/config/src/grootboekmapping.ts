@@ -90,6 +90,12 @@ export type GrootboekMappingRegel = z.infer<typeof GrootboekMappingRegelSchema>;
 export type BalansRegel = z.infer<typeof BalansRegelSchema>;
 export type ResultaatRegel = z.infer<typeof ResultaatRegelSchema>;
 
+/**
+ * Administratie-eigen mapping ("override") — mag voortaan PARTIEEL zijn:
+ * alleen de regels die voor deze administratie afwijken van (of ontbreken
+ * in) de centrale master (zie `GrootboekMappingMasterSchema` hieronder).
+ * Een lege/ontbrekende override betekent "volg de master volledig".
+ */
 export const GrootboekMappingSchema = z.object({
   versie: z.string(),
   administratieId: z.string().min(1),
@@ -98,17 +104,45 @@ export const GrootboekMappingSchema = z.object({
 export type GrootboekMappingConfig = z.infer<typeof GrootboekMappingSchema>;
 
 /**
- * Valideert en normaliseert een ruwe grootboekmapping. Faalt hard (geen
- * stilzwijgende correctie) op een ongeldige structuur of op dubbele
+ * Centrale master-grootboekmapping (`config/grootboekmapping_master.json`,
+ * één bestand, niet per administratie): rekeningen waarvan de classificatie
+ * betrouwbaar gelijk is gebleken over ≥2 administraties (bevestigd via
+ * `@bvc/reporting`'s `inventariseerGrootboekrekeningen`) — nooit een
+ * rekening die maar bij één Bedrijfsnr voorkomt, ook niet als die op
+ * zichzelf `consistent: true` scoort (dat bewijst dan alleen interne
+ * consistentie, niet consistentie ÓVER administraties heen). Zie
+ * `resolveerGrootboekMapping` (`@bvc/domain`) voor hoe master + een
+ * administratie-override tot één effectieve mapping samenkomen.
+ */
+export const GrootboekMappingMasterSchema = z.object({
+  versie: z.string(),
+  regels: z.array(GrootboekMappingRegelSchema),
+});
+export type GrootboekMappingMasterConfig = z.infer<typeof GrootboekMappingMasterSchema>;
+
+function controleerGeenDubbeleRekeningen(regels: readonly GrootboekMappingRegel[], contextLabel: string): void {
+  const nummers = regels.map((regel) => regel.grootboekrekening);
+  const duplicaten = [...new Set(nummers.filter((nummer, index) => nummers.indexOf(nummer) !== index))];
+  if (duplicaten.length > 0) {
+    throw new Error(`${contextLabel} bevat dubbele grootboekrekening(en): ${duplicaten.join(", ")}`);
+  }
+}
+
+/**
+ * Valideert en normaliseert een ruwe administratie-override. Faalt hard
+ * (geen stilzwijgende correctie) op een ongeldige structuur of op dubbele
  * grootboekrekeningnummers — een rekening mag maar één keer voorkomen,
  * anders is de mapping voor die rekening ambigu.
  */
 export function parseGrootboekMapping(ruw: unknown): GrootboekMappingConfig {
   const geparsed = GrootboekMappingSchema.parse(ruw);
-  const nummers = geparsed.regels.map((regel) => regel.grootboekrekening);
-  const duplicaten = [...new Set(nummers.filter((nummer, index) => nummers.indexOf(nummer) !== index))];
-  if (duplicaten.length > 0) {
-    throw new Error(`Grootboekmapping voor administratie "${geparsed.administratieId}" bevat dubbele grootboekrekening(en): ${duplicaten.join(", ")}`);
-  }
+  controleerGeenDubbeleRekeningen(geparsed.regels, `Grootboekmapping voor administratie "${geparsed.administratieId}"`);
+  return geparsed;
+}
+
+/** Valideert en normaliseert de ruwe master-grootboekmapping — zelfde regels als parseGrootboekMapping, zonder administratieId. */
+export function parseGrootboekMappingMaster(ruw: unknown): GrootboekMappingMasterConfig {
+  const geparsed = GrootboekMappingMasterSchema.parse(ruw);
+  controleerGeenDubbeleRekeningen(geparsed.regels, "Master-grootboekmapping");
   return geparsed;
 }

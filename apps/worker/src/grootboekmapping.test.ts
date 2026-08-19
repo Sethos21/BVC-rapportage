@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { leesGrootboekMapping } from "./grootboekmapping.js";
-import { grootboekmappingPad, grootboekmappingenDir } from "./paths.js";
+import { configDir, grootboekmappingMasterPad, grootboekmappingPad, grootboekmappingenDir } from "./paths.js";
 
 let root: string;
 
@@ -16,11 +16,11 @@ afterEach(() => {
 });
 
 describe("leesGrootboekMapping", () => {
-  it("gooit een duidelijke fout als er nog geen mapping is voor deze administratie (geen stilzwijgende fallback)", () => {
+  it("gooit een duidelijke fout als er geen master en geen override is voor deze administratie", () => {
     expect(() => leesGrootboekMapping(root, "070_rooisezoom")).toThrow(/Grootboekmapping ontbreekt/);
   });
 
-  it("laadt en valideert een bestaande mapping", () => {
+  it("laadt en valideert een override zonder master (master ontbreekt = leeg behandeld)", () => {
     mkdirSync(grootboekmappingenDir(root), { recursive: true });
     writeFileSync(
       grootboekmappingPad(root, "070_rooisezoom"),
@@ -41,14 +41,88 @@ describe("leesGrootboekMapping", () => {
     expect(resultaatRegel).toMatchObject({ rapportagepost: "Beheerkosten" });
   });
 
-  it("faalt hard op een ongeldig mappingbestand, geen stilzwijgende correctie", () => {
+  it("laadt een master zonder override (administratie leunt volledig op de master)", () => {
+    mkdirSync(configDir(root), { recursive: true });
+    writeFileSync(
+      grootboekmappingMasterPad(root),
+      JSON.stringify({
+        versie: "0.1",
+        regels: [{ grootboekrekening: "4130", soort: "RESULTAAT", rapportagepost: "Verzekeringen", rapportagecategorie: "Kosten", tekenconventie: "ZOALS_BRON", actief: true, status: "VOORGESTELD" }],
+      }),
+      "utf-8",
+    );
+
+    const mapping = leesGrootboekMapping(root, "070_rooisezoom");
+    expect(mapping.regels).toHaveLength(1);
+    expect(mapping.regels[0]).toMatchObject({ grootboekrekening: "4130" });
+  });
+
+  it("laat de administratie-override een master-regel overschrijven voor dezelfde rekening", () => {
+    mkdirSync(configDir(root), { recursive: true });
+    mkdirSync(grootboekmappingenDir(root), { recursive: true });
+    writeFileSync(
+      grootboekmappingMasterPad(root),
+      JSON.stringify({
+        versie: "0.1",
+        regels: [{ grootboekrekening: "4000", soort: "RESULTAAT", rapportagepost: "Master-versie", rapportagecategorie: "Kosten", tekenconventie: null, actief: true, status: "VOORGESTELD" }],
+      }),
+      "utf-8",
+    );
+    writeFileSync(
+      grootboekmappingPad(root, "070_rooisezoom"),
+      JSON.stringify({
+        versie: "0.1",
+        administratieId: "070_rooisezoom",
+        regels: [{ grootboekrekening: "4000", soort: "RESULTAAT", rapportagepost: "Override-versie", rapportagecategorie: "Kosten", tekenconventie: "ZOALS_BRON", actief: true, status: "GOEDGEKEURD" }],
+      }),
+      "utf-8",
+    );
+
+    const mapping = leesGrootboekMapping(root, "070_rooisezoom");
+    expect(mapping.regels).toHaveLength(1);
+    expect(mapping.regels[0]).toMatchObject({ rapportagepost: "Override-versie", status: "GOEDGEKEURD" });
+  });
+
+  it("combineert master- en override-regels voor verschillende rekeningen", () => {
+    mkdirSync(configDir(root), { recursive: true });
+    mkdirSync(grootboekmappingenDir(root), { recursive: true });
+    writeFileSync(
+      grootboekmappingMasterPad(root),
+      JSON.stringify({
+        versie: "0.1",
+        regels: [{ grootboekrekening: "4130", soort: "RESULTAAT", rapportagepost: "Verzekeringen", rapportagecategorie: "Kosten", tekenconventie: "ZOALS_BRON", actief: true, status: "VOORGESTELD" }],
+      }),
+      "utf-8",
+    );
+    writeFileSync(
+      grootboekmappingPad(root, "070_rooisezoom"),
+      JSON.stringify({
+        versie: "0.1",
+        administratieId: "070_rooisezoom",
+        regels: [{ grootboekrekening: "8815", soort: "RESULTAAT", rapportagepost: "Zonnestroom", rapportagecategorie: "Opbrengsten", tekenconventie: "OMGEKEERD", actief: true, status: "GOEDGEKEURD" }],
+      }),
+      "utf-8",
+    );
+
+    const mapping = leesGrootboekMapping(root, "070_rooisezoom");
+    expect(mapping.regels.map((r) => r.grootboekrekening).sort()).toEqual(["4130", "8815"]);
+  });
+
+  it("faalt hard op een ongeldig override-bestand, geen stilzwijgende correctie", () => {
     mkdirSync(grootboekmappingenDir(root), { recursive: true });
     writeFileSync(grootboekmappingPad(root, "070_rooisezoom"), JSON.stringify({ versie: "0.1" }), "utf-8");
 
     expect(() => leesGrootboekMapping(root, "070_rooisezoom")).toThrow();
   });
 
-  it("laadt een andere administratie nooit via de mapping van een andere administratie", () => {
+  it("faalt hard op een ongeldig master-bestand, geen stilzwijgende correctie", () => {
+    mkdirSync(configDir(root), { recursive: true });
+    writeFileSync(grootboekmappingMasterPad(root), JSON.stringify({ versie: "0.1" }), "utf-8");
+
+    expect(() => leesGrootboekMapping(root, "070_rooisezoom")).toThrow();
+  });
+
+  it("laadt een andere administratie nooit via de override van een andere administratie", () => {
     mkdirSync(grootboekmappingenDir(root), { recursive: true });
     writeFileSync(
       grootboekmappingPad(root, "070_rooisezoom"),

@@ -44,3 +44,22 @@ export function presentatiefactorVoorRegel(regel: Pick<ResultaatRegel, "tekencon
   }
   return { type: "bekend", waarde: regel.tekenconventie === "ZOALS_BRON" ? 1 : -1 };
 }
+
+/**
+ * Combineert de centrale master-grootboekmapping met een administratie-
+ * eigen override tot één effectieve regelset: per grootboekrekening wint
+ * de override-regel als die bestaat, anders geldt de master-regel. Een
+ * override mag dus partieel zijn ("alleen wat afwijkt van de master") —
+ * dat is precies het doel van deze functie. Geen validatie hier (dubbele
+ * grootboekrekeningen binnen master/override zijn al uitgesloten door
+ * `parseGrootboekMapping`/`parseGrootboekMappingMaster`); het resultaat
+ * kan dus per constructie nooit een dubbele grootboekrekening bevatten.
+ */
+export function resolveerGrootboekMapping(
+  master: readonly GrootboekMappingRegel[],
+  override: readonly GrootboekMappingRegel[],
+): GrootboekMappingRegel[] {
+  const overrideRekeningen = new Set(override.map((regel) => regel.grootboekrekening));
+  const masterZonderOverrides = master.filter((regel) => !overrideRekeningen.has(regel.grootboekrekening));
+  return [...masterZonderOverrides, ...override];
+}
