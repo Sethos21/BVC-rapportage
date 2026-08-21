@@ -21,6 +21,7 @@ function balansRegel(overrides: Partial<BalansRegel> = {}): BalansRegel {
     soort: "BALANS",
     balanszijde: "ACTIVA",
     tekenconventie: "ZOALS_BRON",
+    liquideMiddelen: null,
     actief: true,
     status: "VOORGESTELD",
     ...overrides,

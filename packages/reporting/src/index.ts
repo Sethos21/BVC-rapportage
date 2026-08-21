@@ -10,5 +10,7 @@ export * from "./balansPeriodeBerekening.js";
 export * from "./renderBalansPeriode.js";
 export * from "./renderPlPeriode.js";
 export * from "./renderRapportPeriode.js";
+export * from "./kasstroomBerekening.js";
+export * from "./renderKasstroomPeriode.js";
 export * from "./grootboekInventarisatie.js";
 export { HUISSTIJL_CSS, escapeHtml, formatBedragHtml, renderRapportDocument } from "./huisstijl.js";

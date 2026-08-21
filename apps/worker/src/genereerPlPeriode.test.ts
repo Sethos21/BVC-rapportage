@@ -60,7 +60,7 @@ beforeEach(() => {
       regels: [
         { grootboekrekening: "4000", soort: "RESULTAAT", rapportagepost: "Beheerkosten", rapportagecategorie: "Kosten", tekenconventie: "ZOALS_BRON", actief: true, status: "GOEDGEKEURD" },
         { grootboekrekening: "8800", soort: "RESULTAAT", rapportagepost: "Huuropbrengsten belast", rapportagecategorie: "Opbrengsten", tekenconventie: "OMGEKEERD", actief: true, status: "GOEDGEKEURD" },
-        { grootboekrekening: "1010", soort: "BALANS", balanszijde: "ACTIVA", tekenconventie: "ZOALS_BRON", actief: true, status: "GOEDGEKEURD" },
+        { grootboekrekening: "1010", soort: "BALANS", balanszijde: "ACTIVA", tekenconventie: "ZOALS_BRON", liquideMiddelen: null, actief: true, status: "GOEDGEKEURD" },
       ],
     }),
     "utf-8",

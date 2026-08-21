@@ -71,15 +71,17 @@ geen zelfbedachte categorie.
 }
 
 // BALANS-regel: geen rapportagepost/-categorie — niet van toepassing.
-// balanszijde EN tekenconventie zijn WEL verplicht aanwezig (mogen elk apart `null`
-// zijn = nog niet bevestigd) — zie "Balanszijde ≠ presentatieteken" hieronder.
-// balanszijde = vaste eigenschap van de rekening; tekenconventie = hoe het saldo
-// BINNEN die zijde getoond wordt — twee onafhankelijke velden.
+// balanszijde, tekenconventie EN liquideMiddelen zijn WEL verplicht aanwezig (mogen elk apart
+// `null` zijn = nog niet bevestigd) — zie "Balanszijde ≠ presentatieteken" hieronder.
+// balanszijde = vaste eigenschap van de rekening; tekenconventie = hoe het saldo BINNEN die
+// zijde getoond wordt; liquideMiddelen = is dit een bank/kas-rekening (voor de Kasstroom-sectie,
+// packages/reporting/README.md) — drie onafhankelijke velden.
 {
   "grootboekrekening": "1010",       // Bank NL44RABO 0337 7344 45
   "soort": "BALANS",
   "balanszijde": "ACTIVA",           // "ACTIVA" | "PASSIVA" | null (nog niet bevestigd)
   "tekenconventie": "ZOALS_BRON",    // "ZOALS_BRON" | "OMGEKEERD" | null (nog niet bevestigd)
+  "liquideMiddelen": null,           // true | false | null (nog niet bevestigd) — zie "Kasstroom" hieronder
   "actief": true,
   "status": "GOEDGEKEURD"
 }
@@ -223,6 +225,34 @@ inactieve regel hetzelfde als een onbekende rekening (`OnbekendOf`
 - **`null`** — nog niet bevestigd. `@bvc/domain`'s
   `presentatiefactorVoorRegel` geeft dan `OnbekendOf`-`onbekend` terug —
   nooit stilzwijgend `"ZOALS_BRON"`/factor 1 aannemen.
+
+### Liquide middelen (`liquideMiddelen`, alleen BALANS-regels, 2026-08-22)
+
+Derde, onafhankelijke classificatie op een BALANS-regel, toegevoegd als
+voorbereiding op de Kasstroom-sectie (packages/reporting/README.md, eerste
+versie: alleen mutatie bankstand). Bepaalt of een rekening meetelt in de
+kasstroom-mutatie — los van `balanszijde` (alle liquide middelen zijn
+ACTIVA, maar niet andersom: huurdebiteuren/vooruitbetaalde kosten zijn ook
+ACTIVA maar geen liquide middelen) en los van `tekenconventie`.
+
+- **`true`** — deze rekening is bank/kas, telt mee in de kasstroom-mutatie.
+- **`false`** — bekend en bevestigd GEEN liquide middelen (bv. debiteuren).
+  Wordt stil buiten de kasstroom-berekening gehouden, net als een BALANS-
+  regel in de P&L — bekend-en-uitgesloten, geen `controleVereist`.
+- **`null`** — nog niet bevestigd (de standaard voor elke bestaande regel
+  op het moment dat dit veld werd toegevoegd — **ook voor `1010` Bank
+  NL44RABO 0337 7344 45**, ondanks de vrij duidelijke rekeningnaam: deze
+  classificatie is bewust NIET afgeleid uit de omschrijving/naam, exact
+  dezelfde reden waarom `balanszijde`/`tekenconventie` nooit uit het
+  saldoteken worden afgeleid — zie CLAUDE.md §3, geen string-matching op
+  "Bank" als impliciete classificatieregel). Een rekening met een niet-nul
+  mutatie in de periode blijft dan zichtbaar in de kasstroom-
+  `controleVereist`, nooit stilzwijgend meegeteld of weggelaten.
+
+**Nog te bevestigen voor `070_Rooise_Zoom`:** welke rekening(en) liquide
+middelen zijn. `1010` (Bank NL44RABO 0337 7344 45) is de voor de hand
+liggende kandidaat, maar is bewust NIET zelf op `true` gezet — dat is aan
+de gebruiker.
 
 ### Migratie: van 27 regels bij `070_Rooise_Zoom` naar master + override (2026-08-19)
 

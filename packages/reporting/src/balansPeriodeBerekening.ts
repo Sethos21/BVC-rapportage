@@ -164,7 +164,8 @@ export interface BalansPeriodeResultaat {
  * aangeleverd door de bron en telt de ontbrekende kant als 0 (normale
  * boekhoudkundige weergave van een eenzijdig saldo, geen datagat).
  */
-function beginbalansSaldo(stand: Balansstand | undefined): OnbekendOf<Decimal> {
+/** Ook gebruikt door `kasstroomBerekening.ts` (zelfde beginbalans-logica, geen duplicatie). */
+export function beginbalansSaldo(stand: Balansstand | undefined): OnbekendOf<Decimal> {
   if (!stand) {
     return {
       type: "onbekend",

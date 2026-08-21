@@ -98,12 +98,29 @@ export type Balanszijde = z.infer<typeof BalanszijdeSchema>;
  * met een bevestigde `balanszijde` maar een onbevestigde `tekenconventie`
  * (of omgekeerd) komt nog steeds in `controleVereist` terecht.
  */
+/**
+ * Derde, onafhankelijke classificatie op een BALANS-regel (2026-08-22,
+ * voorbereiding op de Kasstroom-sectie): is dit een liquide-middelen-
+ * rekening (bank/kas)? Los van `balanszijde` (ALLE liquide middelen zijn
+ * ACTIVA, maar niet alle ACTIVA-rekeningen zijn liquide middelen — bv.
+ * huurdebiteuren/vooruitbetaalde kosten horen niet in een kasstroom-
+ * mutatie thuis) en los van `tekenconventie`. Config-gestuurd, niet
+ * afgeleid uit de omschrijving/naam van de rekening (CLAUDE.md §3: geen
+ * string-matching op "Bank" in de rekeningomschrijving) — een
+ * administratie kan een bankrekening een afwijkende naam geven.
+ *
+ * Nullable: `null` = nog niet bevestigd. Een niet-bevestigde rekening
+ * telt NIET mee in de kasstroom-mutatie, maar blijft (bij een niet-nul
+ * mutatie in de periode) zichtbaar in `controleVereist` — nooit
+ * stilzwijgend als "geen liquide middelen" aangenomen.
+ */
 export const BalansRegelSchema = z
   .object({
     grootboekrekening: z.string().min(1),
     soort: z.literal("BALANS"),
     balanszijde: BalanszijdeSchema.nullable(),
     tekenconventie: TekenconventieSchema.nullable(),
+    liquideMiddelen: z.boolean().nullable(),
     actief: z.boolean(),
     status: MappingStatusSchema,
   })

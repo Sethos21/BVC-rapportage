@@ -9,6 +9,7 @@ export * from "./genereerControlerapport.js";
 export * from "./genereerPlPeriode.js";
 export * from "./genereerBalansPeriode.js";
 export * from "./genereerRapportPeriode.js";
+export * from "./genereerKasstroomPeriode.js";
 export * from "./genereerGrootboekInventarisatie.js";
 export * from "./replace.js";
 export * from "./validateBron.js";

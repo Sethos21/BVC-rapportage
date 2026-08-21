@@ -64,6 +64,23 @@ export function balanszijdeVoorRegel(regel: Pick<BalansRegel, "balanszijde">): O
 }
 
 /**
+ * Vertaalt `liquideMiddelen` van een BALANS-mappingregel naar `OnbekendOf`
+ * — zelfde nullable-patroon als `balanszijdeVoorRegel`/
+ * `presentatiefactorVoorRegel`. Een nog niet bevestigde classificatie
+ * (`null`) levert `onbekend` op — nooit stilzwijgend "geen liquide
+ * middelen" aannemen (zie `@bvc/config`'s `BalansRegelSchema`).
+ */
+export function liquideMiddelenVoorRegel(regel: Pick<BalansRegel, "liquideMiddelen">): OnbekendOf<boolean> {
+  if (regel.liquideMiddelen === null) {
+    return {
+      type: "onbekend",
+      reden: "Liquiditeitsclassificatie (liquide middelen ja/nee) nog niet bevestigd voor deze grootboekrekening — Controle vereist, geen aanname toegestaan.",
+    };
+  }
+  return { type: "bekend", waarde: regel.liquideMiddelen };
+}
+
+/**
  * Herkomst van een classificatie/presentatiekeuze (balanszijde, tekenconventie)
  * voor één grootboekrekening — voorbereiding op de toekomstige interactieve
  * balansrapportage (nog niet gebouwd, zie packages/reporting/README.md):

@@ -324,6 +324,9 @@ export function rooiseZoomGrootboekMapping(): GrootboekMappingConfig {
         soort: "BALANS" as const,
         balanszijde,
         tekenconventie,
+        // Liquiditeitsclassificatie (Kasstroom-sectie, 2026-08-22) nog niet bevestigd voor deze
+        // representatieve fixture — bewust null, geen aanname (zie packages/config/README.md).
+        liquideMiddelen: null,
         actief: true,
         status: balanszijde === null || tekenconventie === null ? ("VOORGESTELD" as const) : ("GOEDGEKEURD" as const),
       })),
