@@ -259,6 +259,28 @@ geen parallelle berekening. Regressie-administratie: `070_Rooise_Zoom`
   getrokken zodat beide Worker-commando's dezelfde cacherij→domeintype-
   conversie gebruiken — geen duplicatie.
 
+### Regressiereferentie: 070_Rooise_Zoom sluit (2026-08-21)
+
+`balansPeriodeBerekening.test.ts` bevat sinds 2026-08-21 een vastgelegde
+regressietest op basis van de eerste ECHTE productie-run van
+`bvc-worker.exe balans-periode 070_Rooise_Zoom --boekjaar 2026
+--periodeTotEnMet 06` die volledig sluit: alle 14 bevestigde
+BALANS-rekeningen (master + 070-override) samen leveren Activa
+€144.016,55, Passiva −€167.163,11, Resultaat huidig boekjaar €311.179,66,
+verschil €0,00 (`sluitBinnenTolerantie: true`) — door de gebruiker
+persoonlijk geverifieerd tegen de echte cijfers, niet afgeleid of
+aangenomen. De test herbouwt dezelfde beginbalans-per-rekening (géén
+mutaties nodig, alleen het resulterende `ruwSaldo` telt) en de exacte
+master/override-classificatie uit `<BVC_DATA_ROOT>/config/` op dat moment,
+en checkt zowel het totaal als het GETOONDE saldo per individuele
+rekening. Doel: een latere, onbedoelde wijziging aan `berekenBalansPeriode`
+of de mapping-resolutieketen (`resolveerGrootboekMapping`/
+`presentatiefactorVoorRegel`/`balanszijdeVoorRegel`) breekt deze test
+zodra de al-bewezen 070-aansluiting niet langer sluit — in plaats van pas
+in een volgende productie-run ontdekt te worden. `1505`/`1506` en de
+dormant-rekeningen vallen hier bewust buiten: die blijven `controleVereist`
+in productie, geen geraden classificatie.
+
 ## Grootboek-inventarisatie (`grootboekInventarisatie.ts`) — voorbereiding op een centrale mastermapping
 
 Puur diagnostisch, alleen-lezen: past geen mapping toe, verandert niets.

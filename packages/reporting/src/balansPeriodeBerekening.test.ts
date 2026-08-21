@@ -1,4 +1,4 @@
-import type { BalansRegel, ResultaatRegel } from "@bvc/config";
+import type { BalansRegel, GrootboekMappingRegel, ResultaatRegel } from "@bvc/config";
 import type { Balansstand, Boekingsregel, OnbekendOf } from "@bvc/domain";
 import Decimal from "decimal.js";
 import { describe, expect, it } from "vitest";
@@ -369,5 +369,107 @@ describe("berekenBalansPeriode", () => {
     expect(resultaat.controleVereist).toEqual([]);
     expect(resultaat.aansluiting.verschil).toEqual({ type: "bekend", waarde: new Decimal("0") });
     expect(resultaat.aansluiting.sluitBinnenTolerantie).toBe(true);
+  });
+});
+
+/**
+ * Regressiereferentie: de echte productie-run van `bvc-worker.exe
+ * balans-periode 070_Rooise_Zoom --boekjaar 2026 --periodeTotEnMet 06`
+ * (2026-08-21), nadat alle 14 bevestigde BALANS-rekeningen (master +
+ * 070-override, exact zoals in `<BVC_DATA_ROOT>/config/`) waren toegepast.
+ * De echte bron-boekingen/balansstanden blijven buiten git (CLAUDE.md §5)
+ * — deze test herbouwt daarom dezelfde beginbalans-per-rekening (géén
+ * mutaties nodig: alleen het resulterende `ruwSaldo` is relevant) en de
+ * exacte master/override-classificatie, en vergelijkt tegen de door de
+ * gebruiker geverifieerde productie-output. Doel: een toekomstige,
+ * onbedoelde wijziging aan `berekenBalansPeriode` (of aan de
+ * `resolveerGrootboekMapping`/`presentatiefactorVoorRegel`/
+ * `balanszijdeVoorRegel`-keten eronder) breekt deze test zodra de al
+ * bewezen 070-aansluiting niet langer op €0,00 uitkomt — niet pas wanneer
+ * dat in productie ontdekt wordt. Rekeningen 1505/1506 en de dormant-
+ * rekeningen (bv. 1501/1940) horen hier bewust NIET bij: die blijven
+ * `controleVereist` in productie (geen classificatie geraden) en vallen
+ * dus buiten de scope van "de balans sluit".
+ */
+describe("regressie: 070_Rooise_Zoom, boekjaar 2026 t/m periode 06 (echte productie-run, 2026-08-21)", () => {
+  const master: GrootboekMappingRegel[] = [
+    balansRegel({ grootboekrekening: "1400", balanszijde: "ACTIVA", tekenconventie: "ZOALS_BRON" }),
+    balansRegel({ grootboekrekening: "1410", balanszijde: "ACTIVA", tekenconventie: "ZOALS_BRON" }),
+    balansRegel({ grootboekrekening: "1600", balanszijde: "PASSIVA", tekenconventie: null }),
+    balansRegel({ grootboekrekening: "1700", balanszijde: "PASSIVA", tekenconventie: null }),
+    balansRegel({ grootboekrekening: "1712", balanszijde: "ACTIVA", tekenconventie: null }),
+  ];
+  const override: GrootboekMappingRegel[] = [
+    balansRegel({ grootboekrekening: "0840", balanszijde: "PASSIVA", tekenconventie: "OMGEKEERD" }),
+    balansRegel({ grootboekrekening: "0850", balanszijde: "PASSIVA", tekenconventie: "OMGEKEERD" }),
+    balansRegel({ grootboekrekening: "0901", balanszijde: "PASSIVA", tekenconventie: "OMGEKEERD" }),
+    balansRegel({ grootboekrekening: "0902", balanszijde: "PASSIVA", tekenconventie: "OMGEKEERD" }),
+    balansRegel({ grootboekrekening: "0903", balanszijde: "PASSIVA", tekenconventie: "OMGEKEERD" }),
+    balansRegel({ grootboekrekening: "1010", balanszijde: "ACTIVA", tekenconventie: "ZOALS_BRON" }),
+    balansRegel({ grootboekrekening: "1310", balanszijde: "ACTIVA", tekenconventie: "ZOALS_BRON" }),
+    balansRegel({ grootboekrekening: "1600", balanszijde: "PASSIVA", tekenconventie: "OMGEKEERD" }),
+    balansRegel({ grootboekrekening: "1700", balanszijde: "PASSIVA", tekenconventie: "OMGEKEERD" }),
+    balansRegel({ grootboekrekening: "1711", balanszijde: "PASSIVA", tekenconventie: "OMGEKEERD" }),
+    balansRegel({ grootboekrekening: "1712", balanszijde: "ACTIVA", tekenconventie: "ZOALS_BRON" }),
+    balansRegel({ grootboekrekening: "1790", balanszijde: "PASSIVA", tekenconventie: "OMGEKEERD" }),
+  ];
+  // Rauwe saldi (ruwSaldo) exact zoals de echte productie-run rapporteerde — als beginbalans
+  // gemodelleerd (geen boekingen nodig): berekenBalansPeriode telt beginbalans + mutatie op,
+  // dus beginbalans = ruwSaldo + 0 mutatie levert hetzelfde ruwSaldo op.
+  const balansstanden: Balansstand[] = [
+    stand({ grootboekrekeningnr: "0840", beginbalansDebet: new Decimal("2703646.45"), beginbalansCredit: new Decimal(0) }),
+    stand({ grootboekrekeningnr: "0850", beginbalansDebet: new Decimal(0), beginbalansCredit: new Decimal("2329272.01") }),
+    stand({ grootboekrekeningnr: "0901", beginbalansDebet: new Decimal("4577.18"), beginbalansCredit: new Decimal(0) }),
+    stand({ grootboekrekeningnr: "0902", beginbalansDebet: new Decimal(0), beginbalansCredit: new Decimal("22019.21") }),
+    stand({ grootboekrekeningnr: "0903", beginbalansDebet: new Decimal(0), beginbalansCredit: new Decimal("3939.55") }),
+    stand({ grootboekrekeningnr: "1010", beginbalansDebet: new Decimal("73038.37"), beginbalansCredit: new Decimal(0) }),
+    stand({ grootboekrekeningnr: "1310", beginbalansDebet: new Decimal(0), beginbalansCredit: new Decimal("26645.71") }),
+    stand({ grootboekrekeningnr: "1400", beginbalansDebet: new Decimal(0), beginbalansCredit: new Decimal("300") }),
+    stand({ grootboekrekeningnr: "1410", beginbalansDebet: new Decimal("6745.98"), beginbalansCredit: new Decimal(0) }),
+    stand({ grootboekrekeningnr: "1600", beginbalansDebet: new Decimal(0), beginbalansCredit: new Decimal("27754.56") }),
+    stand({ grootboekrekeningnr: "1700", beginbalansDebet: new Decimal(0), beginbalansCredit: new Decimal("3321.96") }),
+    stand({ grootboekrekeningnr: "1711", beginbalansDebet: new Decimal(0), beginbalansCredit: new Decimal("114530") }),
+    stand({ grootboekrekeningnr: "1712", beginbalansDebet: new Decimal("91177.91"), beginbalansCredit: new Decimal(0) }),
+    stand({ grootboekrekeningnr: "1790", beginbalansDebet: new Decimal(0), beginbalansCredit: new Decimal("40223.23") }),
+  ];
+
+  it("reproduceert de bevestigde productie-aansluiting exact: Activa 144.016,55 / Passiva -167.163,11 / verschil 0,00", () => {
+    const resultaat = berekenBalansPeriode(balansstanden, [], master, override, bekendResultaat("311179.66"));
+
+    expect(resultaat.posten).toHaveLength(14);
+    expect(resultaat.controleVereist).toEqual([]);
+    expect(resultaat.categorieTotalen).toEqual([
+      { rapportagecategorie: "ACTIVA", bedrag: new Decimal("144016.55") },
+      { rapportagecategorie: "PASSIVA", bedrag: new Decimal("-167163.11") },
+    ]);
+    expect(resultaat.aansluiting).toEqual({
+      activaTotaal: new Decimal("144016.55"),
+      passivaTotaal: new Decimal("-167163.11"),
+      resultaatHuidigBoekjaar: { type: "bekend", waarde: new Decimal("311179.66") },
+      verschil: { type: "bekend", waarde: new Decimal("0") },
+      sluitBinnenTolerantie: true,
+    });
+  });
+
+  it("kent elke bevestigde 070-rekening het juiste GETOONDE saldo toe (locked per rekening, niet alleen het totaal)", () => {
+    const resultaat = berekenBalansPeriode(balansstanden, [], master, override, bekendResultaat("311179.66"));
+    const saldoPerRekening = new Map(resultaat.posten.map((p) => [p.grootboekrekening, p.saldo.toString()]));
+
+    expect(Object.fromEntries(saldoPerRekening)).toEqual({
+      "0840": "-2703646.45",
+      "0850": "2329272.01",
+      "0901": "-4577.18",
+      "0902": "22019.21",
+      "0903": "3939.55",
+      "1010": "73038.37",
+      "1310": "-26645.71",
+      "1400": "-300",
+      "1410": "6745.98",
+      "1600": "27754.56",
+      "1700": "3321.96",
+      "1711": "114530",
+      "1712": "91177.91",
+      "1790": "40223.23",
+    });
   });
 });
