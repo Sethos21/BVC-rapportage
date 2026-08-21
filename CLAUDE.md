@@ -150,3 +150,39 @@ van bestanden buiten de esbuild-bundel).
 
 Zie `README.md` voor de actuele bouwstatus per package en het
 overdrachtsdossier voor de volledige historische besluitvorming.
+
+## 7. Lokale omgeving & workflow
+
+### VS Code setup
+
+- Claude Code-extensie geïnstalleerd (Anthropic, v2.1.238).
+- WSL Integration uitgeschakeld — gebruik altijd PowerShell, geen bash/WSL.
+- GitHub MCP ingesteld via `mcp.json` (HTTP-transport,
+  `https://api.githubcopilot.com/mcp`).
+- Standaard terminal: PowerShell.
+
+### Build & deploy workflow
+
+- Lokale repo: `C:\Users\seth\BVC-rapportage-claude`.
+- Build commando: `corepack pnpm --filter @bvc/worker build:exe` (zie §5b).
+- Output: `C:\Users\seth\BVC-rapportage-claude\apps\worker\dist\bvc-worker.exe`.
+- Na build automatisch kopiëren naar:
+  `\\BERNHEZE-DC01\gebruikers$\seth\Documents\Claude Desktop\PROJECTEN\Worker\`
+  — dat is de plek van waaruit de gebruiker de `.exe` daadwerkelijk draait.
+  Elke schema-/logicawijziging in `apps/worker` (of een package die het
+  bundelt) vereist een nieuwe build + kopieerstap; de oude `.exe` op de
+  netwerklocatie wordt nooit automatisch bijgewerkt.
+
+### Rapport genereren
+
+- `BVC_DATA_ROOT`: `M:\Werk\werk BVC - BEHEER\Beheer commercieel og\BVC
+  Financiele Rapportage Tool\BVC_DATA_ROOT` (env var, zie §5 — dit is de
+  waarde op deze werkplek, niet een hardcoded pad in code).
+- De Worker draait de gebruiker zelf, op de netwerklocatie, via een aparte
+  PowerShell-sessie — niet vanuit deze devcontainer/sessie (geen toegang
+  tot `BVC_DATA_ROOT` of het netwerkpad vanuit hier).
+- Commando: `.\bvc-worker.exe rapport-periode <administratieId> --boekjaar
+  <jaar> --periodeTotEnMet <periode>` (zie ook `pl-periode`/
+  `balans-periode`/`controlerapport` voor de losse onderdelen, packages/
+  reporting/README.md).
+
