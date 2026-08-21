@@ -24,29 +24,31 @@ describe("de bevestigde 070_Rooise_Zoom-grootboekmapping (representatieve fixtur
     expect(parseGrootboekMapping(viaJson)).toEqual(mapping);
   });
 
-  it("bevat 14 RESULTAAT- en 13 BALANS-rekeningen, allemaal actief", () => {
+  it("bevat 14 RESULTAAT- en 15 BALANS-rekeningen, allemaal actief", () => {
     const mapping = rooiseZoomGrootboekMapping();
-    expect(mapping.regels).toHaveLength(27);
+    expect(mapping.regels).toHaveLength(29);
     expect(mapping.regels.filter((r) => r.soort === "RESULTAAT")).toHaveLength(14);
-    expect(mapping.regels.filter((r) => r.soort === "BALANS")).toHaveLength(13);
+    expect(mapping.regels.filter((r) => r.soort === "BALANS")).toHaveLength(15);
     expect(mapping.regels.every((r) => r.actief)).toBe(true);
   });
 
-  it("heeft 12 van de 13 BALANS-regels met een bevestigde balanszijde (alleen 1506 Afdrachten BTW nog niet)", () => {
+  it("heeft 14 van de 15 BALANS-regels met een bevestigde balanszijde (alleen 1506 Afdrachten BTW nog niet)", () => {
     const mapping = rooiseZoomGrootboekMapping();
     const balansRegels = mapping.regels.filter((r) => r.soort === "BALANS");
     const metBalanszijde = balansRegels.filter((r) => r.soort === "BALANS" && r.balanszijde !== null);
     const zonderBalanszijde = balansRegels.filter((r) => r.soort === "BALANS" && r.balanszijde === null);
-    expect(metBalanszijde).toHaveLength(12);
+    expect(metBalanszijde).toHaveLength(14);
     expect(zonderBalanszijde.map((r) => r.grootboekrekening)).toEqual(["1506"]);
   });
 
-  it("heeft slechts 5 BALANS-regels met een bevestigde tekenconventie (bewust geen aanname voor de rest)", () => {
+  it("heeft 14 van de 15 BALANS-regels met een bevestigde tekenconventie (alleen 1506 Afdrachten BTW nog niet — bewust geen aanname)", () => {
     const mapping = rooiseZoomGrootboekMapping();
     const metTekenconventie = mapping.regels.filter((r) => r.soort === "BALANS" && r.tekenconventie !== null);
     const zonderTekenconventie = mapping.regels.filter((r) => r.soort === "BALANS" && r.tekenconventie === null);
-    expect(metTekenconventie.map((r) => r.grootboekrekening).sort()).toEqual(["0840", "1010", "1310", "1400", "1410"]);
-    expect(zonderTekenconventie.map((r) => r.grootboekrekening).sort()).toEqual(["0901", "0902", "0903", "1506", "1600", "1700", "1711", "1712"]);
+    expect(metTekenconventie.map((r) => r.grootboekrekening).sort()).toEqual([
+      "0840", "0850", "0901", "0902", "0903", "1010", "1310", "1400", "1410", "1600", "1700", "1711", "1712", "1790",
+    ]);
+    expect(zonderTekenconventie.map((r) => r.grootboekrekening).sort()).toEqual(["1506"]);
   });
 
   it("is GOEDGEKEURD voor alle RESULTAAT-regels; voor BALANS-regels alleen als ZOWEL balanszijde als tekenconventie bevestigd zijn", () => {
@@ -65,7 +67,7 @@ describe("de bevestigde 070_Rooise_Zoom-grootboekmapping (representatieve fixtur
     writeFileSync(grootboekmappingPad(root, "070_rooisezoom"), JSON.stringify(rooiseZoomGrootboekMapping()), "utf-8");
 
     const geladen = leesGrootboekMapping(root, "070_rooisezoom");
-    expect(geladen.regels).toHaveLength(27);
+    expect(geladen.regels).toHaveLength(29);
   });
 
   it("levert een bekende RESULTAAT-regel op voor een bevestigde rekening (bv. 8800 Huuropbrengsten belast)", () => {

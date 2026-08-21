@@ -239,22 +239,22 @@ export function begrotingServicekostenRijen(): Record<string, unknown>[] {
  * een echte productie-run) aangevuld met een APART, onafhankelijk
  * `tekenconventie`-veld op BALANS-regels (bepaalt hoe het berekende saldo
  * BINNEN een balanszijde getoond wordt — bewust geen generieke
- * tekenomkering per balanszijde). Van de 13 BALANS-rekeningen: 12 hebben nu
- * een bevestigde balanszijde (1711/1712 zijn per 2026-08-20 alsnog
- * bevestigd; alleen 1506 Afdrachten BTW blijft expliciet niet
- * geclassificeerd), maar slechts 5 hebben ook een bevestigde
- * tekenconventie (1010/1310/1400/1410/0840 ZOALS_BRON — allemaal expliciet
- * zo bevestigd door de gebruiker; 0840 pas per 2026-08-20 na een echte
- * productie-run: het rauwe (ongewijzigde) saldo van 0840 matchte exact de
- * vertrouwde "Algemene Reserve"-waarde uit de bestaande Q2-rapportage,
- * wat suggereert dat 0840 de cumulatieve reservestand voert, niet een
- * kleine jaarmutatie — de eerdere OMGEKEERD-inschatting bleek onjuist). De
- * overige 7 (0901/0902/0903/1600/1700/1711/1712) hebben bewust nog geen
- * tekenconventie — geen aanname, blijven `controleVereist` tot bevestigd.
- * Zie packages/config/README.md voor de volledige toelichting per
- * rekening. Dient hier als representatieve fixture voor tests; is NIET
- * automatisch de mapping die `070_Rooise_Zoom` in productie gebruikt — dat
- * vereist het bestand handmatig naar
+ * tekenomkering per balanszijde). Per 2026-08-21 (na twee echte
+ * productie-runs) zijn 14 van de 15 BALANS-rekeningen bevestigd, zowel
+ * balanszijde als tekenconventie: 0840/1010/1310/1400/1410/1712 ZOALS_BRON;
+ * 0850/0901/0902/0903/1600/1700/1711/1790 OMGEKEERD. Let op 0901: de
+ * gebruiker bevestigde de eindpresentatie met een uitgewerkt voorbeeld (ruw
+ * +4.577,18 → PASSIVA -4.577,18), wat technisch OMGEKEERD is — niet
+ * ZOALS_BRON zoals in een eerdere, losse opsomming abusievelijk genoemd;
+ * het uitgewerkte cijfervoorbeeld is leidend, zie packages/config/README.md.
+ * Alleen 1506 Afdrachten BTW (en het niet-gemapte 1505, dat hier bewust
+ * geen fixture-regel heeft) blijven expliciet niet geclassificeerd: een BTW-
+ * paar met exact tegengestelde bedragen, maar de gebruiker wil de relatie
+ * inhoudelijk vaststellen, niet afleiden uit de toevallige gelijke/
+ * tegengestelde bedragen. Zie packages/config/README.md voor de volledige
+ * toelichting per rekening. Dient hier als representatieve fixture voor
+ * tests; is NIET automatisch de mapping die `070_Rooise_Zoom` in productie
+ * gebruikt — dat vereist het bestand handmatig naar
  * `<BVC_DATA_ROOT>/config/grootboekmappingen/070_Rooise_Zoom.json` te
  * kopiëren (CLAUDE.md §5: data blijft buiten git).
  */
@@ -285,18 +285,20 @@ export function rooiseZoomGrootboekMapping(): GrootboekMappingConfig {
   // Passiva-rekeningen hebben nog GEEN bevestigde tekenconventie (bewust, geen aanname).
   const balansRekeningen: [string, string, "ACTIVA" | "PASSIVA" | null, "ZOALS_BRON" | "OMGEKEERD" | null][] = [
     ["0840", "Ontrekkingen - Uitkeringen", "PASSIVA", "ZOALS_BRON"],
-    ["0901", "Voorziening onderhoud Zoom 1", "PASSIVA", null],
-    ["0902", "Voorziening onderhoud Zoom 2", "PASSIVA", null],
-    ["0903", "Voorziening onderhoud Zoom 3", "PASSIVA", null],
+    ["0850", "Resultaat vorig boekjaar", "PASSIVA", "OMGEKEERD"],
+    ["0901", "Voorziening onderhoud Zoom 1", "PASSIVA", "OMGEKEERD"],
+    ["0902", "Voorziening onderhoud Zoom 2", "PASSIVA", "OMGEKEERD"],
+    ["0903", "Voorziening onderhoud Zoom 3", "PASSIVA", "OMGEKEERD"],
     ["1010", "Bank NL44RABO 0337 7344 45", "ACTIVA", "ZOALS_BRON"],
     ["1310", "Huurdebiteuren", "ACTIVA", "ZOALS_BRON"],
     ["1400", "Te ontvangen vergoedingen", "ACTIVA", "ZOALS_BRON"],
     ["1410", "Vooruitbetaalde kosten", "ACTIVA", "ZOALS_BRON"],
     ["1506", "Afdrachten BTW", null, null],
-    ["1600", "Crediteuren", "PASSIVA", null],
-    ["1700", "Te betalen kosten", "PASSIVA", null],
-    ["1711", "Tussenrekening servicekst", "PASSIVA", null],
-    ["1712", "Betaalde Service kosten", "ACTIVA", null],
+    ["1600", "Crediteuren", "PASSIVA", "OMGEKEERD"],
+    ["1700", "Te betalen kosten", "PASSIVA", "OMGEKEERD"],
+    ["1711", "Tussenrekening servicekst", "PASSIVA", "OMGEKEERD"],
+    ["1712", "Betaalde Service kosten", "ACTIVA", "ZOALS_BRON"],
+    ["1790", "Waarborgsommen", "PASSIVA", "OMGEKEERD"],
   ];
 
   return {

@@ -126,11 +126,11 @@ voorzieningsrekeningen (0902/0903, credit-normaal, rauw saldo negatief) wél
 per "soort" rekening) had dit niet correct kunnen dekken, exact het punt
 van deze correctie.
 
-#### Balanszijde/tekenconventie `070_Rooise_Zoom` (bijgewerkt 2026-08-20)
+#### Balanszijde/tekenconventie `070_Rooise_Zoom` (bijgewerkt 2026-08-21)
 
-**Balanszijde** — 12 van de 13 BALANS-rekeningen zijn nu vastgelegd
-(1711/1712 zijn deze ronde alsnog bevestigd door de gebruiker; alleen 1506
-blijft expliciet ongeclassificeerd):
+**Balanszijde** — 14 van de 15 BALANS-rekeningen zijn nu vastgelegd (`0850`
+en `1790` zijn deze ronde nieuw toegevoegd, gevonden dankzij de
+bugfix hieronder; alleen 1506 blijft expliciet ongeclassificeerd):
 
 | grootboekrekening | omschrijving | balanszijde | motivatie |
 |---|---|---|---|
@@ -143,22 +143,46 @@ blijft expliciet ongeclassificeerd):
 | 1700 | Te betalen kosten | PASSIVA | "te betalen" = schuld |
 | 1711 | Tussenrekening servicekst | PASSIVA | gebruiker (2026-08-20) |
 | 0840 | Ontrekkingen - Uitkeringen | PASSIVA | eigen vermogen/onttrekkingen (gebruiker) |
+| 0850 | Resultaat vorig boekjaar | PASSIVA | eigen vermogen — gebruiker (2026-08-21), gevonden via de beginbalans-bugfix |
 | 0901/0902/0903 | Voorziening onderhoud Zoom 1/2/3 | PASSIVA | voorziening (gebruiker) |
+| 1790 | Waarborgsommen | PASSIVA | schuld aan huurders — gebruiker (2026-08-21), gevonden via de beginbalans-bugfix |
 
 **Nog `null`:** `1506` Afdrachten BTW — de gebruiker heeft expliciet
 gevraagd deze nog niet te classificeren.
 
-**Tekenconventie** — hier is de dekking veel kleiner: slechts 5 van de 13
-rekeningen hebben een bevestigde tekenconventie. Voor 1010/1310/1400/1410
-volgt de conventie direct uit "mag daar negatief zijn" (= toon ongewijzigd,
-geen aanname nodig). Voor de overige 7 Passiva-rekeningen is GEEN aanname
-gedaan:
+**Tekenconventie** — per 2026-08-21 zijn 14 van de 15 rekeningen bevestigd
+(alleen 1506 blijft `null`). Voor 1010/1310/1400/1410 volgt de conventie
+direct uit "mag daar negatief zijn" (= toon ongewijzigd, geen aanname
+nodig):
 
 | grootboekrekening | tekenconventie | onderbouwing |
 |---|---|---|
 | 1010, 1310, 1400, 1410 | ZOALS_BRON | expliciet: "mag daar negatief zijn" — geen omkering, toon het rauwe saldo |
-| 0840 | ZOALS_BRON | **bevestigd tegen een echte productie-run (2026-08-20).** Een eerste inschatting (OMGEKEERD) bleek onjuist: het rauwe (ongewijzigde) saldo van 0840 (+2.703.646,45) matchte exact de "Algemene Reserve"-waarde uit de bestaande Q2-rapportage (+2.703.646) — 0840 voert dus de cumulatieve reservestand, geen kleine jaarmutatie. De gebruiker bevestigde dit: 0840 ("Ontrekkingen - Uitkeringen") ís het Algemene Reserve-grootboek, bewust hernoemd bij 070; toekomstige winsten worden voortaan apart op grootboekrekening `0850` geboekt (nog niet in deze mapping — komt vanzelf als `controleVereist` naar boven zodra die rekening boekingen heeft). **Dit is expliciet een 070-specifieke herstructurering, (nog) niet bij andere administraties** — precies waarom dit in de override (`070_Rooise_Zoom.json`) staat en niet in `grootboekmapping_master.json`; geen aanleiding om deze rekeningnaam/-indeling elders te veronderstellen. |
-| 0901, 0902, 0903, 1600, 1700, 1711, 1712 | `null` | geen expliciete instructie ontvangen — een generieke regel ("alle Passiva OMGEKEERD") zou precies de fout zijn die deze ontwerpcorrectie oplost. Deze rekeningen komen dus (bij een niet-nul saldo) in `controleVereist` totdat de gebruiker per rekening bevestigt welk teken getoond moet worden. |
+| 0840 | ZOALS_BRON | **bevestigd tegen een echte productie-run (2026-08-20).** Het rauwe (ongewijzigde) saldo van 0840 (+2.703.646,45) matchte exact de "Algemene Reserve"-waarde uit de bestaande Q2-rapportage (+2.703.646) — 0840 voert dus de cumulatieve reservestand. De gebruiker bevestigde dit: 0840 ("Ontrekkingen - Uitkeringen") ís het Algemene Reserve-grootboek, bewust hernoemd bij 070; toekomstige winsten worden voortaan apart op grootboekrekening `0850` geboekt. **Dit is expliciet een 070-specifieke herstructurering, (nog) niet bij andere administraties.** |
+| 0850 | OMGEKEERD | Resultaat vorig boekjaar — nieuw sinds de omschrijvingswijziging bij 0840; door de beginbalans-bugfix (zie packages/reporting/README.md) voor het eerst zichtbaar geworden (~€2,33M) en door de gebruiker bevestigd op basis van de gewenste eindpresentatie. |
+| 1600, 1700 | OMGEKEERD | crediteuren/te betalen kosten — credit-normaal, moet als positieve schuld getoond worden. Bevestigd door de gebruiker "voor 070"; `1600`/`1700` staan in de master alleen met `balanszijde` (tekenconventie `null`, nog niet cross-administratie bevestigd) — de tekenconventie is daarom uitsluitend als override bij 070 vastgelegd, niet in `grootboekmapping_master.json`. |
+| 1711 | OMGEKEERD | tussenrekening servicekosten — credit-normaal, zelfde redenering als 1600/1700. |
+| 1712 | ZOALS_BRON | betaalde servicekosten — debet-normaal, rauw saldo al correct. Zelfde master/override-verhouding als 1600/1700: master heeft `balanszijde` maar geen tekenconventie, de 070-bevestiging staat in de override. |
+| 1790 | OMGEKEERD | waarborgsommen — credit-normaal (schuld aan huurders), zelfde als 1600/1700/1711. Nieuw account, door de beginbalans-bugfix voor het eerst zichtbaar geworden. |
+| 0901 | OMGEKEERD | **Let op — technisch tegengesteld aan hoe de gebruiker het account eerst in een losse opsomming benoemde.** De gebruiker gaf een uitgewerkt cijfervoorbeeld als leidend: rauw `+4.577,18` (positief debetsaldo) moet op de Passiva-zijde als `-4.577,18` getoond worden. Dat vereist factor −1, dus technisch `OMGEKEERD` — ondanks dat een eerdere losse bullet-opsomming per ongeluk "ZOALS_BRON" noemde. Het cijfervoorbeeld is leidend, op expliciet verzoek van de gebruiker ("Kies zelf de correcte enum op basis van wat die enum technisch doet"). |
+| 0902, 0903 | OMGEKEERD | voorziening, credit-normaal (rauw saldo negatief), moet positief getoond worden — bevestigd met een uitgewerkt cijfervoorbeeld (rauw `-22.019,21`/`-3.939,55` → PASSIVA `+22.019,21`/`+3.939,55`). |
+
+Merk op dat 0901 enerzijds en 0902/0903 anderzijds dezelfde `tekenconventie`
+(OMGEKEERD) hebben, maar met tegengesteld rauw saldoteken (0901 rauw
+positief, 0902/0903 rauw negatief) — precies de reden waarom
+`tekenconventie` per rekening vastligt, nooit generiek per balanszijde of
+per "soort" rekening afgeleid mag worden (zie de ontwerpcorrectie
+hierboven).
+
+**Bewust niet geclassificeerd (nog):** `1505`/`1506` vormen een BTW-paar
+met exact tegengestelde bedragen. De gebruiker heeft expliciet gevraagd
+hier GEEN classificatie uit af te leiden op basis van die toevallige
+gelijke/tegengestelde bedragen — de relatie moet inhoudelijk (niet
+statistisch) vastgesteld worden. `1505` komt daarom nergens in een
+mapping-bestand voor (niet in master, niet in de 070-override); `1506`
+blijft in de master staan met `balanszijde`/`tekenconventie` beide `null`.
+Beide blijven zichtbaar in `controleVereist` tot de gebruiker ze
+inhoudelijk classificeert.
 
 Onvolledig bevestigde BALANS-regels (balanszijde en/of tekenconventie
 `null`) staan op `"status": "VOORGESTELD"`, nooit stilzwijgend
@@ -255,6 +279,15 @@ nog steeds `"status": "GOEDGEKEURD"`:
 | 1010 | BALANS | Bank NL44RABO 0337 7344 45 | inconsistent — elke administratie heeft een andere bankrekening (verwacht) |
 | 1310 | BALANS | Huurdebiteuren | inconsistent — één administratie (069) noemt dit "Eigenarendebiteuren" |
 | 1711 | BALANS | Tussenrekening servicekst | inconsistent — sommige administraties noemen dit "Voorschotten servicekst" |
+
+**Sindsdien uitgebreid (niet meer 12 regels):** de override groeide na deze
+migratie verder met bevestigde `tekenconventie`-waarden voor de master-only
+rekeningen 1600/1700/1712 (zie "Balanszijde/tekenconventie
+`070_Rooise_Zoom`" hierboven — een 070-specifieke tekenconventie-bevestiging
+wordt als override vastgelegd, nooit als mutatie van de master) en met
+twee volledig nieuwe rekeningen, `0850` en `1790`, die pas na een
+beginbalans-bugfix zichtbaar werden. De override telt per 2026-08-21 17
+regels.
 
 **Kanttekening (bewust niet automatisch toegepast):** bij 0901/0902/0903
 is uitsluitend de omschrijving-tekst inconsistent — de onderliggende
