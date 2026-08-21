@@ -8,5 +8,7 @@ export * from "./renderControlerapport.js";
 export * from "./plPeriodeBerekening.js";
 export * from "./balansPeriodeBerekening.js";
 export * from "./renderBalansPeriode.js";
+export * from "./renderPlPeriode.js";
+export * from "./renderRapportPeriode.js";
 export * from "./grootboekInventarisatie.js";
 export { HUISSTIJL_CSS, escapeHtml, formatBedragHtml, renderRapportDocument } from "./huisstijl.js";

@@ -1,5 +1,6 @@
 import type Decimal from "decimal.js";
 import type { BalansPeriodeResultaat } from "./balansPeriodeBerekening.js";
+import type { PlPeriodeResultaat } from "./plPeriodeBerekening.js";
 
 /**
  * Invoer voor de P&L-exploitatierapportage per vastgoedobject
@@ -179,4 +180,36 @@ export interface BalansPeriodeInvoer {
   boekperiodeTotEnMet: string;
   gegenereerdOp: Date;
   resultaat: BalansPeriodeResultaat;
+}
+
+/**
+ * Invoer voor de resultatenrekening-periodesectie: de al-berekende
+ * `PlPeriodeResultaat` (@bvc/reporting's `berekenPlPeriode`) plus de
+ * weergavecontext (administratie, peildatum) — zelfde patroon als
+ * `BalansPeriodeInvoer`. Rendert alleen — rekent niets uit.
+ */
+export interface PlPeriodeInvoer {
+  administratieNaam: string;
+  bedrijfsnr: string;
+  boekjaar: number;
+  boekperiodeTotEnMet: string;
+  gegenereerdOp: Date;
+  resultaat: PlPeriodeResultaat;
+}
+
+/**
+ * Invoer voor het gecombineerde rapport (resultatenrekening + balans van
+ * dezelfde periode in één document) — twee outputs van dezelfde rekenlaag
+ * (CLAUDE.md §2), hier uitsluitend in de presentatielaag samengevoegd. Geen
+ * eigen berekening: `plResultaat`/`balansResultaat` zijn al-berekende
+ * resultaten van `berekenPlPeriode`/`berekenBalansPeriode`.
+ */
+export interface RapportPeriodeInvoer {
+  administratieNaam: string;
+  bedrijfsnr: string;
+  boekjaar: number;
+  boekperiodeTotEnMet: string;
+  gegenereerdOp: Date;
+  plResultaat: PlPeriodeResultaat;
+  balansResultaat: BalansPeriodeResultaat;
 }

@@ -259,6 +259,50 @@ geen parallelle berekening. Regressie-administratie: `070_Rooise_Zoom`
   getrokken zodat beide Worker-commando's dezelfde cacherij→domeintype-
   conversie gebruiken — geen duplicatie.
 
+## Gecombineerd periode-rapport (resultatenrekening + balans, `rapport-periode`)
+
+De eerste "bruikbare" financiële rapportage (2026-08-21, op expliciet
+verzoek van de gebruiker: "niet nog meer CLI-JSON bekijken, maar de eerste
+bruikbare financiële rapportage maken waarin P&L en balans samenkomen") —
+één HTML-document met de resultatenrekening én de balans van dezelfde
+periode, in plaats van twee losse CLI-JSON-uitvoeren die de gebruiker zelf
+naast elkaar moest leggen.
+
+- **`renderPlPeriode.ts`** (nieuw) — de eerste HTML-renderer voor de
+  al-bestaande, mapping-gedreven `PlPeriodeResultaat`
+  (`plPeriodeBerekening.ts`'s `berekenPlPeriode`, tot nu toe alleen als
+  CLI-JSON zichtbaar via `pl-periode`). Rapportagecategorieën zijn vrije
+  tekst (geen hardcoded Kosten/Opbrengsten-indeling, zie
+  `plPeriodeBerekening.ts`'s moduledoc) — er verschijnt daarom één tabel
+  per categorie in de volgorde van `categorieTotalen`, plus een altijd
+  zichtbare "Controle vereist"-sectie. Dit is een ANDER, apart bestand van
+  het oudere `plRapport.ts`/`renderHtml.ts` (zie "P&L-exploitatierapportage"
+  hierboven, dat op al-gevalideerde jaarcijfers werkt) — geen samenvoeging,
+  zelfde bewuste scheiding als bij `GrootboekMapping` hieronder.
+- **`renderRapportPeriode.ts`** (nieuw) — combineert
+  `renderPlPeriodeBody`/`renderBalansPeriodeBody` (beide nu apart
+  geëxporteerd, naast de bestaande `renderPlPeriodeHtml`/
+  `renderBalansPeriodeHtml` die zelfstandig blijven werken) in ÉÉN
+  document-skelet/cover — geen eigen berekening, geen gedupliceerde
+  opmaaklogica. De al-bewezen rekenlogica (zie de 070_Rooise_Zoom-
+  regressietest hieronder) komt hier niet in terecht: deze renderer rekent
+  zelf niets uit, presenteert alleen de twee al-berekende resultaten na
+  elkaar.
+- **`apps/worker/src/genereerRapportPeriode.ts`** + CLI `rapport-periode
+  <administratieId> --boekjaar N --periodeTotEnMet P [--tolerantie N]` —
+  draait dezelfde berekeningen als `pl-periode`/`balans-periode` (geen
+  parallelle rekenlaag) en schrijft het resultaat als HTML naar
+  `rapporten/` (zelfde patroon als `genereerControlerapport.ts`), i.p.v.
+  JSON naar stdout te printen. Exitcode 1 bij niet-lege `controleVereist`
+  (P&L of balans) of een niet-sluitende (of onbekende) aansluitingscontrole.
+
+Nog niet gedaan: PDF-export van dit gecombineerde rapport, en de
+interactieve correctiemogelijkheid voor balanszijde/tekenconventie per
+rapport (`RAPPORT_OVERRIDE`, zie `balansPeriodeBerekening.ts`'s moduledoc
+"Herkomst") — expliciet bewust uitgesteld door de gebruiker, de
+reken-/herkomstlaag is er al op voorbereid maar de UI komt in een latere
+stap.
+
 ### Regressiereferentie: 070_Rooise_Zoom sluit (2026-08-21)
 
 `balansPeriodeBerekening.test.ts` bevat sinds 2026-08-21 een vastgelegde
@@ -368,7 +412,7 @@ Nog te porten secties (met bronregels in `legacy/index.html`):
 | # | Sectie | Legacy render-functie | Regel | Status |
 |---|---|---|---|---|
 | 01 | Kerncijfers (KPI-dashboard: huurinkomen, EBITDA, uitbetalingsratio, bankstand, debiteuren, servicekosten-saldo + bezettingsgraad) | `renderOverzicht` | ~1502 | ✅ gebouwd (`kerncijfers.ts` + `renderKerncijfers.ts`) |
-| 02 | Resultaat P&L per kwartaal | `renderPnl` | ~1580 | deels gebouwd (ander datamodel/CSS: jaarcijfers i.p.v. kwartaal+begroting) |
+| 02 | Resultaat P&L per kwartaal | `renderPnl` | ~1580 | deels gebouwd — `plRapport.ts`/`renderHtml.ts` (jaarcijfers, ander datamodel/CSS dan kwartaal+begroting) én sinds 2026-08-21 `renderPlPeriode.ts` (mapping-gedreven periodecijfers, nu ook onderdeel van het gecombineerde `rapport-periode`-document hieronder) — nog geen kwartaal+begroting-vergelijking in de renderer zelf |
 | 03 | Kasstroom | `renderCashflow` | ~1647 | nog te bouwen |
 | 04 | Balans | `renderBalans` | ~1725 | ✅ gebouwd (`balansPeriodeBerekening.ts` + `renderBalansPeriode.ts`) — zie sectie hieronder |
 | 05 | Servicekosten (incl. stijgers/dalers, signaalbadges) | `renderServicekosten` | ~1859 | nog te bouwen |

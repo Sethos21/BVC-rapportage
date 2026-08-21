@@ -83,19 +83,16 @@ function renderAansluiting(invoer: BalansPeriodeInvoer): string {
     <div class="toelichting"><strong class="${statusKlasse}">${statusTekst}</strong> binnen de gehanteerde tolerantie. Een verschil is een technisch signaal, meestal veroorzaakt door rekeningen in "Controle vereist" hieronder of een nog niet bevestigd resultaat huidig boekjaar.</div>`;
 }
 
-export function renderBalansPeriodeHtml(invoer: BalansPeriodeInvoer): string {
-  const cover = `
-    <div class="cover">
-      <div class="eyebrow">BVC Vastgoed Consultants</div>
-      <h1 class="serif">Balans</h1>
-      <div class="object">${escapeHtml(invoer.administratieNaam)} (Bedrijfsnr ${escapeHtml(invoer.bedrijfsnr)})</div>
-      <div class="periode">Boekjaar ${invoer.boekjaar}, t/m periode ${escapeHtml(invoer.boekperiodeTotEnMet)} — gegenereerd op ${escapeHtml(invoer.gegenereerdOp.toISOString().slice(0, 19).replace("T", " "))}</div>
-    </div>`;
-
+/**
+ * De balanssectie-HTML zonder document-skelet (geen `<html>`/cover) — apart
+ * geëxporteerd zodat een gecombineerd rapport (`renderRapportPeriode.ts`)
+ * deze sectie kan hergebruiken zonder de opmaaklogica te dupliceren.
+ */
+export function renderBalansPeriodeBody(invoer: BalansPeriodeInvoer): string {
   const activaPosten = invoer.resultaat.posten.filter((p) => p.rapportagecategorie === "ACTIVA");
   const passivaPosten = invoer.resultaat.posten.filter((p) => p.rapportagecategorie === "PASSIVA");
 
-  const body = `
+  return `
     <div class="toelichting" style="margin-bottom:24px">
       Balans op peildatum boekjaar ${invoer.boekjaar}, t/m boekperiode ${escapeHtml(invoer.boekperiodeTotEnMet)}: beginbalans + boekingen
       t/m die periode, op de goedgekeurde master+override-grootboekmapping. Activa/Passiva is de VASTE balanszijde uit
@@ -106,6 +103,16 @@ export function renderBalansPeriodeHtml(invoer: BalansPeriodeInvoer): string {
     ${renderPostenTabel("Passiva", passivaPosten, invoer.resultaat.aansluiting.passivaTotaal)}
     ${renderAansluiting(invoer)}
     ${renderControleVereist(invoer)}`;
+}
 
-  return renderRapportDocument(`Balans — ${invoer.administratieNaam}`, cover, body);
+export function renderBalansPeriodeHtml(invoer: BalansPeriodeInvoer): string {
+  const cover = `
+    <div class="cover">
+      <div class="eyebrow">BVC Vastgoed Consultants</div>
+      <h1 class="serif">Balans</h1>
+      <div class="object">${escapeHtml(invoer.administratieNaam)} (Bedrijfsnr ${escapeHtml(invoer.bedrijfsnr)})</div>
+      <div class="periode">Boekjaar ${invoer.boekjaar}, t/m periode ${escapeHtml(invoer.boekperiodeTotEnMet)} — gegenereerd op ${escapeHtml(invoer.gegenereerdOp.toISOString().slice(0, 19).replace("T", " "))}</div>
+    </div>`;
+
+  return renderRapportDocument(`Balans — ${invoer.administratieNaam}`, cover, renderBalansPeriodeBody(invoer));
 }

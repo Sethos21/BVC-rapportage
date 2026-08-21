@@ -7,6 +7,8 @@ export * from "./grootboekmapping.js";
 export * from "./rebuildCache.js";
 export * from "./genereerControlerapport.js";
 export * from "./genereerPlPeriode.js";
+export * from "./genereerBalansPeriode.js";
+export * from "./genereerRapportPeriode.js";
 export * from "./genereerGrootboekInventarisatie.js";
 export * from "./replace.js";
 export * from "./validateBron.js";

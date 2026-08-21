@@ -6,6 +6,7 @@ import { rebuildCache } from "./rebuildCache.js";
 import { genereerControlerapport } from "./genereerControlerapport.js";
 import { genereerPlPeriode } from "./genereerPlPeriode.js";
 import { genereerBalansPeriode } from "./genereerBalansPeriode.js";
+import { genereerRapportPeriode } from "./genereerRapportPeriode.js";
 import { genereerGrootboekInventarisatie } from "./genereerGrootboekInventarisatie.js";
 import { withLock } from "./lock.js";
 import { AdministratieBestaatAlError, initAdministratie } from "./administratie.js";
@@ -23,6 +24,8 @@ function printGebruik(): never {
       "      (P&L-berekening op de goedgekeurde grootboekmapping voor een expliciete periode; --verwacht vergelijkt automatisch met eerder gereconcilieerde bedragen)",
       "  balans-periode <administratieId> --boekjaar N --periodeTotEnMet P [--tolerantie N]",
       "      (Balans op een expliciete boekjaar+boekperiode-peildatum: beginbalans + boekingen t/m die periode, incl. aansluitingscontrole activa/passiva/resultaat)",
+      "  rapport-periode <administratieId> --boekjaar N --periodeTotEnMet P [--tolerantie N]",
+      "      (Resultatenrekening + balans van dezelfde periode in één HTML-rapport, geschreven naar rapporten/ — zelfde berekeningen als pl-periode/balans-periode)",
       "  grootboek-inventarisatie",
       "      (alleen-lezen: inventariseert grootboekrekeninggebruik over ALLE administraties in de gedeelde bron boekingen/balans_per_jaar — voorbereiding op een centrale mastermapping, past niets toe)",
       "",
@@ -149,6 +152,24 @@ async function main() {
     });
     console.log(JSON.stringify(resultaat, null, 2));
     if (resultaat.resultaat.controleVereist.length > 0 || !resultaat.resultaat.aansluiting.sluitBinnenTolerantie) process.exitCode = 1;
+    return;
+  }
+
+  if (command === "rapport-periode") {
+    const [administratieId] = rest;
+    const boekjaarStr = parseFlag(rest, "boekjaar");
+    const boekperiodeTotEnMet = parseFlag(rest, "periodeTotEnMet");
+    if (!administratieId || !boekjaarStr || !boekperiodeTotEnMet) printGebruik();
+    const tolerantieStr = parseFlag(rest, "tolerantie");
+    const resultaat = genereerRapportPeriode(root, administratieId, {
+      boekjaar: Number(boekjaarStr),
+      boekperiodeTotEnMet,
+      toleranceEuro: tolerantieStr ? new Decimal(tolerantieStr) : undefined,
+    });
+    console.log(`Rapport geschreven: ${resultaat.pad}`);
+    if (resultaat.plResultaat.controleVereist.length > 0 || resultaat.balansResultaat.controleVereist.length > 0 || !resultaat.balansResultaat.aansluiting.sluitBinnenTolerantie) {
+      process.exitCode = 1;
+    }
     return;
   }
 
