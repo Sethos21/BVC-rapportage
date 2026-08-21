@@ -241,8 +241,13 @@ export function begrotingServicekostenRijen(): Record<string, unknown>[] {
  * BINNEN een balanszijde getoond wordt — bewust geen generieke
  * tekenomkering per balanszijde). Per 2026-08-21 (na twee echte
  * productie-runs) zijn 14 van de 15 BALANS-rekeningen bevestigd, zowel
- * balanszijde als tekenconventie: 0840/1010/1310/1400/1410/1712 ZOALS_BRON;
- * 0850/0901/0902/0903/1600/1700/1711/1790 OMGEKEERD. Let op 0901: de
+ * balanszijde als tekenconventie: 1010/1310/1400/1410/1712 ZOALS_BRON;
+ * 0840/0850/0901/0902/0903/1600/1700/1711/1790 OMGEKEERD. 0840 werd
+ * eerder (2026-08-20) ZOALS_BRON bevestigd — bewust herzien naar OMGEKEERD
+ * (2026-08-21) op expliciet verzoek: onttrekkingen/uitkeringen verminderen
+ * het eigen vermogen en moeten daarom NEGATIEF op Passiva getoond worden,
+ * terwijl 0850 (Resultaat vorig boekjaar) juist positief moet blijven. Let
+ * op 0901: de
  * gebruiker bevestigde de eindpresentatie met een uitgewerkt voorbeeld (ruw
  * +4.577,18 → PASSIVA -4.577,18), wat technisch OMGEKEERD is — niet
  * ZOALS_BRON zoals in een eerdere, losse opsomming abusievelijk genoemd;
@@ -284,7 +289,7 @@ export function rooiseZoomGrootboekMapping(): GrootboekMappingConfig {
   // balanszijde) — 1711/1712 kregen alsnog een bevestigde balanszijde, maar de meeste
   // Passiva-rekeningen hebben nog GEEN bevestigde tekenconventie (bewust, geen aanname).
   const balansRekeningen: [string, string, "ACTIVA" | "PASSIVA" | null, "ZOALS_BRON" | "OMGEKEERD" | null][] = [
-    ["0840", "Ontrekkingen - Uitkeringen", "PASSIVA", "ZOALS_BRON"],
+    ["0840", "Ontrekkingen - Uitkeringen", "PASSIVA", "OMGEKEERD"],
     ["0850", "Resultaat vorig boekjaar", "PASSIVA", "OMGEKEERD"],
     ["0901", "Voorziening onderhoud Zoom 1", "PASSIVA", "OMGEKEERD"],
     ["0902", "Voorziening onderhoud Zoom 2", "PASSIVA", "OMGEKEERD"],
