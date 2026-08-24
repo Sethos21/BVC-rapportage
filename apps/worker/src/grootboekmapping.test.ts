@@ -28,8 +28,8 @@ describe("leesGrootboekMapping", () => {
         versie: "0.1",
         administratieId: "070_rooisezoom",
         regels: [
-          { grootboekrekening: "4000", soort: "RESULTAAT", rapportagepost: "Beheerkosten", rapportagecategorie: "Kosten", tekenconventie: null, actief: true, status: "VOORGESTELD" },
-          { grootboekrekening: "1010", soort: "BALANS", balanszijde: "ACTIVA", tekenconventie: "ZOALS_BRON", liquideMiddelen: null, actief: true, status: "VOORGESTELD" },
+          { grootboekrekening: "4000", soort: "RESULTAAT", rapportagepost: "Beheerkosten", rapportagecategorie: "Kosten", tekenconventie: null, kasstroomCategorie: null, actief: true, status: "VOORGESTELD" },
+          { grootboekrekening: "1010", soort: "BALANS", balanszijde: "ACTIVA", tekenconventie: "ZOALS_BRON", liquideMiddelen: null, kasstroomCategorie: null, actief: true, status: "VOORGESTELD" },
         ],
       }),
       "utf-8",
@@ -47,7 +47,7 @@ describe("leesGrootboekMapping", () => {
       grootboekmappingMasterPad(root),
       JSON.stringify({
         versie: "0.1",
-        regels: [{ grootboekrekening: "4130", soort: "RESULTAAT", rapportagepost: "Verzekeringen", rapportagecategorie: "Kosten", tekenconventie: "ZOALS_BRON", actief: true, status: "VOORGESTELD" }],
+        regels: [{ grootboekrekening: "4130", soort: "RESULTAAT", rapportagepost: "Verzekeringen", rapportagecategorie: "Kosten", tekenconventie: "ZOALS_BRON", kasstroomCategorie: null, actief: true, status: "VOORGESTELD" }],
       }),
       "utf-8",
     );
@@ -64,7 +64,7 @@ describe("leesGrootboekMapping", () => {
       grootboekmappingMasterPad(root),
       JSON.stringify({
         versie: "0.1",
-        regels: [{ grootboekrekening: "4000", soort: "RESULTAAT", rapportagepost: "Master-versie", rapportagecategorie: "Kosten", tekenconventie: null, actief: true, status: "VOORGESTELD" }],
+        regels: [{ grootboekrekening: "4000", soort: "RESULTAAT", rapportagepost: "Master-versie", rapportagecategorie: "Kosten", tekenconventie: null, kasstroomCategorie: null, actief: true, status: "VOORGESTELD" }],
       }),
       "utf-8",
     );
@@ -73,7 +73,7 @@ describe("leesGrootboekMapping", () => {
       JSON.stringify({
         versie: "0.1",
         administratieId: "070_rooisezoom",
-        regels: [{ grootboekrekening: "4000", soort: "RESULTAAT", rapportagepost: "Override-versie", rapportagecategorie: "Kosten", tekenconventie: "ZOALS_BRON", actief: true, status: "GOEDGEKEURD" }],
+        regels: [{ grootboekrekening: "4000", soort: "RESULTAAT", rapportagepost: "Override-versie", rapportagecategorie: "Kosten", tekenconventie: "ZOALS_BRON", kasstroomCategorie: null, actief: true, status: "GOEDGEKEURD" }],
       }),
       "utf-8",
     );
@@ -90,7 +90,7 @@ describe("leesGrootboekMapping", () => {
       grootboekmappingMasterPad(root),
       JSON.stringify({
         versie: "0.1",
-        regels: [{ grootboekrekening: "4130", soort: "RESULTAAT", rapportagepost: "Verzekeringen", rapportagecategorie: "Kosten", tekenconventie: "ZOALS_BRON", actief: true, status: "VOORGESTELD" }],
+        regels: [{ grootboekrekening: "4130", soort: "RESULTAAT", rapportagepost: "Verzekeringen", rapportagecategorie: "Kosten", tekenconventie: "ZOALS_BRON", kasstroomCategorie: null, actief: true, status: "VOORGESTELD" }],
       }),
       "utf-8",
     );
@@ -99,7 +99,7 @@ describe("leesGrootboekMapping", () => {
       JSON.stringify({
         versie: "0.1",
         administratieId: "070_rooisezoom",
-        regels: [{ grootboekrekening: "8815", soort: "RESULTAAT", rapportagepost: "Zonnestroom", rapportagecategorie: "Opbrengsten", tekenconventie: "OMGEKEERD", actief: true, status: "GOEDGEKEURD" }],
+        regels: [{ grootboekrekening: "8815", soort: "RESULTAAT", rapportagepost: "Zonnestroom", rapportagecategorie: "Opbrengsten", tekenconventie: "OMGEKEERD", kasstroomCategorie: null, actief: true, status: "GOEDGEKEURD" }],
       }),
       "utf-8",
     );

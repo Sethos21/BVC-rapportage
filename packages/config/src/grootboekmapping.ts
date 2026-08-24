@@ -114,6 +114,28 @@ export type Balanszijde = z.infer<typeof BalanszijdeSchema>;
  * mutatie in de periode) zichtbaar in `controleVereist` — nooit
  * stilzwijgend als "geen liquide middelen" aangenomen.
  */
+/**
+ * Kasstroom-tegenrekeningcategorie (2026-08-22, Kasstroom-managementoverzicht):
+ * classificeert een grootboekrekening als TEGENREKENING van een
+ * liquide-middelen-mutatie — dus onafhankelijk van of de rekening zelf
+ * BALANS of RESULTAAT is (bv. huur loopt bij 070 via Huurdebiteuren, een
+ * BALANS-rekening, niet rechtstreeks via een Opbrengsten-rekening). Staat
+ * daarom op ZOWEL `BalansRegelSchema` als `ResultaatRegelSchema`. Bewust
+ * NIET afgeleid uit `rapportagecategorie` (vrije tekst, zie
+ * `ResultaatRegelSchema` hieronder) — dat zou CLAUDE.md §6 schenden
+ * (classificatie via string-matching op een niet-gegarandeerd veld).
+ *
+ * - `"HUURONTVANGST"` / `"EXPLOITATIE_UITGAVE"` / `"EIGENAARONTTREKKING"` —
+ *   de drie kasstroom-KPI-categorieën.
+ * - `"OVERIG"` — bevestigd GEEN van de drie (bv. BTW-afdracht, voorziening,
+ *   tussenrekening servicekosten). Anders dan `null`: dit is een bewuste,
+ *   afgeronde classificatie, geen `controleVereist`.
+ * - `null` — nog niet bevestigd. Nooit aangenomen; een boekstuk met een
+ *   onbevestigde tegenrekening blijft zichtbaar in `controleVereist`.
+ */
+export const KasstroomCategorieSchema = z.enum(["HUURONTVANGST", "EXPLOITATIE_UITGAVE", "EIGENAARONTTREKKING", "OVERIG"]);
+export type KasstroomCategorie = z.infer<typeof KasstroomCategorieSchema>;
+
 export const BalansRegelSchema = z
   .object({
     grootboekrekening: z.string().min(1),
@@ -121,6 +143,7 @@ export const BalansRegelSchema = z
     balanszijde: BalanszijdeSchema.nullable(),
     tekenconventie: TekenconventieSchema.nullable(),
     liquideMiddelen: z.boolean().nullable(),
+    kasstroomCategorie: KasstroomCategorieSchema.nullable(),
     actief: z.boolean(),
     status: MappingStatusSchema,
   })
@@ -135,6 +158,7 @@ export const ResultaatRegelSchema = z
     /** Bredere groepering van rapportageposten, bv. "Kosten" / "Opbrengsten". */
     rapportagecategorie: z.string().min(1),
     tekenconventie: TekenconventieSchema.nullable(),
+    kasstroomCategorie: KasstroomCategorieSchema.nullable(),
     actief: z.boolean(),
     status: MappingStatusSchema,
   })

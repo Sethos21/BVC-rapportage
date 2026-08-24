@@ -8,6 +8,7 @@ import { genereerPlPeriode } from "./genereerPlPeriode.js";
 import { genereerBalansPeriode } from "./genereerBalansPeriode.js";
 import { genereerRapportPeriode } from "./genereerRapportPeriode.js";
 import { genereerKasstroomPeriode } from "./genereerKasstroomPeriode.js";
+import { genereerKasstroomManagementoverzicht } from "./genereerKasstroomManagementoverzicht.js";
 import { genereerGrootboekInventarisatie } from "./genereerGrootboekInventarisatie.js";
 import { withLock } from "./lock.js";
 import { AdministratieBestaatAlError, initAdministratie } from "./administratie.js";
@@ -29,6 +30,8 @@ function printGebruik(): never {
       "      (Resultatenrekening + balans van dezelfde periode in één HTML-rapport, geschreven naar rapporten/ — zelfde berekeningen als pl-periode/balans-periode)",
       "  kasstroom-periode <administratieId> --boekjaar N --periodeTotEnMet P",
       "      (Mutatie bankstand: beginbalans + boekingen t/m die periode, alleen voor rekeningen met bevestigde liquideMiddelen:true — eerste, eenvoudige kasstroomweergave)",
+      "  kasstroom-managementoverzicht <administratieId> --boekjaar N --periodeTotEnMet P",
+      "      (Uitgebreid kasstroomoverzicht: huurontvangsten/exploitatie-uitgaven/eigenaaronttrekkingen o.b.v. werkelijke bankmutaties via tegenrekening + kasstroomCategorie, kwartaal-uitsplitsing, uitbetalingsratio — HTML naar rapporten/)",
       "  grootboek-inventarisatie",
       "      (alleen-lezen: inventariseert grootboekrekeninggebruik over ALLE administraties in de gedeelde bron boekingen/balans_per_jaar — voorbereiding op een centrale mastermapping, past niets toe)",
       "",
@@ -186,6 +189,20 @@ async function main() {
       boekperiodeTotEnMet,
     });
     console.log(JSON.stringify(resultaat, null, 2));
+    if (resultaat.resultaat.controleVereist.length > 0) process.exitCode = 1;
+    return;
+  }
+
+  if (command === "kasstroom-managementoverzicht") {
+    const [administratieId] = rest;
+    const boekjaarStr = parseFlag(rest, "boekjaar");
+    const boekperiodeTotEnMet = parseFlag(rest, "periodeTotEnMet");
+    if (!administratieId || !boekjaarStr || !boekperiodeTotEnMet) printGebruik();
+    const resultaat = genereerKasstroomManagementoverzicht(root, administratieId, {
+      boekjaar: Number(boekjaarStr),
+      boekperiodeTotEnMet,
+    });
+    console.log(`Rapport geschreven: ${resultaat.pad}`);
     if (resultaat.resultaat.controleVereist.length > 0) process.exitCode = 1;
     return;
   }

@@ -1,6 +1,7 @@
 import type Decimal from "decimal.js";
 import type { BalansPeriodeResultaat } from "./balansPeriodeBerekening.js";
 import type { KasstroomPeriodeResultaat } from "./kasstroomBerekening.js";
+import type { KasstroomManagementoverzichtResultaat } from "./kasstroomManagementoverzicht.js";
 import type { PlPeriodeResultaat } from "./plPeriodeBerekening.js";
 
 /**
@@ -211,6 +212,22 @@ export interface KasstroomPeriodeInvoer {
   boekperiodeTotEnMet: string;
   gegenereerdOp: Date;
   resultaat: KasstroomPeriodeResultaat;
+}
+
+/**
+ * Invoer voor het Kasstroom-managementoverzicht (uitgebreide versie, zie
+ * `kasstroomManagementoverzicht.ts`): de al-berekende
+ * `KasstroomManagementoverzichtResultaat` plus de weergavecontext, zelfde
+ * patroon als `BalansPeriodeInvoer`/`PlPeriodeInvoer`. Rendert alleen —
+ * rekent niets uit.
+ */
+export interface KasstroomManagementoverzichtInvoer {
+  administratieNaam: string;
+  bedrijfsnr: string;
+  boekjaar: number;
+  boekperiodeTotEnMet: string;
+  gegenereerdOp: Date;
+  resultaat: KasstroomManagementoverzichtResultaat;
 }
 
 /**

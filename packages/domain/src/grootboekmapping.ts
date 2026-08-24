@@ -1,4 +1,4 @@
-import type { Balanszijde, BalansRegel, GrootboekMappingRegel, Tekenconventie } from "@bvc/config";
+import type { Balanszijde, BalansRegel, GrootboekMappingRegel, KasstroomCategorie, Tekenconventie } from "@bvc/config";
 import type { OnbekendOf } from "./types.js";
 
 /**
@@ -78,6 +78,25 @@ export function liquideMiddelenVoorRegel(regel: Pick<BalansRegel, "liquideMiddel
     };
   }
   return { type: "bekend", waarde: regel.liquideMiddelen };
+}
+
+/**
+ * Vertaalt `kasstroomCategorie` van een mappingregel naar `OnbekendOf` —
+ * zelfde nullable-patroon als `liquideMiddelenVoorRegel`. Werkt structureel
+ * op elk mappingtype met dit veld (zowel BALANS- als RESULTAAT-regels, zie
+ * `@bvc/config`'s `KasstroomCategorieSchema`-moduledoc: de tegenrekening
+ * van een liquide-middelen-mutatie kan van beide soorten zijn). Een nog
+ * niet bevestigde classificatie (`null`) levert `onbekend` op — nooit
+ * stilzwijgend aangenomen.
+ */
+export function kasstroomCategorieVoorRegel(regel: { kasstroomCategorie: KasstroomCategorie | null }): OnbekendOf<KasstroomCategorie> {
+  if (regel.kasstroomCategorie === null) {
+    return {
+      type: "onbekend",
+      reden: "Kasstroomcategorie (huurontvangst/exploitatie-uitgave/eigenaaronttrekking/overig) nog niet bevestigd voor deze grootboekrekening — Controle vereist, geen aanname toegestaan.",
+    };
+  }
+  return { type: "bekend", waarde: regel.kasstroomCategorie };
 }
 
 /**

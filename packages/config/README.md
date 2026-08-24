@@ -66,22 +66,25 @@ geen zelfbedachte categorie.
   "rapportagepost": "Beheerkosten",  // specifieke rapportregel
   "rapportagecategorie": "Kosten",   // bredere groepering
   "tekenconventie": "ZOALS_BRON",    // "ZOALS_BRON" | "OMGEKEERD" | null (nog niet bevestigd)
+  "kasstroomCategorie": null,        // "HUURONTVANGST"|"EXPLOITATIE_UITGAVE"|"EIGENAARONTTREKKING"|"OVERIG"|null — zie "Kasstroomcategorie" hieronder
   "actief": true,                    // operationele aan/uit-schakelaar
   "status": "GOEDGEKEURD"            // "VOORGESTELD" | "GOEDGEKEURD" — GOEDGEKEURD is een menselijke stap
 }
 
 // BALANS-regel: geen rapportagepost/-categorie — niet van toepassing.
-// balanszijde, tekenconventie EN liquideMiddelen zijn WEL verplicht aanwezig (mogen elk apart
-// `null` zijn = nog niet bevestigd) — zie "Balanszijde ≠ presentatieteken" hieronder.
-// balanszijde = vaste eigenschap van de rekening; tekenconventie = hoe het saldo BINNEN die
-// zijde getoond wordt; liquideMiddelen = is dit een bank/kas-rekening (voor de Kasstroom-sectie,
-// packages/reporting/README.md) — drie onafhankelijke velden.
+// balanszijde, tekenconventie, liquideMiddelen EN kasstroomCategorie zijn WEL verplicht aanwezig
+// (mogen elk apart `null` zijn = nog niet bevestigd) — zie "Balanszijde ≠ presentatieteken"
+// hieronder. balanszijde = vaste eigenschap van de rekening; tekenconventie = hoe het saldo
+// BINNEN die zijde getoond wordt; liquideMiddelen = is dit een bank/kas-rekening; kasstroomCategorie
+// = als deze rekening tegenrekening is van een liquide-middelen-mutatie, welke KPI-categorie —
+// vier onafhankelijke velden.
 {
   "grootboekrekening": "1010",       // Bank NL44RABO 0337 7344 45
   "soort": "BALANS",
   "balanszijde": "ACTIVA",           // "ACTIVA" | "PASSIVA" | null (nog niet bevestigd)
   "tekenconventie": "ZOALS_BRON",    // "ZOALS_BRON" | "OMGEKEERD" | null (nog niet bevestigd)
-  "liquideMiddelen": null,           // true | false | null (nog niet bevestigd) — zie "Kasstroom" hieronder
+  "liquideMiddelen": null,           // true | false | null (nog niet bevestigd) — zie "Liquide middelen" hieronder
+  "kasstroomCategorie": null,        // zie "Kasstroomcategorie" hieronder
   "actief": true,
   "status": "GOEDGEKEURD"
 }
@@ -258,6 +261,52 @@ override-regel die de al-bekende `balanszijde`/`tekenconventie` herhaalt
 plus de nu bevestigde `liquideMiddelen: false`; `1506` blijft voor
 `balanszijde`/`tekenconventie` `null` — alleen de liquiditeitsclassificatie
 is nu apart bevestigd, de rest van die regel blijft `VOORGESTELD`).
+
+### Kasstroomcategorie (`kasstroomCategorie`, BALANS- én RESULTAAT-regels, 2026-08-22)
+
+Vierde classificatie, toegevoegd voor het Kasstroom-managementoverzicht
+(packages/reporting/README.md, `kasstroomManagementoverzicht.ts`):
+classificeert een grootboekrekening als TEGENREKENING van een liquide-
+middelen-mutatie. Staat op ZOWEL `BalansRegelSchema` als
+`ResultaatRegelSchema` — anders dan `liquideMiddelen` (dat alleen zin heeft
+op BALANS-regels), kan de tegenrekening van een bankmutatie van beide
+soorten zijn (bv. bij 070 loopt huur via Huurdebiteuren, een BALANS-
+rekening, niet rechtstreeks via een Opbrengsten-rekening — zie hieronder).
+
+Bewust NIET afgeleid uit `rapportagecategorie` (vrije tekst, zie
+"Tekenconventie" hierboven) — dat zou CLAUDE.md §6 schenden: classificatie
+via string-matching op een niet-gegarandeerd, ooit-mogelijk-op te splitsen
+veld. `kasstroomCategorie` is de eigen, expliciete bron van waarheid voor
+deze indeling.
+
+- **`"HUURONTVANGST"`** / **`"EXPLOITATIE_UITGAVE"`** / **`"EIGENAARONTTREKKING"`**
+  — de drie kasstroom-KPI-categorieën uit het managementoverzicht.
+- **`"OVERIG"`** — bevestigd GEEN van de drie (bv. BTW-afdracht, voorziening,
+  tussenrekening servicekosten). Een bewuste, afgeronde classificatie —
+  anders dan `null` komt dit NOOIT in `controleVereist` terecht.
+- **`null`** — nog niet bevestigd. Een boekstuk met een onbevestigde
+  tegenrekening telt nergens in mee en blijft zichtbaar in
+  `controleVereist` (`kasstroomManagementoverzicht.ts`).
+
+**Onderzoek vooraf (2026-08-22, vóór implementatie), bevestigd door de
+gebruiker:**
+- **Huurontvangsten lopen via Huurdebiteuren (`1310`)**: factuur eerst
+  tegen 1310/Opbrengsten, betaling later Bank tegen 1310 — de tegenrekening
+  van een huur-bankmutatie is dus altijd een BALANS-rekening (1310), nooit
+  rechtstreeks een Opbrengsten-rekening (8800/8801/8805/8815).
+- **Exploitatie-uitgaven zijn gemengd**: soms rechtstreeks Bank↔Kosten,
+  soms via Crediteuren (`1600`)/Te betalen kosten (`1700`) — de
+  classificatie moet dus zowel RESULTAAT-Kosten-tegenrekeningen als
+  1600/1700 kunnen dekken; de precieze verdeling is nog niet empirisch
+  bevestigd voor 070.
+- **Eigenaaronttrekkingen** = rekening `0840` specifiek (al bekend uit de
+  balanswerk hierboven).
+
+**Nog te bevestigen voor `070_Rooise_Zoom`:** welke specifieke rekeningen
+`kasstroomCategorie` krijgen (in elk geval `1310`→HUURONTVANGST, `0840`→
+EIGENAARONTTREKKING, en de relevante Kosten-rekeningen/`1600`/`1700`→
+EXPLOITATIE_UITGAVE) — dit veld staat nu voor alle rekeningen op `null`,
+bewust geen aanname.
 
 ### Migratie: van 27 regels bij `070_Rooise_Zoom` naar master + override (2026-08-19)
 

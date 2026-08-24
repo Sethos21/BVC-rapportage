@@ -12,5 +12,7 @@ export * from "./renderPlPeriode.js";
 export * from "./renderRapportPeriode.js";
 export * from "./kasstroomBerekening.js";
 export * from "./renderKasstroomPeriode.js";
+export * from "./kasstroomManagementoverzicht.js";
+export * from "./renderKasstroomManagementoverzicht.js";
 export * from "./grootboekInventarisatie.js";
 export { HUISSTIJL_CSS, escapeHtml, formatBedragHtml, renderRapportDocument } from "./huisstijl.js";

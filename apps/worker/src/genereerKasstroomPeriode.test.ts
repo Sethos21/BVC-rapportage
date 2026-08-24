@@ -47,8 +47,8 @@ function balansRij(overrides: Record<string, unknown> = {}): Record<string, unkn
 
 function basisMapping(overrides: Record<string, unknown>[] = []): Record<string, unknown> {
   const basis = [
-    { grootboekrekening: "1010", soort: "BALANS", balanszijde: "ACTIVA", tekenconventie: "ZOALS_BRON", liquideMiddelen: true, actief: true, status: "GOEDGEKEURD" },
-    { grootboekrekening: "1310", soort: "BALANS", balanszijde: "ACTIVA", tekenconventie: "ZOALS_BRON", liquideMiddelen: false, actief: true, status: "GOEDGEKEURD" },
+    { grootboekrekening: "1010", soort: "BALANS", balanszijde: "ACTIVA", tekenconventie: "ZOALS_BRON", liquideMiddelen: true, kasstroomCategorie: null, actief: true, status: "GOEDGEKEURD" },
+    { grootboekrekening: "1310", soort: "BALANS", balanszijde: "ACTIVA", tekenconventie: "ZOALS_BRON", liquideMiddelen: false, kasstroomCategorie: null, actief: true, status: "GOEDGEKEURD" },
   ];
   const overrideRekeningen = new Set(overrides.map((r) => r["grootboekrekening"]));
   return {
@@ -107,7 +107,7 @@ describe("genereerKasstroomPeriode", () => {
   it("markeert een BALANS-rekening met onbevestigde liquideMiddelen (null) als controleVereist bij een niet-nul mutatie", () => {
     writeFileSync(
       grootboekmappingPad(root, "070_rooisezoom"),
-      JSON.stringify(basisMapping([{ grootboekrekening: "1010", soort: "BALANS", balanszijde: "ACTIVA", tekenconventie: "ZOALS_BRON", liquideMiddelen: null, actief: true, status: "VOORGESTELD" }])),
+      JSON.stringify(basisMapping([{ grootboekrekening: "1010", soort: "BALANS", balanszijde: "ACTIVA", tekenconventie: "ZOALS_BRON", liquideMiddelen: null, kasstroomCategorie: null, actief: true, status: "VOORGESTELD" }])),
       "utf-8",
     );
     rebuildCache({ root, administratieId: "070_rooisezoom", onVoortgang: () => {} });

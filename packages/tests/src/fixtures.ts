@@ -323,6 +323,10 @@ export function rooiseZoomGrootboekMapping(): GrootboekMappingConfig {
         rapportagepost,
         rapportagecategorie,
         tekenconventie,
+        // Kasstroomcategorie (Kasstroom-managementoverzicht, 2026-08-22) nog niet bevestigd voor
+        // deze representatieve fixture — welke Kosten-rekeningen rechtstreeks tegen de bank worden
+        // betaald (i.p.v. via Crediteuren/Te betalen kosten) staat nog open, bewust null.
+        kasstroomCategorie: null,
         actief: true,
         status: "GOEDGEKEURD" as const,
       })),
@@ -332,6 +336,9 @@ export function rooiseZoomGrootboekMapping(): GrootboekMappingConfig {
         balanszijde,
         tekenconventie,
         liquideMiddelen,
+        // Zelfde: kasstroomCategorie nog niet bevestigd (ook niet voor 1310 Huurdebiteuren, hoewel
+        // al bekend is dát huur via 1310 loopt — de formele bevestiging is een aparte stap).
+        kasstroomCategorie: null,
         actief: true,
         status: balanszijde === null || tekenconventie === null ? ("VOORGESTELD" as const) : ("GOEDGEKEURD" as const),
       })),

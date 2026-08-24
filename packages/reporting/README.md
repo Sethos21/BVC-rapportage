@@ -325,6 +325,86 @@ in een volgende productie-run ontdekt te worden. `1505`/`1506` en de
 dormant-rekeningen vallen hier bewust buiten: die blijven `controleVereist`
 in productie, geen geraden classificatie.
 
+## Kasstroom (`kasstroomBerekening.ts` + `kasstroomManagementoverzicht.ts`)
+
+Twee, bewust gescheiden bouwstappen (2026-08-22), de eerste twee gebouwde
+onderdelen van roadmap-sectie "03 Kasstroom" hieronder:
+
+**1. Mutatie bankstand (`kasstroomBerekening.ts`, eerste, eenvoudige
+versie).** `berekenKasstroomPeriode`: beginbalans + boekingen t/m de
+opgegeven periode, uitsluitend voor rekeningen met een bevestigde
+`liquideMiddelen: true` (`@bvc/config`'s nieuwe BALANS-veld, zelfde
+nullable-patroon als `balanszijde`/`tekenconventie` — nooit afgeleid uit de
+rekeningnaam/-omschrijving). Worker: `genereerKasstroomPeriode.ts` + CLI
+`kasstroom-periode` (print JSON, zelfde stijl als de eerste versies van
+`pl-periode`/`balans-periode`).
+
+**2. Kasstroom-managementoverzicht (`kasstroomManagementoverzicht.ts`,
+uitgebreide versie, op expliciet verzoek van de gebruiker).** Bouwt voort
+op (1) — `berekenKasstroomPeriode` wordt ONGEWIJZIGD hergebruikt voor
+bankstand begin/eind/netto kasstroom, geen dubbele berekening — en voegt
+huurontvangsten/exploitatie-uitgaven/eigenaaronttrekkingen,
+kwartaal-uitsplitsing, uitbetalingsratio en een configureerbare
+streefwaarde bankstand toe.
+
+**Onderzoek vóór implementatie (verplicht door de gebruiker gesteld):**
+huurontvangsten/exploitatie-uitgaven mogen NIET uit P&L-bedragen komen,
+alleen uit werkelijke kasmutaties. Mechanisme: boekingen groeperen per
+`boekstukSleutel` (hergebruik van het al-bewezen `boekstukcontrole`/
+CAL-FIN-006-concept uit `@bvc/domain`'s `finance.ts` — niets nieuws). Voor
+elk boekstuk met een regel op een liquide-middelen-rekening zijn de
+overige regels de tegenrekening(en). Elke tegenrekening wordt
+geclassificeerd via een NIEUW, config-gestuurd veld — `kasstroomCategorie`
+(`@bvc/config`, op zowel BALANS- als RESULTAAT-regels, zie
+packages/config/README.md) — nooit via `rapportagecategorie` (vrije tekst,
+zou CLAUDE.md §6 schenden). Empirisch bevestigd door de gebruiker: bij 070
+lopen huurontvangsten via Huurdebiteuren (`1310`, een BALANS-rekening),
+niet rechtstreeks via een Opbrengsten-rekening; exploitatie-uitgaven zijn
+gemengd (soms direct Bank↔Kosten, soms via Crediteuren/Te betalen kosten).
+
+**Boekstuk-regels (nooit gokken):**
+- Alle tegenrekeningen dezelfde bevestigde categorie → het volledige
+  liquide-bedrag telt mee voor die categorie (kwartaal = boekdatum van de
+  liquide-regel).
+- Eén of meer tegenrekeningen onbekend/ongemapt of `kasstroomCategorie:
+  null` → het boekstuk telt NERGENS mee, de tegenrekening(en) komen in
+  `controleVereist`.
+- Tegenrekeningen met VERSCHILLENDE bevestigde categorieën binnen één
+  boekstuk → niet eenduidig toe te wijzen, het hele boekstuk komt in
+  `controleVereist` (nooit stilzwijgend verdeeld/geraden).
+- Uitsluitend liquide-middelen-regels (bv. overboeking tussen twee
+  liquide-middelen-rekeningen) → geen KPI van toepassing, genegeerd.
+
+**Tekenconventie van de KPI's:** `exploitatieUitgaven` en
+`eigenaarOnttrekkingen` worden als POSITIEF bedrag gerapporteerd (een
+bankuitgave is van nature een credit — dus een negatief `boekingSaldo` —
+hier bewust omgekeerd tot een leesbaar positief KPI-bedrag, net als een
+`tekenconventie: OMGEKEERD`-post in de balans). `huurontvangsten` is van
+nature al positief. `overig` (bevestigd géén van de drie KPI-categorieën,
+bv. BTW/voorzieningen/tussenrekeningen) behoudt het RUWE, ondertekende
+bedrag — een technische reconciliatiebucket, geen gepresenteerde KPI.
+
+**Streefwaarde bankstand:** geen globale `Beheerparameters` (elke
+administratie heeft een andere gewenste bankstand) — een nieuw, optioneel
+`streefwaardeBankstand`-veld in de per-administratie `AdministratieConfig`
+(`apps/worker/src/administratie.ts`), decimaal bedrag als string, net als
+`bedrijfsnr`/`weergavenaam` al daar staan. Ontbreekt het, dan levert de
+KPI `onbekend`, nooit een geraden standaardwaarde.
+
+**Renderer + Worker:** `renderKasstroomManagementoverzicht.ts` — bewust
+NOG NIET pixel-perfect gelijk aan het aangeleverde voorbeeldontwerp (op
+expliciet verzoek van de gebruiker), hergebruikt de bestaande
+`.card`/`.kpi-*`-huisstijl zodat de outputstructuur al wel alle gevraagde
+KPI's/kwartaalregels ondersteunt. `genereerKasstroomManagementoverzicht.ts`
++ CLI `kasstroom-managementoverzicht` schrijft HTML naar `rapporten/`
+(zelfde patroon als `rapport-periode`/`genereerControlerapport.ts`).
+
+**Nog te bevestigen voor `070_Rooise_Zoom`:** `kasstroomCategorie` staat
+voor alle rekeningen nog op `null` — zie packages/config/README.md
+"Kasstroomcategorie" voor de exacte lijst rekeningen die nog bevestigd
+moeten worden (`1310`, `0840`, en de Kosten/Crediteuren/Te-betalen-kosten-
+rekeningen).
+
 ## Grootboek-inventarisatie (`grootboekInventarisatie.ts`) — voorbereiding op een centrale mastermapping
 
 Puur diagnostisch, alleen-lezen: past geen mapping toe, verandert niets.
@@ -413,7 +493,7 @@ Nog te porten secties (met bronregels in `legacy/index.html`):
 |---|---|---|---|---|
 | 01 | Kerncijfers (KPI-dashboard: huurinkomen, EBITDA, uitbetalingsratio, bankstand, debiteuren, servicekosten-saldo + bezettingsgraad) | `renderOverzicht` | ~1502 | ✅ gebouwd (`kerncijfers.ts` + `renderKerncijfers.ts`) |
 | 02 | Resultaat P&L per kwartaal | `renderPnl` | ~1580 | deels gebouwd — `plRapport.ts`/`renderHtml.ts` (jaarcijfers, ander datamodel/CSS dan kwartaal+begroting) én sinds 2026-08-21 `renderPlPeriode.ts` (mapping-gedreven periodecijfers, nu ook onderdeel van het gecombineerde `rapport-periode`-document hieronder) — nog geen kwartaal+begroting-vergelijking in de renderer zelf |
-| 03 | Kasstroom | `renderCashflow` | ~1647 | nog te bouwen |
+| 03 | Kasstroom | `renderCashflow` | ~1647 | deels gebouwd — `kasstroomBerekening.ts` (mutatie bankstand) + `kasstroomManagementoverzicht.ts` (huurontvangsten/exploitatie-uitgaven/eigenaaronttrekkingen/kwartalen/uitbetalingsratio, zie sectie hierboven); renderer nog niet pixel-perfect gelijk aan het voorbeeldontwerp, en `kasstroomCategorie` nog niet bevestigd voor 070 |
 | 04 | Balans | `renderBalans` | ~1725 | ✅ gebouwd (`balansPeriodeBerekening.ts` + `renderBalansPeriode.ts`) — zie sectie hieronder |
 | 05 | Servicekosten (incl. stijgers/dalers, signaalbadges) | `renderServicekosten` | ~1859 | nog te bouwen |
 | 06 | Verhuur / huuroverzicht (contracttabel, statusbadges op resterende looptijd) | `renderRentroll` | ~1897 | nog te bouwen |
