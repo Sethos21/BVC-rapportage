@@ -249,10 +249,15 @@ ACTIVA maar geen liquide middelen) en los van `tekenconventie`.
   mutatie in de periode blijft dan zichtbaar in de kasstroom-
   `controleVereist`, nooit stilzwijgend meegeteld of weggelaten.
 
-**Nog te bevestigen voor `070_Rooise_Zoom`:** welke rekening(en) liquide
-middelen zijn. `1010` (Bank NL44RABO 0337 7344 45) is de voor de hand
-liggende kandidaat, maar is bewust NIET zelf op `true` gezet — dat is aan
-de gebruiker.
+**Bevestigd voor `070_Rooise_Zoom` (2026-08-22):** `1010` (Bank NL44RABO
+0337 7344 45) is de ENIGE liquide-middelen-rekening. Alle overige 14
+bekende BALANS-rekeningen kregen daarom expliciet `liquideMiddelen: false`
+in de override — inclusief `1400`/`1410`/`1506`, die daarvoor alleen in de
+master stonden (voor `1400`/`1410` betekende dat een NIEUWE, volledige
+override-regel die de al-bekende `balanszijde`/`tekenconventie` herhaalt
+plus de nu bevestigde `liquideMiddelen: false`; `1506` blijft voor
+`balanszijde`/`tekenconventie` `null` — alleen de liquiditeitsclassificatie
+is nu apart bevestigd, de rest van die regel blijft `VOORGESTELD`).
 
 ### Migratie: van 27 regels bij `070_Rooise_Zoom` naar master + override (2026-08-19)
 
@@ -314,10 +319,13 @@ nog steeds `"status": "GOEDGEKEURD"`:
 migratie verder met bevestigde `tekenconventie`-waarden voor de master-only
 rekeningen 1600/1700/1712 (zie "Balanszijde/tekenconventie
 `070_Rooise_Zoom`" hierboven — een 070-specifieke tekenconventie-bevestiging
-wordt als override vastgelegd, nooit als mutatie van de master) en met
-twee volledig nieuwe rekeningen, `0850` en `1790`, die pas na een
-beginbalans-bugfix zichtbaar werden. De override telt per 2026-08-21 17
-regels.
+wordt als override vastgelegd, nooit als mutatie van de master), met twee
+volledig nieuwe rekeningen, `0850` en `1790`, die pas na een
+beginbalans-bugfix zichtbaar werden, en met bevestigde `liquideMiddelen`-
+waarden voor alle 15 bekende BALANS-rekeningen (zie "Liquide middelen"
+hierboven) — waaronder nieuwe override-regels voor de master-only
+rekeningen `1400`/`1410`/`1506`, uitsluitend om `liquideMiddelen`
+070-specifiek vast te leggen. De override telt per 2026-08-22 20 regels.
 
 **Kanttekening (bewust niet automatisch toegepast):** bij 0901/0902/0903
 is uitsluitend de omschrijving-tekst inconsistent — de onderliggende

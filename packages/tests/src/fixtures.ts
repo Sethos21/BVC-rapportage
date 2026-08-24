@@ -253,11 +253,16 @@ export function begrotingServicekostenRijen(): Record<string, unknown>[] {
  * ZOALS_BRON zoals in een eerdere, losse opsomming abusievelijk genoemd;
  * het uitgewerkte cijfervoorbeeld is leidend, zie packages/config/README.md.
  * Alleen 1506 Afdrachten BTW (en het niet-gemapte 1505, dat hier bewust
- * geen fixture-regel heeft) blijven expliciet niet geclassificeerd: een BTW-
- * paar met exact tegengestelde bedragen, maar de gebruiker wil de relatie
- * inhoudelijk vaststellen, niet afleiden uit de toevallige gelijke/
- * tegengestelde bedragen. Zie packages/config/README.md voor de volledige
- * toelichting per rekening. Dient hier als representatieve fixture voor
+ * geen fixture-regel heeft) blijven expliciet niet geclassificeerd voor
+ * balanszijde/tekenconventie: een BTW-paar met exact tegengestelde
+ * bedragen, maar de gebruiker wil de relatie inhoudelijk vaststellen, niet
+ * afleiden uit de toevallige gelijke/tegengestelde bedragen. Per
+ * 2026-08-22 is `liquideMiddelen` bevestigd voor alle 15 BALANS-
+ * rekeningen: 1010 (Bank NL44RABO 0337 7344 45) is de ENIGE liquide-
+ * middelen-rekening, alle overige — óók 1506 — expliciet `false` (dat
+ * laat `balanszijde`/`tekenconventie` van 1506 zelf ongemoeid, blijven
+ * `null`). Zie packages/config/README.md voor de volledige toelichting
+ * per rekening. Dient hier als representatieve fixture voor
  * tests; is NIET automatisch de mapping die `070_Rooise_Zoom` in productie
  * gebruikt — dat vereist het bestand handmatig naar
  * `<BVC_DATA_ROOT>/config/grootboekmappingen/070_Rooise_Zoom.json` te
@@ -288,22 +293,24 @@ export function rooiseZoomGrootboekMapping(): GrootboekMappingConfig {
   // geraden. Bijgewerkt 2026-08-20 (ontwerpcorrectie: geen generieke tekenomkering per
   // balanszijde) — 1711/1712 kregen alsnog een bevestigde balanszijde, maar de meeste
   // Passiva-rekeningen hebben nog GEEN bevestigde tekenconventie (bewust, geen aanname).
-  const balansRekeningen: [string, string, "ACTIVA" | "PASSIVA" | null, "ZOALS_BRON" | "OMGEKEERD" | null][] = [
-    ["0840", "Ontrekkingen - Uitkeringen", "PASSIVA", "OMGEKEERD"],
-    ["0850", "Resultaat vorig boekjaar", "PASSIVA", "OMGEKEERD"],
-    ["0901", "Voorziening onderhoud Zoom 1", "PASSIVA", "OMGEKEERD"],
-    ["0902", "Voorziening onderhoud Zoom 2", "PASSIVA", "OMGEKEERD"],
-    ["0903", "Voorziening onderhoud Zoom 3", "PASSIVA", "OMGEKEERD"],
-    ["1010", "Bank NL44RABO 0337 7344 45", "ACTIVA", "ZOALS_BRON"],
-    ["1310", "Huurdebiteuren", "ACTIVA", "ZOALS_BRON"],
-    ["1400", "Te ontvangen vergoedingen", "ACTIVA", "ZOALS_BRON"],
-    ["1410", "Vooruitbetaalde kosten", "ACTIVA", "ZOALS_BRON"],
-    ["1506", "Afdrachten BTW", null, null],
-    ["1600", "Crediteuren", "PASSIVA", "OMGEKEERD"],
-    ["1700", "Te betalen kosten", "PASSIVA", "OMGEKEERD"],
-    ["1711", "Tussenrekening servicekst", "PASSIVA", "OMGEKEERD"],
-    ["1712", "Betaalde Service kosten", "ACTIVA", "ZOALS_BRON"],
-    ["1790", "Waarborgsommen", "PASSIVA", "OMGEKEERD"],
+  // Vijfde kolom: liquideMiddelen (Kasstroom-sectie, bevestigd 2026-08-22 — 1010 is de ENIGE
+  // liquide-middelen-rekening voor 070, alle overige BALANS-rekeningen expliciet `false`).
+  const balansRekeningen: [string, string, "ACTIVA" | "PASSIVA" | null, "ZOALS_BRON" | "OMGEKEERD" | null, boolean | null][] = [
+    ["0840", "Ontrekkingen - Uitkeringen", "PASSIVA", "OMGEKEERD", false],
+    ["0850", "Resultaat vorig boekjaar", "PASSIVA", "OMGEKEERD", false],
+    ["0901", "Voorziening onderhoud Zoom 1", "PASSIVA", "OMGEKEERD", false],
+    ["0902", "Voorziening onderhoud Zoom 2", "PASSIVA", "OMGEKEERD", false],
+    ["0903", "Voorziening onderhoud Zoom 3", "PASSIVA", "OMGEKEERD", false],
+    ["1010", "Bank NL44RABO 0337 7344 45", "ACTIVA", "ZOALS_BRON", true],
+    ["1310", "Huurdebiteuren", "ACTIVA", "ZOALS_BRON", false],
+    ["1400", "Te ontvangen vergoedingen", "ACTIVA", "ZOALS_BRON", false],
+    ["1410", "Vooruitbetaalde kosten", "ACTIVA", "ZOALS_BRON", false],
+    ["1506", "Afdrachten BTW", null, null, false],
+    ["1600", "Crediteuren", "PASSIVA", "OMGEKEERD", false],
+    ["1700", "Te betalen kosten", "PASSIVA", "OMGEKEERD", false],
+    ["1711", "Tussenrekening servicekst", "PASSIVA", "OMGEKEERD", false],
+    ["1712", "Betaalde Service kosten", "ACTIVA", "ZOALS_BRON", false],
+    ["1790", "Waarborgsommen", "PASSIVA", "OMGEKEERD", false],
   ];
 
   return {
@@ -319,14 +326,12 @@ export function rooiseZoomGrootboekMapping(): GrootboekMappingConfig {
         actief: true,
         status: "GOEDGEKEURD" as const,
       })),
-      ...balansRekeningen.map(([grootboekrekening, , balanszijde, tekenconventie]) => ({
+      ...balansRekeningen.map(([grootboekrekening, , balanszijde, tekenconventie, liquideMiddelen]) => ({
         grootboekrekening,
         soort: "BALANS" as const,
         balanszijde,
         tekenconventie,
-        // Liquiditeitsclassificatie (Kasstroom-sectie, 2026-08-22) nog niet bevestigd voor deze
-        // representatieve fixture — bewust null, geen aanname (zie packages/config/README.md).
-        liquideMiddelen: null,
+        liquideMiddelen,
         actief: true,
         status: balanszijde === null || tekenconventie === null ? ("VOORGESTELD" as const) : ("GOEDGEKEURD" as const),
       })),
