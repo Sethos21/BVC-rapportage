@@ -302,11 +302,14 @@ gebruiker:**
 - **Eigenaaronttrekkingen** = rekening `0840` specifiek (al bekend uit de
   balanswerk hierboven).
 
-**Nog te bevestigen voor `070_Rooise_Zoom`:** welke specifieke rekeningen
-`kasstroomCategorie` krijgen (in elk geval `1310`→HUURONTVANGST, `0840`→
-EIGENAARONTTREKKING, en de relevante Kosten-rekeningen/`1600`/`1700`→
-EXPLOITATIE_UITGAVE) — dit veld staat nu voor alle rekeningen op `null`,
-bewust geen aanname.
+**Bevestigd voor `070_Rooise_Zoom` (2026-08-22):** `1310` (Huurdebiteuren)
+→ `HUURONTVANGST`, `0840` (Ontrekkingen - Uitkeringen) → `EIGENAARONTTREKKING`
+— beide rechtstreeks uit het vooronderzoek hierboven, geen aparte
+bevestiging meer nodig. **Nog te bevestigen:** de relevante Kosten-
+rekeningen en/of `1600`/`1700` → `EXPLOITATIE_UITGAVE` — de exacte
+verdeling (rechtstreeks Bank↔Kosten versus via Crediteuren/Te betalen
+kosten) is nog niet empirisch vastgesteld voor 070, dit veld staat voor
+die rekeningen bewust nog op `null`.
 
 ### Migratie: van 27 regels bij `070_Rooise_Zoom` naar master + override (2026-08-19)
 

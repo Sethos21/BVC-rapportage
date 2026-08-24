@@ -293,24 +293,29 @@ export function rooiseZoomGrootboekMapping(): GrootboekMappingConfig {
   // geraden. Bijgewerkt 2026-08-20 (ontwerpcorrectie: geen generieke tekenomkering per
   // balanszijde) — 1711/1712 kregen alsnog een bevestigde balanszijde, maar de meeste
   // Passiva-rekeningen hebben nog GEEN bevestigde tekenconventie (bewust, geen aanname).
-  // Vijfde kolom: liquideMiddelen (Kasstroom-sectie, bevestigd 2026-08-22 — 1010 is de ENIGE
-  // liquide-middelen-rekening voor 070, alle overige BALANS-rekeningen expliciet `false`).
-  const balansRekeningen: [string, string, "ACTIVA" | "PASSIVA" | null, "ZOALS_BRON" | "OMGEKEERD" | null, boolean | null][] = [
-    ["0840", "Ontrekkingen - Uitkeringen", "PASSIVA", "OMGEKEERD", false],
-    ["0850", "Resultaat vorig boekjaar", "PASSIVA", "OMGEKEERD", false],
-    ["0901", "Voorziening onderhoud Zoom 1", "PASSIVA", "OMGEKEERD", false],
-    ["0902", "Voorziening onderhoud Zoom 2", "PASSIVA", "OMGEKEERD", false],
-    ["0903", "Voorziening onderhoud Zoom 3", "PASSIVA", "OMGEKEERD", false],
-    ["1010", "Bank NL44RABO 0337 7344 45", "ACTIVA", "ZOALS_BRON", true],
-    ["1310", "Huurdebiteuren", "ACTIVA", "ZOALS_BRON", false],
-    ["1400", "Te ontvangen vergoedingen", "ACTIVA", "ZOALS_BRON", false],
-    ["1410", "Vooruitbetaalde kosten", "ACTIVA", "ZOALS_BRON", false],
-    ["1506", "Afdrachten BTW", null, null, false],
-    ["1600", "Crediteuren", "PASSIVA", "OMGEKEERD", false],
-    ["1700", "Te betalen kosten", "PASSIVA", "OMGEKEERD", false],
-    ["1711", "Tussenrekening servicekst", "PASSIVA", "OMGEKEERD", false],
-    ["1712", "Betaalde Service kosten", "ACTIVA", "ZOALS_BRON", false],
-    ["1790", "Waarborgsommen", "PASSIVA", "OMGEKEERD", false],
+  // Vijfde kolom: liquideMiddelen (bevestigd 2026-08-22 — 1010 is de ENIGE liquide-middelen-
+  // rekening voor 070, alle overige BALANS-rekeningen expliciet `false`). Zesde kolom:
+  // kasstroomCategorie (Kasstroom-managementoverzicht) — 1310 (Huurdebiteuren) en 0840
+  // (Ontrekkingen) zijn bevestigd (HUURONTVANGST resp. EIGENAARONTTREKKING, rechtstreeks uit het
+  // vooronderzoek), de EXPLOITATIE_UITGAVE-verdeling (rechtstreeks Kosten vs. Crediteuren/Te
+  // betalen kosten) staat nog open, bewust null.
+  type KasstroomCat = "HUURONTVANGST" | "EXPLOITATIE_UITGAVE" | "EIGENAARONTTREKKING" | "OVERIG" | null;
+  const balansRekeningen: [string, string, "ACTIVA" | "PASSIVA" | null, "ZOALS_BRON" | "OMGEKEERD" | null, boolean | null, KasstroomCat][] = [
+    ["0840", "Ontrekkingen - Uitkeringen", "PASSIVA", "OMGEKEERD", false, "EIGENAARONTTREKKING"],
+    ["0850", "Resultaat vorig boekjaar", "PASSIVA", "OMGEKEERD", false, null],
+    ["0901", "Voorziening onderhoud Zoom 1", "PASSIVA", "OMGEKEERD", false, null],
+    ["0902", "Voorziening onderhoud Zoom 2", "PASSIVA", "OMGEKEERD", false, null],
+    ["0903", "Voorziening onderhoud Zoom 3", "PASSIVA", "OMGEKEERD", false, null],
+    ["1010", "Bank NL44RABO 0337 7344 45", "ACTIVA", "ZOALS_BRON", true, null],
+    ["1310", "Huurdebiteuren", "ACTIVA", "ZOALS_BRON", false, "HUURONTVANGST"],
+    ["1400", "Te ontvangen vergoedingen", "ACTIVA", "ZOALS_BRON", false, null],
+    ["1410", "Vooruitbetaalde kosten", "ACTIVA", "ZOALS_BRON", false, null],
+    ["1506", "Afdrachten BTW", null, null, false, null],
+    ["1600", "Crediteuren", "PASSIVA", "OMGEKEERD", false, null],
+    ["1700", "Te betalen kosten", "PASSIVA", "OMGEKEERD", false, null],
+    ["1711", "Tussenrekening servicekst", "PASSIVA", "OMGEKEERD", false, null],
+    ["1712", "Betaalde Service kosten", "ACTIVA", "ZOALS_BRON", false, null],
+    ["1790", "Waarborgsommen", "PASSIVA", "OMGEKEERD", false, null],
   ];
 
   return {
@@ -330,15 +335,13 @@ export function rooiseZoomGrootboekMapping(): GrootboekMappingConfig {
         actief: true,
         status: "GOEDGEKEURD" as const,
       })),
-      ...balansRekeningen.map(([grootboekrekening, , balanszijde, tekenconventie, liquideMiddelen]) => ({
+      ...balansRekeningen.map(([grootboekrekening, , balanszijde, tekenconventie, liquideMiddelen, kasstroomCategorie]) => ({
         grootboekrekening,
         soort: "BALANS" as const,
         balanszijde,
         tekenconventie,
         liquideMiddelen,
-        // Zelfde: kasstroomCategorie nog niet bevestigd (ook niet voor 1310 Huurdebiteuren, hoewel
-        // al bekend is dát huur via 1310 loopt — de formele bevestiging is een aparte stap).
-        kasstroomCategorie: null,
+        kasstroomCategorie,
         actief: true,
         status: balanszijde === null || tekenconventie === null ? ("VOORGESTELD" as const) : ("GOEDGEKEURD" as const),
       })),
