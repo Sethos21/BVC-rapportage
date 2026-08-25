@@ -402,6 +402,29 @@ KPI's/kwartaalregels ondersteunt. `genereerKasstroomManagementoverzicht.ts`
 → `kasstroomCategorie: "EIGENAARONTTREKKING"` — dat is voor dit
 vereenvoudigde overzicht het enige dat nog bevestigd hoefde te worden.
 
+**Diagnostiek: `kasstroomTegenrekeningDiagnose.ts` (2026-08-25).** Alleen-
+lezen hulpmiddel, geen KPI, geen rapportbestand — gebouwd nadat een echte
+productie-run voor `070_Rooise_Zoom` `waarvan eigenaaronttrekkingen: €0,00`
+toonde terwijl rekening `0840` bevestigd op `EIGENAARONTTREKKING` staat en
+eerder (met de bredere, eerste opzet) al €253.000 aan relevante mutaties
+via die rekening was gevonden. In plaats van de kernberekening op een
+vermoeden aan te passen (CLAUDE.md §6: nooit gokken), legt
+`diagnoseerKasstroomTegenrekening(boekingen, mappingRegels, doelRekening)`
+per boekstuk waarin de opgegeven rekening voorkomt bloot: het herberekende
+liquide-bedrag van dat boekstuk, of het vandaag meetelt als
+eigenaaronttrekking, en zo niet, welke van de vier mogelijke oorzaken dat
+verklaart (geen liquide regel in het boekstuk; liquide-bedrag niet
+negatief — bv. omdat de doelrekening zelf onverwacht als `liquideMiddelen:
+true` staat en zichzelf binnen het boekstuk opheft; geen van de
+tegenrekeningen resolveert naar `EIGENAARONTTREKKING`; of een gemengd
+boekstuk). Herhaalt bewust dezelfde groeperings-/classificatielogica als
+`berekenKasstroomManagementoverzicht` — introduceert geen nieuwe
+classificatie, legt alleen de bestaande bloot. Worker:
+`genereerKasstroomTegenrekeningDiagnose.ts` + CLI
+`kasstroom-diagnose-tegenrekening <administratieId> --boekjaar N
+--periodeTotEnMet P --rekening <grootboekrekening>` (print JSON op
+stdout, schrijft geen bestand).
+
 ## Grootboek-inventarisatie (`grootboekInventarisatie.ts`) — voorbereiding op een centrale mastermapping
 
 Puur diagnostisch, alleen-lezen: past geen mapping toe, verandert niets.

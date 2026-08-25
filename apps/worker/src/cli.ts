@@ -9,6 +9,7 @@ import { genereerBalansPeriode } from "./genereerBalansPeriode.js";
 import { genereerRapportPeriode } from "./genereerRapportPeriode.js";
 import { genereerKasstroomPeriode } from "./genereerKasstroomPeriode.js";
 import { genereerKasstroomManagementoverzicht } from "./genereerKasstroomManagementoverzicht.js";
+import { genereerKasstroomTegenrekeningDiagnose } from "./genereerKasstroomTegenrekeningDiagnose.js";
 import { genereerGrootboekInventarisatie } from "./genereerGrootboekInventarisatie.js";
 import { withLock } from "./lock.js";
 import { AdministratieBestaatAlError, initAdministratie } from "./administratie.js";
@@ -32,6 +33,8 @@ function printGebruik(): never {
       "      (Mutatie bankstand: beginbalans + boekingen t/m die periode, alleen voor rekeningen met bevestigde liquideMiddelen:true — eerste, eenvoudige kasstroomweergave)",
       "  kasstroom-managementoverzicht <administratieId> --boekjaar N --periodeTotEnMet P",
       "      (Kasstroom-managementoverzicht: bankstand begin/eind, totale ontvangsten/uitgaven en netto kasstroom o.b.v. werkelijke mutaties op de liquide-middelenrekening(en), met eigenaaronttrekkingen (0840) als uitsplitsing binnen uitgaven en per kwartaal — HTML naar rapporten/)",
+      "  kasstroom-diagnose-tegenrekening <administratieId> --boekjaar N --periodeTotEnMet P --rekening <grootboekrekening>",
+      "      (alleen-lezen: toont per boekstuk waarin de opgegeven rekening voorkomt of dat boekstuk vandaag meetelt als eigenaaronttrekking in kasstroom-managementoverzicht, en zo niet waarom niet — geen rapportbestand, alleen JSON op stdout)",
       "  grootboek-inventarisatie",
       "      (alleen-lezen: inventariseert grootboekrekeninggebruik over ALLE administraties in de gedeelde bron boekingen/balans_per_jaar — voorbereiding op een centrale mastermapping, past niets toe)",
       "",
@@ -204,6 +207,21 @@ async function main() {
     });
     console.log(`Rapport geschreven: ${resultaat.pad}`);
     if (resultaat.resultaat.controleVereist.length > 0) process.exitCode = 1;
+    return;
+  }
+
+  if (command === "kasstroom-diagnose-tegenrekening") {
+    const [administratieId] = rest;
+    const boekjaarStr = parseFlag(rest, "boekjaar");
+    const boekperiodeTotEnMet = parseFlag(rest, "periodeTotEnMet");
+    const doelRekening = parseFlag(rest, "rekening");
+    if (!administratieId || !boekjaarStr || !boekperiodeTotEnMet || !doelRekening) printGebruik();
+    const resultaat = genereerKasstroomTegenrekeningDiagnose(root, administratieId, {
+      boekjaar: Number(boekjaarStr),
+      boekperiodeTotEnMet,
+      doelRekening,
+    });
+    console.log(JSON.stringify(resultaat, null, 2));
     return;
   }
 
