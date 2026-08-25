@@ -94,4 +94,18 @@ describe("renderKasstroomManagementoverzichtHtml", () => {
     expect(html.trim().startsWith("<!DOCTYPE html>")).toBe(true);
     expect(html.trim().endsWith("</html>")).toBe(true);
   });
+
+  it("toont de top overige uitgaven als die zijn meegegeven", () => {
+    const html = renderKasstroomManagementoverzichtHtml(
+      invoer({ topOverigeUitgaven: [{ boekdatum: new Date("2026-03-01"), bedrag: new Decimal("1234.56"), omschrijving: "Onderhoud dak" }] }),
+    );
+    expect(html).toContain("Top 1 grootste overige uitgaven");
+    expect(html).toContain("Onderhoud dak");
+    expect(html).toContain("2026-03-01");
+  });
+
+  it("laat de top-overige-uitgaven-sectie weg als er geen regels zijn meegegeven", () => {
+    const html = renderKasstroomManagementoverzichtHtml(invoer());
+    expect(html).not.toContain("grootste overige uitgaven");
+  });
 });

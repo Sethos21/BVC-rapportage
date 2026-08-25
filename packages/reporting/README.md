@@ -499,6 +499,32 @@ lopen — zie de eerdere toelichting hierboven over dat scenario). Vormgeving
 dat gebeurt later gezamenlijk met P&L en balans, zodat huisstijlwerk niet
 drie keer apart gebeurt.
 
+### Aanvullend: Top overige uitgaven (`kasstroomTopUitgaven.ts`, 2026-08-25)
+
+Puur informatieve uitsplitsing BOVENOP het (vastgelegde) managementoverzicht
+— bewust in een EIGEN functie, niet in `berekenKasstroomManagementoverzicht`
+zelf, om de zojuist vastgelegde regressie-uitkomst niet aan te raken.
+`berekenTopOverigeUitgaven(boekingen, mappingRegels, aantal = 3)` levert de
+N grootste individuele "werkelijke uitgaande bankbetalingen" (elke losse
+boeking op een liquide-middelen-rekening met een negatief saldo — dezelfde
+regel als `uitgaven`, geen boekstukaggregatie), **exclusief**
+eigenaaronttrekkingen.
+
+Een individuele bankregel wordt uitgesloten als hetzelfde boekstuk een
+tegenrekening-regel bevat met een bevestigde `kasstroomCategorie:
+"EIGENAARONTTREKKING"` én EXACT hetzelfde bedrag — bedrag-matching per
+boekstuk (multiset, elke tegenrekening-regel maar één keer verbruikt), zodat
+een verzamelboeking met meerdere onttrekkingen ze stuk voor stuk correct
+uitsluit. Dit patroon is empirisch bevestigd bij 070 (elke
+eigenaaronttrekking-tegenrekeningregel heeft daar een exact even grote,
+tegengestelde liquide regel in hetzelfde boekstuk — zie het
+`kasstroomTegenrekeningDiagnose`-onderzoek hierboven). Puur informatief:
+telt niet apart mee, heeft geen invloed op `uitgaven`/`overigeUitgaven`/
+enige aansluiting. Gerenderd als extra tabel (datum/omschrijving/bedrag) in
+`renderKasstroomManagementoverzicht.ts`, alleen als
+`KasstroomManagementoverzichtInvoer.topOverigeUitgaven` is meegegeven
+(optioneel veld — leeg/ontbrekend rendert geen sectie).
+
 ## Grootboek-inventarisatie (`grootboekInventarisatie.ts`) — voorbereiding op een centrale mastermapping
 
 Puur diagnostisch, alleen-lezen: past geen mapping toe, verandert niets.

@@ -49,6 +49,24 @@ function renderUitgavenUitsplitsing(invoer: KasstroomManagementoverzichtInvoer):
     </table>`;
 }
 
+function renderTopOverigeUitgaven(invoer: KasstroomManagementoverzichtInvoer): string {
+  const regels = invoer.topOverigeUitgaven;
+  if (!regels || regels.length === 0) return "";
+  const rijen = regels
+    .map((r) => `<tr><td>${escapeHtml(r.boekdatum.toISOString().slice(0, 10))}</td><td>${escapeHtml(r.omschrijving)}</td><td>${formatBedragHtml(r.bedrag)}</td></tr>`)
+    .join("");
+  return `
+    <h2>Top ${regels.length} grootste overige uitgaven</h2>
+    <div class="toelichting">
+      Werkelijke uitgaande bankbetalingen, exclusief eigenaaronttrekkingen — puur informatief, telt niet apart mee
+      (zit al in "waarvan overige uitgaven" hierboven).
+    </div>
+    <table>
+      <thead><tr><th>Datum</th><th>Omschrijving</th><th>Bedrag</th></tr></thead>
+      <tbody>${rijen}</tbody>
+    </table>`;
+}
+
 function renderControleVereist(invoer: KasstroomManagementoverzichtInvoer): string {
   const { controleVereist } = invoer.resultaat;
   if (controleVereist.length === 0) {
@@ -89,6 +107,7 @@ export function renderKasstroomManagementoverzichtBody(invoer: KasstroomManageme
     ${kpis}
     ${renderUitgavenUitsplitsing(invoer)}
     ${renderKwartaalTabel(invoer)}
+    ${renderTopOverigeUitgaven(invoer)}
     ${renderControleVereist(invoer)}`;
 }
 

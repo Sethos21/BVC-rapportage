@@ -5,12 +5,14 @@ import { openCacheReadonly, selecteerBoekingen, type BalansstandRow, type Boekin
 import type { Balansstand, Boekingsregel } from "@bvc/domain";
 import {
   berekenKasstroomManagementoverzicht,
+  berekenTopOverigeUitgaven,
   renderKasstroomManagementoverzichtHtml,
   vergelijkKasstroomManagementoverzichtMetVerwacht,
   type KasstroomManagementoverzichtInvoer,
   type KasstroomManagementoverzichtResultaat,
   type KasstroomManagementoverzichtVergelijkingsResultaat,
   type KasstroomManagementoverzichtVerwacht,
+  type KasstroomTopUitgaveRegel,
 } from "@bvc/reporting";
 import { administratieCachePad, administratieRapportenDir } from "./paths.js";
 import { leesAdministratieConfig } from "./administratie.js";
@@ -40,6 +42,7 @@ export interface GenereerKasstroomManagementoverzichtResultaat {
   html: string;
   pad: string;
   resultaat: KasstroomManagementoverzichtResultaat;
+  topOverigeUitgaven: readonly KasstroomTopUitgaveRegel[];
   vergelijking?: KasstroomManagementoverzichtVergelijkingsResultaat;
 }
 
@@ -69,6 +72,7 @@ export function genereerKasstroomManagementoverzicht(
     const balansstanden: Balansstand[] = balansstandRijen.map(naarBalansstand);
 
     const resultaat = berekenKasstroomManagementoverzicht(balansstanden, boekingsregels, mapping.regels);
+    const topOverigeUitgaven = berekenTopOverigeUitgaven(boekingsregels, mapping.regels);
 
     const invoer: KasstroomManagementoverzichtInvoer = {
       administratieNaam: config.weergavenaam,
@@ -77,6 +81,7 @@ export function genereerKasstroomManagementoverzicht(
       boekperiodeTotEnMet: opties.boekperiodeTotEnMet,
       gegenereerdOp: new Date(),
       resultaat,
+      topOverigeUitgaven,
     };
 
     const html = renderKasstroomManagementoverzichtHtml(invoer);
@@ -87,12 +92,12 @@ export function genereerKasstroomManagementoverzicht(
     writeFileSync(pad, html, "utf-8");
 
     if (!opties.verwachtePad) {
-      return { html, pad, resultaat };
+      return { html, pad, resultaat, topOverigeUitgaven };
     }
 
     const verwacht = leesKasstroomManagementoverzichtVerwacht(opties.verwachtePad);
     const vergelijking = vergelijkKasstroomManagementoverzichtMetVerwacht(resultaat, verwacht, opties.toleranceEuro ?? new Decimal("0.01"));
-    return { html, pad, resultaat, vergelijking };
+    return { html, pad, resultaat, topOverigeUitgaven, vergelijking };
   } finally {
     db.close();
   }
