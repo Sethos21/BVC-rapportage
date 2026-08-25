@@ -73,32 +73,46 @@ naar DSN/SQL geen herontwerp is:
   nog niet gebouwd — vereist een echt DSN-doelsysteem om tegen te
   ontwerpen/testen.
 
-### 4b. Concreet doelsysteem: Informant/PxPlus SQL ODBC (nog niet gebouwd)
+### 4b. Concreet doelsysteem: Informant/PxPlus SQL ODBC (onderzoek afgerond, bouw nog niet gestart)
 
 Bevestigd (2026-08-13): het toekomstige DSN-doelsysteem is Informant,
-ontsloten via de PxPlus SQL ODBC-driver. Bedrijfsomgeving heeft nu
+ontsloten via de PxPlus SQL ODBC-driver. Bedrijfsomgeving heeft
 PxPlus SQL ODBC Driver **v7.00.02.00, 32-bit** geïnstalleerd; de
 Informant File DSN's gebruiken deze driver, en Excel op diezelfde
-omgeving is ook 32-bit. In `V:\Informant\install\odbc\` staan installers
-voor zowel een 32-bit als een 64-bit variant van de driver.
+omgeving is ook 32-bit.
 
-Expliciete beslissing: **geen 32-bit build en geen ODBC-code nu.** De
-huidige x64 `bvc-worker.exe`-build (`apps/worker/scripts/build-exe.mjs`)
-blijft ongewijzigd. Twee paden worden apart onderzocht (nog geen keuze
-gemaakt):
-1. of de 64-bit PxPlus-driver rechtstreeks vanuit deze x64 Worker
-   bruikbaar is;
-2. zo niet (bv. door Informant/PxPlus Views-compatibiliteit), een kleine
-   aparte 32-bit ODBC-bridge/hulpproces.
+**Onderzoek afgerond (2026-08-25) — volledige bevindingen en
+architectuurkeuzes staan in
+[`docs/informant-odbc-onderzoek-en-architectuur.md`](docs/informant-odbc-onderzoek-en-architectuur.md).
+Dat document is de technische uitgangspositie voor dit onderdeel; lees
+het eerst voordat aan de Informant-koppeling wordt gebouwd.** Kernpunten:
 
-Architectuurbewaking voor wanneer die keuze gemaakt is: de toekomstige
-`InformantOdbcSource`/`InformantOdbcBronAdapter` implementeert dezelfde
-`BronAdapter`-interface als `ExcelBronAdapter` (zie `bronAdapter.ts`) —
-ODBC/PxPlus/bitness-details mogen nooit doorlekken naar domain/cache/
-reporting. Een bridge-over-hulpproces is vermoedelijk inherent
-asynchroon (`leesRuweRijen` is nu synchroon); die interfacewijziging
-wordt pas gemaakt zodra de aanpak zelf gebouwd wordt, niet vooraf
-gegokt op een nog onbeslist ontwerp.
+- **PxPlus 64-bit is uitgesloten** als optie — niet verder onderzoeken
+  of ontwerpen rond de 64-bit driver.
+- De hoofd-Worker (`bvc-worker.exe`, §5b) **blijft x64** en wordt niet
+  omgebouwd naar 32-bit.
+- Gekozen richting: een kleine, bewust domme **32-bit Informant ODBC
+  bridge** naast de x64 Worker (child process, streaming resultaten,
+  vermoedelijk JSON Lines over stdout — protocol nog te ontwerpen in
+  fase 2/3 van het document). De bridge doet uitsluitend DSN-toegang,
+  read-only `SELECT`'s en foutvertaling; nooit KPI/cache/domeinlogica.
+- Praktisch bewezen: File DSN per administratie (bv.
+  `informant 070 rooise zoom.dsn`) werkt, schema met 281 tabellen
+  toegankelijk, `Boekingen`-tabel met geparametriseerde `SELECT ...
+  WHERE Bedrijfsnr = ?` succesvol getest tegen echte data van
+  070_Rooise_Zoom.
+- **Niet bewezen**, dus geen aanname: dat `informant alle bedrijven.dsn`
+  (context `000`) alle administraties in één keer ontsluit. Eerste
+  implementatie moet per-administratie DSN-mapping gebruiken.
+- Architectuurbewaking blijft gelden: de toekomstige
+  `InformantOdbcSource`/`InformantOdbcBronAdapter` implementeert dezelfde
+  `BronAdapter`-interface als `ExcelBronAdapter` (zie `bronAdapter.ts`) —
+  ODBC/PxPlus/bitness-details mogen nooit doorlekken naar domain/cache/
+  reporting. Excel blijft tijdens de migratie de referentie-bron en
+  wordt pas per brontype uitgefaseerd na aantoonbare parallelle
+  validatie tegen de ODBC-route.
+- Nog geen brede implementatie starten vóór de repositoryanalyse en
+  bridge-PoC uit het onderzoeksdocument (fase 1–2) zijn doorlopen.
 
 ## 5. Eén centrale data root, buiten git
 
