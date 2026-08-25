@@ -15,6 +15,7 @@ export * from "./renderKasstroomPeriode.js";
 export * from "./kasstroomManagementoverzicht.js";
 export * from "./kasstroomManagementoverzichtVergelijking.js";
 export * from "./kasstroomTopUitgaven.js";
+export * from "./kasstroomRekeningActiviteit.js";
 export * from "./renderKasstroomManagementoverzicht.js";
 export * from "./kasstroomTegenrekeningDiagnose.js";
 export * from "./grootboekInventarisatie.js";

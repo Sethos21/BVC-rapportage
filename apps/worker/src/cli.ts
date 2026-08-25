@@ -10,6 +10,7 @@ import { genereerRapportPeriode } from "./genereerRapportPeriode.js";
 import { genereerKasstroomPeriode } from "./genereerKasstroomPeriode.js";
 import { genereerKasstroomManagementoverzicht } from "./genereerKasstroomManagementoverzicht.js";
 import { genereerKasstroomTegenrekeningDiagnose } from "./genereerKasstroomTegenrekeningDiagnose.js";
+import { genereerKasstroomRekeningActiviteit } from "./genereerKasstroomRekeningActiviteit.js";
 import { genereerGrootboekInventarisatie } from "./genereerGrootboekInventarisatie.js";
 import { withLock } from "./lock.js";
 import { AdministratieBestaatAlError, initAdministratie } from "./administratie.js";
@@ -35,6 +36,8 @@ function printGebruik(): never {
       "      (Kasstroom-managementoverzicht: bankstand begin/eind, totale ontvangsten/uitgaven en netto kasstroom o.b.v. werkelijke mutaties op de liquide-middelenrekening(en), met eigenaaronttrekkingen (0840) als uitsplitsing binnen uitgaven en per kwartaal — HTML naar rapporten/; --verwacht vergelijkt automatisch met een eerder geverifieerd regressiepunt, bv. 070_Rooise_Zoom boekjaar 2026 t/m periode 06)",
       "  kasstroom-diagnose-tegenrekening <administratieId> --boekjaar N --periodeTotEnMet P --rekening <grootboekrekening>",
       "      (alleen-lezen: toont per boekstuk waarin de opgegeven rekening voorkomt of dat boekstuk vandaag meetelt als eigenaaronttrekking in kasstroom-managementoverzicht, en zo niet waarom niet — geen rapportbestand, alleen JSON op stdout)",
+      "  kasstroom-diagnose-rekeningactiviteit <administratieId> --boekjaar N --periodeTotEnMet P --rekening <grootboekrekening>",
+      "      (alleen-lezen: toont ALLE boekingen op de opgegeven rekening chronologisch, met boekstukSleutel/dagboeknr/bedrag/omschrijving en of het boekstuk kasstroom-relevant is — bouwstap om een keten zoals factuur (bv. 1506) -> crediteuren (1600) -> bank te kunnen beoordelen, matcht zelf niets automatisch)",
       "  grootboek-inventarisatie",
       "      (alleen-lezen: inventariseert grootboekrekeninggebruik over ALLE administraties in de gedeelde bron boekingen/balans_per_jaar — voorbereiding op een centrale mastermapping, past niets toe)",
       "",
@@ -224,6 +227,21 @@ async function main() {
     const doelRekening = parseFlag(rest, "rekening");
     if (!administratieId || !boekjaarStr || !boekperiodeTotEnMet || !doelRekening) printGebruik();
     const resultaat = genereerKasstroomTegenrekeningDiagnose(root, administratieId, {
+      boekjaar: Number(boekjaarStr),
+      boekperiodeTotEnMet,
+      doelRekening,
+    });
+    console.log(JSON.stringify(resultaat, null, 2));
+    return;
+  }
+
+  if (command === "kasstroom-diagnose-rekeningactiviteit") {
+    const [administratieId] = rest;
+    const boekjaarStr = parseFlag(rest, "boekjaar");
+    const boekperiodeTotEnMet = parseFlag(rest, "periodeTotEnMet");
+    const doelRekening = parseFlag(rest, "rekening");
+    if (!administratieId || !boekjaarStr || !boekperiodeTotEnMet || !doelRekening) printGebruik();
+    const resultaat = genereerKasstroomRekeningActiviteit(root, administratieId, {
       boekjaar: Number(boekjaarStr),
       boekperiodeTotEnMet,
       doelRekening,

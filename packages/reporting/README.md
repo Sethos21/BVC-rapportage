@@ -525,6 +525,49 @@ enige aansluiting. Gerenderd als extra tabel (datum/omschrijving/bedrag) in
 `KasstroomManagementoverzichtInvoer.topOverigeUitgaven` is meegegeven
 (optioneel veld — leeg/ontbrekend rendert geen sectie).
 
+### Onderzoek: BTW-positie (2026-08-25, nog GEEN mapping/berekening gewijzigd)
+
+Op verzoek onderzocht of een BTW-kasstroom-KPI (ontvangen/betaald/saldo)
+betrouwbaar afleidbaar is. `1506` (Afdrachten BTW, samen met `1505` een
+BTW-paar — zie packages/config/README.md, bewust nooit geclassificeerd op
+basis van hun toevallig gelijke/tegengestelde bedragen) bleek GEEN directe
+banktegenrekening: een diagnose tegen de echte `070_Rooise_Zoom`-cache
+(`kasstroom-diagnose-tegenrekening --rekening 1506`) toonde één boekstuk
+(26-01-2026, €31.617) waar `1506` uitsluitend tegen `1600` (Crediteuren)
+boekt — geen liquide regel in dat boekstuk.
+
+Om te onderzoeken of die €31.617 via `1600` alsnog naar de bank loopt (en
+dus wél een kasstroom-BTW-post zou zijn), is `kasstroomRekeningActiviteit.ts`
+gebouwd: `diagnoseerRekeningActiviteit(boekingen, mappingRegels,
+doelRekening)` toont ALLE boekingen op één rekening chronologisch
+(boekstukSleutel/dagboeknr/datum/bedrag/omschrijving/kasstroom-relevantie),
+zonder zelf iets te matchen. Reden om dit als apart, generiek instrument te
+bouwen i.p.v. direct een matchpoging te coderen: een crediteurenrekening is
+gepoold over meerdere leveranciers/facturen, en de factuurregistratie
+(credit 1600) en de betaling (debit 1600, tegen de bank) staan gegarandeerd
+in VERSCHILLENDE boekstukken (anders dan bij eigenaaronttrekkingen, waar
+tegenrekening en bankregel in hetzelfde boekstuk staan) — een keten
+betrouwbaar volgen kan dus niet via `boekstukSleutel`, en een blind
+bedrag-match tussen een credit- en een latere debitregel op 1600 zou precies
+de "toevallige bedragmatch"-fout herhalen die bij 1505/1506 al expliciet is
+afgewezen. Worker: `genereerKasstroomRekeningActiviteit.ts` + CLI
+`kasstroom-diagnose-rekeningactiviteit <administratieId> --boekjaar N
+--periodeTotEnMet P --rekening <grootboekrekening>`.
+
+**Bijkomende bevinding, nog niet opgevolgd:** de brondata bevat volgens
+`packages/data-contracts/src/sources/boekingen.ts` twee extra kolommen
+(`Boeking_Grootboek_A`/`Boeking_Grootboek_B`) die in potentie een
+betrouwbare reconciliatiesleutel voor open-postenboekhouding zouden kunnen
+zijn (bv. een factuur-/matchingreferentie) — maar deze twee velden worden
+momenteel NERGENS voorbij de staging-laag doorgegeven: niet in
+`packages/cache`'s schema, niet in het `Boekingsregel`-type dat
+`@bvc/reporting` gebruikt. Ze zijn dus vandaag niet inspecteerbaar via
+bovenstaand diagnose-instrument. Uitbreiden van de cache om ze wél op te
+nemen zou een echte, aparte codewijziging zijn (schema-uitbreiding) — bewust
+nog niet gedaan; eerst met de gebruiker vaststellen of `Grootboek_A`/`B` in
+de echte Excel-bron voor 070 gevuld zijn en wat ze inhoudelijk betekenen,
+vóór daar een cache-uitbreiding op gebouwd wordt.
+
 ## Grootboek-inventarisatie (`grootboekInventarisatie.ts`) — voorbereiding op een centrale mastermapping
 
 Puur diagnostisch, alleen-lezen: past geen mapping toe, verandert niets.
