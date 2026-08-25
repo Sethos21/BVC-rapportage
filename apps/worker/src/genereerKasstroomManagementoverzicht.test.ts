@@ -103,4 +103,54 @@ describe("genereerKasstroomManagementoverzicht", () => {
     rmSync(grootboekmappingPad(root, "070_rooisezoom"));
     expect(() => genereerKasstroomManagementoverzicht(root, "070_rooisezoom", { boekjaar: 2026, boekperiodeTotEnMet: "06" })).toThrow(/Grootboekmapping ontbreekt/);
   });
+
+  it("--verwacht: sluit volledig als het verwachte bestand exact de berekende uitkomst bevat (regressiepunt)", () => {
+    const basis = genereerKasstroomManagementoverzicht(root, "070_rooisezoom", { boekjaar: 2026, boekperiodeTotEnMet: "06" });
+    const verwachtePad = join(root, "verwacht-kasstroom.json");
+    writeFileSync(
+      verwachtePad,
+      JSON.stringify({
+        bankstandBegin: basis.resultaat.bankstandBegin.toString(),
+        bankstandEind: basis.resultaat.bankstandEind.toString(),
+        ontvangsten: basis.resultaat.ontvangsten.toString(),
+        uitgaven: basis.resultaat.uitgaven.toString(),
+        nettoKasstroom: basis.resultaat.nettoKasstroom.toString(),
+        eigenaarOnttrekkingen: basis.resultaat.eigenaarOnttrekkingen.toString(),
+        overigeUitgaven: basis.resultaat.overigeUitgaven.toString(),
+        perKwartaal: basis.resultaat.perKwartaal.map((k) => ({
+          kwartaal: k.kwartaal,
+          ontvangsten: k.ontvangsten.toString(),
+          uitgaven: k.uitgaven.toString(),
+          eigenaarOnttrekkingen: k.eigenaarOnttrekkingen.toString(),
+          nettoKasstroom: k.nettoKasstroom.toString(),
+        })),
+      }),
+      "utf-8",
+    );
+
+    const resultaat = genereerKasstroomManagementoverzicht(root, "070_rooisezoom", { boekjaar: 2026, boekperiodeTotEnMet: "06", verwachtePad });
+    expect(resultaat.vergelijking?.alleSluitenBinnenTolerantie).toBe(true);
+  });
+
+  it("--verwacht: signaleert een afwijking als het verwachte bestand niet meer overeenkomt", () => {
+    const verwachtePad = join(root, "verwacht-kasstroom.json");
+    writeFileSync(
+      verwachtePad,
+      JSON.stringify({
+        bankstandBegin: "2000",
+        bankstandEind: "2700",
+        ontvangsten: "1000",
+        uitgaven: "300",
+        nettoKasstroom: "700",
+        eigenaarOnttrekkingen: "0", // afwijkend: verwacht 300
+        overigeUitgaven: "300",
+        perKwartaal: [1, 2, 3, 4].map((kwartaal) => ({ kwartaal, ontvangsten: "0", uitgaven: "0", eigenaarOnttrekkingen: "0", nettoKasstroom: "0" })),
+      }),
+      "utf-8",
+    );
+
+    const resultaat = genereerKasstroomManagementoverzicht(root, "070_rooisezoom", { boekjaar: 2026, boekperiodeTotEnMet: "06", verwachtePad });
+    expect(resultaat.vergelijking?.alleSluitenBinnenTolerantie).toBe(false);
+    expect(resultaat.vergelijking?.regels.find((r) => r.label === "Eigenaaronttrekkingen")?.sluitBinnenTolerantie).toBe(false);
+  });
 });

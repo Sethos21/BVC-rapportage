@@ -31,8 +31,8 @@ function printGebruik(): never {
       "      (Resultatenrekening + balans van dezelfde periode in één HTML-rapport, geschreven naar rapporten/ — zelfde berekeningen als pl-periode/balans-periode)",
       "  kasstroom-periode <administratieId> --boekjaar N --periodeTotEnMet P",
       "      (Mutatie bankstand: beginbalans + boekingen t/m die periode, alleen voor rekeningen met bevestigde liquideMiddelen:true — eerste, eenvoudige kasstroomweergave)",
-      "  kasstroom-managementoverzicht <administratieId> --boekjaar N --periodeTotEnMet P",
-      "      (Kasstroom-managementoverzicht: bankstand begin/eind, totale ontvangsten/uitgaven en netto kasstroom o.b.v. werkelijke mutaties op de liquide-middelenrekening(en), met eigenaaronttrekkingen (0840) als uitsplitsing binnen uitgaven en per kwartaal — HTML naar rapporten/)",
+      "  kasstroom-managementoverzicht <administratieId> --boekjaar N --periodeTotEnMet P [--verwacht <pad-naar-json>] [--tolerantie N]",
+      "      (Kasstroom-managementoverzicht: bankstand begin/eind, totale ontvangsten/uitgaven en netto kasstroom o.b.v. werkelijke mutaties op de liquide-middelenrekening(en), met eigenaaronttrekkingen (0840) als uitsplitsing binnen uitgaven en per kwartaal — HTML naar rapporten/; --verwacht vergelijkt automatisch met een eerder geverifieerd regressiepunt, bv. 070_Rooise_Zoom boekjaar 2026 t/m periode 06)",
       "  kasstroom-diagnose-tegenrekening <administratieId> --boekjaar N --periodeTotEnMet P --rekening <grootboekrekening>",
       "      (alleen-lezen: toont per boekstuk waarin de opgegeven rekening voorkomt of dat boekstuk vandaag meetelt als eigenaaronttrekking in kasstroom-managementoverzicht, en zo niet waarom niet — geen rapportbestand, alleen JSON op stdout)",
       "  grootboek-inventarisatie",
@@ -201,11 +201,18 @@ async function main() {
     const boekjaarStr = parseFlag(rest, "boekjaar");
     const boekperiodeTotEnMet = parseFlag(rest, "periodeTotEnMet");
     if (!administratieId || !boekjaarStr || !boekperiodeTotEnMet) printGebruik();
+    const tolerantieStr = parseFlag(rest, "tolerantie");
     const resultaat = genereerKasstroomManagementoverzicht(root, administratieId, {
       boekjaar: Number(boekjaarStr),
       boekperiodeTotEnMet,
+      verwachtePad: parseFlag(rest, "verwacht"),
+      toleranceEuro: tolerantieStr ? new Decimal(tolerantieStr) : undefined,
     });
     console.log(`Rapport geschreven: ${resultaat.pad}`);
+    if (resultaat.vergelijking) {
+      console.log(JSON.stringify(resultaat.vergelijking, null, 2));
+      if (!resultaat.vergelijking.alleSluitenBinnenTolerantie) process.exitCode = 1;
+    }
     if (resultaat.resultaat.controleVereist.length > 0) process.exitCode = 1;
     return;
   }

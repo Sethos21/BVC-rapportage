@@ -419,15 +419,6 @@ blijft bestaan — een latere sectie kan de bredere HUURONTVANGST/
 EXPLOITATIE_UITGAVE-indeling nog hergebruiken, dit overzicht gebruikt er nu
 alleen `EIGENAARONTTREKKING` van.
 
-**Bewust losgelaten uit de eerste, bredere opzet:** `huurontvangsten`/
-`exploitatieUitgaven`/`OVERIG` als aparte KPI-categorieën, `uitbetalingsratio`,
-en een configureerbare streefwaarde bankstand (`AdministratieConfig` had
-hiervoor kort een `streefwaardeBankstand`-veld — weer verwijderd, niet
-gebruikt door dit overzicht). `kasstroomCategorie` zelf (het config-veld)
-blijft bestaan — een latere sectie kan de bredere HUURONTVANGST/
-EXPLOITATIE_UITGAVE-indeling nog hergebruiken, dit overzicht gebruikt er nu
-alleen `EIGENAARONTTREKKING` van.
-
 **Renderer + Worker:** `renderKasstroomManagementoverzicht.ts` — bewust
 NOG NIET pixel-perfect gelijk aan het aangeleverde voorbeeldontwerp (op
 expliciet verzoek van de gebruiker), hergebruikt de bestaande
@@ -459,6 +450,54 @@ classificatie, legt alleen de bestaande bloot. Worker:
 `kasstroom-diagnose-tegenrekening <administratieId> --boekjaar N
 --periodeTotEnMet P --rekening <grootboekrekening>` (print JSON op
 stdout, schrijft geen bestand).
+
+### Regressiepunt: 070_Rooise_Zoom kasstroom-managementoverzicht sluit (2026-08-25)
+
+Na de fix hierboven is `kasstroom-managementoverzicht 070_Rooise_Zoom
+--boekjaar 2026 --periodeTotEnMet 06` door de gebruiker persoonlijk
+geverifieerd tegen de echte productie-run en bevestigd correct — niet
+afgeleid of aangenomen. Vastgelegde uitkomst:
+
+| Veld | Bedrag |
+| --- | --- |
+| Bankstand begin | € 1.607,50 |
+| Bankstand eind | € 73.038,37 |
+| Totale ontvangsten | € 552.498,76 |
+| Totale uitgaven | € 481.067,89 |
+| Netto kasstroom | € 71.430,87 |
+| Waarvan eigenaaronttrekkingen | € 253.000,00 |
+| Waarvan overige uitgaven | € 228.067,89 |
+| Q1 (ontvangsten / uitgaven / onttrekkingen / netto) | € 307.782,11 / € 222.424,47 / € 100.000,00 / € 85.357,64 |
+| Q2 (ontvangsten / uitgaven / onttrekkingen / netto) | € 244.716,65 / € 258.643,42 / € 153.000,00 / −€ 13.926,77 |
+| Q3 / Q4 | € 0,00 (geen boekingen in deze periode) |
+| Controle vereist | geen |
+
+Anders dan de balans-periode-regressietest hierboven (`070_Rooise_Zoom
+sluit`, 2026-08-21) is dit NIET als een hardgecodeerde test met
+gereconstrueerde boekingsregels vastgelegd: de balans-periodetest kon
+volstaan met 14 statische beginbalanscijfers, maar deze uitkomst volgt
+uit maanden aan individuele boekingsregels (productiedata, buiten git —
+CLAUDE.md §5) die niet in de repo passen of horen. In plaats daarvan is
+dit vastgelegd via het generieke `--verwacht <pad-naar-json>`-mechanisme
+(`vergelijkKasstroomManagementoverzichtMetVerwacht`,
+`kasstroomManagementoverzichtVergelijking.ts` — zelfde rol als
+`pl-periode`'s `--verwacht`, hier op de vaste KPI-velden + vier
+kwartalen in plaats van een dynamische rapportagepost-lijst). Een
+`verwacht-070-2026-06.json` met bovenstaande cijfers is aan de gebruiker
+geleverd; `bvc-worker kasstroom-managementoverzicht 070_Rooise_Zoom
+--boekjaar 2026 --periodeTotEnMet 06 --verwacht <pad>` toetst elke
+toekomstige run automatisch tegen deze bevestigde uitkomst
+(`exitCode 1` bij een afwijking buiten €0,01).
+
+**Beleid vanaf hier (op expliciet verzoek van de gebruiker, 2026-08-25):**
+geen verdere wijzigingen meer aan `berekenKasstroomManagementoverzicht`
+of `diagnoseerKasstroomTegenrekening` tenzij een ANDERE administratie
+daadwerkelijk een nieuw, nog niet gedekt geval blootlegt (bv. onttrekkingen
+die niet via een aparte rekening maar rechtstreeks tegen de winstreserve
+lopen — zie de eerdere toelichting hierboven over dat scenario). Vormgeving
+(HTML/CSS) van dit overzicht wordt bewust NIET nu losstaand opgepoetst —
+dat gebeurt later gezamenlijk met P&L en balans, zodat huisstijlwerk niet
+drie keer apart gebeurt.
 
 ## Grootboek-inventarisatie (`grootboekInventarisatie.ts`) — voorbereiding op een centrale mastermapping
 
