@@ -6,15 +6,17 @@ import { boekingSaldo, kasstroomCategorieVoorRegel, liquideMiddelenVoorRegel, zo
  * Alleen-lezen diagnostiek (2026-08-25) — geen rapport, geen KPI, verandert
  * niets aan `berekenKasstroomManagementoverzicht`. Doel: per boekstuk waarin
  * een opgegeven grootboekrekening voorkomt, tonen of dat boekstuk vandaag
- * meetelt in de eigenaaronttrekkingen-uitsplitsing, en zo niet, waarom niet
- * — zodat een niet-verklaarbaar verschil (bv. "0840 zou €253.000 aan
- * mutaties moeten hebben, het overzicht toont €0,00") met echte productiedata
- * te herleiden is tot een concrete regel/boekstuk, in plaats van gokken.
+ * meetelt in de eigenaaronttrekkingen-uitsplitsing, en zo niet, waarom niet.
  *
- * Herhaalt bewust dezelfde boekstuk-groeperings- en classificatielogica als
- * `berekenKasstroomManagementoverzicht` (boekstukSleutel, liquideMiddelen,
- * kasstroomCategorie) — dit bestand introduceert geen nieuwe classificaties
- * of aannames, het legt alleen bloot wat de bestaande logica doet.
+ * Herhaalt bewust dezelfde mechaniek als `berekenKasstroomManagementoverzicht`
+ * (herzien 2026-08-25 na een echte productie-run tegen 070_Rooise_Zoom): een
+ * boekstuk telt een tegenrekening-bedrag mee zodra (a) het boekstuk ten
+ * minste één regel op een bevestigde liquide-middelen-rekening bevat
+ * (kasstroom-relevant) EN (b) de opgegeven rekening zelf een bevestigde
+ * `kasstroomCategorie: "EIGENAARONTTREKKING"` heeft — geen boekstuk-brede
+ * homogeniteitseis of bedrag-matching, zie `kasstroomManagementoverzicht.ts`
+ * voor de volledige toelichting waarom dat bij 070 nodig bleek (maandelijkse
+ * verzamelboekingen, niet één boekstuk per transactie).
  */
 
 export interface KasstroomTegenrekeningDiagnoseRegel {
@@ -59,6 +61,7 @@ export function diagnoseerKasstroomTegenrekening(
 
   const doelMappingResultaat = zoekMappingRegel(mappingRegels, doelRekening);
   const doelKasstroomCategorieResultaat = doelMappingResultaat.type === "bekend" ? kasstroomCategorieVoorRegel(doelMappingResultaat.waarde) : null;
+  const doelIsBevestigdEigenaarOnttrekking = doelKasstroomCategorieResultaat?.type === "bekend" && doelKasstroomCategorieResultaat.waarde === "EIGENAARONTTREKKING";
 
   interface Groep {
     boekstukSleutel: string;
@@ -81,38 +84,25 @@ export function diagnoseerKasstroomTegenrekening(
     if (!groep.regels.some((r) => r.grootboeknr === doelRekening)) continue;
 
     const liquideRegels = groep.regels.filter((r) => liquideRekeningen.has(r.grootboeknr));
-    const tegenRegels = groep.regels.filter((r) => !liquideRekeningen.has(r.grootboeknr));
     const liquideBedrag = liquideRegels.reduce((som, r) => som.plus(boekingSaldo(r)), new Decimal(0));
 
-    let telt = false;
+    let telt: boolean;
     let redenNiet: string | null;
 
     if (liquideRegels.length === 0) {
-      redenNiet = "Geen enkele regel in dit boekstuk staat op een bevestigde liquide-middelen-rekening.";
-    } else if (!liquideBedrag.isNegative()) {
-      redenNiet = `Liquide-bedrag van dit boekstuk is niet negatief (${liquideBedrag.toString()}) — telt daarom niet als uitgave.`;
+      telt = false;
+      redenNiet = "Geen enkele regel in dit boekstuk staat op een bevestigde liquide-middelen-rekening — niet kasstroom-relevant.";
+    } else if (!doelIsBevestigdEigenaarOnttrekking) {
+      telt = false;
+      redenNiet = `Kasstroomcategorie van deze rekening resolveert niet naar EIGENAARONTTREKKING (huidige waarde: ${doelKasstroomCategorieResultaat === null ? "rekening niet gevonden in de mapping" : doelKasstroomCategorieResultaat.type === "bekend" ? doelKasstroomCategorieResultaat.waarde : "onbevestigd (null)"}).`;
     } else {
-      const isOnttrekking = tegenRegels.map((r) => {
-        const m = zoekMappingRegel(mappingRegels, r.grootboeknr);
-        if (m.type === "onbekend") return false;
-        const c = kasstroomCategorieVoorRegel(m.waarde);
-        return c.type === "bekend" && c.waarde === "EIGENAARONTTREKKING";
-      });
-      const alle = isOnttrekking.length > 0 && isOnttrekking.every((v) => v);
-      const geen = isOnttrekking.every((v) => !v);
-      if (alle) {
-        telt = true;
-        redenNiet = null;
-      } else if (geen) {
-        redenNiet = "Geen van de tegenrekeningen in dit boekstuk resolveert naar EIGENAARONTTREKKING (onbekend, ongemapt, of een andere classificatie).";
-      } else {
-        redenNiet = "Boekstuk heeft een mix van tegenrekeningen — sommige wel, sommige niet EIGENAARONTTREKKING (telt mee in overigeUitgaven, niet in eigenaarOnttrekkingen).";
-      }
+      telt = true;
+      redenNiet = null;
     }
 
     const bedragVoorDoel = groep.regels.filter((r) => r.grootboeknr === doelRekening).reduce((som, r) => som.plus(boekingSaldo(r)), new Decimal(0));
-    if (telt) totaalMeegeteld = totaalMeegeteld.plus(bedragVoorDoel.abs());
-    else totaalNietMeegeteld = totaalNietMeegeteld.plus(bedragVoorDoel.abs());
+    if (telt) totaalMeegeteld = totaalMeegeteld.plus(bedragVoorDoel);
+    else totaalNietMeegeteld = totaalNietMeegeteld.plus(bedragVoorDoel);
 
     boekstukken.push({
       boekstukSleutel: groep.boekstukSleutel,

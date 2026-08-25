@@ -354,12 +354,23 @@ worden UITSLUITEND afgeleid uit de mutaties op de bevestigde liquide-
 middelen-rekening(en) zelf (elke boeking: positief = ontvangst, negatief =
 uitgave als positief bedrag) — geen tegenrekening-classificatie meer nodig
 voor het totaal. Eigenaaronttrekkingen is een aanvullende uitsplitsing
-BINNEN de uitgaven: alleen daarvoor wordt de tegenrekening bekeken (via
-het boekstukSleutel-mechanisme, hergebruik van het al-bewezen
-`boekstukcontrole`/CAL-FIN-006-concept), specifiek of die een bevestigde
-`kasstroomCategorie: "EIGENAARONTTREKKING"` heeft (`@bvc/config`, op zowel
-BALANS- als RESULTAAT-regels — nooit via `rapportagecategorie`, vrije
-tekst, zou CLAUDE.md §6 schenden). Bij 070: rekening `0840`.
+BINNEN de uitgaven, specifiek of een bevestigde `kasstroomCategorie:
+"EIGENAARONTTREKKING"` (`@bvc/config`, op zowel BALANS- als RESULTAAT-
+regels — nooit via `rapportagecategorie`, vrije tekst, zou CLAUDE.md §6
+schenden). Bij 070: rekening `0840`.
+
+**Mechanisme voor eigenaaronttrekkingen (herzien 2026-08-25, zie
+"Productiebevinding" hieronder):** per boekstuk (`boekstukSleutel`) wordt
+alleen bepaald of het ten minste één regel op een liquide-middelen-
+rekening bevat (kasstroom-relevant). Is dat zo, dan telt ELKE
+tegenrekening-regel in dat boekstuk met een bevestigde `kasstroomCategorie:
+"EIGENAARONTTREKKING"` mee met haar eigen bedrag — geen boekstuk-brede
+homogeniteitseis, geen bedrag-matching tussen een specifieke bankregel en
+een specifieke tegenrekening. Dat is geen aanname: een boekstuk balanceert
+per definitie (debet = credit), dus het bedrag van een bevestigde
+eigenaaronttrekking-tegenrekening binnen een kasstroom-relevant boekstuk
+IS het bedrag dat via de liquide-middelen-rekening is uitbetaald, ongeacht
+wat er verder nog in datzelfde boekstuk zit.
 
 **Twee aansluitingen gelden ALTIJD, structureel (geen aparte controle
 nodig — ze volgen uit de constructie):**
@@ -370,16 +381,43 @@ nodig — ze volgen uit de constructie):**
   — "overig" hoeft dus NOOIT bevestigd te worden, in tegenstelling tot
   `liquideMiddelen`/`kasstroomCategorie` zelf).
 
-**Wat GEEN `controleVereist` meer oplevert (bewuste vereenvoudiging):** een
+**Wat GEEN `controleVereist` oplevert (bewuste vereenvoudiging):** een
 uitgave met een onbekende, ongemapte, of niet-EIGENAARONTTREKKING-
 tegenrekening telt gewoon mee in `overigeUitgaven` — dat is de per
 definitie gedefinieerde restcategorie, geen aanname die bevestiging
-vereist. Alleen een uitgave-boekstuk waarvan de tegenrekeningen
-GEDEELTELIJK (niet allemaal) op een eigenaaronttrekking wijzen, is echt
-ambigu voor déze ene sub-splitsing — dat komt als informatieve regel in
-`controleVereist` (telt gewoon mee in `overigeUitgaven`, nooit verloren).
-Onderliggende `liquideMiddelen`-onzekerheid (van `berekenKasstroomPeriode`)
-blijft wél zichtbaar in `controleVereist`.
+vereist. `controleVereist` bevat daarom uitsluitend de doorgegeven
+`liquideMiddelen`-onzekerheid van `berekenKasstroomPeriode`.
+
+**Productiebevinding (070_Rooise_Zoom, 2026-08-25) — waarom de eerste
+versie van dit mechanisme faalde:** een echte run toonde `waarvan
+eigenaaronttrekkingen: €0,00` terwijl `0840` al bevestigd leek op
+`EIGENAARONTTREKKING`. Onderzoek met `kasstroomTegenrekeningDiagnose.ts`
+(zie hieronder) op de ECHTE cache legde twee afzonderlijke oorzaken bloot:
+1. De actieve productie-mapping had `kasstroomCategorie: null` voor `0840`
+   staan — de eerdere bevestiging was nooit daadwerkelijk in het bestand
+   op `BVC_DATA_ROOT` doorgevoerd (los, operationeel probleem — geen
+   codefout).
+2. Belangrijker: `boekstukSleutel` bleek bij 070 een MAANDELIJKSE
+   verzamelboeking te zijn (één boekstuk bundelt meerdere afzonderlijke
+   huurontvangsten, eigenaaronttrekkingen én kostenbetalingen — niet één
+   boekstuk per transactie). De vorige versie van dit mechanisme eiste dat
+   het NETTO liquide-bedrag van het HELE boekstuk negatief was én dat ALLE
+   tegenrekeningen in dat boekstuk dezelfde categorie hadden — bij een
+   verzamelboeking met gemengde categorieën (bv. huur ÉN onttrekking in
+   hetzelfde boekstuk) is dat vrijwel nooit het geval, dus zelfs met (1)
+   gecorrigeerd was 148.000 van de 253.000 aan echte 0840-mutaties gemist.
+   Het huidige mechanisme (hierboven) heeft geen van beide eisen meer
+   nodig en telt het bevestigde bedrag rechtstreeks, ongeacht wat er
+   verder in het boekstuk zit.
+
+**Bewust losgelaten uit de eerste, bredere opzet:** `huurontvangsten`/
+`exploitatieUitgaven`/`OVERIG` als aparte KPI-categorieën, `uitbetalingsratio`,
+en een configureerbare streefwaarde bankstand (`AdministratieConfig` had
+hiervoor kort een `streefwaardeBankstand`-veld — weer verwijderd, niet
+gebruikt door dit overzicht). `kasstroomCategorie` zelf (het config-veld)
+blijft bestaan — een latere sectie kan de bredere HUURONTVANGST/
+EXPLOITATIE_UITGAVE-indeling nog hergebruiken, dit overzicht gebruikt er nu
+alleen `EIGENAARONTTREKKING` van.
 
 **Bewust losgelaten uit de eerste, bredere opzet:** `huurontvangsten`/
 `exploitatieUitgaven`/`OVERIG` als aparte KPI-categorieën, `uitbetalingsratio`,
@@ -402,22 +440,19 @@ KPI's/kwartaalregels ondersteunt. `genereerKasstroomManagementoverzicht.ts`
 → `kasstroomCategorie: "EIGENAARONTTREKKING"` — dat is voor dit
 vereenvoudigde overzicht het enige dat nog bevestigd hoefde te worden.
 
-**Diagnostiek: `kasstroomTegenrekeningDiagnose.ts` (2026-08-25).** Alleen-
-lezen hulpmiddel, geen KPI, geen rapportbestand — gebouwd nadat een echte
-productie-run voor `070_Rooise_Zoom` `waarvan eigenaaronttrekkingen: €0,00`
-toonde terwijl rekening `0840` bevestigd op `EIGENAARONTTREKKING` staat en
-eerder (met de bredere, eerste opzet) al €253.000 aan relevante mutaties
-via die rekening was gevonden. In plaats van de kernberekening op een
-vermoeden aan te passen (CLAUDE.md §6: nooit gokken), legt
+**Diagnostiek: `kasstroomTegenrekeningDiagnose.ts` (2026-08-25, mechanisme
+meegewerkt met de fix hierboven).** Alleen-lezen hulpmiddel, geen KPI, geen
+rapportbestand — het instrument waarmee de productiebevinding hierboven is
+gedaan, blijft bestaan voor toekomstige administraties/rekeningen.
 `diagnoseerKasstroomTegenrekening(boekingen, mappingRegels, doelRekening)`
-per boekstuk waarin de opgegeven rekening voorkomt bloot: het herberekende
-liquide-bedrag van dat boekstuk, of het vandaag meetelt als
-eigenaaronttrekking, en zo niet, welke van de vier mogelijke oorzaken dat
-verklaart (geen liquide regel in het boekstuk; liquide-bedrag niet
-negatief — bv. omdat de doelrekening zelf onverwacht als `liquideMiddelen:
-true` staat en zichzelf binnen het boekstuk opheft; geen van de
-tegenrekeningen resolveert naar `EIGENAARONTTREKKING`; of een gemengd
-boekstuk). Herhaalt bewust dezelfde groeperings-/classificatielogica als
+toont per boekstuk waarin de opgegeven rekening voorkomt: of dat boekstuk
+kasstroom-relevant is (bevat het een liquide regel), of het vandaag meetelt
+als eigenaaronttrekking, en zo niet, welke van de twee mogelijke oorzaken
+dat verklaart (geen liquide regel in het boekstuk — bv. omdat de
+doelrekening zelf onverwacht als `liquideMiddelen: true` staat; of de
+rekening zelf heeft geen bevestigde `kasstroomCategorie:
+"EIGENAARONTTREKKING"` — inclusief het `null`-geval dat de productiebevinding
+verklaarde). Herhaalt bewust dezelfde logica als
 `berekenKasstroomManagementoverzicht` — introduceert geen nieuwe
 classificatie, legt alleen de bestaande bloot. Worker:
 `genereerKasstroomTegenrekeningDiagnose.ts` + CLI

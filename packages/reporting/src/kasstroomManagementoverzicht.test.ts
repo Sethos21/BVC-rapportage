@@ -112,18 +112,31 @@ describe("berekenKasstroomManagementoverzicht (vereenvoudigd, 2026-08-24)", () =
     expect(resultaat.eigenaarOnttrekkingen.toString()).toBe("0");
   });
 
-  it("meldt (informatief) een uitgave-boekstuk met GEDEELTELIJK eigenaaronttrekking-tegenrekeningen, telt toch mee in overigeUitgaven", () => {
+  it("splitst een eigenaaronttrekking correct uit een MAANDELIJKSE VERZAMELBOEKING (één boekstukSleutel, meerdere afzonderlijke transacties gemengd) — regressie op een echte productiebevinding bij 070_Rooise_Zoom (2026-08-25)", () => {
+    // Eén boekstuk ("verzamelboeking") met een huurontvangst (1310), een eigenaaronttrekking (0840)
+    // én een kostenbetaling (4000) door elkaar -- precies zoals in de echte 070-data: geen boekstuk
+    // per transactie, dus GEEN homogeniteitseis over het hele boekstuk toegestaan.
     const boekingen: Boekingsregel[] = [
-      boeking("F", "1010", "0", "200", "2026-01-25"),
+      boeking("F", "1010", "1000", "0", "2026-01-25"), // huurontvangst
+      boeking("F", "1310", "0", "1000", "2026-01-25"),
+      boeking("F", "1010", "0", "100", "2026-01-25"), // eigenaaronttrekking
       boeking("F", "0840", "100", "0", "2026-01-25"),
-      boeking("F", "4000", "100", "0", "2026-01-25"),
+      boeking("F", "1010", "0", "200", "2026-01-25"), // overige uitgave
+      boeking("F", "4000", "200", "0", "2026-01-25"),
     ];
     const resultaat = berekenKasstroomManagementoverzicht(balansstanden, boekingen, mapping);
-    expect(resultaat.uitgaven.toString()).toBe("200");
+    expect(resultaat.ontvangsten.toString()).toBe("1000");
+    expect(resultaat.uitgaven.toString()).toBe("300");
+    expect(resultaat.eigenaarOnttrekkingen.toString()).toBe("100");
     expect(resultaat.overigeUitgaven.toString()).toBe("200");
+    expect(resultaat.controleVereist).toEqual([]);
+  });
+
+  it("negeert een eigenaaronttrekking-tegenrekening in een boekstuk ZONDER liquide regel (niet kasstroom-relevant)", () => {
+    const boekingen: Boekingsregel[] = [boeking("H", "0840", "100", "0", "2026-01-25"), boeking("H", "1600", "0", "100", "2026-01-25")];
+    const resultaat = berekenKasstroomManagementoverzicht(balansstanden, boekingen, mapping);
     expect(resultaat.eigenaarOnttrekkingen.toString()).toBe("0");
-    expect(resultaat.controleVereist).toHaveLength(1);
-    expect(resultaat.controleVereist[0]?.reden).toContain("gedeeltelijk");
+    expect(resultaat.uitgaven.toString()).toBe("0");
   });
 
   it("houdt de aansluiting ontvangsten - uitgaven = nettoKasstroom altijd sluitend", () => {
