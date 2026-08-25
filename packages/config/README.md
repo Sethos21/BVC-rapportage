@@ -280,13 +280,16 @@ veld. `kasstroomCategorie` is de eigen, expliciete bron van waarheid voor
 deze indeling.
 
 - **`"HUURONTVANGST"`** / **`"EXPLOITATIE_UITGAVE"`** / **`"EIGENAARONTTREKKING"`**
-  — de drie kasstroom-KPI-categorieën uit het managementoverzicht.
-- **`"OVERIG"`** — bevestigd GEEN van de drie (bv. BTW-afdracht, voorziening,
-  tussenrekening servicekosten). Een bewuste, afgeronde classificatie —
-  anders dan `null` komt dit NOOIT in `controleVereist` terecht.
-- **`null`** — nog niet bevestigd. Een boekstuk met een onbevestigde
-  tegenrekening telt nergens in mee en blijft zichtbaar in
-  `controleVereist` (`kasstroomManagementoverzicht.ts`).
+  — vier mogelijke tegenrekening-classificaties (zie hieronder waarom er
+  toch maar drie inhoudelijk verschillende zijn); het schema staat alle vier
+  toe zodat een classificatie die nu al bevestigd is (bv. 1310 →
+  HUURONTVANGST) niet verloren gaat, ook als de huidige rekenmodule hem
+  (nog) niet leest.
+- **`"OVERIG"`** — bevestigd GEEN van de andere drie (bv. BTW-afdracht,
+  voorziening, tussenrekening servicekosten). Een bewuste, afgeronde
+  classificatie — anders dan `null` komt dit NOOIT in `controleVereist`
+  terecht.
+- **`null`** — nog niet bevestigd.
 
 **Onderzoek vooraf (2026-08-22, vóór implementatie), bevestigd door de
 gebruiker:**
@@ -301,6 +304,21 @@ gebruiker:**
   bevestigd voor 070.
 - **Eigenaaronttrekkingen** = rekening `0840` specifiek (al bekend uit de
   balanswerk hierboven).
+
+**Vereenvoudiging (2026-08-25):** het Kasstroom-managementoverzicht is
+teruggebracht tot bankstand begin/eind, totale ontvangsten/uitgaven en
+netto kasstroom — uitsluitend afgeleid uit mutaties op de
+liquide-middelenrekening(en) zelf, zonder tegenrekening-classificatie
+nodig. De enige tegenrekening-classificatie die de rekenmodule
+(`kasstroomManagementoverzicht.ts`) nog leest, is **`"EIGENAARONTTREKKING"`**
+(voor de uitsplitsing "waarvan eigenaaronttrekkingen" binnen uitgaven).
+`"HUURONTVANGST"`/`"EXPLOITATIE_UITGAVE"`/`"OVERIG"` blijven geldige
+schemawaarden en de al bevestigde `1310` → `HUURONTVANGST` blijft staan
+als correcte, herbruikbare classificatie — ze worden alleen door geen
+enkele huidige berekening gelezen. Een niet-`EIGENAARONTTREKKING`-tegen-
+rekening (bevestigd `OVERIG`, `null`, of iets anders) valt voor dit
+overzicht automatisch in "overige uitgaven"; zie
+`packages/reporting/README.md` "Kasstroom" voor de volledige toelichting.
 
 **Bevestigd voor `070_Rooise_Zoom` (2026-08-22):** `1310` (Huurdebiteuren)
 → `HUURONTVANGST`, `0840` (Ontrekkingen - Uitkeringen) → `EIGENAARONTTREKKING`

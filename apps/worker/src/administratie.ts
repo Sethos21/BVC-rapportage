@@ -13,16 +13,6 @@ export interface AdministratieConfig {
   bronlocaties: Record<BronType, BronLocatie>;
   laatstGeopendBoekjaar?: number;
   laatstGeopendBoekperiode?: string;
-  /**
-   * Configureerbare streefwaarde bankstand voor het Kasstroom-
-   * managementoverzicht (2026-08-22) — per administratie, geen globale
-   * parameter (elke administratie/complex heeft een andere gewenste
-   * bankstand). Decimaal bedrag als string (zelfde conventie als andere
-   * JSON-config-bestanden in deze repo). Optioneel: ontbreekt dit veld, dan
-   * levert de kasstroomberekening `onbekend` op voor deze KPI, nooit een
-   * geraden standaardwaarde.
-   */
-  streefwaardeBankstand?: string | null;
 }
 
 /**

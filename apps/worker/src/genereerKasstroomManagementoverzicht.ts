@@ -1,6 +1,5 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import Decimal from "decimal.js";
 import { openCacheReadonly, selecteerBoekingen, type BalansstandRow, type BoekingRow } from "@bvc/cache";
 import type { Balansstand, Boekingsregel } from "@bvc/domain";
 import { berekenKasstroomManagementoverzicht, renderKasstroomManagementoverzichtHtml, type KasstroomManagementoverzichtInvoer, type KasstroomManagementoverzichtResultaat } from "@bvc/reporting";
@@ -10,12 +9,10 @@ import { leesGrootboekMapping } from "./grootboekmapping.js";
 import { naarBalansstand, naarBoekingsregel } from "./rowMappers.js";
 
 /**
- * Bouwt het Kasstroom-managementoverzicht (`@bvc/reporting`'s
+ * Bouwt het (vereenvoudigde) Kasstroom-managementoverzicht (`@bvc/reporting`'s
  * `berekenKasstroomManagementoverzicht`) uit de al-herbouwde cache van één
  * administratie, en schrijft het weg naar `rapporten/` (zelfde patroon als
- * `genereerRapportPeriode.ts`/`genereerControlerapport.ts`). De
- * `streefwaardeBankstand` komt uit de per-administratie `administratie.json`
- * (nieuw, optioneel veld) — nooit een geraden standaardwaarde.
+ * `genereerRapportPeriode.ts`/`genereerControlerapport.ts`).
  */
 
 export interface GenereerKasstroomManagementoverzichtOpties {
@@ -54,8 +51,7 @@ export function genereerKasstroomManagementoverzicht(
       .all(config.bedrijfsnr, opties.boekjaar) as unknown as BalansstandRow[];
     const balansstanden: Balansstand[] = balansstandRijen.map(naarBalansstand);
 
-    const streefwaardeBankstand = config.streefwaardeBankstand ? new Decimal(config.streefwaardeBankstand) : null;
-    const resultaat = berekenKasstroomManagementoverzicht(balansstanden, boekingsregels, mapping.regels, streefwaardeBankstand);
+    const resultaat = berekenKasstroomManagementoverzicht(balansstanden, boekingsregels, mapping.regels);
 
     const invoer: KasstroomManagementoverzichtInvoer = {
       administratieNaam: config.weergavenaam,

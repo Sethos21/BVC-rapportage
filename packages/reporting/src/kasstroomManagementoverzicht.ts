@@ -1,61 +1,61 @@
 import Decimal from "decimal.js";
-import type { GrootboekMappingRegel, KasstroomCategorie } from "@bvc/config";
-import { boekingSaldo, kasstroomCategorieVoorRegel, liquideMiddelenVoorRegel, rapportregelsom, zoekMappingRegel, type Balansstand, type Boekingsregel, type OnbekendOf } from "@bvc/domain";
+import type { GrootboekMappingRegel } from "@bvc/config";
+import { boekingSaldo, kasstroomCategorieVoorRegel, liquideMiddelenVoorRegel, zoekMappingRegel, type Balansstand, type Boekingsregel } from "@bvc/domain";
 import { berekenKasstroomPeriode } from "./kasstroomBerekening.js";
 
 /**
- * Kasstroom-managementoverzicht (2026-08-22) — bouwt voort op de bewezen
- * `berekenKasstroomPeriode` (mutatie bankstand, ONGEWIJZIGD hergebruikt,
- * geen dubbele berekening) met een categorisering van de onderliggende
- * bankmutaties naar huurontvangsten / exploitatie-uitgaven /
- * eigenaaronttrekkingen, plus een kwartaal-uitsplitsing en de
- * uitbetalingsratio.
+ * Kasstroom-managementoverzicht (2026-08-24, vereenvoudigd op expliciet
+ * verzoek van de gebruiker — "hoeveel geld kwam er binnen, hoeveel ging
+ * eruit, en hoeveel daarvan heb ik zelf opgenomen?"). Bouwt voort op de
+ * bewezen `berekenKasstroomPeriode` (bankstand begin/eind/netto,
+ * ONGEWIJZIGD hergebruikt, geen dubbele berekening) en leidt ontvangsten/
+ * uitgaven UITSLUITEND af uit de werkelijke mutaties op de bevestigde
+ * liquide-middelen-rekening(en) zelf — geen tegenrekening-classificatie
+ * meer nodig voor het totaal. Eigenaaronttrekkingen is een aanvullende
+ * uitsplitsing BINNEN de uitgaven (welk deel van de uitgaven ging naar een
+ * rekening met `kasstroomCategorie: "EIGENAARONTTREKKING"`, bv. 0840 bij
+ * 070) — niet een aparte, los berekende categorie.
  *
- * Mechanisme (hergebruik van het al-bewezen boekstukSleutel-concept uit
- * `@bvc/domain`'s `boekstukcontrole`/CAL-FIN-006, niet nieuw): boekingen
- * worden gegroepeerd per boekstuk. Voor elk boekstuk met minstens één
- * regel op een bevestigde liquide-middelen-rekening (generiek via
- * `liquideMiddelenVoorRegel`, nooit een hardcoded rekeningnummer) zijn de
- * OVERIGE regels binnen datzelfde boekstuk de tegenrekening(en). Elke
- * tegenrekening wordt geclassificeerd via het nieuwe, config-gestuurde
- * `kasstroomCategorie`-veld (`@bvc/config`'s `KasstroomCategorieSchema`) —
- * NOOIT via `rapportagecategorie` (vrije tekst, CLAUDE.md §6 zou dat
- * verbieden).
+ * Twee aansluitingen gelden ALTIJD, structureel (nooit een aparte
+ * controle nodig, ze volgen uit de constructie van deze functie):
+ * - `ontvangsten - uitgaven = nettoKasstroom` (nettoKasstroom komt
+ *   rechtstreeks van `berekenKasstroomPeriode`'s `mutatieTotaal`, en
+ *   ontvangsten/uitgaven zijn respectievelijk de som van de positieve en
+ *   de (als positief bedrag getoonde) negatieve boekingen op dezelfde
+ *   liquide-middelen-rekeningen — wiskundig per definitie gelijk).
+ * - `eigenaarOnttrekkingen + overigeUitgaven = uitgaven` (`overigeUitgaven`
+ *   is expliciet gedefinieerd als het restbedrag, geen apart berekende/
+ *   te bevestigen categorie).
  *
- * Regels voor een boekstuk:
- * - Eén of meer tegenrekeningen, allemaal dezelfde bevestigde categorie:
- *   het volledige liquide-bedrag van dit boekstuk telt mee voor die
- *   categorie (in het kwartaal van de boekdatum van de liquide-regel).
- * - Een onbekende/ongemapte of onbevestigde tegenrekening: het boekstuk
- *   telt NERGENS mee, de tegenrekening komt in `controleVereist` (nooit
- *   geraden).
- * - Tegenrekeningen met VERSCHILLENDE bevestigde categorieën binnen één
- *   boekstuk: niet eenduidig toe te wijzen, komt als geheel in
- *   `controleVereist` — nooit stilzwijgend verdeeld.
- * - Uitsluitend liquide-middelen-regels (bv. overboeking tussen twee
- *   liquide-middelen-rekeningen): geen KPI-categorie van toepassing,
- *   genegeerd (bekend-en-niet-relevant, geen controleVereist).
+ * Ontvangsten/uitgaven-splitsing: per individuele boeking op een liquide-
+ * middelen-rekening (debet-credit positief = ontvangst, negatief =
+ * uitgave) — geen boekstuk-/tegenrekeninglogica nodig voor dit totaal.
  *
- * Tekenconventie van de drie uitgave-achtige KPI's: `exploitatieUitgaven`
- * en `eigenaarOnttrekkingen` worden als POSITIEF bedrag gerapporteerd (een
- * bankuitgave is van nature een credit op de bankrekening, dus een
- * negatief `boekingSaldo` — hier bewust omgekeerd zodat "hoeveel is
- * uitgegeven/onttrokken" een leesbaar positief KPI-bedrag is, net als een
- * `tekenconventie: OMGEKEERD`-post in de balans). `huurontvangsten` is van
- * nature al positief (een bankontvangst is een debet). `overig` behoudt
- * bewust het RUWE (ondertekende) bedrag — dat is een technische
- * reconciliatie-bucket, geen KPI om te presenteren.
+ * Eigenaaronttrekkingen-splitsing: hergebruikt het boekstukSleutel-
+ * mechanisme (CAL-FIN-006/`boekstukcontrole`) alleen om, per UITGAVE-
+ * boekstuk, te bepalen of de tegenrekening(en) allemaal een bevestigde
+ * `kasstroomCategorie: "EIGENAARONTTREKKING"` hebben. Zijn ze dat niet
+ * (onbekend, ongemapt, of een andere/geen classificatie), dan telt het
+ * bedrag mee in `overigeUitgaven` — dat is de bewuste, gedefinieerde
+ * restcategorie, GEEN gok (CLAUDE.md §6): "overig" hoeft niet apart
+ * bevestigd te worden, het is per definitie "niet aantoonbaar een
+ * eigenaaronttrekking". Alleen een boekstuk met tegenrekeningen die
+ * GEDEELTELIJK (niet allemaal) op eigenaaronttrekking wijzen is echt
+ * ambigu voor deze ene sub-splitsing — dat komt als informatieve regel in
+ * `controleVereist` (telt wél gewoon mee in `overigeUitgaven`, nooit
+ * verloren of dubbel geteld).
  */
 
 export interface KasstroomKwartaalRegel {
   kwartaal: 1 | 2 | 3 | 4;
-  huurontvangsten: Decimal;
+  ontvangsten: Decimal;
+  uitgaven: Decimal;
   eigenaarOnttrekkingen: Decimal;
-  uitbetalingsratio: OnbekendOf<Decimal>;
+  nettoKasstroom: Decimal;
 }
 
 export interface KasstroomManagementoverzichtControleVereist {
-  /** Tegenrekening, of (bij een gemengd boekstuk) een kommagescheiden lijst van tegenrekeningen. */
+  /** Tegenrekening, of (bij een gemengd uitgave-boekstuk) een kommagescheiden lijst van tegenrekeningen. */
   grootboekrekening: string;
   saldo: Decimal;
   reden: string;
@@ -64,51 +64,28 @@ export interface KasstroomManagementoverzichtControleVereist {
 export interface KasstroomManagementoverzichtResultaat {
   bankstandBegin: Decimal;
   bankstandEind: Decimal;
-  /** = bankstandEind - bankstandBegin (rechtstreeks van `berekenKasstroomPeriode`, niet herberekend). */
+  ontvangsten: Decimal;
+  uitgaven: Decimal;
+  /** = ontvangsten - uitgaven (per constructie gelijk aan bankstandEind - bankstandBegin). */
   nettoKasstroom: Decimal;
-  huurontvangsten: Decimal;
-  exploitatieUitgaven: Decimal;
+  /** Uitsplitsing BINNEN uitgaven: bedrag met een bevestigde tegenrekening-kasstroomCategorie "EIGENAARONTTREKKING", als positief bedrag. */
   eigenaarOnttrekkingen: Decimal;
-  /** Kasstroom-relevante mutaties met een bevestigde `kasstroomCategorie: "OVERIG"` — reconciliatie, geen gepresenteerde KPI. */
-  overig: Decimal;
-  streefwaardeBankstand: OnbekendOf<Decimal>;
-  /** eigenaarOnttrekkingen / huurontvangsten. */
-  uitbetalingsratio: OnbekendOf<Decimal>;
+  /** = uitgaven - eigenaarOnttrekkingen (per definitie, geen aparte berekening/aanname). */
+  overigeUitgaven: Decimal;
   perKwartaal: KasstroomKwartaalRegel[];
   controleVereist: KasstroomManagementoverzichtControleVereist[];
 }
 
-interface ControleAccumulator {
-  saldo: Decimal;
-  redenen: Set<string>;
-}
-
-function voegControleToe(map: Map<string, ControleAccumulator>, grootboekrekening: string, saldo: Decimal, reden: string): void {
-  const bestaand = map.get(grootboekrekening);
-  if (bestaand) {
-    bestaand.saldo = bestaand.saldo.plus(saldo);
-    bestaand.redenen.add(reden);
-  } else {
-    map.set(grootboekrekening, { saldo, redenen: new Set([reden]) });
-  }
-}
-
-function kwartaalVanDatum(datum: Date): 1 | 2 | 3 | 4 {
-  return (Math.floor(datum.getUTCMonth() / 3) + 1) as 1 | 2 | 3 | 4;
-}
-
-function berekenUitbetalingsratio(eigenaarOnttrekkingen: Decimal, huurontvangsten: Decimal): OnbekendOf<Decimal> {
-  if (huurontvangsten.isZero()) {
-    return { type: "onbekend", reden: "Huurontvangsten zijn nul in deze periode — uitbetalingsratio niet te bepalen." };
-  }
-  return { type: "bekend", waarde: eigenaarOnttrekkingen.dividedBy(huurontvangsten) };
+interface BoekstukInfo {
+  liquideBedrag: Decimal;
+  liquideBoekdatum: Date;
+  tegenRegels: Boekingsregel[];
 }
 
 export function berekenKasstroomManagementoverzicht(
   balansstanden: readonly Balansstand[],
   boekingen: readonly Boekingsregel[],
   mappingRegels: readonly GrootboekMappingRegel[],
-  streefwaardeBankstand: Decimal | null,
 ): KasstroomManagementoverzichtResultaat {
   const kasstroomPeriode = berekenKasstroomPeriode(balansstanden, boekingen, mappingRegels);
 
@@ -119,107 +96,115 @@ export function berekenKasstroomManagementoverzicht(
     if (liquideResultaat.type === "bekend" && liquideResultaat.waarde) liquideRekeningen.add(regel.grootboekrekening);
   }
 
-  const boekingenPerBoekstuk = new Map<string, Boekingsregel[]>();
+  // Ontvangsten/uitgaven: rechtstreeks per boeking op een liquide-middelen-rekening, geen
+  // tegenrekeninglogica nodig — zie moduledoc.
+  let ontvangsten = new Decimal(0);
+  let uitgaven = new Decimal(0);
+  const perKwartaalOntvangsten = new Map<number, Decimal>();
+  const perKwartaalUitgaven = new Map<number, Decimal>();
+
+  for (const boeking of boekingen) {
+    if (!liquideRekeningen.has(boeking.grootboeknr)) continue;
+    const saldo = boekingSaldo(boeking);
+    const kwartaal = kwartaalVanDatum(boeking.boekdatum);
+    if (saldo.isPositive()) {
+      ontvangsten = ontvangsten.plus(saldo);
+      perKwartaalOntvangsten.set(kwartaal, (perKwartaalOntvangsten.get(kwartaal) ?? new Decimal(0)).plus(saldo));
+    } else if (saldo.isNegative()) {
+      uitgaven = uitgaven.plus(saldo.negated());
+      perKwartaalUitgaven.set(kwartaal, (perKwartaalUitgaven.get(kwartaal) ?? new Decimal(0)).plus(saldo.negated()));
+    }
+  }
+
+  // Eigenaaronttrekkingen: alleen voor UITGAVE-boekstukken, via de tegenrekening(en) van dat boekstuk.
+  const boekstukkenPerSleutel = new Map<string, BoekstukInfo>();
   for (const boeking of boekingen) {
     const key = `${boeking.bedrijfsnr}::${boeking.boekstukSleutel}`;
-    const bestaand = boekingenPerBoekstuk.get(key);
-    if (bestaand) bestaand.push(boeking);
-    else boekingenPerBoekstuk.set(key, [boeking]);
-  }
-
-  let huurontvangsten = new Decimal(0);
-  let exploitatieUitgaven = new Decimal(0);
-  let eigenaarOnttrekkingen = new Decimal(0);
-  let overig = new Decimal(0);
-  const perCategorieEnKwartaal = new Map<string, Decimal>();
-  const controleAccumulator = new Map<string, ControleAccumulator>();
-  const gemengdeBoekstukken: KasstroomManagementoverzichtControleVereist[] = [];
-
-  for (const regels of boekingenPerBoekstuk.values()) {
-    const liquideRegels = regels.filter((r) => liquideRekeningen.has(r.grootboeknr));
-    if (liquideRegels.length === 0) continue;
-
-    const tegenRegels = regels.filter((r) => !liquideRekeningen.has(r.grootboeknr));
-    if (tegenRegels.length === 0) continue; // uitsluitend liquide-middelen-regels (bv. overboeking) -- geen KPI van toepassing
-
-    const liquideBedrag = rapportregelsom(liquideRegels.map((r) => boekingSaldo(r)));
-
-    const categorieen: (KasstroomCategorie | undefined)[] = [];
-    let heeftOnbekende = false;
-    for (const tegenRegel of tegenRegels) {
-      const mappingResultaat = zoekMappingRegel(mappingRegels, tegenRegel.grootboeknr);
-      if (mappingResultaat.type === "onbekend") {
-        voegControleToe(controleAccumulator, tegenRegel.grootboeknr, boekingSaldo(tegenRegel), mappingResultaat.reden);
-        heeftOnbekende = true;
-        continue;
+    const isLiquide = liquideRekeningen.has(boeking.grootboeknr);
+    const bestaand = boekstukkenPerSleutel.get(key);
+    if (bestaand) {
+      if (isLiquide) {
+        bestaand.liquideBedrag = bestaand.liquideBedrag.plus(boekingSaldo(boeking));
+      } else {
+        bestaand.tegenRegels.push(boeking);
       }
-      const categorieResultaat = kasstroomCategorieVoorRegel(mappingResultaat.waarde);
-      if (categorieResultaat.type === "onbekend") {
-        voegControleToe(controleAccumulator, tegenRegel.grootboeknr, boekingSaldo(tegenRegel), categorieResultaat.reden);
-        heeftOnbekende = true;
-        continue;
-      }
-      categorieen.push(categorieResultaat.waarde);
-    }
-
-    if (heeftOnbekende) continue; // al gerapporteerd in controleVereist hierboven
-
-    const unieke = new Set(categorieen);
-    if (unieke.size > 1) {
-      gemengdeBoekstukken.push({
-        grootboekrekening: tegenRegels.map((r) => r.grootboeknr).join(", "),
-        saldo: liquideBedrag,
-        reden: `Boekstuk bevat tegenrekeningen met verschillende kasstroomcategorieën (${Array.from(unieke).join(", ")}) — niet eenduidig aan één KPI toe te wijzen.`,
-      });
-      continue;
-    }
-
-    const categorie = [...unieke][0]!;
-    const kwartaal = kwartaalVanDatum(liquideRegels[0]!.boekdatum);
-
-    if (categorie === "HUURONTVANGST") {
-      huurontvangsten = huurontvangsten.plus(liquideBedrag);
-      perCategorieEnKwartaal.set(`HUUR::${kwartaal}`, (perCategorieEnKwartaal.get(`HUUR::${kwartaal}`) ?? new Decimal(0)).plus(liquideBedrag));
-    } else if (categorie === "EXPLOITATIE_UITGAVE") {
-      exploitatieUitgaven = exploitatieUitgaven.plus(liquideBedrag.negated());
-    } else if (categorie === "EIGENAARONTTREKKING") {
-      const bedrag = liquideBedrag.negated();
-      eigenaarOnttrekkingen = eigenaarOnttrekkingen.plus(bedrag);
-      perCategorieEnKwartaal.set(`ONTTREKKING::${kwartaal}`, (perCategorieEnKwartaal.get(`ONTTREKKING::${kwartaal}`) ?? new Decimal(0)).plus(bedrag));
     } else {
-      overig = overig.plus(liquideBedrag);
+      boekstukkenPerSleutel.set(key, {
+        liquideBedrag: isLiquide ? boekingSaldo(boeking) : new Decimal(0),
+        liquideBoekdatum: boeking.boekdatum,
+        tegenRegels: isLiquide ? [] : [boeking],
+      });
     }
   }
+
+  let eigenaarOnttrekkingen = new Decimal(0);
+  const perKwartaalOnttrekkingen = new Map<number, Decimal>();
+  const controleAccumulator = new Map<string, { saldo: Decimal; redenen: Set<string> }>();
+
+  for (const { liquideBedrag, liquideBoekdatum, tegenRegels } of boekstukkenPerSleutel.values()) {
+    if (!liquideBedrag.isNegative() || tegenRegels.length === 0) continue; // alleen uitgave-boekstukken met een tegenrekening
+
+    const isOnttrekking = tegenRegels.map((tegenRegel) => {
+      const mappingResultaat = zoekMappingRegel(mappingRegels, tegenRegel.grootboeknr);
+      if (mappingResultaat.type === "onbekend") return false;
+      const categorieResultaat = kasstroomCategorieVoorRegel(mappingResultaat.waarde);
+      return categorieResultaat.type === "bekend" && categorieResultaat.waarde === "EIGENAARONTTREKKING";
+    });
+
+    const alleOnttrekking = isOnttrekking.every((v) => v);
+    const geenOnttrekking = isOnttrekking.every((v) => !v);
+    const uitgaveBedrag = liquideBedrag.negated();
+
+    if (alleOnttrekking) {
+      const kwartaal = kwartaalVanDatum(liquideBoekdatum);
+      eigenaarOnttrekkingen = eigenaarOnttrekkingen.plus(uitgaveBedrag);
+      perKwartaalOnttrekkingen.set(kwartaal, (perKwartaalOnttrekkingen.get(kwartaal) ?? new Decimal(0)).plus(uitgaveBedrag));
+    } else if (!geenOnttrekking) {
+      // Gedeeltelijk: sommige tegenrekeningen wijzen op een eigenaaronttrekking, andere niet — niet
+      // eenduidig te splitsen. Telt (bewust) mee in overigeUitgaven, alleen informatief gemeld.
+      const rekening = tegenRegels.map((r) => r.grootboeknr).join(", ");
+      const bestaand = controleAccumulator.get(rekening);
+      const reden = "Boekstuk heeft tegenrekeningen die gedeeltelijk op een eigenaaronttrekking wijzen — niet eenduidig te splitsen, telt mee in overigeUitgaven.";
+      if (bestaand) {
+        bestaand.saldo = bestaand.saldo.plus(uitgaveBedrag);
+        bestaand.redenen.add(reden);
+      } else {
+        controleAccumulator.set(rekening, { saldo: uitgaveBedrag, redenen: new Set([reden]) });
+      }
+    }
+  }
+
+  const overigeUitgaven = uitgaven.minus(eigenaarOnttrekkingen);
 
   const perKwartaal: KasstroomKwartaalRegel[] = ([1, 2, 3, 4] as const).map((kwartaal) => {
-    const huur = perCategorieEnKwartaal.get(`HUUR::${kwartaal}`) ?? new Decimal(0);
-    const onttrekking = perCategorieEnKwartaal.get(`ONTTREKKING::${kwartaal}`) ?? new Decimal(0);
-    return { kwartaal, huurontvangsten: huur, eigenaarOnttrekkingen: onttrekking, uitbetalingsratio: berekenUitbetalingsratio(onttrekking, huur) };
+    const kwOntvangsten = perKwartaalOntvangsten.get(kwartaal) ?? new Decimal(0);
+    const kwUitgaven = perKwartaalUitgaven.get(kwartaal) ?? new Decimal(0);
+    const kwOnttrekkingen = perKwartaalOnttrekkingen.get(kwartaal) ?? new Decimal(0);
+    return { kwartaal, ontvangsten: kwOntvangsten, uitgaven: kwUitgaven, eigenaarOnttrekkingen: kwOnttrekkingen, nettoKasstroom: kwOntvangsten.minus(kwUitgaven) };
   });
 
   const controleVereist: KasstroomManagementoverzichtControleVereist[] = [
+    ...kasstroomPeriode.controleVereist,
     ...Array.from(controleAccumulator.entries()).map(([grootboekrekening, entry]) => ({
       grootboekrekening,
       saldo: entry.saldo,
       reden: Array.from(entry.redenen).join(" "),
     })),
-    ...gemengdeBoekstukken,
   ].sort((a, b) => a.grootboekrekening.localeCompare(b.grootboekrekening));
 
   return {
     bankstandBegin: kasstroomPeriode.beginstandTotaal,
     bankstandEind: kasstroomPeriode.eindstandTotaal,
+    ontvangsten,
+    uitgaven,
     nettoKasstroom: kasstroomPeriode.mutatieTotaal,
-    huurontvangsten,
-    exploitatieUitgaven,
     eigenaarOnttrekkingen,
-    overig,
-    streefwaardeBankstand:
-      streefwaardeBankstand === null
-        ? { type: "onbekend", reden: "Geen streefwaarde bankstand geconfigureerd voor deze administratie." }
-        : { type: "bekend", waarde: streefwaardeBankstand },
-    uitbetalingsratio: berekenUitbetalingsratio(eigenaarOnttrekkingen, huurontvangsten),
+    overigeUitgaven,
     perKwartaal,
     controleVereist,
   };
+}
+
+function kwartaalVanDatum(datum: Date): 1 | 2 | 3 | 4 {
+  return (Math.floor(datum.getUTCMonth() / 3) + 1) as 1 | 2 | 3 | 4;
 }

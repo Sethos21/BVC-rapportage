@@ -340,56 +340,55 @@ rekeningnaam/-omschrijving). Worker: `genereerKasstroomPeriode.ts` + CLI
 `pl-periode`/`balans-periode`).
 
 **2. Kasstroom-managementoverzicht (`kasstroomManagementoverzicht.ts`,
-uitgebreide versie, op expliciet verzoek van de gebruiker).** Bouwt voort
-op (1) — `berekenKasstroomPeriode` wordt ONGEWIJZIGD hergebruikt voor
-bankstand begin/eind/netto kasstroom, geen dubbele berekening — en voegt
-huurontvangsten/exploitatie-uitgaven/eigenaaronttrekkingen,
-kwartaal-uitsplitsing, uitbetalingsratio en een configureerbare
-streefwaarde bankstand toe.
+vereenvoudigd 2026-08-24 op expliciet verzoek van de gebruiker — "hoeveel
+geld kwam er binnen, hoeveel ging eruit, en hoeveel daarvan heb ik zelf
+opgenomen?").** Bouwt voort op (1) — `berekenKasstroomPeriode` wordt
+ONGEWIJZIGD hergebruikt voor bankstand begin/eind/netto kasstroom, geen
+dubbele berekening. Toont: bankstand begin, totale ontvangsten, totale
+uitgaven, netto kasstroom, bankstand eind, een uitsplitsing BINNEN de
+uitgaven (waarvan eigenaaronttrekkingen / waarvan overige uitgaven), en
+per kwartaal ontvangsten/uitgaven/eigenaaronttrekkingen/netto kasstroom.
 
-**Onderzoek vóór implementatie (verplicht door de gebruiker gesteld):**
-huurontvangsten/exploitatie-uitgaven mogen NIET uit P&L-bedragen komen,
-alleen uit werkelijke kasmutaties. Mechanisme: boekingen groeperen per
-`boekstukSleutel` (hergebruik van het al-bewezen `boekstukcontrole`/
-CAL-FIN-006-concept uit `@bvc/domain`'s `finance.ts` — niets nieuws). Voor
-elk boekstuk met een regel op een liquide-middelen-rekening zijn de
-overige regels de tegenrekening(en). Elke tegenrekening wordt
-geclassificeerd via een NIEUW, config-gestuurd veld — `kasstroomCategorie`
-(`@bvc/config`, op zowel BALANS- als RESULTAAT-regels, zie
-packages/config/README.md) — nooit via `rapportagecategorie` (vrije tekst,
-zou CLAUDE.md §6 schenden). Empirisch bevestigd door de gebruiker: bij 070
-lopen huurontvangsten via Huurdebiteuren (`1310`, een BALANS-rekening),
-niet rechtstreeks via een Opbrengsten-rekening; exploitatie-uitgaven zijn
-gemengd (soms direct Bank↔Kosten, soms via Crediteuren/Te betalen kosten).
+**Kernvereenvoudiging t.o.v. de eerste versie:** ontvangsten en uitgaven
+worden UITSLUITEND afgeleid uit de mutaties op de bevestigde liquide-
+middelen-rekening(en) zelf (elke boeking: positief = ontvangst, negatief =
+uitgave als positief bedrag) — geen tegenrekening-classificatie meer nodig
+voor het totaal. Eigenaaronttrekkingen is een aanvullende uitsplitsing
+BINNEN de uitgaven: alleen daarvoor wordt de tegenrekening bekeken (via
+het boekstukSleutel-mechanisme, hergebruik van het al-bewezen
+`boekstukcontrole`/CAL-FIN-006-concept), specifiek of die een bevestigde
+`kasstroomCategorie: "EIGENAARONTTREKKING"` heeft (`@bvc/config`, op zowel
+BALANS- als RESULTAAT-regels — nooit via `rapportagecategorie`, vrije
+tekst, zou CLAUDE.md §6 schenden). Bij 070: rekening `0840`.
 
-**Boekstuk-regels (nooit gokken):**
-- Alle tegenrekeningen dezelfde bevestigde categorie → het volledige
-  liquide-bedrag telt mee voor die categorie (kwartaal = boekdatum van de
-  liquide-regel).
-- Eén of meer tegenrekeningen onbekend/ongemapt of `kasstroomCategorie:
-  null` → het boekstuk telt NERGENS mee, de tegenrekening(en) komen in
-  `controleVereist`.
-- Tegenrekeningen met VERSCHILLENDE bevestigde categorieën binnen één
-  boekstuk → niet eenduidig toe te wijzen, het hele boekstuk komt in
-  `controleVereist` (nooit stilzwijgend verdeeld/geraden).
-- Uitsluitend liquide-middelen-regels (bv. overboeking tussen twee
-  liquide-middelen-rekeningen) → geen KPI van toepassing, genegeerd.
+**Twee aansluitingen gelden ALTIJD, structureel (geen aparte controle
+nodig — ze volgen uit de constructie):**
+- `ontvangsten - uitgaven = nettoKasstroom` (wiskundig gegarandeerd: som
+  van de positieve delen minus som van de negatieve delen = som van alles).
+- `eigenaarOnttrekkingen + overigeUitgaven = uitgaven` (`overigeUitgaven`
+  is expliciet het restbedrag, geen los berekende/te bevestigen categorie
+  — "overig" hoeft dus NOOIT bevestigd te worden, in tegenstelling tot
+  `liquideMiddelen`/`kasstroomCategorie` zelf).
 
-**Tekenconventie van de KPI's:** `exploitatieUitgaven` en
-`eigenaarOnttrekkingen` worden als POSITIEF bedrag gerapporteerd (een
-bankuitgave is van nature een credit — dus een negatief `boekingSaldo` —
-hier bewust omgekeerd tot een leesbaar positief KPI-bedrag, net als een
-`tekenconventie: OMGEKEERD`-post in de balans). `huurontvangsten` is van
-nature al positief. `overig` (bevestigd géén van de drie KPI-categorieën,
-bv. BTW/voorzieningen/tussenrekeningen) behoudt het RUWE, ondertekende
-bedrag — een technische reconciliatiebucket, geen gepresenteerde KPI.
+**Wat GEEN `controleVereist` meer oplevert (bewuste vereenvoudiging):** een
+uitgave met een onbekende, ongemapte, of niet-EIGENAARONTTREKKING-
+tegenrekening telt gewoon mee in `overigeUitgaven` — dat is de per
+definitie gedefinieerde restcategorie, geen aanname die bevestiging
+vereist. Alleen een uitgave-boekstuk waarvan de tegenrekeningen
+GEDEELTELIJK (niet allemaal) op een eigenaaronttrekking wijzen, is echt
+ambigu voor déze ene sub-splitsing — dat komt als informatieve regel in
+`controleVereist` (telt gewoon mee in `overigeUitgaven`, nooit verloren).
+Onderliggende `liquideMiddelen`-onzekerheid (van `berekenKasstroomPeriode`)
+blijft wél zichtbaar in `controleVereist`.
 
-**Streefwaarde bankstand:** geen globale `Beheerparameters` (elke
-administratie heeft een andere gewenste bankstand) — een nieuw, optioneel
-`streefwaardeBankstand`-veld in de per-administratie `AdministratieConfig`
-(`apps/worker/src/administratie.ts`), decimaal bedrag als string, net als
-`bedrijfsnr`/`weergavenaam` al daar staan. Ontbreekt het, dan levert de
-KPI `onbekend`, nooit een geraden standaardwaarde.
+**Bewust losgelaten uit de eerste, bredere opzet:** `huurontvangsten`/
+`exploitatieUitgaven`/`OVERIG` als aparte KPI-categorieën, `uitbetalingsratio`,
+en een configureerbare streefwaarde bankstand (`AdministratieConfig` had
+hiervoor kort een `streefwaardeBankstand`-veld — weer verwijderd, niet
+gebruikt door dit overzicht). `kasstroomCategorie` zelf (het config-veld)
+blijft bestaan — een latere sectie kan de bredere HUURONTVANGST/
+EXPLOITATIE_UITGAVE-indeling nog hergebruiken, dit overzicht gebruikt er nu
+alleen `EIGENAARONTTREKKING` van.
 
 **Renderer + Worker:** `renderKasstroomManagementoverzicht.ts` — bewust
 NOG NIET pixel-perfect gelijk aan het aangeleverde voorbeeldontwerp (op
@@ -399,11 +398,9 @@ KPI's/kwartaalregels ondersteunt. `genereerKasstroomManagementoverzicht.ts`
 + CLI `kasstroom-managementoverzicht` schrijft HTML naar `rapporten/`
 (zelfde patroon als `rapport-periode`/`genereerControlerapport.ts`).
 
-**Nog te bevestigen voor `070_Rooise_Zoom`:** `kasstroomCategorie` staat
-voor alle rekeningen nog op `null` — zie packages/config/README.md
-"Kasstroomcategorie" voor de exacte lijst rekeningen die nog bevestigd
-moeten worden (`1310`, `0840`, en de Kosten/Crediteuren/Te-betalen-kosten-
-rekeningen).
+**Bevestigd voor `070_Rooise_Zoom`:** `0840` (Ontrekkingen - Uitkeringen)
+→ `kasstroomCategorie: "EIGENAARONTTREKKING"` — dat is voor dit
+vereenvoudigde overzicht het enige dat nog bevestigd hoefde te worden.
 
 ## Grootboek-inventarisatie (`grootboekInventarisatie.ts`) — voorbereiding op een centrale mastermapping
 

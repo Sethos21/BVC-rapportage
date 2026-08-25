@@ -235,11 +235,12 @@ Aandachtspunten:
   P&L-uitkomst blijft ongewijzigd. Zie `packages/reporting/README.md`.
 - **Kasstroom** (`bvc-worker kasstroom-periode`/`kasstroom-managementoverzicht
   <administratieId> --boekjaar N --periodeTotEnMet P`) — mutatie bankstand
-  (alleen bevestigde `liquideMiddelen: true`-rekeningen), en een uitgebreid
-  managementoverzicht (huurontvangsten/exploitatie-uitgaven/
-  eigenaaronttrekkingen/kwartalen/uitbetalingsratio) op basis van
-  werkelijke bankmutaties via de tegenrekening van elk boekstuk — nooit uit
-  P&L-bedragen. Zie `packages/reporting/README.md` "Kasstroom".
+  (alleen bevestigde `liquideMiddelen: true`-rekeningen), en een
+  managementoverzicht (bankstand begin/eind, totale ontvangsten/uitgaven,
+  netto kasstroom, eigenaaronttrekkingen (0840) als uitsplitsing binnen
+  uitgaven, per kwartaal) uitsluitend afgeleid uit werkelijke mutaties op
+  de liquide-middelenrekening(en) — nooit uit P&L-bedragen. Zie
+  `packages/reporting/README.md` "Kasstroom".
 - **`apps/web`** — nog een lege Next.js-scaffold. Wordt het interactieve
   dashboard (met filters), op dezelfde rekenlaag/cache als de HTML/PDF-
   rapporten (CLAUDE.md §3) — nog te bouwen.

@@ -31,7 +31,7 @@ function printGebruik(): never {
       "  kasstroom-periode <administratieId> --boekjaar N --periodeTotEnMet P",
       "      (Mutatie bankstand: beginbalans + boekingen t/m die periode, alleen voor rekeningen met bevestigde liquideMiddelen:true — eerste, eenvoudige kasstroomweergave)",
       "  kasstroom-managementoverzicht <administratieId> --boekjaar N --periodeTotEnMet P",
-      "      (Uitgebreid kasstroomoverzicht: huurontvangsten/exploitatie-uitgaven/eigenaaronttrekkingen o.b.v. werkelijke bankmutaties via tegenrekening + kasstroomCategorie, kwartaal-uitsplitsing, uitbetalingsratio — HTML naar rapporten/)",
+      "      (Kasstroom-managementoverzicht: bankstand begin/eind, totale ontvangsten/uitgaven en netto kasstroom o.b.v. werkelijke mutaties op de liquide-middelenrekening(en), met eigenaaronttrekkingen (0840) als uitsplitsing binnen uitgaven en per kwartaal — HTML naar rapporten/)",
       "  grootboek-inventarisatie",
       "      (alleen-lezen: inventariseert grootboekrekeninggebruik over ALLE administraties in de gedeelde bron boekingen/balans_per_jaar — voorbereiding op een centrale mastermapping, past niets toe)",
       "",

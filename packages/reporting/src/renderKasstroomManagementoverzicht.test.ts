@@ -7,19 +7,17 @@ import type { KasstroomManagementoverzichtResultaat } from "./kasstroomManagemen
 function resultaat(overrides: Partial<KasstroomManagementoverzichtResultaat> = {}): KasstroomManagementoverzichtResultaat {
   return {
     bankstandBegin: new Decimal("2000"),
-    bankstandEind: new Decimal("3000"),
-    nettoKasstroom: new Decimal("1000"),
-    huurontvangsten: new Decimal("1000"),
-    exploitatieUitgaven: new Decimal("300"),
+    bankstandEind: new Decimal("2200"),
+    ontvangsten: new Decimal("1000"),
+    uitgaven: new Decimal("800"),
+    nettoKasstroom: new Decimal("200"),
     eigenaarOnttrekkingen: new Decimal("500"),
-    overig: new Decimal("-50"),
-    streefwaardeBankstand: { type: "bekend", waarde: new Decimal("50000") },
-    uitbetalingsratio: { type: "bekend", waarde: new Decimal("0.5") },
+    overigeUitgaven: new Decimal("300"),
     perKwartaal: [
-      { kwartaal: 1, huurontvangsten: new Decimal("1000"), eigenaarOnttrekkingen: new Decimal("0"), uitbetalingsratio: { type: "bekend", waarde: new Decimal("0") } },
-      { kwartaal: 2, huurontvangsten: new Decimal("0"), eigenaarOnttrekkingen: new Decimal("500"), uitbetalingsratio: { type: "onbekend", reden: "Huurontvangsten zijn nul." } },
-      { kwartaal: 3, huurontvangsten: new Decimal("0"), eigenaarOnttrekkingen: new Decimal("0"), uitbetalingsratio: { type: "onbekend", reden: "Huurontvangsten zijn nul." } },
-      { kwartaal: 4, huurontvangsten: new Decimal("0"), eigenaarOnttrekkingen: new Decimal("0"), uitbetalingsratio: { type: "onbekend", reden: "Huurontvangsten zijn nul." } },
+      { kwartaal: 1, ontvangsten: new Decimal("1000"), uitgaven: new Decimal("300"), eigenaarOnttrekkingen: new Decimal("0"), nettoKasstroom: new Decimal("700") },
+      { kwartaal: 2, ontvangsten: new Decimal("0"), uitgaven: new Decimal("500"), eigenaarOnttrekkingen: new Decimal("500"), nettoKasstroom: new Decimal("-500") },
+      { kwartaal: 3, ontvangsten: new Decimal("0"), uitgaven: new Decimal("0"), eigenaarOnttrekkingen: new Decimal("0"), nettoKasstroom: new Decimal("0") },
+      { kwartaal: 4, ontvangsten: new Decimal("0"), uitgaven: new Decimal("0"), eigenaarOnttrekkingen: new Decimal("0"), nettoKasstroom: new Decimal("0") },
     ],
     controleVereist: [],
     ...overrides,
@@ -32,7 +30,7 @@ function invoer(overrides: Partial<KasstroomManagementoverzichtInvoer> = {}): Ka
     bedrijfsnr: "070",
     boekjaar: 2026,
     boekperiodeTotEnMet: "06",
-    gegenereerdOp: new Date("2026-08-22T12:00:00Z"),
+    gegenereerdOp: new Date("2026-08-24T12:00:00Z"),
     resultaat: resultaat(),
     ...overrides,
   };
@@ -47,45 +45,42 @@ describe("renderKasstroomManagementoverzichtHtml", () => {
     expect(html).toContain("t/m periode 06");
   });
 
-  it("toont alle acht KPI-kaarten", () => {
+  it("toont de vijf hoofd-KPI's", () => {
     const html = renderKasstroomManagementoverzichtHtml(invoer());
     expect(html).toContain("Bankstand begin");
-    expect(html).toContain("Bankstand eind");
+    expect(html).toContain("Totale ontvangsten");
+    expect(html).toContain("Totale uitgaven");
     expect(html).toContain("Netto kasstroom");
-    expect(html).toContain("Streefwaarde bankstand");
-    expect(html).toContain("Huurontvangsten");
-    expect(html).toContain("Exploitatie-uitgaven");
-    expect(html).toContain("Eigenaaronttrekkingen");
-    expect(html).toContain("Uitbetalingsratio");
+    expect(html).toContain("Bankstand eind");
   });
 
-  it("toont een kwartaaltabel met vier regels", () => {
+  it("toont de uitsplitsing eigenaaronttrekkingen/overige uitgaven binnen uitgaven", () => {
+    const html = renderKasstroomManagementoverzichtHtml(invoer());
+    expect(html).toContain("Waarvan eigenaaronttrekkingen");
+    expect(html).toContain("Waarvan overige uitgaven");
+    expect(html).toContain("Totaal uitgaven");
+  });
+
+  it("toont een kwartaaltabel met ontvangsten, uitgaven, eigenaaronttrekkingen en netto kasstroom per kwartaal", () => {
     const html = renderKasstroomManagementoverzichtHtml(invoer());
     expect(html).toContain("Q1");
     expect(html).toContain("Q2");
     expect(html).toContain("Q3");
     expect(html).toContain("Q4");
-    expect(html).toContain("50,0%"); // uitbetalingsratio Q1 = 0
   });
 
-  it("toont Onbekend met reden voor een streefwaarde die niet geconfigureerd is", () => {
-    const html = renderKasstroomManagementoverzichtHtml(invoer({ resultaat: resultaat({ streefwaardeBankstand: { type: "onbekend", reden: "Geen streefwaarde bankstand geconfigureerd voor deze administratie." } }) }));
-    expect(html).toContain("Onbekend");
-    expect(html).toContain("Geen streefwaarde bankstand geconfigureerd");
-  });
-
-  it("toont controleVereist-rekeningen altijd zichtbaar, nooit stilzwijgend weggelaten", () => {
+  it("toont controleVereist-regels altijd zichtbaar, nooit stilzwijgend weggelaten", () => {
     const html = renderKasstroomManagementoverzichtHtml(
-      invoer({ resultaat: resultaat({ controleVereist: [{ grootboekrekening: "1600", saldo: new Decimal("20"), reden: "Kasstroomcategorie nog niet bevestigd." }] }) }),
+      invoer({ resultaat: resultaat({ controleVereist: [{ grootboekrekening: "1010", saldo: new Decimal("20"), reden: "Liquiditeitsclassificatie nog niet bevestigd." }] }) }),
     );
     expect(html).toContain("Controle vereist");
-    expect(html).toContain("1600");
-    expect(html).toContain("Kasstroomcategorie nog niet bevestigd.");
+    expect(html).toContain("1010");
+    expect(html).toContain("Liquiditeitsclassificatie nog niet bevestigd.");
   });
 
   it("meldt duidelijk dat er geen controle vereist is als de lijst leeg is", () => {
     const html = renderKasstroomManagementoverzichtHtml(invoer());
-    expect(html).toContain("geen — alle liquide-middelen-mutaties");
+    expect(html).toContain("Controle vereist:</strong> geen");
   });
 
   it("escaped HTML-gevoelige tekens", () => {
