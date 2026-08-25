@@ -173,6 +173,21 @@ overdrachtsdossier voor de volledige historische besluitvorming.
   bundelt) vereist een nieuwe build + kopieerstap; de oude `.exe` op de
   netwerklocatie wordt nooit automatisch bijgewerkt.
 
+**Trigger.** Zegt de gebruiker kortweg **"build"** of **"build nu"** (of
+een variant als "git pull en build exe", "worker bouwen", "opnieuw
+uitvoeren git pull en build exe"), voer dan zonder verdere toelichting
+deze volledige reeks uit:
+1. `git status` (controleer op ongecommit werk vóór de pull).
+2. `git pull`.
+3. `corepack pnpm install`.
+4. `corepack pnpm --filter @bvc/worker build:exe`.
+5. Kopieer `apps\worker\dist\bvc-worker.exe` naar
+   `\\BERNHEZE-DC01\gebruikers$\seth\Documents\Claude Desktop\PROJECTEN\Worker\`.
+
+Sluit af met een korte samenvatting (welke commit is opgehaald, of de build
+en kopieerstap geslaagd zijn) — geen aparte bevestigingsvraag per stap
+nodig.
+
 ### Rapport genereren
 
 - `BVC_DATA_ROOT`: `M:\Werk\werk BVC - BEHEER\Beheer commercieel og\BVC
