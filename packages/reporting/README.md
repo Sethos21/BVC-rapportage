@@ -685,6 +685,29 @@ kort bronnenonderzoek, nog GEEN mapping/implementatie (2026-08-26):**
   bezettingsgraad-/huur-helpers in `kerncijfers.ts`) — volledig braakliggend
   terrein, geen vervolgstap zonder nieuwe afstemming met de gebruiker.
 
+### Regressiepunt: 070_Rooise_Zoom kerncijfers (2026-08-26)
+
+`kerncijfers 070_Rooise_Zoom --boekjaar 2026 --periodeTotEnMet 06` door de
+gebruiker persoonlijk gedraaid tegen de echte productiecache en bevestigd:
+
+| Veld | Waarde |
+| --- | --- |
+| Totale opbrengsten | € 341.734,81 |
+| Totale kosten | € 30.555,15 |
+| Resultaat huidig boekjaar | € 311.179,66 |
+| Bankstand einde periode | € 73.038,37 |
+| Netto kasstroom | € 71.430,87 |
+| Eigenaaronttrekkingen | € 253.000,00 |
+| Balans sluit binnen tolerantie | ja |
+
+Twee onafhankelijke kruiscontroles bevestigen dat er geen nieuwe rekenlogica
+is geslopen: (1) bankstand/netto kasstroom/eigenaaronttrekkingen zijn EXACT
+gelijk aan het al op 2026-08-25 geverifieerde
+`kasstroom-managementoverzicht`-regressiepunt hierboven; (2) €341.734,81 −
+€30.555,15 = €311.179,66, exact gelijk aan `resultaatHuidigBoekjaar` — de
+opbrengsten/kosten-extractie en `berekenNettoResultaat` zijn dus onderling
+consistent.
+
 ## Grootboek-inventarisatie (`grootboekInventarisatie.ts`) — voorbereiding op een centrale mastermapping
 
 Puur diagnostisch, alleen-lezen: past geen mapping toe, verandert niets.
