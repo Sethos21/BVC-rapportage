@@ -23,4 +23,6 @@ export * from "./kerncijfersManagement.js";
 export * from "./vastgoedKerncijfers.js";
 export * from "./rentrollDiagnose.js";
 export * from "./huurKerncijfers.js";
+export * from "./managementRapport.js";
+export * from "./renderManagementRapport.js";
 export { HUISSTIJL_CSS, escapeHtml, formatBedragHtml, renderRapportDocument } from "./huisstijl.js";

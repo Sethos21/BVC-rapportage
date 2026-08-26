@@ -1,5 +1,5 @@
 import type Decimal from "decimal.js";
-import { formatEUR } from "@bvc/domain";
+import { formatEUR, formatPercentage } from "@bvc/domain";
 
 /**
  * Gedeelde BVC-huisstijl (CSS, escaping, bedragformattering) voor alle
@@ -57,6 +57,13 @@ export const HUISSTIJL_CSS = `
   @media print{
     .card{box-shadow:none;border:1px solid #d8d6ce;break-inside:avoid}
   }
+  .badge{display:inline-block;font:600 10.5px 'IBM Plex Sans';letter-spacing:0.05em;text-transform:uppercase;padding:3px 9px;border-radius:999px}
+  .badge-momentopname{background:#fbf3e2;color:var(--gold);border:1px solid #ecdcb3}
+  .badge-periode{background:var(--tintGreen);color:var(--green);border:1px solid #cfe1d8}
+  .controle-vereist{color:var(--gold);font-style:italic;cursor:help;border-bottom:1px dotted var(--gold)}
+  .ernst-kritiek{color:var(--red);font-weight:600}
+  .ernst-waarschuwing{color:var(--gold);font-weight:600}
+  .ernst-informatief{color:var(--muted)}
 `;
 
 export function escapeHtml(tekst: string): string {
@@ -66,6 +73,26 @@ export function escapeHtml(tekst: string): string {
 export function formatBedragHtml(bedrag: Decimal): string {
   const tekst = escapeHtml(formatEUR(bedrag, "haakjes"));
   return bedrag.isNegative() ? `<span class="negatief">${tekst}</span>` : tekst;
+}
+
+/** `12,5%` — zie `@bvc/domain`'s `formatPercentage` (verwacht een waarde die al ×100 is, bv. bezettingsgraad). */
+export function formatPercentageHtml(waarde: Decimal): string {
+  const tekst = escapeHtml(formatPercentage(waarde));
+  return waarde.isNegative() ? `<span class="negatief">${tekst}</span>` : tekst;
+}
+
+/** `1.390 m²` / `3.333,5 m²` — duizendtalpunt, komma als decimaal (zelfde stijl als `formatEUR`), geen decimalen als de waarde een heel getal is. */
+export function formatM2Html(waarde: Decimal): string {
+  const [geheel, decimalen] = waarde.toFixed(waarde.isInteger() ? 0 : 1).split(".");
+  const geheelMetPunten = (geheel ?? "0").replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  const tekst = decimalen ? `${geheelMetPunten},${decimalen}` : geheelMetPunten;
+  return `${escapeHtml(tekst)} m²`;
+}
+
+/** Toont een `OnbekendOf<Decimal>` als de geformatteerde waarde, of als "Controle vereist" (met de reden als tooltip) — nooit een gok. */
+export function formatOnbekendOfHtml<T extends Decimal>(waarde: { type: "bekend"; waarde: T } | { type: "onbekend"; reden: string }, formatteer: (d: T) => string): string {
+  if (waarde.type === "bekend") return formatteer(waarde.waarde);
+  return `<span class="controle-vereist" title="${escapeHtml(waarde.reden)}">Controle vereist</span>`;
 }
 
 /** Wikkelt sectie-HTML in het gedeelde document-skelet (doctype/head/CSS/pagina-div). */
