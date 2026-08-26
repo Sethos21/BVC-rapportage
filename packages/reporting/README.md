@@ -793,6 +793,90 @@ gelijk aan het al op 2026-08-25 geverifieerde
 opbrengsten/kosten-extractie en `berekenNettoResultaat` zijn dus onderling
 consistent.
 
+## Rentroll-diagnose (`rentrollDiagnose.ts`, TIJDELIJK, 2026-08-26) — onderzoek vóór een huur-KPI-module
+
+Alleen-lezen, geen KPI: toont per rentroll-regel `Vorderingsoort`,
+`prolongatie_bedrag_jaar`, `korting_bedrag_jaar`, `gehuurd_oppervlak` en —
+uitsluitend bij een deterministische (1-op-1) match op contractnummer —
+`ingangsdatum`/`afloopdatum`/`check_lopend_contract` uit `contracten` (geen
+match of meerdere matches wordt expliciet gemeld, nooit gegokt). Plus
+diagnostische totalen per `Vorderingsoort`. Gebouwd om vast te stellen hoe
+`Vorderingsoort` zich in de echte 070-data gedraagt vóórdat er een
+huur-KPI-module op gebaseerd werd — zie de bevindingen direct hieronder bij
+`huurKerncijfers.ts`. CLI: `rentroll-diagnose <administratieId>`.
+
+## Huur-/rentroll-kerncijfers v1 (`huurKerncijfers.ts`, 2026-08-26) — bruto/netto jaarhuur, huurkortingen, huur per m², STRIKT ZELFSTANDIG
+
+Tweede vastgoed-KPI-module, bewust volledig los van `vastgoedKerncijfers.ts`
+(geen import, geen gedeelde VVO-definitie) — beide modules rekenen
+onafhankelijk, gereconcilieerd tegen dezelfde 070-data, geen technische
+koppeling (bewuste keuze van de gebruiker: eerst de output afzonderlijk
+bewijzen, pas daarna beoordelen of een gedeelde helper zinvol is).
+
+**Bronregels**, bevestigd via `rentrollDiagnose.ts`-onderzoek tegen de
+echte 070-cache (2026-08-26) — GEEN universele waarheid voor elke
+toekomstige bron/administratie:
+- `Vorderingsoort = "01"` = reguliere bruto jaarhuur.
+- `Vorderingsoort = "13"` = huurkorting (negatief bedrag verwacht).
+- `Vorderingsoort = "12"` (Compensatie OB) komt bij 070 niet voor — puur
+  informatief genegeerd als hij wel voorkomt.
+- `korting_bedrag_jaar` (het aparte kolomveld) staat bij 070 altijd op 0 —
+  NOOIT leidend; de huurkorting komt uitsluitend uit de `13`-regel(s) van
+  `prolongatie_bedrag_jaar`.
+- Verhuurde VVO (deze module) = eigen, onafhankelijke som
+  `gehuurd_oppervlak` van geldige `01`-regels — komt voor 070 toevallig
+  exact overeen met `vastgoedKerncijfers.ts`'s VVO (6.589,5 m²), maar dat
+  is geen garantie voor andere administraties.
+
+**Contractgeldigheid** (`bepaalContractGeldigheid`, apart geëxporteerd en
+grensgeval-getest): peildatum = `bronPeildatum` uit
+`rentroll.rapportage_datum` (alleen gevuld bij eenduidigheid, zelfde
+bepaling als `vastgoedKerncijfers.ts`, bewust opnieuw lokaal gedefinieerd
+i.p.v. gedeeld). Ontbrekende `ingangsdatum` → geldigheid altijd `onbekend`;
+`ingangsdatum`/`afloopdatum`-grenzen zijn INCLUSIEF; geen `afloopdatum` =
+open einde, blijft geldig. `check_lopend_contract` wordt gecrosscheckt
+(afwijking → WAARSCHUWING) maar is nooit leidend boven de berekende
+geldigheid.
+
+**Datakwaliteitscontroles** (`OnbekendOf`/`controleVereist`): onbekende/
+onverwachte `Vorderingsoort`, ontbrekende of niet-eenduidige
+contractkoppeling, ontbrekend `prolongatie_bedrag_jaar`, `01` met 0/
+ontbrekende m² (WAARSCHUWING) of negatieve m² (KRITIEK), `13` met een
+niet-negatieve waarde (KRITIEK, geen aanname dat het toch een korting is)
+of met oppervlak > 0 (WAARSCHUWING), meerdere geldige `01`-regels voor
+hetzelfde contract (INFORMATIEF). Nooit automatisch gecorrigeerd.
+
+Worker: `genereerHuurKerncijfers.ts`. Tijdelijk CLI-commando (nog geen
+renderer, nog niet gekoppeld aan `kerncijfersManagement`):
+`huur-kerncijfers <administratieId>` — geen `--boekjaar`/
+`--periodeTotEnMet` (momentopname), JSON op stdout.
+
+### Regressiepunt: 070_Rooise_Zoom huur-kerncijfers (2026-08-26)
+
+`huur-kerncijfers 070_Rooise_Zoom` door de gebruiker persoonlijk gedraaid
+tegen de echte productiecache en bevestigd:
+
+| | Bruto jaarhuur | Huurkortingen | Netto jaarhuur | Verhuurde VVO | Bruto €/m² | Netto €/m² |
+| --- | --- | --- | --- | --- | --- | --- |
+| Portefeuille | € 687.900,88 | € 13.920,00 | € 673.980,88 | 6.589,5 m² | € 104,39 | € 102,28 |
+| Complex 001 | € 168.630,48 | € 0 | € 168.630,48 | 1.390 m² | € 121,32 | € 121,32 |
+| Complex 002 | € 113.637,88 | € 0 | € 113.637,88 | 954 m² | € 119,12 | € 119,12 |
+| Complex 003 | € 99.390,12 | € 13.920,00 | € 85.470,12 | 912 m² | € 108,98 | € 93,72 |
+| Complex 004 | € 306.242,40 | € 0 | € 306.242,40 | 3.333,5 m² | € 91,87 | € 91,87 |
+
+`bronPeildatum`: 2026-07-31. `controleVereist`: leeg — geen enkel
+datakwaliteitspunt getriggerd voor de al bewezen 070-structuur. Complex 003
+laat goed zien waarom bruto/netto apart tonen zinvol is: €108,98 bruto
+zakt naar €93,72 netto door de huurkortingen, terwijl de andere drie
+complexen geen bruto/netto-verschil hebben.
+
+Tijdens het bouwen ontdekt (en hier gefixt): decimal.js's `.isPositive()`
+behandelt `0` als positief (`s > 0` is niet de interne definitie — intern
+is het teken van 0 standaard `+1`). Een check "13-regel met oppervlak >
+0" gaf hierdoor false positives bij `gehuurd_oppervlak = 0`; gefixt met
+`.greaterThan(0)`. Zelfde patroon bleek ook in `vastgoedKerncijfers.ts` te
+zitten (zie de losse bugfix hieronder).
+
 ## Grootboek-inventarisatie (`grootboekInventarisatie.ts`) — voorbereiding op een centrale mastermapping
 
 Puur diagnostisch, alleen-lezen: past geen mapping toe, verandert niets.
