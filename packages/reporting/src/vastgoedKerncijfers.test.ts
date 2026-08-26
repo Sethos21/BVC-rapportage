@@ -209,6 +209,16 @@ describe("berekenVastgoedKerncijfers — datakwaliteitsregels (synthetische geva
     expect(item?.bericht).toContain("afwijkend patroon");
   });
 
+  it("bugfix: 0 m² met jaarhuur = 0 is NIET afwijkend (decimal.js isPositive() behandelt 0 ten onrechte als positief — .greaterThan(0) hoort hier)", () => {
+    const units: VastgoedUnitRegel[] = [unit("999", "0001", "100")];
+    const rentroll: VastgoedRentrollRegel[] = [rentrollRegel("C1", "999", "0", "0")];
+    const resultaat = berekenVastgoedKerncijfers(units, rentroll, []);
+
+    const item = resultaat.controleVereist.find((i) => i.complexnr === "999" && i.bericht.includes("C1"));
+    expect(item?.ernst).toBe("INFORMATIEF");
+    expect(item?.bericht).not.toContain("afwijkend patroon");
+  });
+
   it("een negatief gehuurd_oppervlak is KRITIEK en telt niet mee (geen aanname over de betekenis)", () => {
     const units: VastgoedUnitRegel[] = [unit("999", "0001", "100")];
     const rentroll: VastgoedRentrollRegel[] = [rentrollRegel("C1", "999", "60"), rentrollRegel("C2", "999", "-20")];

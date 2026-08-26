@@ -233,7 +233,7 @@ export function berekenVastgoedKerncijfers(
       }
       if (oppervlak.isZero()) {
         const jaarhuur = regel.prolongatieBedragJaar;
-        const afwijkend = jaarhuur !== null && jaarhuur.isPositive();
+        const afwijkend = jaarhuur !== null && jaarhuur.greaterThan(0);
         controleVereist.push({
           complexnr,
           ernst: afwijkend ? "WAARSCHUWING" : "INFORMATIEF",
