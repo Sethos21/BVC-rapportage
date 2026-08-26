@@ -208,10 +208,27 @@ nodig.
   Financiele Rapportage Tool\BVC_DATA_ROOT` (env var, zie §5 — dit is de
   waarde op deze werkplek, niet een hardcoded pad in code).
 - De Worker draait de gebruiker zelf, op de netwerklocatie, via een aparte
-  PowerShell-sessie — niet vanuit deze devcontainer/sessie (geen toegang
-  tot `BVC_DATA_ROOT` of het netwerkpad vanuit hier).
+  PowerShell- of cmd-sessie — niet vanuit deze devcontainer/sessie (geen
+  toegang tot `BVC_DATA_ROOT`/`M:\` vanuit hier).
 - Commando: `.\bvc-worker.exe rapport-periode <administratieId> --boekjaar
   <jaar> --periodeTotEnMet <periode>` (zie ook `pl-periode`/
   `balans-periode`/`controlerapport` voor de losse onderdelen, packages/
   reporting/README.md).
+
+**JSON-uitvoer teruggeven zonder copy-paste (2026-08-26).** Voor commando's
+die alleen JSON op stdout printen (`pl-periode`, `kerncijfers`,
+`vastgoed-kerncijfers`, `kasstroom-diagnose-*`, `grootboek-inventarisatie`,
+...) heeft Claude WEL directe lees-/schrijftoegang tot dezelfde
+netwerkmap als de build-kopieerstap hierboven:
+`\\BERNHEZE-DC01\gebruikers$\seth\Documents\Claude Desktop\PROJECTEN\Worker\`
+(bevestigd: dit is een ANDERE share dan `BVC_DATA_ROOT`/`M:\`, waar Claude
+nog steeds geen toegang toe heeft). Laat de gebruiker de uitvoer daarom naar
+die map omleiden — werkt in zowel PowerShell als cmd.exe, `Out-File` is
+PowerShell-only en faalt in cmd:
+```
+.\bvc-worker.exe <commando> ... > <bestandsnaam>.json
+```
+Zodra de gebruiker meldt dat het bestand er staat, leest Claude het
+rechtstreeks via hetzelfde UNC-pad — geen copy-paste van terminal-output
+meer nodig.
 
