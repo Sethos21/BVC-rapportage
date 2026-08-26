@@ -771,6 +771,20 @@ gebruiker persoonlijk gedraaid tegen de echte productiecache en bevestigd:
 | Eigenaaronttrekkingen | € 253.000,00 |
 | Balans sluit binnen tolerantie | ja |
 
+**Koppeling vastgoedsectie (2026-08-26):** `samenstelKerncijfersManagement`
+kreeg een vijfde parameter (`VastgoedKerncijfersResultaat`, ongewijzigd
+doorgegeven als `vastgoed`); `genereerKerncijfers.ts` hergebruikt
+`genereerVastgoedKerncijfers.ts` ongewijzigd via een eigen, tweede
+cacheverbinding. `kerncijfers 070_Rooise_Zoom --boekjaar 2026
+--periodeTotEnMet 06` door de gebruiker opnieuw gedraaid tegen de echte
+cache bevestigt dat beide secties naast elkaar staan zonder vermenging: de
+financiële velden hierboven zijn byte-voor-byte gelijk aan vóór de
+koppeling, en `vastgoed` is byte-voor-byte gelijk aan het
+vastgoed-kerncijfers-regressiepunt hierboven (portefeuille, alle vier
+complexen, `bronPeildatum` 2026-07-31, en alle vijf `controleVereist`-
+meldingen met dezelfde ernstniveaus). Nog geen renderer — alleen de
+samengestelde JSON-output.
+
 Twee onafhankelijke kruiscontroles bevestigen dat er geen nieuwe rekenlogica
 is geslopen: (1) bankstand/netto kasstroom/eigenaaronttrekkingen zijn EXACT
 gelijk aan het al op 2026-08-25 geverifieerde
