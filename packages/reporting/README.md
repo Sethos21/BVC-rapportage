@@ -685,6 +685,77 @@ kort bronnenonderzoek, nog GEEN mapping/implementatie (2026-08-26):**
   bezettingsgraad-/huur-helpers in `kerncijfers.ts`) — volledig braakliggend
   terrein, geen vervolgstap zonder nieuwe afstemming met de gebruiker.
 
+## Vastgoed-kerncijfers v1 (`vastgoedKerncijfers.ts`, 2026-08-26) — bottom-up bezettingsgraad/leegstand, STRIKT GESCHEIDEN van de financiële kerncijfers
+
+Eerste echte vastgoed-KPI-module, op basis van het bottom-up-onderzoek
+hierboven. `berekenVastgoedKerncijfers(units, rentroll, complexTotalen)`
+importeert NIETS van `plPeriodeBerekening.ts`/`balansPeriodeBerekening.ts`/
+`kasstroomManagementoverzicht.ts`/`kerncijfersManagement.ts` en gebruikt
+eigen, lokale invoertypen (geen `Boekingsregel`) — bewust geen
+boekjaar/periode, dit is een **momentopname** (`momentopname: true` in de
+output), geen periodegebonden cijfer (zie het peildatum-onderzoek hierboven:
+geen van de drie bronnen heeft een betrouwbare, gezamenlijke historische
+periodeselectie). `bronPeildatum` wordt alleen gevuld als ALLE aangeleverde
+`rentroll.rapportage_datum`-waarden identiek zijn, anders `null` — nooit
+verzonnen.
+
+**Bronkeuze v1** (voor 070_Rooise_Zoom bottom-up gereconcilieerd, GEEN
+universele boekhoudkundige waarheid voor elke toekomstige bron/
+administratie):
+- totale VVO per complex = som van `units.VVO`;
+- verhuurde VVO per complex = som van `rentroll.gehuurd_oppervlak` voor
+  regels met `gehuurd_oppervlak > 0`;
+- `complex_totalen` is UITSLUITEND een onafhankelijke controlebron — nooit
+  een fallback voor een ontbrekende/afwijkende units-/rentroll-waarde;
+- `contracten` is in v1 GEEN bron voor oppervlakte: bij 070 is aangetoond
+  dat een contract zonder `unitnr` meerdere units kan omvatten (contract
+  0000000043, complex 001, 750 m² over vermoedelijk 2 units) — een
+  unit-niveau-telling via `contracten` zou dat stilzwijgend missen. Om
+  dezelfde reden bouwt v1 ook geen "aantal verhuurde units"-KPI.
+
+**Datakwaliteitsregels**, via het `OnbekendOf`/`controleVereist`-patroon:
+verhuurde VVO > totale VVO is KRITIEK (blokkeert een negatieve leegstand of
+bezettingsgraad >100%); een ontbrekende/`null` VVO of `gehuurd_oppervlak`
+wordt nooit stilzwijgend als 0 behandeld (totale/verhuurde VVO wordt dan
+`onbekend`); units met VVO = 0 en rentroll-regels met `gehuurd_oppervlak =
+0` tellen niet mee maar worden wel INFORMATIEF gemeld; afwijkende patronen
+(0 m² + positieve jaarhuur, negatieve jaarhuur + oppervlak > 0) worden als
+WAARSCHUWING gerapporteerd; een negatief `gehuurd_oppervlak` is KRITIEK en
+telt niet mee; afwijkingen tussen de bottom-up-berekening en
+`complex_totalen` (Totaal_Oppervlakte/Totaal_Verhuurd/Totaal_Leegstand,
+per complex) worden gesignaleerd maar NOOIT automatisch gecorrigeerd. Een
+geslaagde KPI-berekening betekent dus niet automatisch dat `controleVereist`
+leeg is — zie het regressiepunt hieronder (complex 002/004).
+
+Worker: `genereerVastgoedKerncijfers.ts` leest `units`/`rentroll`/
+`complex_totalen` rechtstreeks uit de cache (zelfde ongefilterde
+`SELECT * FROM ...`-patroon als `genereerControlerapport.ts`). Tijdelijk
+CLI-commando (nog geen renderer/HTML, nog NIET gekoppeld aan
+`kerncijfersManagement`): `vastgoed-kerncijfers <administratieId>` — geen
+`--boekjaar`/`--periodeTotEnMet`, JSON op stdout.
+
+### Regressiepunt: 070_Rooise_Zoom vastgoed-kerncijfers (2026-08-26)
+
+`vastgoed-kerncijfers 070_Rooise_Zoom` door de gebruiker persoonlijk
+gedraaid tegen de echte productiecache en bevestigd — exact gelijk aan de
+bottom-up-analyse hierboven:
+
+| | Totale VVO | Verhuurde VVO | Leegstand | Bezettingsgraad | Leegstandspercentage |
+| --- | --- | --- | --- | --- | --- |
+| Portefeuille | 6.773,5 m² | 6.589,5 m² | 184 m² | 97,28% | 2,72% |
+| Complex 001 | 1.390 m² | 1.390 m² | 0 m² | 100% | 0% |
+| Complex 002 | 1.138 m² | 954 m² | 184 m² | 83,83% | 16,17% |
+| Complex 003 | 912 m² | 912 m² | 0 m² | 100% | 0% |
+| Complex 004 | 3.333,5 m² | 3.333,5 m² | 0 m² | 100% | 0% |
+
+`bronPeildatum`: 2026-07-31 (alle rentroll-regels bleken dezelfde
+`rapportage_datum` te hebben). `controleVereist` bevatte exact de vijf
+verwachte meldingen: INFORMATIEF voor de 0 m²-unit (001/0005) en de twee
+kortingsregels op rentroll (003), en WAARSCHUWING voor de al bekende
+afwijkingen bij complex 002 (`Totaal_Leegstand`) en 004
+(`Totaal_Oppervlakte`) — geen KRITIEK. Bevestigt dat een betrouwbare
+bottom-up KPI en een niet-lege `controleVereist` tegelijk kunnen bestaan.
+
 ### Regressiepunt: 070_Rooise_Zoom kerncijfers (2026-08-26)
 
 `kerncijfers 070_Rooise_Zoom --boekjaar 2026 --periodeTotEnMet 06` door de
