@@ -1,8 +1,7 @@
 import type { BalansRegel, GrootboekMappingRegel } from "@bvc/config";
-import type { Boekingsregel } from "@bvc/domain";
 import Decimal from "decimal.js";
 import { describe, expect, it } from "vitest";
-import { diagnoseerRekeningActiviteit } from "./kasstroomRekeningActiviteit.js";
+import { diagnoseerRekeningActiviteit, type BoekingsregelMetGrootboekAB } from "./kasstroomRekeningActiviteit.js";
 
 function balansRegel(overrides: Partial<BalansRegel> = {}): BalansRegel {
   return {
@@ -19,7 +18,17 @@ function balansRegel(overrides: Partial<BalansRegel> = {}): BalansRegel {
 }
 
 let volgnrTeller = 0;
-function boeking(boekstukSleutel: string, grootboeknr: string, bedragDebet: string, bedragCredit: string, boekdatum: string, omschrijving = "test", dagboeknr = "20"): Boekingsregel {
+function boeking(
+  boekstukSleutel: string,
+  grootboeknr: string,
+  bedragDebet: string,
+  bedragCredit: string,
+  boekdatum: string,
+  omschrijving = "test",
+  dagboeknr = "20",
+  grootboekA: string | null = null,
+  grootboekB: string | null = null,
+): BoekingsregelMetGrootboekAB {
   volgnrTeller += 1;
   return {
     bedrijfsnr: "070",
@@ -33,6 +42,8 @@ function boeking(boekstukSleutel: string, grootboeknr: string, bedragDebet: stri
     omschrijving,
     bedragDebet: new Decimal(bedragDebet),
     bedragCredit: new Decimal(bedragCredit),
+    grootboekA,
+    grootboekB,
   };
 }
 
@@ -40,7 +51,7 @@ const mapping: GrootboekMappingRegel[] = [balansRegel({ grootboekrekening: "1010
 
 describe("diagnoseerRekeningActiviteit", () => {
   it("toont de factuurregistratie (niet kasstroom-relevant) en de latere betaling (wel) chronologisch", () => {
-    const boekingen: Boekingsregel[] = [
+    const boekingen: BoekingsregelMetGrootboekAB[] = [
       boeking("F1", "1506", "31617", "0", "2026-01-26", "BTW Q4 2025", "90"),
       boeking("F1", "1600", "0", "31617", "2026-01-26", "BTW Q4 2025", "90"),
       boeking("B1", "1600", "31617", "0", "2026-02-10", "Betaalbatch week 6", "20"),
@@ -55,7 +66,7 @@ describe("diagnoseerRekeningActiviteit", () => {
   });
 
   it("negeert boekingen op andere rekeningen", () => {
-    const boekingen: Boekingsregel[] = [boeking("F1", "1506", "31617", "0", "2026-01-26"), boeking("F1", "1600", "0", "31617", "2026-01-26")];
+    const boekingen: BoekingsregelMetGrootboekAB[] = [boeking("F1", "1506", "31617", "0", "2026-01-26"), boeking("F1", "1600", "0", "31617", "2026-01-26")];
     const regels = diagnoseerRekeningActiviteit(boekingen, mapping, "1506");
     expect(regels).toHaveLength(1);
     expect(regels[0]?.boekstukSleutel).toBe("F1");
@@ -64,5 +75,15 @@ describe("diagnoseerRekeningActiviteit", () => {
   it("geeft een leeg resultaat als de rekening niet voorkomt", () => {
     const regels = diagnoseerRekeningActiviteit([], mapping, "9999");
     expect(regels).toEqual([]);
+  });
+
+  it("geeft Boeking_Grootboek_A/B onveranderd door, zonder er iets mee te matchen", () => {
+    const boekingen: BoekingsregelMetGrootboekAB[] = [
+      boeking("F1", "1600", "0", "31617", "2026-01-26", "BTW Q4 2025", "90", "1506", "F2026-0142"),
+      boeking("B1", "1600", "31617", "0", "2026-02-10", "Betaalbatch week 6", "20", null, "BATCH-2026-06"),
+    ];
+    const regels = diagnoseerRekeningActiviteit(boekingen, mapping, "1600");
+    expect(regels[0]).toMatchObject({ grootboekA: "1506", grootboekB: "F2026-0142" });
+    expect(regels[1]).toMatchObject({ grootboekA: null, grootboekB: "BATCH-2026-06" });
   });
 });

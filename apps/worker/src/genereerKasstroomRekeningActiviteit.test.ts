@@ -65,7 +65,15 @@ beforeEach(() => {
 
   schrijfXlsxFixture(join(bronGedeeldDir(root), "boekingen.xlsx"), [
     boekingRij({ Boeking_Grootboeknr: "1506", Boeking_Bedrag_Debet: 31617, Boeking_Bedrag_Credit: 0, Boeking_Omschrijving: "BTW Q4 2025" }),
-    boekingRij({ Boeking_Volgnr: "000002", Boeking_Grootboeknr: "1600", Boeking_Bedrag_Debet: 0, Boeking_Bedrag_Credit: 31617, Boeking_Omschrijving: "BTW Q4 2025" }),
+    boekingRij({
+      Boeking_Volgnr: "000002",
+      Boeking_Grootboeknr: "1600",
+      Boeking_Bedrag_Debet: 0,
+      Boeking_Bedrag_Credit: 31617,
+      Boeking_Omschrijving: "BTW Q4 2025",
+      Boeking_Grootboek_A: "1506",
+      Boeking_Grootboek_B: "F2026-0142",
+    }),
     boekingRij({
       Boekstuk_Sleutel: "0704020024002",
       Boeking_Boekstuknr: "024002",
@@ -77,6 +85,7 @@ beforeEach(() => {
       Boeking_Bedrag_Debet: 31617,
       Boeking_Bedrag_Credit: 0,
       Boeking_Omschrijving: "Betaalbatch week 6",
+      Boeking_Grootboek_B: "BATCH-2026-06",
     }),
     boekingRij({
       Boekstuk_Sleutel: "0704020024002",
@@ -112,5 +121,11 @@ describe("genereerKasstroomRekeningActiviteit", () => {
     expect(regels[0]?.isKasstroomRelevant).toBe(false);
     expect(regels[1]?.omschrijving).toBe("Betaalbatch week 6");
     expect(regels[1]?.isKasstroomRelevant).toBe(true);
+  });
+
+  it("geeft Boeking_Grootboek_A/B door vanuit de brondata, via de cache, tot in de diagnose-output", () => {
+    const regels = genereerKasstroomRekeningActiviteit(root, "070_rooisezoom", { boekjaar: 2026, boekperiodeTotEnMet: "06", doelRekening: "1600" });
+    expect(regels[0]).toMatchObject({ grootboekA: "1506", grootboekB: "F2026-0142" });
+    expect(regels[1]).toMatchObject({ grootboekA: null, grootboekB: "BATCH-2026-06" });
   });
 });

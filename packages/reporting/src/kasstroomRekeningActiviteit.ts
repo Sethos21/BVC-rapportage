@@ -24,7 +24,25 @@ import { boekingSaldo, liquideMiddelenVoorRegel, type Boekingsregel } from "@bvc
  * beslist zelf niets en matcht niets automatisch (geen aanname op basis
  * van toevallig gelijke bedragen, zie packages/config/README.md's
  * 1505/1506-toelichting).
+ *
+ * Uitbreiding (2026-08-26): `Boeking_Grootboek_A`/`Boeking_Grootboek_B` zijn
+ * twee bronkolommen (`packages/data-contracts/src/sources/boekingen.ts`) die
+ * mogelijk een betrouwbaardere koppelsleutel bevatten dan bedrag-matching om
+ * de keten 1506 → 1600 → bank te volgen — nog GEEN aanname over hun
+ * betekenis, puur zichtbaar maken voor onderzoek met echte data. Ze staan al
+ * langer in `packages/cache`'s schema (`grootboek_a`/`grootboek_b` op
+ * `boekingen`), maar het gedeelde `Boekingsregel`-domeintype (`@bvc/domain`,
+ * bewust minimaal — alleen velden die berekeningen nodig hebben) geeft ze
+ * niet door. Om die reden breidt DIT diagnose-instrument lokaal uit i.p.v.
+ * het domeintype te wijzigen: `BoekingsregelMetGrootboekAB` is een
+ * intersection-type, alleen gebruikt door deze functie en de aanroepende
+ * Worker-generator — geen enkele KPI/domeincode raakt hierdoor geraakt.
  */
+
+export type BoekingsregelMetGrootboekAB = Boekingsregel & {
+  grootboekA: string | null;
+  grootboekB: string | null;
+};
 
 export interface RekeningActiviteitRegel {
   boekstukSleutel: string;
@@ -33,10 +51,12 @@ export interface RekeningActiviteitRegel {
   bedrag: Decimal;
   omschrijving: string;
   isKasstroomRelevant: boolean;
+  grootboekA: string | null;
+  grootboekB: string | null;
 }
 
 export function diagnoseerRekeningActiviteit(
-  boekingen: readonly Boekingsregel[],
+  boekingen: readonly BoekingsregelMetGrootboekAB[],
   mappingRegels: readonly GrootboekMappingRegel[],
   doelRekening: string,
 ): RekeningActiviteitRegel[] {
@@ -63,6 +83,8 @@ export function diagnoseerRekeningActiviteit(
       bedrag: boekingSaldo(boeking),
       omschrijving: boeking.omschrijving,
       isKasstroomRelevant: kasstroomRelevantBoekstuk.get(`${boeking.bedrijfsnr}::${boeking.boekstukSleutel}`) ?? false,
+      grootboekA: boeking.grootboekA,
+      grootboekB: boeking.grootboekB,
     }));
 
   return regels.sort((a, b) => a.boekdatum.getTime() - b.boekdatum.getTime());

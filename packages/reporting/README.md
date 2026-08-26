@@ -554,19 +554,46 @@ afgewezen. Worker: `genereerKasstroomRekeningActiviteit.ts` + CLI
 `kasstroom-diagnose-rekeningactiviteit <administratieId> --boekjaar N
 --periodeTotEnMet P --rekening <grootboekrekening>`.
 
-**Bijkomende bevinding, nog niet opgevolgd:** de brondata bevat volgens
-`packages/data-contracts/src/sources/boekingen.ts` twee extra kolommen
-(`Boeking_Grootboek_A`/`Boeking_Grootboek_B`) die in potentie een
-betrouwbare reconciliatiesleutel voor open-postenboekhouding zouden kunnen
-zijn (bv. een factuur-/matchingreferentie) — maar deze twee velden worden
-momenteel NERGENS voorbij de staging-laag doorgegeven: niet in
-`packages/cache`'s schema, niet in het `Boekingsregel`-type dat
-`@bvc/reporting` gebruikt. Ze zijn dus vandaag niet inspecteerbaar via
-bovenstaand diagnose-instrument. Uitbreiden van de cache om ze wél op te
-nemen zou een echte, aparte codewijziging zijn (schema-uitbreiding) — bewust
-nog niet gedaan; eerst met de gebruiker vaststellen of `Grootboek_A`/`B` in
-de echte Excel-bron voor 070 gevuld zijn en wat ze inhoudelijk betekenen,
-vóór daar een cache-uitbreiding op gebouwd wordt.
+**Onderzoek Boeking_Grootboek_A/B (2026-08-26, correctie + diagnostische
+uitbreiding, nog GEEN classificatie/kasstroomlogica):** de brondata bevat
+volgens `packages/data-contracts/src/sources/boekingen.ts` twee extra
+kolommen (`Boeking_Grootboek_A`/`Boeking_Grootboek_B`) die in potentie een
+betrouwbaardere koppelsleutel zijn dan bedrag-matching om een keten zoals
+1506 → 1600 → bank te volgen (bv. een factuur-/matchingreferentie) — precies
+om de "toevallige bedragmatch"-fout te vermijden die bij 1505/1506 al is
+afgewezen (zie hierboven, en `packages/config/README.md`).
+
+Eerdere versie van deze paragraaf beweerde dat deze twee velden nergens
+voorbij de staging-laag kwamen — dat was **onjuist**: `packages/cache`'s
+schema had `grootboek_a`/`grootboek_b` op de `boekingen`-tabel al sinds de
+oorspronkelijke pivot naar de lokale-eerst architectuur, en
+`rebuildCache`/`apps/worker/src/rebuildCache.ts` vulde ze ook al. Het
+werkelijke gat zat alleen in het gedeelde `Boekingsregel`-domeintype
+(`@bvc/domain`, bewust minimaal — alleen velden die berekeningen nodig
+hebben): dat gaf A/B niet door, waardoor geen enkel reporting-instrument ze
+kon tonen.
+
+Minimale diagnostische uitbreiding (géén wijziging aan `Boekingsregel`
+zelf, dus geen enkele KPI/domeincode geraakt): `kasstroomRekeningActiviteit.ts`
+heeft nu een lokaal intersection-type `BoekingsregelMetGrootboekAB`
+(`Boekingsregel & { grootboekA, grootboekB }`); `RekeningActiviteitRegel`
+bevat `grootboekA`/`grootboekB`, en `apps/worker/src/genereerKasstroomRekeningActiviteit.ts`
+vult ze rechtstreeks vanuit de cache-rij (`row.grootboek_a`/`row.grootboek_b`)
+in plaats van via de gedeelde `naarBoekingsregel`-mapper. Zichtbaar via
+dezelfde CLI als hierboven:
+`kasstroom-diagnose-rekeningactiviteit <administratieId> --boekjaar N
+--periodeTotEnMet P --rekening <grootboekrekening>` (JSON op stdout bevat nu
+per regel ook `grootboekA`/`grootboekB`).
+
+**Nog open, met opzet niet zelf aangenomen:** wat A/B inhoudelijk
+voorstellen (bv. factuurreferentie versus grootboek-subrekening) staat
+nergens gedocumenteerd in de bron en moet empirisch worden vastgesteld door
+deze diagnose tegen de echte cache van 070_Rooise_Zoom te draaien voor zowel
+de BTW-boeking op 1506/1600 (26-01-2026, €31.617) als de bijbehorende
+betaling (27-01-2026). Pas ná die inspectie kan beoordeeld worden of A/B de
+keten 1506 → 1600 → bank deterministisch kunnen volgen, en of dat ook
+standhoudt bij verzamelbetalingen/deelbetalingen — dit bestand matcht nog
+steeds niets automatisch.
 
 ## Grootboek-inventarisatie (`grootboekInventarisatie.ts`) — voorbereiding op een centrale mastermapping
 

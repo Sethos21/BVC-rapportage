@@ -1,6 +1,5 @@
 import { openCacheReadonly, selecteerBoekingen, type BoekingRow } from "@bvc/cache";
-import type { Boekingsregel } from "@bvc/domain";
-import { diagnoseerRekeningActiviteit, type RekeningActiviteitRegel } from "@bvc/reporting";
+import { diagnoseerRekeningActiviteit, type BoekingsregelMetGrootboekAB, type RekeningActiviteitRegel } from "@bvc/reporting";
 import { administratieCachePad } from "./paths.js";
 import { leesAdministratieConfig } from "./administratie.js";
 import { leesGrootboekMapping } from "./grootboekmapping.js";
@@ -37,7 +36,11 @@ export function genereerKasstroomRekeningActiviteit(
       boekjaar: opties.boekjaar,
       boekperiodeTotEnMet: opties.boekperiodeTotEnMet,
     });
-    const boekingsregels: Boekingsregel[] = geselecteerd.map(naarBoekingsregel);
+    const boekingsregels: BoekingsregelMetGrootboekAB[] = geselecteerd.map((row) => ({
+      ...naarBoekingsregel(row),
+      grootboekA: row.grootboek_a,
+      grootboekB: row.grootboek_b,
+    }));
 
     return diagnoseerRekeningActiviteit(boekingsregels, mapping.regels, opties.doelRekening);
   } finally {
