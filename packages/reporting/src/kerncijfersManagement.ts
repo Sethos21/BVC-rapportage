@@ -34,8 +34,8 @@ import type { VastgoedKerncijfersResultaat } from "./vastgoedKerncijfers.js";
  * hetzelfde als `resultaatHuidigBoekjaar`/`balansSluitBinnenTolerantie`.
  */
 
-const OPBRENGSTEN_CATEGORIE = "Opbrengsten";
-const KOSTEN_CATEGORIE = "Kosten";
+export const OPBRENGSTEN_CATEGORIE = "Opbrengsten";
+export const KOSTEN_CATEGORIE = "Kosten";
 
 export interface KerncijfersManagementResultaat {
   totaleOpbrengsten: Decimal;
@@ -70,7 +70,7 @@ export interface KerncijfersManagementResultaat {
  * die telt bewust NIET mee in dit bedrag (geen gok welke categorie een
  * onbekende rekening zou toebehoren).
  */
-function categorieTotaalOf(categorieTotalen: readonly PlPeriodeCategorieTotaal[], rapportagecategorie: string): Decimal {
+export function categorieTotaalOf(categorieTotalen: readonly PlPeriodeCategorieTotaal[], rapportagecategorie: string): Decimal {
   const gevonden = categorieTotalen.find((c) => c.rapportagecategorie === rapportagecategorie);
   return gevonden ? gevonden.bedrag : new Decimal(0);
 }

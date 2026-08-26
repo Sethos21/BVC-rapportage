@@ -60,6 +60,7 @@ export const HUISSTIJL_CSS = `
   .badge{display:inline-block;font:600 10.5px 'IBM Plex Sans';letter-spacing:0.05em;text-transform:uppercase;padding:3px 9px;border-radius:999px}
   .badge-momentopname{background:#fbf3e2;color:var(--gold);border:1px solid #ecdcb3}
   .badge-periode{background:var(--tintGreen);color:var(--green);border:1px solid #cfe1d8}
+  .badge-stand{background:#eef2f6;color:#2b4a63;border:1px solid #cfdbe6}
   .controle-vereist{color:var(--gold);font-style:italic;cursor:help;border-bottom:1px dotted var(--gold)}
   .ernst-kritiek{color:var(--red);font-weight:600}
   .ernst-waarschuwing{color:var(--gold);font-weight:600}

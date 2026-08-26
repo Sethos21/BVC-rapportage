@@ -1,8 +1,7 @@
 import Decimal from "decimal.js";
 import { describe, expect, it } from "vitest";
 import { renderManagementRapportHtml } from "./renderManagementRapport.js";
-import { samenstelManagementRapport, type ManagementRapportInvoer } from "./managementRapport.js";
-import type { KerncijfersManagementResultaat } from "./kerncijfersManagement.js";
+import { samenstelManagementRapport, type ManagementRapportInvoer, type ManagementRapportPeriodeSectie, type ManagementRapportStandSectie } from "./managementRapport.js";
 import type { HuurKerncijfersResultaat } from "./huurKerncijfers.js";
 import type { KasstroomManagementoverzichtResultaat } from "./kasstroomManagementoverzicht.js";
 import type { VastgoedKerncijfersResultaat } from "./vastgoedKerncijfers.js";
@@ -16,20 +15,6 @@ function vastgoed(overrides: Partial<VastgoedKerncijfersResultaat> = {}): Vastgo
     portefeuille: { totaalVvo: BEKEND("6773.5"), verhuurdeVvo: BEKEND("6589.5"), leegstandVvo: BEKEND("184"), bezettingsgraad: BEKEND("97.28"), leegstandspercentage: BEKEND("2.72") },
     perComplex: [{ complexnr: "002", totaalVvo: BEKEND("1138"), verhuurdeVvo: BEKEND("954"), leegstandVvo: BEKEND("184"), bezettingsgraad: BEKEND("83.83"), leegstandspercentage: BEKEND("16.17") }],
     controleVereist: [],
-    ...overrides,
-  };
-}
-
-function kerncijfers(overrides: Partial<KerncijfersManagementResultaat> = {}): KerncijfersManagementResultaat {
-  return {
-    totaleOpbrengsten: new Decimal("341734.81"),
-    totaleKosten: new Decimal("30555.15"),
-    resultaatHuidigBoekjaar: BEKEND("311179.66"),
-    bankstandEindePeriode: new Decimal("73038.37"),
-    nettoKasstroom: new Decimal("71430.87"),
-    eigenaarOnttrekkingen: new Decimal("253000"),
-    balansSluitBinnenTolerantie: true,
-    vastgoed: vastgoed(),
     ...overrides,
   };
 }
@@ -56,20 +41,42 @@ function huur(overrides: Partial<HuurKerncijfersResultaat> = {}): HuurKerncijfer
 
 function kasstroom(overrides: Partial<KasstroomManagementoverzichtResultaat> = {}): KasstroomManagementoverzichtResultaat {
   return {
-    bankstandBegin: new Decimal("1607.50"),
-    bankstandEind: new Decimal("73038.37"),
-    ontvangsten: new Decimal("552498.76"),
-    uitgaven: new Decimal("481067.89"),
-    nettoKasstroom: new Decimal("71430.87"),
-    eigenaarOnttrekkingen: new Decimal("253000"),
-    overigeUitgaven: new Decimal("228067.89"),
+    bankstandBegin: new Decimal("1800"),
+    bankstandEind: new Decimal("2000"),
+    ontvangsten: new Decimal("500"),
+    uitgaven: new Decimal("300"),
+    nettoKasstroom: new Decimal("200"),
+    eigenaarOnttrekkingen: new Decimal("300"),
+    overigeUitgaven: new Decimal("0"),
     perKwartaal: [
-      { kwartaal: 1, ontvangsten: new Decimal("307782.11"), uitgaven: new Decimal("222424.47"), eigenaarOnttrekkingen: new Decimal("100000"), nettoKasstroom: new Decimal("85357.64") },
-      { kwartaal: 2, ontvangsten: new Decimal("244716.65"), uitgaven: new Decimal("258643.42"), eigenaarOnttrekkingen: new Decimal("153000"), nettoKasstroom: new Decimal("-13926.77") },
+      { kwartaal: 1, ontvangsten: new Decimal("0"), uitgaven: new Decimal("0"), eigenaarOnttrekkingen: new Decimal("0"), nettoKasstroom: new Decimal("0") },
+      { kwartaal: 2, ontvangsten: new Decimal("500"), uitgaven: new Decimal("300"), eigenaarOnttrekkingen: new Decimal("300"), nettoKasstroom: new Decimal("200") },
       { kwartaal: 3, ontvangsten: new Decimal("0"), uitgaven: new Decimal("0"), eigenaarOnttrekkingen: new Decimal("0"), nettoKasstroom: new Decimal("0") },
       { kwartaal: 4, ontvangsten: new Decimal("0"), uitgaven: new Decimal("0"), eigenaarOnttrekkingen: new Decimal("0"), nettoKasstroom: new Decimal("0") },
     ],
     controleVereist: [],
+    ...overrides,
+  };
+}
+
+function periode(overrides: Partial<ManagementRapportPeriodeSectie> = {}): ManagementRapportPeriodeSectie {
+  return {
+    boekperiodeVan: "04",
+    boekperiodeTotEnMet: "06",
+    totaleOpbrengsten: new Decimal("500"),
+    totaleKosten: new Decimal("300"),
+    resultaatPeriode: BEKEND("200"),
+    kasstroom: kasstroom(),
+    ...overrides,
+  };
+}
+
+function stand(overrides: Partial<ManagementRapportStandSectie> = {}): ManagementRapportStandSectie {
+  return {
+    boekperiodeTotEnMet: "06",
+    bankstandEinde: new Decimal("2000"),
+    resultaatHuidigBoekjaarYtd: BEKEND("900"),
+    balansSluit: true,
     ...overrides,
   };
 }
@@ -79,10 +86,10 @@ function invoer(overrides: Partial<ManagementRapportInvoer> = {}): ManagementRap
     administratieNaam: "Rooise Zoom",
     bedrijfsnr: "070",
     boekjaar: 2026,
-    boekperiodeTotEnMet: "06",
     gegenereerdOp: new Date("2026-08-26T12:00:00.000Z"),
-    kerncijfers: kerncijfers(),
-    kasstroom: kasstroom(),
+    periode: periode(),
+    stand: stand(),
+    vastgoed: vastgoed(),
     huur: huur(),
     ...overrides,
   };
@@ -98,38 +105,40 @@ describe("renderManagementRapportHtml", () => {
     expect(h).toContain("Managementrapportage");
     expect(h).toContain("Rooise Zoom");
     expect(h).toContain("Bedrijfsnr 070");
-    expect(h).toContain("t/m periode 06");
+    expect(h).toContain("periode 04 t/m 06");
   });
 
-  it("toont sectie 1 met alle zeven managementsamenvatting-KPI's", () => {
+  it("toont sectie 1 met de periode-groep EN de stand/YTD-groep, apart gelabeld", () => {
     const h = html();
     expect(h).toContain("1. Managementsamenvatting");
-    expect(h).toContain("Totale opbrengsten");
-    expect(h).toContain("Totale kosten");
-    expect(h).toContain("Resultaat huidig boekjaar");
-    expect(h).toContain("Bankstand einde");
-    expect(h).toContain("Netto kasstroom");
-    expect(h).toContain("Eigenaaronttrekkingen");
-    expect(h).toContain("Balans sluit");
+    expect(h).toContain("Periode 04 t/m 06");
+    expect(h).toContain("Stand/YTD t/m periode 06");
+    expect(h).toContain("Resultaat (periode)");
+    expect(h).toContain("Resultaat huidig boekjaar (YTD)");
   });
 
-  it("toont 'Controle vereist' i.p.v. een gegokt bedrag als resultaatHuidigBoekjaar onbekend is", () => {
-    const h = html({ kerncijfers: kerncijfers({ resultaatHuidigBoekjaar: { type: "onbekend", reden: "test-reden" } }) });
+  it("toont resultaat-periode en resultaat-YTD als twee verschillende bedragen, nooit onder hetzelfde label", () => {
+    const h = html({ periode: periode({ resultaatPeriode: BEKEND("200") }), stand: stand({ resultaatHuidigBoekjaarYtd: BEKEND("900") }) });
+    // 200 (periode) en 900 (YTD) moeten beide voorkomen, als aparte bedragen.
+    expect(h).toContain("€ 200,00");
+    expect(h).toContain("€ 900,00");
+  });
+
+  it("toont 'Controle vereist' i.p.v. een gegokt bedrag als resultaatPeriode onbekend is", () => {
+    const h = html({ periode: periode({ resultaatPeriode: { type: "onbekend", reden: "test-reden" } }) });
     expect(h).toContain("Controle vereist");
   });
 
-  it("toont sectie 2 (vastgoed) als momentopname met bronPeildatum en per-complex-tabel", () => {
+  it("toont sectie 2 (vastgoed) als momentopname met bronPeildatum, onafhankelijk van de periodeselectie", () => {
     const h = html();
     expect(h).toContain("2. Vastgoed");
     expect(h).toContain("Momentopname");
     expect(h).toContain("2026-07-31");
-    expect(h).toContain("Totale VVO");
-    expect(h).toContain("Bezettingsgraad");
     expect(h).toContain("83,8%"); // per-complex bezettingsgraad complex 002
   });
 
-  it("toont een onbekende bronPeildatum expliciet, ook al is er wel een financiële periode geselecteerd", () => {
-    const h = html({ kerncijfers: kerncijfers({ vastgoed: vastgoed({ bronPeildatum: null }) }) });
+  it("toont een onbekende bronPeildatum expliciet, ook al is er wel een periode geselecteerd", () => {
+    const h = html({ vastgoed: vastgoed({ bronPeildatum: null }) });
     expect(h).toContain("Momentopname");
     expect(h).toContain("onbekend");
   });
@@ -140,23 +149,21 @@ describe("renderManagementRapportHtml", () => {
     expect(h).toContain("Bruto jaarhuur");
     expect(h).toContain("Huurkortingen");
     expect(h).toContain("Netto jaarhuur");
-    expect(h).toContain("Bruto huur per m²");
-    expect(h).toContain("Netto huur per m²");
   });
 
-  it("toont sectie 4 (kasstroom) met de volledige detail inclusief kwartaaluitsplitsing", () => {
+  it("toont sectie 4 (kasstroom) met bankstand begin/eind van de periode zelf, niet 1 januari", () => {
     const h = html();
     expect(h).toContain("4. Kasstroom");
-    expect(h).toContain("Bankstand begin");
-    expect(h).toContain("Waarvan eigenaaronttrekkingen");
-    expect(h).toContain("Waarvan overige uitgaven");
+    expect(h).toContain("Bankstand begin (periode 04)");
+    expect(h).toContain("Bankstand einde (periode 06)");
+    expect(h).toContain("€ 1.800,00"); // bankstandBegin van de fixture
     expect(h).toContain("Q1");
     expect(h).toContain("Q4");
   });
 
-  it("toont de top overige uitgaven als toelichting indien meegegeven, zonder aparte KPI-status", () => {
-    const h = html({ topOverigeUitgaven: [{ boekdatum: new Date("2026-03-01T00:00:00.000Z"), bedrag: new Decimal("5000"), omschrijving: "Grote reparatie" }] });
-    expect(h).toContain("Top 1 grootste overige uitgaven");
+  it("toont de top overige uitgaven van de periode als toelichting indien meegegeven", () => {
+    const h = html({ periode: periode({ topOverigeUitgaven: [{ boekdatum: new Date("2026-05-01T00:00:00.000Z"), bedrag: new Decimal("300"), omschrijving: "Grote reparatie" }] }) });
+    expect(h).toContain("Top 1 grootste overige uitgaven (periode)");
     expect(h).toContain("Grote reparatie");
   });
 
@@ -167,7 +174,7 @@ describe("renderManagementRapportHtml", () => {
 
   it("toont sectie 5 met gecombineerde controleVereist uit alle modules, zichtbaar met sectielabel", () => {
     const h = html({
-      kerncijfers: kerncijfers({ vastgoed: vastgoed({ controleVereist: [{ complexnr: "004", ernst: "WAARSCHUWING", bericht: "vastgoed-afwijking-004" }] }) }),
+      vastgoed: vastgoed({ controleVereist: [{ complexnr: "004", ernst: "WAARSCHUWING", bericht: "vastgoed-afwijking-004" }] }),
       huur: huur({ controleVereist: [{ complexnr: "003", ernst: "KRITIEK", bericht: "huur-afwijking-003" }] }),
     });
     expect(h).toContain("5. Controle vereist");

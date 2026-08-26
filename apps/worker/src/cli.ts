@@ -44,8 +44,8 @@ function printGebruik(): never {
       "      (TIJDELIJK, alleen-lezen: toont per rentroll-regel contractnummer/complexnr/unitnr/Vorderingsoort/prolongatie_bedrag_jaar/korting_bedrag_jaar/gehuurd_oppervlak/rapportage_datum, plus — uitsluitend bij een eenduidige (1-op-1) match op contractnummer — ingangsdatum/afloopdatum/expiratiedatum/check_lopend_contract uit contracten (geen match of meerdere matches wordt expliciet gemeld, nooit gegokt). Ook: aantal regels/som prolongatie_bedrag_jaar/som gehuurd_oppervlak/aantal unieke contracten per Vorderingsoort, en onverwachte Vorderingsoort-waarden. Geen huur-KPI, geen renderer, alleen JSON op stdout — bouwstap om te bepalen hoe Vorderingsoort 01/12/13 zich in de echte data gedraagt vóór een huur-KPI-module wordt ontworpen)",
       "  huur-kerncijfers <administratieId>",
       "      (TIJDELIJK, v1: bruto/netto jaarhuur, huurkortingen, verhuurde VVO en huur per m², per complex + portefeuille — Vorderingsoort 01=huur/13=korting (Vorderingsoort 12 en onverwachte waarden genegeerd+gemeld), alleen regels met een deterministische, op bronPeildatum geldige contractkoppeling tellen mee. STRIKT ZELFSTANDIG van vastgoed-kerncijfers/kerncijfersManagement/@bvc/domain/vastgoed.ts, geen boekjaar/periode: actuele bronstand. Geen renderer/HTML, alleen JSON op stdout)",
-      "  management-rapport <administratieId> --boekjaar N --periodeTotEnMet P [--tolerantie N]",
-      "      (TIJDELIJK, v1: eerste gecombineerde managementrapportage — bundelt kerncijfers (financieel+vastgoed), huur-kerncijfers en het volledige kasstroom-managementoverzicht in één HTML-rapport, geschreven naar rapporten/. Rekent zelf niets uit, presenteert alleen de al-bewezen module-uitkomsten; vastgoed/huur blijven expliciet gelabeld als momentopname met bronPeildatum, los van de geselecteerde financiële periode. Nog niet pixel-perfect naar het voorbeeldontwerp)",
+      "  management-rapport <administratieId> --boekjaar N [--periodeVan P] --periodeTotEnMet P [--tolerantie N]",
+      "      (TIJDELIJK, v1: eerste gecombineerde managementrapportage — bundelt kerncijfers (financieel+vastgoed), huur-kerncijfers en het volledige kasstroom-managementoverzicht in één HTML-rapport, geschreven naar rapporten/. Rekent zelf niets uit, presenteert alleen de al-bewezen module-uitkomsten. --periodeVan (standaard 01) bepaalt uitsluitend de V&W-/kasstroomperiode ('Periode'-groep); balans, resultaat-huidig-boekjaar-YTD ('Stand/YTD'-groep) en vastgoed/huur (momentopname met bronPeildatum) blijven altijd een stand per einde --periodeTotEnMet, ongeacht --periodeVan)",
       "  kasstroom-periode <administratieId> --boekjaar N --periodeTotEnMet P",
       "      (Mutatie bankstand: beginbalans + boekingen t/m die periode, alleen voor rekeningen met bevestigde liquideMiddelen:true — eerste, eenvoudige kasstroomweergave)",
       "  kasstroom-managementoverzicht <administratieId> --boekjaar N --periodeTotEnMet P [--verwacht <pad-naar-json>] [--tolerantie N]",
@@ -253,6 +253,7 @@ async function main() {
     const tolerantieStr = parseFlag(rest, "tolerantie");
     const resultaat = genereerManagementRapport(root, administratieId, {
       boekjaar: Number(boekjaarStr),
+      boekperiodeVan: parseFlag(rest, "periodeVan"),
       boekperiodeTotEnMet,
       toleranceEuro: tolerantieStr ? new Decimal(tolerantieStr) : undefined,
     });

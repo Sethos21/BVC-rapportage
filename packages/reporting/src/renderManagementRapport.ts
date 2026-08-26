@@ -6,13 +6,16 @@ import type { HuurComplexKpi } from "./huurKerncijfers.js";
 import type { VastgoedComplexKpi } from "./vastgoedKerncijfers.js";
 
 /**
- * HTML-renderer voor de eerste gecombineerde managementrapportage (v1,
- * 2026-08-26). Rendert UITSLUITEND het al-samengestelde
- * `ManagementRapportResultaat` (`managementRapport.ts`) — geen enkele
- * berekening hier, alleen presentatie. Nog niet pixel-perfect naar het
- * voorbeeldontwerp; hergebruikt de bestaande gedeelde huisstijl
- * (`huisstijl.ts`) zodat een latere designronde het geheel in één keer kan
- * laten aansluiten.
+ * HTML-renderer voor de gecombineerde managementrapportage (v1,
+ * 2026-08-26; periode-van uitgebreid 2026-08-26). Rendert UITSLUITEND het
+ * al-samengestelde `ManagementRapportResultaat` (`managementRapport.ts`) —
+ * geen enkele berekening hier, alleen presentatie.
+ *
+ * Belangrijk (expliciet verzoek gebruiker): "resultaat periode X-Y" en
+ * "resultaat huidig boekjaar YTD t/m Y" mogen NOOIT onder hetzelfde label
+ * verschijnen. Elke KPI-kaart in sectie 1 draagt daarom een zichtbare
+ * periodebadge ("Periode X t/m Y" vs "Stand/YTD t/m Y"), en de twee
+ * groepen staan ook visueel als aparte blokken.
  */
 
 function renderKpiKaart(label: string, waardeHtml: string, subHtml = ""): string {
@@ -29,26 +32,40 @@ function renderMomentopnameBadge(bronPeildatum: Date | null): string {
   return `<span class="badge badge-momentopname" title="Actuele bronstand, geen boekjaar/periode-gebonden cijfer">Momentopname — bronPeildatum: ${peildatumTekst}</span>`;
 }
 
-function renderPeriodeBadge(boekjaar: number, boekperiodeTotEnMet: string): string {
-  return `<span class="badge badge-periode">Periodecijfer — boekjaar ${boekjaar}, t/m periode ${escapeHtml(boekperiodeTotEnMet)}</span>`;
+function renderPeriodeBadge(boekperiodeVan: string, boekperiodeTotEnMet: string): string {
+  return `<span class="badge badge-periode" title="Uitsluitend deze periode, geen jaar-tot-datum">Periode ${escapeHtml(boekperiodeVan)} t/m ${escapeHtml(boekperiodeTotEnMet)}</span>`;
+}
+
+function renderStandBadge(boekperiodeTotEnMet: string): string {
+  return `<span class="badge badge-stand" title="Boekjaar 01 t/m deze periode, ongeacht de geselecteerde periode-vanaf">Stand/YTD t/m periode ${escapeHtml(boekperiodeTotEnMet)}</span>`;
 }
 
 // --- 1. Managementsamenvatting -------------------------------------------------
 
 function renderManagementsamenvatting(resultaat: ManagementRapportResultaat): string {
-  const s = resultaat.managementsamenvatting;
+  const p = resultaat.periode;
+  const s = resultaat.stand;
+  const k = p.kasstroom;
   return `
     <h2>1. Managementsamenvatting</h2>
-    <div class="toelichting" style="margin-bottom:16px">
-      ${renderPeriodeBadge(resultaat.boekjaar, resultaat.boekperiodeTotEnMet)}
-    </div>
+
+    <div class="toelichting" style="margin-bottom:8px">${renderPeriodeBadge(p.boekperiodeVan, p.boekperiodeTotEnMet)}</div>
     <div class="grid g4">
-      ${renderKpiKaart("Totale opbrengsten", formatBedragHtml(s.totaleOpbrengsten))}
-      ${renderKpiKaart("Totale kosten", formatBedragHtml(s.totaleKosten))}
-      ${renderKpiKaart("Resultaat huidig boekjaar", formatOnbekendOfHtml(s.resultaatHuidigBoekjaar, formatBedragHtml))}
+      ${renderKpiKaart("Totale opbrengsten", formatBedragHtml(p.totaleOpbrengsten))}
+      ${renderKpiKaart("Totale kosten", formatBedragHtml(p.totaleKosten))}
+      ${renderKpiKaart("Resultaat (periode)", formatOnbekendOfHtml(p.resultaatPeriode, formatBedragHtml))}
+      ${renderKpiKaart("Ontvangsten", formatBedragHtml(k.ontvangsten))}
+    </div>
+    <div class="grid g4" style="margin-top:16px">
+      ${renderKpiKaart("Uitgaven", formatBedragHtml(k.uitgaven))}
+      ${renderKpiKaart("Netto kasstroom (periode)", formatBedragHtml(k.nettoKasstroom))}
+      ${renderKpiKaart("Eigenaaronttrekkingen (periode)", formatBedragHtml(k.eigenaarOnttrekkingen))}
+    </div>
+
+    <div class="toelichting" style="margin:24px 0 8px">${renderStandBadge(s.boekperiodeTotEnMet)}</div>
+    <div class="grid g4">
       ${renderKpiKaart("Bankstand einde", formatBedragHtml(s.bankstandEinde))}
-      ${renderKpiKaart("Netto kasstroom", formatBedragHtml(s.nettoKasstroom))}
-      ${renderKpiKaart("Eigenaaronttrekkingen", formatBedragHtml(s.eigenaarOnttrekkingen))}
+      ${renderKpiKaart("Resultaat huidig boekjaar (YTD)", formatOnbekendOfHtml(s.resultaatHuidigBoekjaarYtd, formatBedragHtml))}
       ${renderKpiKaart("Balans sluit", s.balansSluit ? `<span class="ernst-informatief" style="color:var(--green)">Ja</span>` : `<span class="ernst-kritiek">Nee</span>`)}
     </div>`;
 }
@@ -84,7 +101,8 @@ function renderVastgoed(resultaat: ManagementRapportResultaat): string {
     <div class="toelichting" style="margin-bottom:16px">
       ${renderMomentopnameBadge(v.bronPeildatum)}
       — bezettingsgraad/leegstand op basis van <code>units</code> (totale VVO) en <code>rentroll</code>
-      (verhuurde VVO), onafhankelijk van de geselecteerde financiële periode hierboven.
+      (verhuurde VVO). Onafhankelijk van de geselecteerde periode hierboven — er is nog geen
+      betrouwbare historische periodeselectie voor deze brondata.
     </div>
     <div class="grid g4">
       ${renderKpiKaart("Totale VVO", formatOnbekendOfHtml(p.totaalVvo, formatM2Html))}
@@ -135,7 +153,8 @@ function renderHuur(resultaat: ManagementRapportResultaat): string {
     <div class="toelichting" style="margin-bottom:16px">
       ${renderMomentopnameBadge(h.bronPeildatum)}
       — bruto/netto jaarhuur op basis van <code>rentroll</code> (Vorderingsoort 01/13), onafhankelijk
-      berekend van de vastgoedsectie hierboven (zie packages/reporting/README.md).
+      berekend van de vastgoedsectie hierboven (zie packages/reporting/README.md). Onafhankelijk van
+      de geselecteerde periode — nog geen betrouwbare historische periodeselectie voor deze brondata.
     </div>
     <div class="grid g4">
       ${renderKpiKaart("Bruto jaarhuur", formatOnbekendOfHtml(p.brutoJaarhuur, formatBedragHtml))}
@@ -153,7 +172,8 @@ function renderHuur(resultaat: ManagementRapportResultaat): string {
 // --- 4. Kasstroom --------------------------------------------------------------------
 
 function renderKasstroom(resultaat: ManagementRapportResultaat): string {
-  const k = resultaat.kasstroom;
+  const p = resultaat.periode;
+  const k = p.kasstroom;
   const kwartaalRijen = k.perKwartaal
     .map(
       (q) =>
@@ -161,12 +181,12 @@ function renderKasstroom(resultaat: ManagementRapportResultaat): string {
     )
     .join("");
 
-  const topUitgaven = resultaat.topOverigeUitgaven;
+  const topUitgaven = p.topOverigeUitgaven;
   const topUitgavenHtml =
     topUitgaven && topUitgaven.length > 0
       ? `
-    <h3 class="serif" style="margin-top:24px">Top ${topUitgaven.length} grootste overige uitgaven</h3>
-    <div class="toelichting">Werkelijke uitgaande bankbetalingen, exclusief eigenaaronttrekkingen — puur informatief, zit al in "overige uitgaven" hieronder.</div>
+    <h3 class="serif" style="margin-top:24px">Top ${topUitgaven.length} grootste overige uitgaven (periode)</h3>
+    <div class="toelichting">Werkelijke uitgaande bankbetalingen binnen periode ${escapeHtml(p.boekperiodeVan)} t/m ${escapeHtml(p.boekperiodeTotEnMet)}, exclusief eigenaaronttrekkingen — puur informatief, zit al in "overige uitgaven" hieronder.</div>
     <table>
       <thead><tr><th>Datum</th><th>Omschrijving</th><th>Bedrag</th></tr></thead>
       <tbody>${topUitgaven.map((r) => `<tr><td>${escapeHtml(r.boekdatum.toISOString().slice(0, 10))}</td><td>${escapeHtml(r.omschrijving)}</td><td>${formatBedragHtml(r.bedrag)}</td></tr>`).join("")}</tbody>
@@ -176,11 +196,12 @@ function renderKasstroom(resultaat: ManagementRapportResultaat): string {
   return `
     <h2>4. Kasstroom</h2>
     <div class="toelichting" style="margin-bottom:16px">
-      ${renderPeriodeBadge(resultaat.boekjaar, resultaat.boekperiodeTotEnMet)}
-      — kasstroom-managementoverzicht, uitsluitend werkelijke mutaties op de liquide-middelenrekening(en).
+      ${renderPeriodeBadge(p.boekperiodeVan, p.boekperiodeTotEnMet)}
+      — bankstand begin/eind van uitsluitend deze periode (niet 1 januari), werkelijke mutaties op de
+      liquide-middelenrekening(en). Bankstand begin = bankstand einde van de voorafgaande periode.
     </div>
     <div class="grid g4">
-      ${renderKpiKaart("Bankstand begin", formatBedragHtml(k.bankstandBegin))}
+      ${renderKpiKaart(`Bankstand begin (periode ${p.boekperiodeVan})`, formatBedragHtml(k.bankstandBegin))}
       ${renderKpiKaart("Ontvangsten", formatBedragHtml(k.ontvangsten))}
       ${renderKpiKaart("Uitgaven", formatBedragHtml(k.uitgaven))}
       ${renderKpiKaart("Netto kasstroom", formatBedragHtml(k.nettoKasstroom))}
@@ -190,7 +211,7 @@ function renderKasstroom(resultaat: ManagementRapportResultaat): string {
       <tbody>
         <tr><td>Waarvan eigenaaronttrekkingen</td><td>${formatBedragHtml(k.eigenaarOnttrekkingen)}</td></tr>
         <tr><td>Waarvan overige uitgaven</td><td>${formatBedragHtml(k.overigeUitgaven)}</td></tr>
-        <tr class="totaalrij"><td>Bankstand einde</td><td>${formatBedragHtml(k.bankstandEind)}</td></tr>
+        <tr class="totaalrij"><td>Bankstand einde (periode ${escapeHtml(p.boekperiodeTotEnMet)})</td><td>${formatBedragHtml(k.bankstandEind)}</td></tr>
       </tbody>
     </table>
     <h3 class="serif" style="margin-top:24px">Per kwartaal</h3>
@@ -245,7 +266,7 @@ export function renderManagementRapportHtml(resultaat: ManagementRapportResultaa
       <div class="eyebrow">BVC Vastgoed Consultants</div>
       <h1 class="serif">Managementrapportage</h1>
       <div class="object">${escapeHtml(resultaat.administratieNaam)} (Bedrijfsnr ${escapeHtml(resultaat.bedrijfsnr)})</div>
-      <div class="periode">Boekjaar ${resultaat.boekjaar}, t/m periode ${escapeHtml(resultaat.boekperiodeTotEnMet)} — gegenereerd op ${escapeHtml(resultaat.gegenereerdOp.toISOString().slice(0, 19).replace("T", " "))}</div>
+      <div class="periode">Boekjaar ${resultaat.boekjaar} — periode ${escapeHtml(resultaat.periode.boekperiodeVan)} t/m ${escapeHtml(resultaat.periode.boekperiodeTotEnMet)} — gegenereerd op ${escapeHtml(resultaat.gegenereerdOp.toISOString().slice(0, 19).replace("T", " "))}</div>
     </div>`;
 
   return renderRapportDocument(`Managementrapportage — ${resultaat.administratieNaam}`, cover, renderManagementRapportBody(resultaat));

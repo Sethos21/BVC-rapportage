@@ -1,7 +1,6 @@
 import Decimal from "decimal.js";
 import { describe, expect, it } from "vitest";
-import { samenstelManagementRapport, type ManagementRapportInvoer } from "./managementRapport.js";
-import type { KerncijfersManagementResultaat } from "./kerncijfersManagement.js";
+import { samenstelManagementRapport, type ManagementRapportInvoer, type ManagementRapportPeriodeSectie, type ManagementRapportStandSectie } from "./managementRapport.js";
 import type { HuurKerncijfersResultaat } from "./huurKerncijfers.js";
 import type { KasstroomManagementoverzichtResultaat } from "./kasstroomManagementoverzicht.js";
 import type { VastgoedKerncijfersResultaat } from "./vastgoedKerncijfers.js";
@@ -19,20 +18,6 @@ function vastgoed(overrides: Partial<VastgoedKerncijfersResultaat> = {}): Vastgo
   };
 }
 
-function kerncijfers(overrides: Partial<KerncijfersManagementResultaat> = {}): KerncijfersManagementResultaat {
-  return {
-    totaleOpbrengsten: new Decimal("100000"),
-    totaleKosten: new Decimal("40000"),
-    resultaatHuidigBoekjaar: BEKEND("60000"),
-    bankstandEindePeriode: new Decimal("12345.67"),
-    nettoKasstroom: new Decimal("2000"),
-    eigenaarOnttrekkingen: new Decimal("500"),
-    balansSluitBinnenTolerantie: true,
-    vastgoed: vastgoed(),
-    ...overrides,
-  };
-}
-
 function huur(overrides: Partial<HuurKerncijfersResultaat> = {}): HuurKerncijfersResultaat {
   return {
     momentopname: true,
@@ -46,15 +31,37 @@ function huur(overrides: Partial<HuurKerncijfersResultaat> = {}): HuurKerncijfer
 
 function kasstroom(overrides: Partial<KasstroomManagementoverzichtResultaat> = {}): KasstroomManagementoverzichtResultaat {
   return {
-    bankstandBegin: new Decimal("1000"),
-    bankstandEind: new Decimal("12345.67"),
-    ontvangsten: new Decimal("5000"),
-    uitgaven: new Decimal("3000"),
-    nettoKasstroom: new Decimal("2000"),
-    eigenaarOnttrekkingen: new Decimal("500"),
-    overigeUitgaven: new Decimal("2500"),
+    bankstandBegin: new Decimal("1800"),
+    bankstandEind: new Decimal("2000"),
+    ontvangsten: new Decimal("500"),
+    uitgaven: new Decimal("300"),
+    nettoKasstroom: new Decimal("200"),
+    eigenaarOnttrekkingen: new Decimal("300"),
+    overigeUitgaven: new Decimal("0"),
     perKwartaal: [],
     controleVereist: [],
+    ...overrides,
+  };
+}
+
+function periode(overrides: Partial<ManagementRapportPeriodeSectie> = {}): ManagementRapportPeriodeSectie {
+  return {
+    boekperiodeVan: "04",
+    boekperiodeTotEnMet: "06",
+    totaleOpbrengsten: new Decimal("500"),
+    totaleKosten: new Decimal("300"),
+    resultaatPeriode: BEKEND("200"),
+    kasstroom: kasstroom(),
+    ...overrides,
+  };
+}
+
+function stand(overrides: Partial<ManagementRapportStandSectie> = {}): ManagementRapportStandSectie {
+  return {
+    boekperiodeTotEnMet: "06",
+    bankstandEinde: new Decimal("2000"),
+    resultaatHuidigBoekjaarYtd: BEKEND("900"),
+    balansSluit: true,
     ...overrides,
   };
 }
@@ -64,44 +71,31 @@ function invoer(overrides: Partial<ManagementRapportInvoer> = {}): ManagementRap
     administratieNaam: "Rooise Zoom",
     bedrijfsnr: "070",
     boekjaar: 2026,
-    boekperiodeTotEnMet: "06",
     gegenereerdOp: new Date("2026-08-26T10:00:00.000Z"),
-    kerncijfers: kerncijfers(),
-    kasstroom: kasstroom(),
+    periode: periode(),
+    stand: stand(),
+    vastgoed: vastgoed(),
     huur: huur(),
     ...overrides,
   };
 }
 
 describe("samenstelManagementRapport", () => {
-  it("geeft de financiële velden ongewijzigd door in managementsamenvatting", () => {
+  it("houdt periode- en standcijfers strikt gescheiden — 'resultaat periode' en 'resultaat huidig boekjaar YTD' zijn twee losse velden", () => {
     const resultaat = samenstelManagementRapport(invoer());
-    expect(resultaat.managementsamenvatting).toEqual({
-      totaleOpbrengsten: new Decimal("100000"),
-      totaleKosten: new Decimal("40000"),
-      resultaatHuidigBoekjaar: BEKEND("60000"),
-      bankstandEinde: new Decimal("12345.67"),
-      nettoKasstroom: new Decimal("2000"),
-      eigenaarOnttrekkingen: new Decimal("500"),
-      balansSluit: true,
-    });
+    expect(resultaat.periode.resultaatPeriode).toEqual(BEKEND("200"));
+    expect(resultaat.stand.resultaatHuidigBoekjaarYtd).toEqual(BEKEND("900"));
+    expect(resultaat.periode.boekperiodeVan).toBe("04");
+    expect(resultaat.periode.boekperiodeTotEnMet).toBe("06");
+    expect(resultaat.stand.boekperiodeTotEnMet).toBe("06");
   });
 
   it("geeft vastgoed/huur/kasstroom ongewijzigd (identiek object) door, geen herberekening", () => {
     const inv = invoer();
     const resultaat = samenstelManagementRapport(inv);
-    expect(resultaat.vastgoed).toBe(inv.kerncijfers.vastgoed);
+    expect(resultaat.vastgoed).toBe(inv.vastgoed);
     expect(resultaat.huur).toBe(inv.huur);
-    expect(resultaat.kasstroom).toBe(inv.kasstroom);
-  });
-
-  it("geeft topOverigeUitgaven door indien aanwezig, undefined indien niet meegegeven", () => {
-    const zonder = samenstelManagementRapport(invoer());
-    expect(zonder.topOverigeUitgaven).toBeUndefined();
-
-    const top = [{ boekdatum: new Date("2026-03-01T00:00:00.000Z"), bedrag: new Decimal("5000"), omschrijving: "Grote uitgave" }];
-    const met = samenstelManagementRapport(invoer({ topOverigeUitgaven: top }));
-    expect(met.topOverigeUitgaven).toBe(top);
+    expect(resultaat.periode.kasstroom).toBe(inv.periode.kasstroom);
   });
 
   it("voegt geen controleVereist toe als alles schoon is", () => {
@@ -109,31 +103,32 @@ describe("samenstelManagementRapport", () => {
     expect(resultaat.controleVereist).toEqual([]);
   });
 
-  it("meldt een onbekend resultaatHuidigBoekjaar als WAARSCHUWING in sectie Financieel", () => {
-    const resultaat = samenstelManagementRapport(invoer({ kerncijfers: kerncijfers({ resultaatHuidigBoekjaar: { type: "onbekend", reden: "test-reden" } }) }));
-    expect(resultaat.controleVereist).toContainEqual({ sectie: "Financieel", ernst: "WAARSCHUWING", referentie: null, bericht: "test-reden" });
+  it("meldt een onbekend resultaatPeriode én resultaatHuidigBoekjaarYtd apart als WAARSCHUWING", () => {
+    const resultaat = samenstelManagementRapport(
+      invoer({
+        periode: periode({ resultaatPeriode: { type: "onbekend", reden: "periode-reden" } }),
+        stand: stand({ resultaatHuidigBoekjaarYtd: { type: "onbekend", reden: "ytd-reden" } }),
+      }),
+    );
+    expect(resultaat.controleVereist).toContainEqual({ sectie: "Financieel", ernst: "WAARSCHUWING", referentie: null, bericht: "periode-reden" });
+    expect(resultaat.controleVereist).toContainEqual({ sectie: "Financieel", ernst: "WAARSCHUWING", referentie: null, bericht: "ytd-reden" });
   });
 
-  it("meldt een niet-sluitende balans als KRITIEK in sectie Financieel", () => {
-    const resultaat = samenstelManagementRapport(invoer({ kerncijfers: kerncijfers({ balansSluitBinnenTolerantie: false }) }));
+  it("meldt een niet-sluitende balans als KRITIEK", () => {
+    const resultaat = samenstelManagementRapport(invoer({ stand: stand({ balansSluit: false }) }));
     expect(resultaat.controleVereist).toContainEqual({ sectie: "Financieel", ernst: "KRITIEK", referentie: null, bericht: "Balans sluit niet binnen tolerantie voor deze periode." });
   });
 
-  it("combineert vastgoed-/huur-controleVereist met de juiste sectielabel, referentie = complexnr", () => {
+  it("combineert vastgoed-/huur-/kasstroom-controleVereist met de juiste sectielabel", () => {
     const resultaat = samenstelManagementRapport(
       invoer({
-        kerncijfers: kerncijfers({ vastgoed: vastgoed({ controleVereist: [{ complexnr: "002", ernst: "WAARSCHUWING", bericht: "vastgoed-afwijking" }] }) }),
+        vastgoed: vastgoed({ controleVereist: [{ complexnr: "002", ernst: "WAARSCHUWING", bericht: "vastgoed-afwijking" }] }),
         huur: huur({ controleVereist: [{ complexnr: "003", ernst: "KRITIEK", bericht: "huur-afwijking" }] }),
+        periode: periode({ kasstroom: kasstroom({ controleVereist: [{ grootboekrekening: "9999", saldo: new Decimal("50"), reden: "onbekende rekening" }] }) }),
       }),
     );
     expect(resultaat.controleVereist).toContainEqual({ sectie: "Vastgoed", ernst: "WAARSCHUWING", referentie: "002", bericht: "vastgoed-afwijking" });
     expect(resultaat.controleVereist).toContainEqual({ sectie: "Huur", ernst: "KRITIEK", referentie: "003", bericht: "huur-afwijking" });
-  });
-
-  it("combineert kasstroom-controleVereist (grootboekrekening/saldo/reden) als WAARSCHUWING met sectie Kasstroom", () => {
-    const resultaat = samenstelManagementRapport(
-      invoer({ kasstroom: kasstroom({ controleVereist: [{ grootboekrekening: "9999", saldo: new Decimal("123.45"), reden: "onbekende rekening" }] }) }),
-    );
-    expect(resultaat.controleVereist).toContainEqual({ sectie: "Kasstroom", ernst: "WAARSCHUWING", referentie: "9999", bericht: "onbekende rekening (saldo 123.45)" });
+    expect(resultaat.controleVereist).toContainEqual({ sectie: "Kasstroom", ernst: "WAARSCHUWING", referentie: "9999", bericht: "onbekende rekening (saldo 50)" });
   });
 });

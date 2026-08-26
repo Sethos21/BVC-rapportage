@@ -61,7 +61,7 @@ ${bodyHtml}
 
 export interface SelectieSchermOpties {
   fouten?: readonly string[];
-  ingevoerd?: { administratieId?: string; boekjaar?: string; boekperiodeTotEnMet?: string };
+  ingevoerd?: { administratieId?: string; boekjaar?: string; boekperiodeVan?: string; boekperiodeTotEnMet?: string };
 }
 
 export function renderSelectieScherm(administraties: readonly AdministratieListItem[], opties: SelectieSchermOpties = {}): string {
@@ -72,6 +72,9 @@ export function renderSelectieScherm(administraties: readonly AdministratieListI
         `<option value="${escapeHtml(a.administratieId)}"${a.administratieId === geselecteerdeAdministratie ? " selected" : ""}>${escapeHtml(a.weergavenaam)} (${escapeHtml(a.bedrijfsnr)})</option>`,
     )
     .join("");
+
+  const geselecteerdeVan = opties.ingevoerd?.boekperiodeVan ?? "01";
+  const vanOpties = BOEKPERIODES.map((p) => `<option value="${p.waarde}"${p.waarde === geselecteerdeVan ? " selected" : ""}>${escapeHtml(p.label)}</option>`).join("");
 
   const geselecteerdePeriode = opties.ingevoerd?.boekperiodeTotEnMet ?? "";
   const periodeOpties = BOEKPERIODES.map((p) => `<option value="${p.waarde}"${p.waarde === geselecteerdePeriode ? " selected" : ""}>${escapeHtml(p.label)}</option>`).join("");
@@ -103,6 +106,11 @@ export function renderSelectieScherm(administraties: readonly AdministratieListI
         <label for="boekjaar">Boekjaar</label>
         <input type="number" name="boekjaar" id="boekjaar" min="2000" max="2100" step="1" value="${escapeHtml(boekjaarWaarde)}" required />
 
+        <label for="boekperiodeVan">Periode vanaf</label>
+        <select name="boekperiodeVan" id="boekperiodeVan" required>
+          ${vanOpties}
+        </select>
+
         <label for="boekperiodeTotEnMet">Periode t/m</label>
         <select name="boekperiodeTotEnMet" id="boekperiodeTotEnMet" required>
           <option value="" disabled${geselecteerdePeriode ? "" : " selected"}>Kies een periode…</option>
@@ -111,7 +119,7 @@ export function renderSelectieScherm(administraties: readonly AdministratieListI
 
         <button type="submit">Managementrapport openen</button>
       </form>
-      <div class="toelichting">Genereert het gecombineerde managementrapport (financieel, vastgoed, huur, kasstroom) voor de gekozen administratie en periode.</div>
+      <div class="toelichting">Genereert het gecombineerde managementrapport (financieel, vastgoed, huur, kasstroom) voor de gekozen administratie en periode. "Periode vanaf" bepaalt alleen de V&amp;W- en kasstroomperiode; balans en YTD-resultaat blijven altijd een stand per einde "Periode t/m".</div>
     </div>`;
 
   return paginaShell("BVC Rapportage — Managementrapportage", body);

@@ -13,6 +13,7 @@ export * from "./renderRapportPeriode.js";
 export * from "./kasstroomBerekening.js";
 export * from "./renderKasstroomPeriode.js";
 export * from "./kasstroomManagementoverzicht.js";
+export * from "./kasstroomManagementoverzichtSubperiode.js";
 export * from "./kasstroomManagementoverzichtVergelijking.js";
 export * from "./kasstroomTopUitgaven.js";
 export * from "./kasstroomRekeningActiviteit.js";

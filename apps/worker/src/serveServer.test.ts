@@ -94,9 +94,30 @@ afterEach(() => {
 describe("valideerRapportInvoer", () => {
   const administraties = [{ administratieId: "070_rooisezoom", bedrijfsnr: "070", weergavenaam: "Rooise Zoom" }];
 
-  it("accepteert geldige invoer", () => {
+  it("accepteert geldige invoer, met boekperiodeVan default '01' als niet meegegeven", () => {
     const resultaat = valideerRapportInvoer({ administratieId: "070_rooisezoom", boekjaar: "2026", boekperiodeTotEnMet: "06" }, administraties);
-    expect(resultaat).toEqual({ ok: true, administratieId: "070_rooisezoom", boekjaar: 2026, boekperiodeTotEnMet: "06" });
+    expect(resultaat).toEqual({ ok: true, administratieId: "070_rooisezoom", boekjaar: 2026, boekperiodeVan: "01", boekperiodeTotEnMet: "06" });
+  });
+
+  it("accepteert een expliciete boekperiodeVan <= boekperiodeTotEnMet", () => {
+    const resultaat = valideerRapportInvoer({ administratieId: "070_rooisezoom", boekjaar: "2026", boekperiodeVan: "04", boekperiodeTotEnMet: "06" }, administraties);
+    expect(resultaat).toEqual({ ok: true, administratieId: "070_rooisezoom", boekjaar: 2026, boekperiodeVan: "04", boekperiodeTotEnMet: "06" });
+  });
+
+  it("accepteert boekperiodeVan === boekperiodeTotEnMet", () => {
+    const resultaat = valideerRapportInvoer({ administratieId: "070_rooisezoom", boekjaar: "2026", boekperiodeVan: "06", boekperiodeTotEnMet: "06" }, administraties);
+    expect(resultaat.ok).toBe(true);
+  });
+
+  it("weigert boekperiodeVan > boekperiodeTotEnMet", () => {
+    const resultaat = valideerRapportInvoer({ administratieId: "070_rooisezoom", boekjaar: "2026", boekperiodeVan: "08", boekperiodeTotEnMet: "03" }, administraties);
+    expect(resultaat.ok).toBe(false);
+    if (!resultaat.ok) expect(resultaat.fouten.some((f) => f.includes("Periode vanaf moet vóór of gelijk"))).toBe(true);
+  });
+
+  it.each(["00", "13", "6", "juni"])("weigert een ongeldige boekperiodeVan (%s)", (boekperiodeVan) => {
+    const resultaat = valideerRapportInvoer({ administratieId: "070_rooisezoom", boekjaar: "2026", boekperiodeVan, boekperiodeTotEnMet: "06" }, administraties);
+    expect(resultaat.ok).toBe(false);
   });
 
   it("weigert een onbekende administratie", () => {
@@ -199,6 +220,33 @@ describe("maakServeServer (HTTP)", () => {
       expect(res.status).toBe(400);
       const html = await res.text();
       expect(html).toContain("Periode t/m moet");
+    });
+  });
+
+  it("POST /rapport/management weigert een boekperiodeVan die na boekperiodeTotEnMet ligt — genereert geen rapport", async () => {
+    await metServer(async (baseUrl) => {
+      const res = await fetch(baseUrl + "/rapport/management", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ administratieId: "070_rooisezoom", boekjaar: "2026", boekperiodeVan: "08", boekperiodeTotEnMet: "03" }).toString(),
+      });
+      expect(res.status).toBe(400);
+      const html = await res.text();
+      expect(html).toContain("Periode vanaf moet vóór of gelijk");
+      expect(html).not.toContain("1. Managementsamenvatting");
+    });
+  });
+
+  it("POST /rapport/management met boekperiodeVan genereert het rapport met de gekozen subperiode", async () => {
+    await metServer(async (baseUrl) => {
+      const res = await fetch(baseUrl + "/rapport/management", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ administratieId: "070_rooisezoom", boekjaar: "2026", boekperiodeVan: "01", boekperiodeTotEnMet: "06" }).toString(),
+      });
+      expect(res.status).toBe(200);
+      const html = await res.text();
+      expect(html).toContain("Periode 01 t/m 06");
     });
   });
 

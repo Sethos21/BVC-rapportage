@@ -58,24 +58,7 @@ function basisMapping(): Record<string, unknown> {
   };
 }
 
-beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "bvc-management-rapport-"));
-  mkdirSync(bronGedeeldDir(root), { recursive: true });
-  mkdirSync(administratieDir(root, "070_rooisezoom"), { recursive: true });
-  schrijfAdministratieConfig(root, "070_rooisezoom", nieuweAdministratieConfig("070", "Rooise Zoom"));
-
-  schrijfXlsxFixture(join(bronGedeeldDir(root), "boekingen.xlsx"), [
-    boekingRij({ Boeking_Grootboeknr: "1010", Boeking_Bedrag_Debet: 500, Boeking_Bedrag_Credit: 0 }),
-    boekingRij({ Boekstuk_Sleutel: "0704020024002", Boeking_Boekstuknr: "024002", Boeking_Volgnr: "000002", Boeking_Grootboeknr: "8800", Boeking_Bedrag_Debet: 0, Boeking_Bedrag_Credit: 500 }),
-    boekingRij({ Boekstuk_Sleutel: "0704020024003", Boeking_Boekstuknr: "024003", Boeking_Volgnr: "000001", Boeking_Grootboeknr: "1010", Boeking_Bedrag_Debet: 0, Boeking_Bedrag_Credit: 200 }),
-    boekingRij({ Boekstuk_Sleutel: "0704020024003", Boeking_Boekstuknr: "024003", Boeking_Volgnr: "000002", Boeking_Grootboeknr: "4000", Boeking_Bedrag_Debet: 200, Boeking_Bedrag_Credit: 0 }),
-  ]);
-  schrijfXlsxFixture(join(bronGedeeldDir(root), "balans_per_jaar.xlsx"), [
-    balansRij({ Grootboekrekeningnr: "1010", Beginbalans_debet: 1000, Beginbalans_credit: 0, Rekening_omschrijving: "Bank" }),
-    balansRij({ Grootboekrekeningnr: "1711", Beginbalans_debet: 0, Beginbalans_credit: 1000, Rekening_omschrijving: "Crediteuren" }),
-  ]);
-  schrijfXlsxFixture(join(bronGedeeldDir(root), "servicekosten.xlsx"), []);
-
+function schrijfVastgoedEnHuurFixtures(): void {
   schrijfXlsxFixture(join(bronGedeeldDir(root), "units.xlsx"), [
     { Bedrijfsnr: "070", Complexnummer: "001", Unitnummer: "0001", Unit_Non_actief: "Nee", Unitomschrijving: "Unit A", Unitsoort: "Kantoor", Unit_VVO: "100", Unit_BVO: "110" },
   ]);
@@ -94,46 +77,68 @@ beforeEach(() => {
     },
   ]);
   schrijfXlsxFixture(join(bronGedeeldDir(root), "complex_totalen.xlsx"), []);
+}
 
+function schrijfBasisAdministratie(): void {
+  mkdirSync(bronGedeeldDir(root), { recursive: true });
+  mkdirSync(administratieDir(root, "070_rooisezoom"), { recursive: true });
+  schrijfAdministratieConfig(root, "070_rooisezoom", nieuweAdministratieConfig("070", "Rooise Zoom"));
   mkdirSync(grootboekmappingenDir(root), { recursive: true });
   writeFileSync(grootboekmappingPad(root, "070_rooisezoom"), JSON.stringify(basisMapping()), "utf-8");
+}
 
-  rebuildCache({ root, administratieId: "070_rooisezoom", onVoortgang: () => {} });
-});
+describe("genereerManagementRapport — boekperiodeVan='01' (regressie)", () => {
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "bvc-management-rapport-"));
+    schrijfBasisAdministratie();
 
-afterEach(() => {
-  rmSync(root, { recursive: true, force: true });
-});
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "boekingen.xlsx"), [
+      boekingRij({ Boeking_Grootboeknr: "1010", Boeking_Bedrag_Debet: 500, Boeking_Bedrag_Credit: 0 }),
+      boekingRij({ Boekstuk_Sleutel: "0704020024002", Boeking_Boekstuknr: "024002", Boeking_Volgnr: "000002", Boeking_Grootboeknr: "8800", Boeking_Bedrag_Debet: 0, Boeking_Bedrag_Credit: 500 }),
+      boekingRij({ Boekstuk_Sleutel: "0704020024003", Boeking_Boekstuknr: "024003", Boeking_Volgnr: "000001", Boeking_Grootboeknr: "1010", Boeking_Bedrag_Debet: 0, Boeking_Bedrag_Credit: 200 }),
+      boekingRij({ Boekstuk_Sleutel: "0704020024003", Boeking_Boekstuknr: "024003", Boeking_Volgnr: "000002", Boeking_Grootboeknr: "4000", Boeking_Bedrag_Debet: 200, Boeking_Bedrag_Credit: 0 }),
+    ]);
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "balans_per_jaar.xlsx"), [
+      balansRij({ Grootboekrekeningnr: "1010", Beginbalans_debet: 1000, Beginbalans_credit: 0, Rekening_omschrijving: "Bank" }),
+      balansRij({ Grootboekrekeningnr: "1711", Beginbalans_debet: 0, Beginbalans_credit: 1000, Rekening_omschrijving: "Crediteuren" }),
+    ]);
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "servicekosten.xlsx"), []);
+    schrijfVastgoedEnHuurFixtures();
 
-describe("genereerManagementRapport", () => {
-  it("combineert kerncijfers/vastgoed/huur/kasstroom tot één HTML-rapport, zonder eigen berekening", () => {
+    rebuildCache({ root, administratieId: "070_rooisezoom", onVoortgang: () => {} });
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("combineert kerncijfers/vastgoed/huur/kasstroom tot één HTML-rapport, zonder eigen berekening (exact gelijk aan het bevestigde regressiepunt)", () => {
     const resultaat = genereerManagementRapport(root, "070_rooisezoom", { boekjaar: 2026, boekperiodeTotEnMet: "06" });
 
     expect(existsSync(resultaat.pad)).toBe(true);
     expect(readFileSync(resultaat.pad, "utf-8")).toBe(resultaat.html);
 
-    // Financieel (sectie 1) — zelfde cijfers als het al bewezen genereerKerncijfers-regressiepunt.
-    expect(resultaat.resultaat.managementsamenvatting.totaleOpbrengsten.toString()).toBe("500");
-    expect(resultaat.resultaat.managementsamenvatting.totaleKosten.toString()).toBe("200");
-    expect(resultaat.resultaat.managementsamenvatting.bankstandEinde.toString()).toBe("1300");
-    expect(resultaat.resultaat.managementsamenvatting.balansSluit).toBe(true);
+    expect(resultaat.resultaat.periode.boekperiodeVan).toBe("01");
+    expect(resultaat.resultaat.periode.totaleOpbrengsten.toString()).toBe("500");
+    expect(resultaat.resultaat.periode.totaleKosten.toString()).toBe("200");
+    expect(resultaat.resultaat.stand.bankstandEinde.toString()).toBe("1300");
+    expect(resultaat.resultaat.stand.balansSluit).toBe(true);
 
-    // Vastgoed (sectie 2) — momentopname, los van boekjaar/periode.
     expect(resultaat.resultaat.vastgoed.momentopname).toBe(true);
     if (resultaat.resultaat.vastgoed.portefeuille.totaalVvo.type === "bekend") {
       expect(resultaat.resultaat.vastgoed.portefeuille.totaalVvo.waarde.toString()).toBe("100");
     }
 
-    // Huur (sectie 3) — momentopname, eigen VVO-definitie.
     expect(resultaat.resultaat.huur.momentopname).toBe(true);
     if (resultaat.resultaat.huur.portefeuille.brutoJaarhuur.type === "bekend") {
       expect(resultaat.resultaat.huur.portefeuille.brutoJaarhuur.waarde.toString()).toBe("10000");
     }
 
-    // Kasstroom (sectie 4) — volledige detail, zelfde bankstand als sectie 1.
-    expect(resultaat.resultaat.kasstroom.bankstandEind.toString()).toBe("1300");
+    // Kasstroom periode 01–06 == YTD; met boekperiodeVan="01" is boekingenVoorPeriode leeg,
+    // dus dit moet exact hetzelfde zijn als de bestaande YTD-kasstroomfunctie zou geven.
+    expect(resultaat.resultaat.periode.kasstroom.bankstandBegin.toString()).toBe("1000");
+    expect(resultaat.resultaat.periode.kasstroom.bankstandEind.toString()).toBe("1300");
 
-    // HTML bevat alle vijf secties.
     expect(resultaat.html).toContain("1. Managementsamenvatting");
     expect(resultaat.html).toContain("2. Vastgoed");
     expect(resultaat.html).toContain("3. Huur");
@@ -144,5 +149,84 @@ describe("genereerManagementRapport", () => {
   it("gooit een duidelijke fout als de grootboekmapping ontbreekt", () => {
     rmSync(grootboekmappingPad(root, "070_rooisezoom"));
     expect(() => genereerManagementRapport(root, "070_rooisezoom", { boekjaar: 2026, boekperiodeTotEnMet: "06" })).toThrow(/Grootboekmapping ontbreekt/);
+  });
+});
+
+describe("genereerManagementRapport — boekperiodeVan='04' (subperiode)", () => {
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "bvc-management-rapport-subperiode-"));
+    schrijfBasisAdministratie();
+
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "boekingen.xlsx"), [
+      // Periode 01 — mag NIET meetellen in de periode-groep 04–06, wel in de YTD-stand-groep.
+      boekingRij({ Boeking_Boekperiode: "01", Boeking_Grootboeknr: "1010", Boeking_Bedrag_Debet: 1000, Boeking_Bedrag_Credit: 0 }),
+      boekingRij({ Boekstuk_Sleutel: "0704020024001b", Boeking_Boekperiode: "01", Boeking_Boekstuknr: "024001b", Boeking_Volgnr: "000002", Boeking_Grootboeknr: "8800", Boeking_Bedrag_Debet: 0, Boeking_Bedrag_Credit: 1000 }),
+      // Periode 05 — telt mee in 04–06.
+      boekingRij({ Boekstuk_Sleutel: "0704020024002", Boeking_Boekperiode: "05", Boeking_Boekstuknr: "024002", Boeking_Volgnr: "000001", Boeking_Grootboeknr: "1010", Boeking_Bedrag_Debet: 500, Boeking_Bedrag_Credit: 0 }),
+      boekingRij({ Boekstuk_Sleutel: "0704020024002", Boeking_Boekperiode: "05", Boeking_Boekstuknr: "024002", Boeking_Volgnr: "000002", Boeking_Grootboeknr: "8800", Boeking_Bedrag_Debet: 0, Boeking_Bedrag_Credit: 500 }),
+      // Periode 06 — telt mee in 04–06.
+      boekingRij({ Boekstuk_Sleutel: "0704020024003", Boeking_Boekperiode: "06", Boeking_Boekstuknr: "024003", Boeking_Volgnr: "000001", Boeking_Grootboeknr: "1010", Boeking_Bedrag_Debet: 0, Boeking_Bedrag_Credit: 300 }),
+      boekingRij({ Boekstuk_Sleutel: "0704020024003", Boeking_Boekperiode: "06", Boeking_Boekstuknr: "024003", Boeking_Volgnr: "000002", Boeking_Grootboeknr: "4000", Boeking_Bedrag_Debet: 300, Boeking_Bedrag_Credit: 0 }),
+    ]);
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "balans_per_jaar.xlsx"), [
+      balansRij({ Grootboekrekeningnr: "1010", Beginbalans_debet: 2000, Beginbalans_credit: 0, Rekening_omschrijving: "Bank" }),
+      balansRij({ Grootboekrekeningnr: "1711", Beginbalans_debet: 0, Beginbalans_credit: 2000, Rekening_omschrijving: "Crediteuren" }),
+    ]);
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "servicekosten.xlsx"), []);
+    schrijfVastgoedEnHuurFixtures();
+
+    rebuildCache({ root, administratieId: "070_rooisezoom", onVoortgang: () => {} });
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("bevat in de periode-groep (04–06) uitsluitend periode-05/06-boekingen, niet periode 01", () => {
+    const resultaat = genereerManagementRapport(root, "070_rooisezoom", { boekjaar: 2026, boekperiodeVan: "04", boekperiodeTotEnMet: "06" });
+
+    expect(resultaat.resultaat.periode.boekperiodeVan).toBe("04");
+    expect(resultaat.resultaat.periode.boekperiodeTotEnMet).toBe("06");
+    // Opbrengsten periode 04–06 = alleen periode 05 (500) — de 1000 uit periode 01 telt niet mee.
+    expect(resultaat.resultaat.periode.totaleOpbrengsten.toString()).toBe("500");
+    expect(resultaat.resultaat.periode.totaleKosten.toString()).toBe("300");
+  });
+
+  it("bankstand begin/eind van de periode-groep is de werkelijke bankstand, niet de jaarbeginstand + periode-boekingen", () => {
+    const resultaat = genereerManagementRapport(root, "070_rooisezoom", { boekjaar: 2026, boekperiodeVan: "04", boekperiodeTotEnMet: "06" });
+    const kasstroom = resultaat.resultaat.periode.kasstroom;
+
+    // bankstandBegin periode 04 = jaarbegin (2000) + mutatie periode 01 (+1000) = 3000 — NIET de jaarbeginstand 2000 zelf.
+    expect(kasstroom.bankstandBegin.toString()).toBe("3000");
+    // bankstandEind periode 06 = 3000 + mutatie 05/06 (500 - 300 = 200) = 3200.
+    expect(kasstroom.bankstandEind.toString()).toBe("3200");
+    // Ontvangsten/uitgaven bevatten uitsluitend periode 05/06.
+    expect(kasstroom.ontvangsten.toString()).toBe("500");
+    expect(kasstroom.uitgaven.toString()).toBe("300");
+    expect(kasstroom.nettoKasstroom.toString()).toBe("200");
+  });
+
+  it("harde controle 1: bankstandBegin + nettoKasstroom = bankstandEind van de periode-groep", () => {
+    const resultaat = genereerManagementRapport(root, "070_rooisezoom", { boekjaar: 2026, boekperiodeVan: "04", boekperiodeTotEnMet: "06" });
+    const kasstroom = resultaat.resultaat.periode.kasstroom;
+
+    expect(kasstroom.bankstandBegin.plus(kasstroom.nettoKasstroom).toString()).toBe(kasstroom.bankstandEind.toString());
+  });
+
+  it("harde controle 2: bankstandEind van de periode-groep = bankstandEinde van de YTD-stand-groep voor dezelfde periodeTotEnMet", () => {
+    const resultaat = genereerManagementRapport(root, "070_rooisezoom", { boekjaar: 2026, boekperiodeVan: "04", boekperiodeTotEnMet: "06" });
+
+    expect(resultaat.resultaat.periode.kasstroom.bankstandEind.toString()).toBe(resultaat.resultaat.stand.bankstandEinde.toString());
+  });
+
+  it("balans/resultaat-huidig-boekjaar-YTD/vastgoed/huur blijven identiek, ongeacht boekperiodeVan", () => {
+    const resultaatVan01 = genereerManagementRapport(root, "070_rooisezoom", { boekjaar: 2026, boekperiodeVan: "01", boekperiodeTotEnMet: "06" });
+    const resultaatVan04 = genereerManagementRapport(root, "070_rooisezoom", { boekjaar: 2026, boekperiodeVan: "04", boekperiodeTotEnMet: "06" });
+
+    expect(resultaatVan04.resultaat.stand.bankstandEinde.toString()).toBe(resultaatVan01.resultaat.stand.bankstandEinde.toString());
+    expect(resultaatVan04.resultaat.stand.resultaatHuidigBoekjaarYtd).toEqual(resultaatVan01.resultaat.stand.resultaatHuidigBoekjaarYtd);
+    expect(resultaatVan04.resultaat.stand.balansSluit).toBe(resultaatVan01.resultaat.stand.balansSluit);
+    expect(resultaatVan04.resultaat.vastgoed).toEqual(resultaatVan01.resultaat.vastgoed);
+    expect(resultaatVan04.resultaat.huur).toEqual(resultaatVan01.resultaat.huur);
   });
 });

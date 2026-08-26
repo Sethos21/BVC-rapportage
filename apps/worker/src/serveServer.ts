@@ -30,11 +30,12 @@ export interface ServeOpties {
 export interface RapportInvoerVelden {
   administratieId?: string;
   boekjaar?: string;
+  boekperiodeVan?: string;
   boekperiodeTotEnMet?: string;
 }
 
 export type RapportInvoerValidatie =
-  | { ok: true; administratieId: string; boekjaar: number; boekperiodeTotEnMet: string }
+  | { ok: true; administratieId: string; boekjaar: number; boekperiodeVan: string; boekperiodeTotEnMet: string }
   | { ok: false; fouten: string[] };
 
 const GELDIGE_PERIODES = new Set(BOEKPERIODES.map((p) => p.waarde));
@@ -60,13 +61,22 @@ export function valideerRapportInvoer(velden: RapportInvoerVelden, administratie
     fouten.push("Boekjaar moet een geldig jaartal zijn (2000 t/m 2100).");
   }
 
+  const boekperiodeVan = (velden.boekperiodeVan ?? "01").trim();
+  if (!GELDIGE_PERIODES.has(boekperiodeVan)) {
+    fouten.push('Periode vanaf moet "01" t/m "12" zijn.');
+  }
+
   const boekperiodeTotEnMet = (velden.boekperiodeTotEnMet ?? "").trim();
   if (!GELDIGE_PERIODES.has(boekperiodeTotEnMet)) {
     fouten.push('Periode t/m moet "01" t/m "12" zijn.');
   }
 
+  if (GELDIGE_PERIODES.has(boekperiodeVan) && GELDIGE_PERIODES.has(boekperiodeTotEnMet) && Number(boekperiodeVan) > Number(boekperiodeTotEnMet)) {
+    fouten.push('Periode vanaf moet vóór of gelijk aan periode t/m liggen.');
+  }
+
   if (fouten.length > 0) return { ok: false, fouten };
-  return { ok: true, administratieId, boekjaar, boekperiodeTotEnMet };
+  return { ok: true, administratieId, boekjaar, boekperiodeVan, boekperiodeTotEnMet };
 }
 
 function leesBody(req: IncomingMessage): Promise<string> {
@@ -107,6 +117,7 @@ async function handleRequest(root: string, req: IncomingMessage, res: ServerResp
     try {
       const resultaat = genereerManagementRapport(root, validatie.administratieId, {
         boekjaar: validatie.boekjaar,
+        boekperiodeVan: validatie.boekperiodeVan,
         boekperiodeTotEnMet: validatie.boekperiodeTotEnMet,
       });
       stuurHtml(res, 200, resultaat.html);

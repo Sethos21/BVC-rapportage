@@ -1,30 +1,37 @@
 import type Decimal from "decimal.js";
 import type { OnbekendOf } from "@bvc/domain";
-import type { KerncijfersManagementResultaat } from "./kerncijfersManagement.js";
 import type { HuurKerncijfersResultaat } from "./huurKerncijfers.js";
 import type { KasstroomManagementoverzichtResultaat } from "./kasstroomManagementoverzicht.js";
 import type { KasstroomTopUitgaveRegel } from "./kasstroomTopUitgaven.js";
 import type { VastgoedKerncijfersResultaat } from "./vastgoedKerncijfers.js";
 
 /**
- * Eerste gecombineerde managementrapportage (v1, 2026-08-26) — PURE
- * samenstelfunctie: bundelt uitsluitend de al-bewezen uitkomsten van
- * `kerncijfersManagement.ts` (financieel + vastgoed), `huurKerncijfers.ts`
- * en `kasstroomManagementoverzicht.ts` (volledige detail, incl.
- * `topOverigeUitgaven`). Rekent zelf NIETS uit — geen enkel bedrag/
+ * Eerste gecombineerde managementrapportage (v1, 2026-08-26; periode-van
+ * uitgebreid 2026-08-26) — PURE samenstelfunctie: bundelt uitsluitend
+ * al-bewezen uitkomsten. Rekent zelf NIETS uit — geen enkel bedrag/
  * percentage/m² wordt hier herberekend of gecombineerd tot een nieuw
- * getal. `renderManagementRapport.ts` ontvangt uitsluitend
- * `ManagementRapportResultaat` en presenteert; ook de renderer rekent
- * niets. CLAUDE.md §2 in optima forma: "twee outputs van dezelfde
- * rekenlaag", hier vier bronnen tot één rapport.
+ * getal; dat gebeurt in `apps/worker/src/genereerManagementRapport.ts`
+ * (selectie) en de reportingfuncties die het aanroept (`berekenPlPeriode`,
+ * `berekenNettoResultaat`, `berekenKasstroomManagementoverzicht`/
+ * `berekenKasstroomManagementoverzichtSubperiode`, `berekenTopOverigeUitgaven`).
  *
- * `controleVereist` combineert de datakwaliteitsmeldingen van alle
- * onderliggende modules tot één genormaliseerde lijst (sectie + ernst +
- * referentie + bericht) — puur herlabelen, geen nieuwe classificatie. De
- * financiële sectie krijgt twee AFGELEIDE meldingen die in de bronmodules
- * zelf geen `controleVereist`-item zijn (`resultaatHuidigBoekjaar` is
- * `onbekend`, of `balansSluitBinnenTolerantie` is `false`) — ook dat is
- * puur weergeven van een al-bestaand veld, geen nieuwe beoordeling.
+ * DRIE EXPLICIET GESCHEIDEN GROEPEN, elk met een eigen financiële
+ * betekenis — een gebruiker die periode 04–06 selecteert mag nooit hoeven
+ * gokken of "resultaat" Q2 of het halfjaar betekent:
+ *
+ * 1. `periode` — UITSLUITEND boekperiodeVan t/m boekperiodeTotEnMet
+ *    (P&L + kasstroom over de geselecteerde sub-periode, bv. "Q2").
+ * 2. `stand` — ALTIJD boekperiode 01 t/m boekperiodeTotEnMet, ONGEACHT
+ *    boekperiodeVan (bankstand einde, resultaat huidig boekjaar YTD,
+ *    balans-sluit-check — een balans is een momentopname aan het einde
+ *    van de periode, geen bereik, en resultaat-huidig-boekjaar moet YTD
+ *    blijven voor de balansaansluiting activa = passiva + resultaat).
+ * 3. `vastgoed`/`huur` — momentopname, volledig los van boekjaar/periode
+ *    (ongewijzigd, ook bij een periode-van-selectie).
+ *
+ * `controleVereist` combineert de datakwaliteitsmeldingen van alle bronnen
+ * tot één genormaliseerde lijst (sectie + ernst + referentie + bericht) —
+ * puur herlabelen, geen nieuwe classificatie.
  */
 
 export type ManagementRapportControleErnst = "KRITIEK" | "WAARSCHUWING" | "INFORMATIEF";
@@ -38,13 +45,23 @@ export interface ManagementRapportControleItem {
   bericht: string;
 }
 
-export interface ManagementRapportSamenvatting {
+/** Uitsluitend boekperiodeVan t/m boekperiodeTotEnMet — GEEN YTD. */
+export interface ManagementRapportPeriodeSectie {
+  boekperiodeVan: string;
+  boekperiodeTotEnMet: string;
   totaleOpbrengsten: Decimal;
   totaleKosten: Decimal;
-  resultaatHuidigBoekjaar: OnbekendOf<Decimal>;
+  resultaatPeriode: OnbekendOf<Decimal>;
+  /** Bij boekperiodeVan="01" is dit byte-identiek aan de bestaande YTD-kasstroomweergave; anders van `berekenKasstroomManagementoverzichtSubperiode`. */
+  kasstroom: KasstroomManagementoverzichtResultaat;
+  topOverigeUitgaven?: readonly KasstroomTopUitgaveRegel[] | undefined;
+}
+
+/** ALTIJD boekperiode 01 t/m boekperiodeTotEnMet, ongeacht boekperiodeVan. */
+export interface ManagementRapportStandSectie {
+  boekperiodeTotEnMet: string;
   bankstandEinde: Decimal;
-  nettoKasstroom: Decimal;
-  eigenaarOnttrekkingen: Decimal;
+  resultaatHuidigBoekjaarYtd: OnbekendOf<Decimal>;
   balansSluit: boolean;
 }
 
@@ -52,42 +69,41 @@ export interface ManagementRapportInvoer {
   administratieNaam: string;
   bedrijfsnr: string;
   boekjaar: number;
-  boekperiodeTotEnMet: string;
   gegenereerdOp: Date;
-  kerncijfers: KerncijfersManagementResultaat;
-  kasstroom: KasstroomManagementoverzichtResultaat;
+  periode: ManagementRapportPeriodeSectie;
+  stand: ManagementRapportStandSectie;
+  vastgoed: VastgoedKerncijfersResultaat;
   huur: HuurKerncijfersResultaat;
-  topOverigeUitgaven?: readonly KasstroomTopUitgaveRegel[] | undefined;
 }
 
 export interface ManagementRapportResultaat {
   administratieNaam: string;
   bedrijfsnr: string;
   boekjaar: number;
-  boekperiodeTotEnMet: string;
   gegenereerdOp: Date;
-  managementsamenvatting: ManagementRapportSamenvatting;
+  periode: ManagementRapportPeriodeSectie;
+  stand: ManagementRapportStandSectie;
   /** Ongewijzigd doorgegeven (momentopname, eigen `bronPeildatum`/`controleVereist`) — zie `vastgoedKerncijfers.ts`. */
   vastgoed: VastgoedKerncijfersResultaat;
   /** Ongewijzigd doorgegeven (momentopname, eigen `bronPeildatum`/`controleVereist`) — zie `huurKerncijfers.ts`. */
   huur: HuurKerncijfersResultaat;
-  /** Ongewijzigd doorgegeven, volledige detail (bankstand begin/eind, ontvangsten/uitgaven, kwartalen) — zie `kasstroomManagementoverzicht.ts`. */
-  kasstroom: KasstroomManagementoverzichtResultaat;
-  topOverigeUitgaven?: readonly KasstroomTopUitgaveRegel[] | undefined;
   controleVereist: ManagementRapportControleItem[];
 }
 
 export function samenstelManagementRapport(invoer: ManagementRapportInvoer): ManagementRapportResultaat {
   const controleVereist: ManagementRapportControleItem[] = [];
 
-  if (invoer.kerncijfers.resultaatHuidigBoekjaar.type === "onbekend") {
-    controleVereist.push({ sectie: "Financieel", ernst: "WAARSCHUWING", referentie: null, bericht: invoer.kerncijfers.resultaatHuidigBoekjaar.reden });
+  if (invoer.periode.resultaatPeriode.type === "onbekend") {
+    controleVereist.push({ sectie: "Financieel", ernst: "WAARSCHUWING", referentie: null, bericht: invoer.periode.resultaatPeriode.reden });
   }
-  if (!invoer.kerncijfers.balansSluitBinnenTolerantie) {
+  if (invoer.stand.resultaatHuidigBoekjaarYtd.type === "onbekend") {
+    controleVereist.push({ sectie: "Financieel", ernst: "WAARSCHUWING", referentie: null, bericht: invoer.stand.resultaatHuidigBoekjaarYtd.reden });
+  }
+  if (!invoer.stand.balansSluit) {
     controleVereist.push({ sectie: "Financieel", ernst: "KRITIEK", referentie: null, bericht: "Balans sluit niet binnen tolerantie voor deze periode." });
   }
 
-  for (const item of invoer.kerncijfers.vastgoed.controleVereist) {
+  for (const item of invoer.vastgoed.controleVereist) {
     controleVereist.push({ sectie: "Vastgoed", ernst: item.ernst, referentie: item.complexnr, bericht: item.bericht });
   }
 
@@ -95,7 +111,7 @@ export function samenstelManagementRapport(invoer: ManagementRapportInvoer): Man
     controleVereist.push({ sectie: "Huur", ernst: item.ernst, referentie: item.complexnr, bericht: item.bericht });
   }
 
-  for (const item of invoer.kasstroom.controleVereist) {
+  for (const item of invoer.periode.kasstroom.controleVereist) {
     controleVereist.push({
       sectie: "Kasstroom",
       ernst: "WAARSCHUWING",
@@ -108,21 +124,11 @@ export function samenstelManagementRapport(invoer: ManagementRapportInvoer): Man
     administratieNaam: invoer.administratieNaam,
     bedrijfsnr: invoer.bedrijfsnr,
     boekjaar: invoer.boekjaar,
-    boekperiodeTotEnMet: invoer.boekperiodeTotEnMet,
     gegenereerdOp: invoer.gegenereerdOp,
-    managementsamenvatting: {
-      totaleOpbrengsten: invoer.kerncijfers.totaleOpbrengsten,
-      totaleKosten: invoer.kerncijfers.totaleKosten,
-      resultaatHuidigBoekjaar: invoer.kerncijfers.resultaatHuidigBoekjaar,
-      bankstandEinde: invoer.kerncijfers.bankstandEindePeriode,
-      nettoKasstroom: invoer.kerncijfers.nettoKasstroom,
-      eigenaarOnttrekkingen: invoer.kerncijfers.eigenaarOnttrekkingen,
-      balansSluit: invoer.kerncijfers.balansSluitBinnenTolerantie,
-    },
-    vastgoed: invoer.kerncijfers.vastgoed,
+    periode: invoer.periode,
+    stand: invoer.stand,
+    vastgoed: invoer.vastgoed,
     huur: invoer.huur,
-    kasstroom: invoer.kasstroom,
-    topOverigeUitgaven: invoer.topOverigeUitgaven,
     controleVereist,
   };
 }
