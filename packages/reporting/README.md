@@ -595,6 +595,31 @@ keten 1506 → 1600 → bank deterministisch kunnen volgen, en of dat ook
 standhoudt bij verzamelbetalingen/deelbetalingen — dit bestand matcht nog
 steeds niets automatisch.
 
+**Resultaat van die inspectie (2026-08-26): A/B zijn GEEN bruikbare
+koppelsleutel — onderzoek gepauzeerd op verzoek van de gebruiker.** Een
+echte run van `kasstroom-diagnose-rekeningactiviteit` tegen 070_Rooise_Zoom
+voor rekening 1600 (boekjaar 2026 t/m periode 02, 176 regels) toonde dat
+`grootboekA` op ELKE regel dezelfde waarde heeft (`"00000910"`) — inclusief
+de BTW-boeking zelf (26-01, boekstuk `202650000035`, -€31.617) én de
+bijbehorende betaling (27-01, boekstuk `202620000007`, +€31.617), maar ook
+elke andere, volledig ongerelateerde boeking op 1600 (verzekeringspremies,
+schoonmaak, elektra-afrekeningen, liftonderhoud, etc.). `grootboekB` was op
+alle 176 regels `null`. A/B varieert dus niet per boekstuk/factuur/betaling
+op deze rekening — het gedraagt zich als een vast, rekeninggebonden
+kenmerk (vermoedelijk een intern Informant/PxPlus-kenmerk van rekening 1600
+zelf), niet als een per-transactie referentie. Daarmee kan het geen twee
+specifieke boekstukken van elkaar onderscheiden en dus de keten 1506 → 1600
+→ bank niet deterministisch volgen — noch voor het basisgeval, laat staan
+voor verzamel-/deelbetalingen.
+
+De diagnostische uitbreiding (`grootboekA`/`grootboekB` op
+`RekeningActiviteitRegel`, zie hierboven) blijft in de code staan — die is
+op zichzelf correct en herbruikbaar (bv. om A/B op een andere rekening of
+administratie te checken), maar het BTW-ketenonderzoek zelf is op expliciet
+verzoek van de gebruiker gepauzeerd: geen vervolgstap (1506 los checken,
+alternatieve velden zoeken, structurele matching bouwen) ondernemen zonder
+dat opnieuw met de gebruiker af te stemmen.
+
 ## Grootboek-inventarisatie (`grootboekInventarisatie.ts`) — voorbereiding op een centrale mastermapping
 
 Puur diagnostisch, alleen-lezen: past geen mapping toe, verandert niets.
