@@ -19,4 +19,5 @@ export * from "./kasstroomRekeningActiviteit.js";
 export * from "./renderKasstroomManagementoverzicht.js";
 export * from "./kasstroomTegenrekeningDiagnose.js";
 export * from "./grootboekInventarisatie.js";
+export * from "./kerncijfersManagement.js";
 export { HUISSTIJL_CSS, escapeHtml, formatBedragHtml, renderRapportDocument } from "./huisstijl.js";

@@ -7,6 +7,7 @@ import { genereerControlerapport } from "./genereerControlerapport.js";
 import { genereerPlPeriode } from "./genereerPlPeriode.js";
 import { genereerBalansPeriode } from "./genereerBalansPeriode.js";
 import { genereerRapportPeriode } from "./genereerRapportPeriode.js";
+import { genereerKerncijfers } from "./genereerKerncijfers.js";
 import { genereerKasstroomPeriode } from "./genereerKasstroomPeriode.js";
 import { genereerKasstroomManagementoverzicht } from "./genereerKasstroomManagementoverzicht.js";
 import { genereerKasstroomTegenrekeningDiagnose } from "./genereerKasstroomTegenrekeningDiagnose.js";
@@ -30,6 +31,8 @@ function printGebruik(): never {
       "      (Balans op een expliciete boekjaar+boekperiode-peildatum: beginbalans + boekingen t/m die periode, incl. aansluitingscontrole activa/passiva/resultaat)",
       "  rapport-periode <administratieId> --boekjaar N --periodeTotEnMet P [--tolerantie N]",
       "      (Resultatenrekening + balans van dezelfde periode in één HTML-rapport, geschreven naar rapporten/ — zelfde berekeningen als pl-periode/balans-periode)",
+      "  kerncijfers <administratieId> --boekjaar N --periodeTotEnMet P [--tolerantie N]",
+      "      (TIJDELIJK, v1: compact Management-KPI-overzicht dat uitsluitend al-bewezen berekeningen samenstelt — totale opbrengsten/kosten + resultaat huidig boekjaar (pl-periode), bankstand einde periode/netto kasstroom/eigenaaronttrekkingen (kasstroom-managementoverzicht) en balansSluitBinnenTolerantie als datakwaliteitsindicator (balans-periode) — geen renderer/HTML, alleen JSON op stdout, geen nieuwe financiële logica)",
       "  kasstroom-periode <administratieId> --boekjaar N --periodeTotEnMet P",
       "      (Mutatie bankstand: beginbalans + boekingen t/m die periode, alleen voor rekeningen met bevestigde liquideMiddelen:true — eerste, eenvoudige kasstroomweergave)",
       "  kasstroom-managementoverzicht <administratieId> --boekjaar N --periodeTotEnMet P [--verwacht <pad-naar-json>] [--tolerantie N]",
@@ -182,6 +185,22 @@ async function main() {
     if (resultaat.plResultaat.controleVereist.length > 0 || resultaat.balansResultaat.controleVereist.length > 0 || !resultaat.balansResultaat.aansluiting.sluitBinnenTolerantie) {
       process.exitCode = 1;
     }
+    return;
+  }
+
+  if (command === "kerncijfers") {
+    const [administratieId] = rest;
+    const boekjaarStr = parseFlag(rest, "boekjaar");
+    const boekperiodeTotEnMet = parseFlag(rest, "periodeTotEnMet");
+    if (!administratieId || !boekjaarStr || !boekperiodeTotEnMet) printGebruik();
+    const tolerantieStr = parseFlag(rest, "tolerantie");
+    const resultaat = genereerKerncijfers(root, administratieId, {
+      boekjaar: Number(boekjaarStr),
+      boekperiodeTotEnMet,
+      toleranceEuro: tolerantieStr ? new Decimal(tolerantieStr) : undefined,
+    });
+    console.log(JSON.stringify(resultaat, null, 2));
+    if (!resultaat.balansSluitBinnenTolerantie) process.exitCode = 1;
     return;
   }
 

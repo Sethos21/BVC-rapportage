@@ -620,6 +620,71 @@ verzoek van de gebruiker gepauzeerd: geen vervolgstap (1506 los checken,
 alternatieve velden zoeken, structurele matching bouwen) ondernemen zonder
 dat opnieuw met de gebruiker af te stemmen.
 
+## Kerncijfers / Management-KPI's (`kerncijfersManagement.ts`, v1, 2026-08-26) — samenstellen, geen nieuwe berekening
+
+Compact managementoverzicht, op verzoek van de gebruiker gebouwd bovenop
+drie al-bewezen rekenmodules — `berekenPlPeriode`/`berekenNettoResultaat`,
+`berekenKasstroomManagementoverzicht` en (uitsluitend voor de
+datakwaliteitsindicator) `berekenBalansPeriode`. `samenstelKerncijfersManagement`
+herschikt alleen bestaande resultaten; er wordt geen boeking, saldo of
+mapping opnieuw beoordeeld. Zeven velden:
+
+- `totaleOpbrengsten`/`totaleKosten` — uit `PlPeriodeResultaat.categorieTotalen`,
+  opgezocht op de rapportagecategorienamen `"Opbrengsten"`/`"Kosten"` (de
+  enige twee die systeembreed in gebruik zijn, zelfde aanname als
+  `STANDAARD_TEKEN_PER_CATEGORIE` in `genereerBalansPeriode.ts` — bewust nog
+  niet generieker gemaakt, op verzoek gebruiker). Komt een categorie niet
+  voor in een geldige periode, dan is het resultaat €0 (geen boekingen in
+  die categorie — een legitieme lege-som, geen datagat); rekeningen die
+  helemaal niet classificeerbaar zijn, blijven zoals altijd apart zichtbaar
+  via `PlPeriodeResultaat.controleVereist`, niet stilzwijgend meegeteld.
+- `resultaatHuidigBoekjaar` — rechtstreeks `berekenNettoResultaat`'s
+  `OnbekendOf<Decimal>`, ongewijzigd.
+- `bankstandEindePeriode`/`nettoKasstroom`/`eigenaarOnttrekkingen` —
+  rechtstreeks uit `KasstroomManagementoverzichtResultaat`.
+- `balansSluitBinnenTolerantie` — rechtstreeks
+  `BalansAansluitingscontrole.sluitBinnenTolerantie`: uitsluitend een
+  datakwaliteitsindicator, GEEN van de zes kerncijfers hierboven wordt via
+  de balans herberekend of gevalideerd.
+
+Bewust een APARTE module van de bestaande `kerncijfers.ts`/`renderKerncijfers.ts`
+("sectie 01 — Kerncijfers (KPI-dashboard)" hieronder): dat is een vroege,
+nooit aan een Worker-commando of aan echte cachedata gekoppelde poort van
+`legacy/index.html`'s `renderOverzicht` (huurinkomen/EBITDA/uitbetalingsratio/
+bankstand/debiteuren/servicekosten-saldo + bezettingsgraad, getest tegen
+fixture "Fergagne BV") — een ander, breder concept. Niet vermengd of
+overschreven, expliciete keuze van de gebruiker.
+
+Worker: `genereerKerncijfers.ts` — één cache-read, zelfde
+mapping-/periodeselectiepatroon als `genereerRapportPeriode.ts`, nu voor
+drie i.p.v. twee bronnen. CLI (TIJDELIJK, v1, nog geen renderer/HTML):
+`kerncijfers <administratieId> --boekjaar N --periodeTotEnMet P
+[--tolerantie N]`, JSON op stdout.
+
+**Vastgoed-KPI's (bezettingsgraad, huur per m², contractvervalkalender) —
+kort bronnenonderzoek, nog GEEN mapping/implementatie (2026-08-26):**
+- Bezettingsgraad/leegstand: `complex_totalen` heeft `totaal_oppervlakte`/
+  `totaal_verhuurd`/`totaal_leegstand` al per complex geaggregeerd —
+  sterkste kandidaat, en er bestaat al een ongebruikte rekenfunctie
+  (`berekenBezettingsgraadPortefeuille`, in de bestaande `kerncijfers.ts`)
+  die hier direct op past.
+- Huur per m²: `rentroll` heeft `prolongatie_bedrag_jaar` (jaarhuur) +
+  `gehuurd_oppervlak` per contract, aggregeerbaar per complex. Data lijkt
+  aanwezig, maar (a) rentroll heeft een `rapportage_datum`
+  (peildatum-snapshot) waarvoor — anders dan bij boekingen/balansstanden —
+  nog GEEN expliciete periodeselectie-functie bestaat in
+  `packages/cache/periodeSelectie.ts`; (b) welke huurcomponent telt (kaal /
+  incl. korting / incl. servicevoorschot) is nog geen bevestigde keuze.
+- Contractvervalkalender/WALT: `contracten` heeft expiratie-/
+  opzegdatumvelden, te combineren met rentroll (huur) en units (m²) voor
+  een gewogen resterende looptijd. Theoretisch afleidbaar, maar
+  join-integriteit (complexnummer/unitnummer/contractnummer consistent
+  over de drie tabellen) is nog niet tegen echte data geverifieerd.
+- Op geen van deze vier tabellen bestaat vandaag enige domain/reporting-laag
+  (geen mapper, geen rekenfunctie behalve de losse
+  bezettingsgraad-/huur-helpers in `kerncijfers.ts`) — volledig braakliggend
+  terrein, geen vervolgstap zonder nieuwe afstemming met de gebruiker.
+
 ## Grootboek-inventarisatie (`grootboekInventarisatie.ts`) — voorbereiding op een centrale mastermapping
 
 Puur diagnostisch, alleen-lezen: past geen mapping toe, verandert niets.
