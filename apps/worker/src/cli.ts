@@ -9,6 +9,7 @@ import { genereerBalansPeriode } from "./genereerBalansPeriode.js";
 import { genereerRapportPeriode } from "./genereerRapportPeriode.js";
 import { genereerKerncijfers } from "./genereerKerncijfers.js";
 import { genereerVastgoedKerncijfers } from "./genereerVastgoedKerncijfers.js";
+import { genereerRentrollDiagnose } from "./genereerRentrollDiagnose.js";
 import { genereerKasstroomPeriode } from "./genereerKasstroomPeriode.js";
 import { genereerKasstroomManagementoverzicht } from "./genereerKasstroomManagementoverzicht.js";
 import { genereerKasstroomTegenrekeningDiagnose } from "./genereerKasstroomTegenrekeningDiagnose.js";
@@ -36,6 +37,8 @@ function printGebruik(): never {
       "      (TIJDELIJK, v1: compact Management-KPI-overzicht dat uitsluitend al-bewezen berekeningen samenstelt — totale opbrengsten/kosten + resultaat huidig boekjaar (pl-periode), bankstand einde periode/netto kasstroom/eigenaaronttrekkingen (kasstroom-managementoverzicht) en balansSluitBinnenTolerantie als datakwaliteitsindicator (balans-periode) — plus een aparte 'vastgoed'-sectie (totale/verhuurde/leegstand VVO, bezettingsgraad, leegstandspercentage, bronPeildatum, controleVereist) van vastgoed-kerncijfers: een ONAFHANKELIJKE, actuele momentopname, GEEN periodegebonden cijfer en nooit meegeteld in de financiële velden — geen renderer/HTML, alleen JSON op stdout, geen nieuwe financiële of vastgoed-rekenlogica)",
       "  vastgoed-kerncijfers <administratieId>",
       "      (TIJDELIJK, v1: vastgoed-KPI's — bezettingsgraad/leegstand per complex + portefeuille, bottom-up uit units (totale VVO) en rentroll (verhuurde VVO, regels >0 m²) — STRIKT GESCHEIDEN van de financiële berekeningen, geen boekjaar/periode: dit is een actuele bronstand, geen periodegebonden cijfer. complex_totalen is uitsluitend een onafhankelijke controlebron; afwijkingen komen in controleVereist, worden nooit stilzwijgend gecorrigeerd. Geen renderer/HTML, alleen JSON op stdout, nog niet gekoppeld aan kerncijfers)",
+      "  rentroll-diagnose <administratieId>",
+      "      (TIJDELIJK, alleen-lezen: toont per rentroll-regel contractnummer/complexnr/unitnr/Vorderingsoort/prolongatie_bedrag_jaar/korting_bedrag_jaar/gehuurd_oppervlak/rapportage_datum, plus — uitsluitend bij een eenduidige (1-op-1) match op contractnummer — ingangsdatum/afloopdatum/expiratiedatum/check_lopend_contract uit contracten (geen match of meerdere matches wordt expliciet gemeld, nooit gegokt). Ook: aantal regels/som prolongatie_bedrag_jaar/som gehuurd_oppervlak/aantal unieke contracten per Vorderingsoort, en onverwachte Vorderingsoort-waarden. Geen huur-KPI, geen renderer, alleen JSON op stdout — bouwstap om te bepalen hoe Vorderingsoort 01/12/13 zich in de echte data gedraagt vóór een huur-KPI-module wordt ontworpen)",
       "  kasstroom-periode <administratieId> --boekjaar N --periodeTotEnMet P",
       "      (Mutatie bankstand: beginbalans + boekingen t/m die periode, alleen voor rekeningen met bevestigde liquideMiddelen:true — eerste, eenvoudige kasstroomweergave)",
       "  kasstroom-managementoverzicht <administratieId> --boekjaar N --periodeTotEnMet P [--verwacht <pad-naar-json>] [--tolerantie N]",
@@ -213,6 +216,14 @@ async function main() {
     const resultaat = genereerVastgoedKerncijfers(root, administratieId);
     console.log(JSON.stringify(resultaat, null, 2));
     if (resultaat.controleVereist.some((i) => i.ernst === "KRITIEK")) process.exitCode = 1;
+    return;
+  }
+
+  if (command === "rentroll-diagnose") {
+    const [administratieId] = rest;
+    if (!administratieId) printGebruik();
+    const resultaat = genereerRentrollDiagnose(root, administratieId);
+    console.log(JSON.stringify(resultaat, null, 2));
     return;
   }
 
