@@ -19,6 +19,7 @@ import { genereerKasstroomRekeningActiviteit } from "./genereerKasstroomRekening
 import { genereerGrootboekInventarisatie } from "./genereerGrootboekInventarisatie.js";
 import { withLock } from "./lock.js";
 import { AdministratieBestaatAlError, initAdministratie } from "./administratie.js";
+import { startServeServer } from "./serveServer.js";
 
 function printGebruik(): never {
   console.error(
@@ -55,6 +56,8 @@ function printGebruik(): never {
       "      (alleen-lezen: toont ALLE boekingen op de opgegeven rekening chronologisch, met boekstukSleutel/dagboeknr/bedrag/omschrijving en of het boekstuk kasstroom-relevant is — bouwstap om een keten zoals factuur (bv. 1506) -> crediteuren (1600) -> bank te kunnen beoordelen, matcht zelf niets automatisch)",
       "  grootboek-inventarisatie",
       "      (alleen-lezen: inventariseert grootboekrekeninggebruik over ALLE administraties in de gedeelde bron boekingen/balans_per_jaar — voorbereiding op een centrale mastermapping, past niets toe)",
+      "  serve [--poort N]",
+      "      (TIJDELIJK, v1: lokaal invoerscherm — start een webserver op 127.0.0.1 (standaard poort 8787, nooit op het netwerk bereikbaar), opent de browser automatisch. Administratie/boekjaar/periode kiezen -> 'Managementrapport openen' roept rechtstreeks dezelfde genereerManagementRapport() aan als het CLI-commando management-rapport, geen nieuwe reken-/reportinglogica. Administratielijst dynamisch uit BVC_DATA_ROOT/administraties, server-side validatie. Ctrl+C sluit netjes af)",
       "",
       `bronType is één van: ${BRON_TYPES.join(", ")}`,
       "Vereist BVC_DATA_ROOT.",
@@ -330,6 +333,14 @@ async function main() {
     );
     console.log(JSON.stringify(resultaat.inventarisatie, null, 2));
     return;
+  }
+
+  if (command === "serve") {
+    const poortStr = parseFlag(rest, "poort");
+    const poort = poortStr ? Number(poortStr) : 8787;
+    if (!Number.isInteger(poort) || poort < 1 || poort > 65535) printGebruik();
+    startServeServer(root, { poort });
+    return; // proces blijft leven zolang de server luistert — geen expliciete "wacht" nodig.
   }
 
   printGebruik();

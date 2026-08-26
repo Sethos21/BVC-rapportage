@@ -1,7 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { dirname } from "node:path";
-import { BRON_TYPES, type BronType, administratieConfigPad, administratieDir } from "./paths.js";
+import { BRON_TYPES, type BronType, administratieConfigPad, administratieDir, administratiesDir } from "./paths.js";
 
 export type BronLocatie = "gedeeld" | "eigen";
 
@@ -73,6 +73,37 @@ function valideerConfig(config: AdministratieConfig): void {
 
 export function bestaatAdministratie(root: string, administratieId: string): boolean {
   return existsSync(administratieDir(root, administratieId));
+}
+
+export interface AdministratieListItem {
+  administratieId: string;
+  bedrijfsnr: string;
+  weergavenaam: string;
+}
+
+/**
+ * Leest alle administraties dynamisch uit `<root>/administraties/` — puur
+ * listing (submappen + hun `administratie.json`), geen berekening. Gebruikt
+ * door `serve` (invoerscherm) om de administratie-dropdown te vullen; nooit
+ * een hardcoded lijst. Een submap zonder geldige `administratie.json` wordt
+ * overgeslagen (niet fataal) zodat één onvolledige/corrupte administratie de
+ * rest van de lijst niet blokkeert.
+ */
+export function lijstAdministraties(root: string): AdministratieListItem[] {
+  const dir = administratiesDir(root);
+  if (!existsSync(dir)) return [];
+
+  const resultaat: AdministratieListItem[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    try {
+      const config = leesAdministratieConfig(root, entry.name);
+      resultaat.push({ administratieId: entry.name, bedrijfsnr: config.bedrijfsnr, weergavenaam: config.weergavenaam });
+    } catch {
+      continue;
+    }
+  }
+  return resultaat.sort((a, b) => a.weergavenaam.localeCompare(b.weergavenaam));
 }
 
 export class AdministratieBestaatAlError extends Error {}
