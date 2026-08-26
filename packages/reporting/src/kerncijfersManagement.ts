@@ -2,6 +2,7 @@ import Decimal from "decimal.js";
 import type { OnbekendOf } from "@bvc/domain";
 import type { PlPeriodeCategorieTotaal, PlPeriodeResultaat } from "./plPeriodeBerekening.js";
 import type { KasstroomManagementoverzichtResultaat } from "./kasstroomManagementoverzicht.js";
+import type { VastgoedKerncijfersResultaat } from "./vastgoedKerncijfers.js";
 
 /**
  * Kerncijfers / Management-KPI's (v1, 2026-08-26) — pure samenstelfunctie:
@@ -19,6 +20,18 @@ import type { KasstroomManagementoverzichtResultaat } from "./kasstroomManagemen
  * Dit is een ander, smaller concept (management-KPI's rechtstreeks uit
  * pl-periode/balans-periode/kasstroom-managementoverzicht, regressie tegen
  * 070_Rooise_Zoom) — niet vermengd of overschreven, op verzoek gebruiker.
+ *
+ * Koppeling vastgoed-kerncijfers (2026-08-26): `vastgoed`
+ * (`VastgoedKerncijfersResultaat`, `vastgoedKerncijfers.ts`) wordt ALLEEN
+ * doorgegeven, ongewijzigd — geen enkel veld hierboven wordt ermee
+ * herberekend en geen enkel vastgoedveld wordt in een financieel totaal
+ * meegeteld. De twee secties blijven semantisch gescheiden: de financiële
+ * velden zijn periodegebonden (boekjaar + periodeTotEnMet, van de
+ * aanroeper), `vastgoed` is en blijft een actuele momentopname
+ * (`vastgoed.momentopname === true`, `vastgoed.bronPeildatum` — geen
+ * boekjaar/periode). `vastgoed.controleVereist` is uitsluitend
+ * vastgoedbron-afwijkingen (units/rentroll/complex_totalen) en is niet
+ * hetzelfde als `resultaatHuidigBoekjaar`/`balansSluitBinnenTolerantie`.
  */
 
 const OPBRENGSTEN_CATEGORIE = "Opbrengsten";
@@ -37,6 +50,15 @@ export interface KerncijfersManagementResultaat {
    * geen van de zes kerncijfers hierboven wordt via de balans herberekend.
    */
   balansSluitBinnenTolerantie: boolean;
+  /**
+   * Vastgoed-KPI's (v1, `vastgoedKerncijfers.ts`) — ongewijzigd doorgegeven.
+   * ONAFHANKELIJKE, actuele momentopname (`vastgoed.momentopname === true`),
+   * GEEN periodegebonden cijfer en NOOIT meegeteld in de financiële velden
+   * hierboven. Bevat zelf al portefeuille + per-complex bezettingsgraad/
+   * leegstand, `bronPeildatum` en `controleVereist` voor vastgoedbron-
+   * afwijkingen (zie `vastgoedKerncijfers.ts`).
+   */
+  vastgoed: VastgoedKerncijfersResultaat;
 }
 
 /**
@@ -58,6 +80,7 @@ export function samenstelKerncijfersManagement(
   resultaatHuidigBoekjaar: OnbekendOf<Decimal>,
   kasstroomResultaat: KasstroomManagementoverzichtResultaat,
   balansSluitBinnenTolerantie: boolean,
+  vastgoed: VastgoedKerncijfersResultaat,
 ): KerncijfersManagementResultaat {
   return {
     totaleOpbrengsten: categorieTotaalOf(plResultaat.categorieTotalen, OPBRENGSTEN_CATEGORIE),
@@ -67,5 +90,6 @@ export function samenstelKerncijfersManagement(
     nettoKasstroom: kasstroomResultaat.nettoKasstroom,
     eigenaarOnttrekkingen: kasstroomResultaat.eigenaarOnttrekkingen,
     balansSluitBinnenTolerantie,
+    vastgoed,
   };
 }

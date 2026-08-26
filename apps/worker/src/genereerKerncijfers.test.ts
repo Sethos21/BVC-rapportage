@@ -79,6 +79,19 @@ beforeEach(() => {
   ]);
   schrijfXlsxFixture(join(bronGedeeldDir(root), "servicekosten.xlsx"), []);
 
+  // Vastgoedbron, bewust klein: bewijst dat de vastgoedsectie echt gekoppeld is (los van de financiële cijfers hierboven).
+  schrijfXlsxFixture(join(bronGedeeldDir(root), "units.xlsx"), [
+    { Bedrijfsnr: "070", Complexnummer: "001", Unitnummer: "0001", Unit_Non_actief: "Nee", Unitomschrijving: "Unit A", Unitsoort: "Kantoor", Unit_VVO: "100", Unit_BVO: "110" },
+  ]);
+  schrijfXlsxFixture(join(bronGedeeldDir(root), "rentroll.xlsx"), [
+    {
+      Bedrijfsnummer: "070", Contractnummer: "C1", Vorderingsoort: "01", Unitnummer: "0001", Complexnummer: "001",
+      Rapportage_datum: "30-06-2026", Prolongatie_bedrag_jaar: "10000", Korting_bedrag_jaar: null,
+      Service_voorschot_jaar: null, Gehuurd_oppervlak: "80", Contract_expiratiedatum: null, Contract_opzegdatum: null,
+    },
+  ]);
+  schrijfXlsxFixture(join(bronGedeeldDir(root), "complex_totalen.xlsx"), []);
+
   mkdirSync(grootboekmappingenDir(root), { recursive: true });
   writeFileSync(grootboekmappingPad(root, "070_rooisezoom"), JSON.stringify(basisMapping()), "utf-8");
 
@@ -103,6 +116,19 @@ describe("genereerKerncijfers", () => {
     expect(resultaat.nettoKasstroom.toString()).toBe("300");
     expect(resultaat.eigenaarOnttrekkingen.toString()).toBe("0");
     expect(resultaat.balansSluitBinnenTolerantie).toBe(true);
+
+    // Vastgoedsectie: los gekoppeld, geen boekjaar/periode, geen invloed op de financiële velden hierboven.
+    expect(resultaat.vastgoed.momentopname).toBe(true);
+    expect(resultaat.vastgoed.portefeuille.totaalVvo).toEqual({ type: "bekend", waarde: expect.anything() });
+    if (resultaat.vastgoed.portefeuille.totaalVvo.type === "bekend") {
+      expect(resultaat.vastgoed.portefeuille.totaalVvo.waarde.toString()).toBe("100");
+    }
+    if (resultaat.vastgoed.portefeuille.verhuurdeVvo.type === "bekend") {
+      expect(resultaat.vastgoed.portefeuille.verhuurdeVvo.waarde.toString()).toBe("80");
+    }
+    if (resultaat.vastgoed.portefeuille.leegstandVvo.type === "bekend") {
+      expect(resultaat.vastgoed.portefeuille.leegstandVvo.waarde.toString()).toBe("20");
+    }
   });
 
   it("gooit een duidelijke fout als de grootboekmapping ontbreekt", () => {

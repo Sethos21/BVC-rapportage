@@ -12,6 +12,7 @@ import {
 import { administratieCachePad } from "./paths.js";
 import { leesAdministratieConfig } from "./administratie.js";
 import { STANDAARD_TEKEN_PER_CATEGORIE } from "./genereerBalansPeriode.js";
+import { genereerVastgoedKerncijfers } from "./genereerVastgoedKerncijfers.js";
 import { leesGrootboekMappingGesplitst } from "./grootboekmapping.js";
 import { naarBalansstand, naarBoekingsregel } from "./rowMappers.js";
 
@@ -29,6 +30,13 @@ import { naarBalansstand, naarBoekingsregel } from "./rowMappers.js";
  * als `genereerRapportPeriode.ts`, nu voor drie i.p.v. twee bronnen. Geen
  * financiële logica hier — alleen samenstellen (@bvc/reporting's
  * `kerncijfersManagement.ts`).
+ *
+ * Vastgoedsectie (2026-08-26): hergebruikt `genereerVastgoedKerncijfers.ts`
+ * ONGEWIJZIGD (eigen, tweede read-only cacheverbinding — geen aanpassing
+ * aan de vastgoed-rekenlogica of aan de financiële logica hierboven). De
+ * vastgoedsectie kent bewust geen boekjaar/periode: het blijft een actuele
+ * momentopname (`vastgoed.momentopname === true`), losstaand van de
+ * periodegebonden financiële velden — zie `kerncijfersManagement.ts`.
  */
 
 export interface GenereerKerncijfersOpties {
@@ -71,8 +79,9 @@ export function genereerKerncijfers(root: string, administratieId: string, optie
       opties.toleranceEuro ?? new Decimal("0.01"),
     );
     const kasstroomResultaat = berekenKasstroomManagementoverzicht(balansstanden, boekingsregels, mappingRegels);
+    const vastgoed = genereerVastgoedKerncijfers(root, administratieId);
 
-    return samenstelKerncijfersManagement(plResultaat, resultaatHuidigBoekjaar, kasstroomResultaat, balansResultaat.aansluiting.sluitBinnenTolerantie);
+    return samenstelKerncijfersManagement(plResultaat, resultaatHuidigBoekjaar, kasstroomResultaat, balansResultaat.aansluiting.sluitBinnenTolerantie, vastgoed);
   } finally {
     db.close();
   }
