@@ -8,6 +8,7 @@ import { genereerPlPeriode } from "./genereerPlPeriode.js";
 import { genereerBalansPeriode } from "./genereerBalansPeriode.js";
 import { genereerRapportPeriode } from "./genereerRapportPeriode.js";
 import { genereerKerncijfers } from "./genereerKerncijfers.js";
+import { genereerVastgoedKerncijfers } from "./genereerVastgoedKerncijfers.js";
 import { genereerKasstroomPeriode } from "./genereerKasstroomPeriode.js";
 import { genereerKasstroomManagementoverzicht } from "./genereerKasstroomManagementoverzicht.js";
 import { genereerKasstroomTegenrekeningDiagnose } from "./genereerKasstroomTegenrekeningDiagnose.js";
@@ -33,6 +34,8 @@ function printGebruik(): never {
       "      (Resultatenrekening + balans van dezelfde periode in één HTML-rapport, geschreven naar rapporten/ — zelfde berekeningen als pl-periode/balans-periode)",
       "  kerncijfers <administratieId> --boekjaar N --periodeTotEnMet P [--tolerantie N]",
       "      (TIJDELIJK, v1: compact Management-KPI-overzicht dat uitsluitend al-bewezen berekeningen samenstelt — totale opbrengsten/kosten + resultaat huidig boekjaar (pl-periode), bankstand einde periode/netto kasstroom/eigenaaronttrekkingen (kasstroom-managementoverzicht) en balansSluitBinnenTolerantie als datakwaliteitsindicator (balans-periode) — geen renderer/HTML, alleen JSON op stdout, geen nieuwe financiële logica)",
+      "  vastgoed-kerncijfers <administratieId>",
+      "      (TIJDELIJK, v1: vastgoed-KPI's — bezettingsgraad/leegstand per complex + portefeuille, bottom-up uit units (totale VVO) en rentroll (verhuurde VVO, regels >0 m²) — STRIKT GESCHEIDEN van de financiële berekeningen, geen boekjaar/periode: dit is een actuele bronstand, geen periodegebonden cijfer. complex_totalen is uitsluitend een onafhankelijke controlebron; afwijkingen komen in controleVereist, worden nooit stilzwijgend gecorrigeerd. Geen renderer/HTML, alleen JSON op stdout, nog niet gekoppeld aan kerncijfers)",
       "  kasstroom-periode <administratieId> --boekjaar N --periodeTotEnMet P",
       "      (Mutatie bankstand: beginbalans + boekingen t/m die periode, alleen voor rekeningen met bevestigde liquideMiddelen:true — eerste, eenvoudige kasstroomweergave)",
       "  kasstroom-managementoverzicht <administratieId> --boekjaar N --periodeTotEnMet P [--verwacht <pad-naar-json>] [--tolerantie N]",
@@ -201,6 +204,15 @@ async function main() {
     });
     console.log(JSON.stringify(resultaat, null, 2));
     if (!resultaat.balansSluitBinnenTolerantie) process.exitCode = 1;
+    return;
+  }
+
+  if (command === "vastgoed-kerncijfers") {
+    const [administratieId] = rest;
+    if (!administratieId) printGebruik();
+    const resultaat = genereerVastgoedKerncijfers(root, administratieId);
+    console.log(JSON.stringify(resultaat, null, 2));
+    if (resultaat.controleVereist.some((i) => i.ernst === "KRITIEK")) process.exitCode = 1;
     return;
   }
 
