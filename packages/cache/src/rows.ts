@@ -55,6 +55,8 @@ export interface ServicekostenRow {
   saldo: string;
   doorbelasten: string | null;
   uitsluitingsstatus: string;
+  kostensoort_soort: string | null;
+  jaar_sv_afrekening: string | null;
 }
 
 export interface ContractRow {

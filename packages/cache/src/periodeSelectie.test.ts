@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { selecteerBalansOpBoekperiode, selecteerBalansstanden, selecteerBoekingen } from "./periodeSelectie.js";
-import type { BalansstandRow, BoekingRow } from "./rows.js";
+import { selecteerBalansOpBoekperiode, selecteerBalansstanden, selecteerBoekingen, selecteerServicekosten } from "./periodeSelectie.js";
+import type { BalansstandRow, BoekingRow, ServicekostenRow } from "./rows.js";
 
 function boeking(overrides: Partial<BoekingRow> = {}): BoekingRow {
   return {
@@ -88,6 +88,66 @@ describe("selecteerBoekingen", () => {
 
   it("geeft alle boekperioden van het boekjaar terug zonder range-opgave (expliciete keuze, geen impliciete eerste/laatste rij)", () => {
     const resultaat = selecteerBoekingen(rows, { bedrijfsnr: "070", boekjaar: 2026, grootboekrekening: "8800" });
+    expect(resultaat.map((r) => r.boekperiode)).toEqual(["01", "03", "06", "07"]);
+  });
+});
+
+function servicekostenregel(overrides: Partial<ServicekostenRow> = {}): ServicekostenRow {
+  return {
+    bedrijfsnr: "070",
+    boekjaar: 2026,
+    boekperiode: "01",
+    dagboeknummer: "50",
+    boekstuknummer: "000001",
+    volgnummer: "000001",
+    complexnummer: "001",
+    unitnummer: "0001",
+    contractnummer: "C1",
+    huurdernummer: "H1",
+    kostensoort: "4300",
+    kostensoort_omschrijving: "Onderhoud",
+    omschrijving: "Onderhoud dak",
+    bedrag_debet: "100",
+    bedrag_credit: "0",
+    saldo: "100",
+    doorbelasten: "Nee",
+    uitsluitingsstatus: "GEEN",
+    kostensoort_soort: "Kosten",
+    jaar_sv_afrekening: null,
+    ...overrides,
+  };
+}
+
+describe("selecteerServicekosten", () => {
+  const rows = [
+    servicekostenregel({ boekjaar: 2026, boekperiode: "01", boekstuknummer: "000001" }),
+    servicekostenregel({ boekjaar: 2026, boekperiode: "03", boekstuknummer: "000002" }),
+    servicekostenregel({ boekjaar: 2026, boekperiode: "06", boekstuknummer: "000003" }),
+    servicekostenregel({ boekjaar: 2026, boekperiode: "07", boekstuknummer: "000004" }),
+    servicekostenregel({ boekjaar: 2025, boekperiode: "03", boekstuknummer: "000005" }),
+    servicekostenregel({ bedrijfsnr: "074", boekjaar: 2026, boekperiode: "03", boekstuknummer: "000006" }),
+  ];
+
+  it("selecteert op boekjaar", () => {
+    const resultaat2026 = selecteerServicekosten(rows, { bedrijfsnr: "070", boekjaar: 2026 });
+    expect(resultaat2026).toHaveLength(4);
+    expect(resultaat2026.every((r) => r.boekjaar === 2026)).toBe(true);
+  });
+
+  it("selecteert een inclusieve boekperiode-range (periode 1 t/m 6)", () => {
+    const resultaat = selecteerServicekosten(rows, { bedrijfsnr: "070", boekjaar: 2026, boekperiodeVan: "01", boekperiodeTotEnMet: "06" });
+    expect(resultaat.map((r) => r.boekperiode)).toEqual(["01", "03", "06"]);
+    expect(resultaat.some((r) => r.boekperiode === "07")).toBe(false);
+  });
+
+  it("isoleert per administratie (bedrijfsnr)", () => {
+    const resultaat = selecteerServicekosten(rows, { bedrijfsnr: "074", boekjaar: 2026 });
+    expect(resultaat).toHaveLength(1);
+    expect(resultaat[0]?.bedrijfsnr).toBe("074");
+  });
+
+  it("geeft alle boekperioden van het boekjaar terug zonder range-opgave", () => {
+    const resultaat = selecteerServicekosten(rows, { bedrijfsnr: "070", boekjaar: 2026 });
     expect(resultaat.map((r) => r.boekperiode)).toEqual(["01", "03", "06", "07"]);
   });
 });

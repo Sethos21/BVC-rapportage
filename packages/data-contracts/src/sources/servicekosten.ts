@@ -29,6 +29,19 @@ export const ServicekostenregelBronSchema = z.object({
   Service_BK_Bedrag_debet: zDecimal,
   Service_BK_Bedrag_credit: zDecimal,
   Service_BK_Doorbelasten: zCodeOptional,
+  /**
+   * Bewezen via de servicekosten-diagnoseronde (2026-08-26/27, 070_Rooise_Zoom):
+   * "Kosten"/"Voorschotten"/"Nvt" — bron-native onderscheid tussen werkelijke
+   * servicekosten en vooraf ontvangen voorschotten. Bewust vrije string, geen
+   * Zod-enum: een onverwachte waarde bij een andere administratie moet
+   * zichtbaar blijven (`ServicekostenStroom`/`bepaalServicekostenStroom` in
+   * `@bvc/reporting`'s servicekostenPositie.ts classificeert dit, met een
+   * kruiscontrole tegen `uitgeslotenKostensoorten` hieronder), nooit een
+   * parse-fout die de rij laat verdwijnen.
+   */
+  Kostensoort_Soort: zCodeOptional,
+  /** Het jaar waarop een serviceafrekening (kostensoort 9600) betrekking heeft — uitsluitend een getoond attribuut, nooit een selectiecriterium (zie servicekostenPositie.ts). */
+  Service_BK_Jaar_SV_Afrekening: zCodeOptional,
 });
 
 export type ServicekostenregelBron = z.infer<typeof ServicekostenregelBronSchema>;
@@ -75,6 +88,8 @@ export interface GestaagdeServicekostenregel {
   serviceBoekingSaldo: Decimal;
   serviceBkDoorbelasten: string | null;
   uitsluitingsstatus: ServicekostenUitsluitingsstatus;
+  kostensoortSoort: string | null;
+  jaarSvAfrekening: string | null;
   raw: ServicekostenregelBron;
 }
 
@@ -98,6 +113,8 @@ function naarGestaagdeServicekostenregel(bron: ServicekostenregelBron, serviceko
     serviceBoekingSaldo: bron.Service_BK_Bedrag_debet.minus(bron.Service_BK_Bedrag_credit),
     serviceBkDoorbelasten: bron.Service_BK_Doorbelasten,
     uitsluitingsstatus: bepaalUitsluitingsstatus(bron.Service_BK_Kostensoort, bron.Service_BK_Omschrijving, servicekostenParams),
+    kostensoortSoort: bron.Kostensoort_Soort,
+    jaarSvAfrekening: bron.Service_BK_Jaar_SV_Afrekening,
     raw: bron,
   };
 }

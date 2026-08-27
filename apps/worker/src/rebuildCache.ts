@@ -219,6 +219,7 @@ export function rebuildCache(options: RebuildCacheOptions): RebuildCacheResultaa
               kostensoort_omschrijving: r.kostensoortOmschrijving, omschrijving: r.serviceBkOmschrijving,
               bedrag_debet: dec(r.serviceBkBedragDebet)!, bedrag_credit: dec(r.serviceBkBedragCredit)!,
               saldo: dec(r.serviceBoekingSaldo)!, doorbelasten: r.serviceBkDoorbelasten, uitsluitingsstatus: r.uitsluitingsstatus,
+              kostensoort_soort: r.kostensoortSoort, jaar_sv_afrekening: r.jaarSvAfrekening,
             }));
           log(`${bron.bronType}: ${cacheRijen.length} rijen voor deze administratie (van ${rijen.length} gevalideerd), wegschrijven naar cache…`);
           builder.insertServicekosten(cacheRijen);

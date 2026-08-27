@@ -41,4 +41,16 @@ describe("parseServicekosten", () => {
     expect(rijen[0]?.serviceBoekingSaldo.toString()).toBe("100");
     expect(rijen[0]?.uitsluitingsstatus).toBe("GEEN");
   });
+
+  it("geeft Kostensoort_Soort en Service_BK_Jaar_SV_Afrekening door zonder ze te classificeren", () => {
+    const { rijen } = parseServicekosten([{ ...basisRij, Kostensoort_Soort: "Kosten", Service_BK_Jaar_SV_Afrekening: "2025" }], STANDAARD_PARAMETERS.servicekosten);
+    expect(rijen[0]?.kostensoortSoort).toBe("Kosten");
+    expect(rijen[0]?.jaarSvAfrekening).toBe("2025");
+  });
+
+  it("laat Kostensoort_Soort/jaarSvAfrekening null als ze in de bron ontbreken, nooit een lege string of default", () => {
+    const { rijen } = parseServicekosten([basisRij], STANDAARD_PARAMETERS.servicekosten);
+    expect(rijen[0]?.kostensoortSoort).toBeNull();
+    expect(rijen[0]?.jaarSvAfrekening).toBeNull();
+  });
 });

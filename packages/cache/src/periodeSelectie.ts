@@ -1,5 +1,5 @@
 import type { OnbekendOf } from "@bvc/domain";
-import type { BalansstandRow, BoekingRow } from "./rows.js";
+import type { BalansstandRow, BoekingRow, ServicekostenRow } from "./rows.js";
 
 /**
  * Expliciete periodeselectie op de cache-rijen (CLAUDE.md, "periodefilters
@@ -39,6 +39,32 @@ export function selecteerBoekingen(rows: readonly BoekingRow[], criteria: Boekin
     if (criteria.boekperiodeVan !== undefined && row.boekperiode < criteria.boekperiodeVan) return false;
     if (criteria.boekperiodeTotEnMet !== undefined && row.boekperiode > criteria.boekperiodeTotEnMet) return false;
     if (criteria.grootboekrekening !== undefined && row.grootboeknr !== criteria.grootboekrekening) return false;
+    return true;
+  });
+}
+
+export interface ServicekostenSelectieCriteria {
+  bedrijfsnr: string;
+  boekjaar: number;
+  /** Zelfde betekenis/inclusiviteit als bij `BoekingenSelectieCriteria` — beide grenzen optioneel. */
+  boekperiodeVan?: string | undefined;
+  boekperiodeTotEnMet?: string | undefined;
+}
+
+/**
+ * Selecteert servicekostenregels op administratie (bedrijfsnr) + boekjaar +
+ * optionele boekperiode-range — zelfde patroon en boekperiode-vergelijking
+ * (lexicografisch, 2-cijferige strings) als `selecteerBoekingen`. De
+ * servicekosten-cachetabel draagt dezelfde `boekjaar`/`boekperiode`-velden,
+ * dus deze selectie kent geen aparte beperking (in tegenstelling tot
+ * `selecteerBalansOpBoekperiode`).
+ */
+export function selecteerServicekosten(rows: readonly ServicekostenRow[], criteria: ServicekostenSelectieCriteria): ServicekostenRow[] {
+  return rows.filter((row) => {
+    if (row.bedrijfsnr !== criteria.bedrijfsnr) return false;
+    if (row.boekjaar !== criteria.boekjaar) return false;
+    if (criteria.boekperiodeVan !== undefined && row.boekperiode < criteria.boekperiodeVan) return false;
+    if (criteria.boekperiodeTotEnMet !== undefined && row.boekperiode > criteria.boekperiodeTotEnMet) return false;
     return true;
   });
 }

@@ -62,6 +62,8 @@ export const CACHE_TABLES_DDL: readonly string[] = [
     saldo TEXT NOT NULL,
     doorbelasten TEXT,
     uitsluitingsstatus TEXT NOT NULL,
+    kostensoort_soort TEXT,
+    jaar_sv_afrekening TEXT,
     PRIMARY KEY (bedrijfsnr, boekjaar, boekperiode, dagboeknummer, boekstuknummer, volgnummer)
   )`,
   `CREATE TABLE contracten (

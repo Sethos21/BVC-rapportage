@@ -10,6 +10,10 @@ import { genereerRapportPeriode } from "./genereerRapportPeriode.js";
 import { genereerKerncijfers } from "./genereerKerncijfers.js";
 import { genereerVastgoedKerncijfers } from "./genereerVastgoedKerncijfers.js";
 import { genereerRentrollDiagnose } from "./genereerRentrollDiagnose.js";
+import { genereerServicekostenBronKolommenDiagnose } from "./genereerServicekostenBronKolommenDiagnose.js";
+import { genereerServicekostenAfrekeningDiagnose } from "./genereerServicekostenAfrekeningDiagnose.js";
+import { genereerServicekostenGrootboekReconciliatieDiagnose } from "./genereerServicekostenGrootboekReconciliatieDiagnose.js";
+import { genereerServicekostenPositie } from "./genereerServicekostenPositie.js";
 import { genereerHuurKerncijfers } from "./genereerHuurKerncijfers.js";
 import { genereerManagementRapport } from "./genereerManagementRapport.js";
 import { genereerKasstroomPeriode } from "./genereerKasstroomPeriode.js";
@@ -42,6 +46,14 @@ function printGebruik(): never {
       "      (TIJDELIJK, v1: vastgoed-KPI's — bezettingsgraad/leegstand per complex + portefeuille, bottom-up uit units (totale VVO) en rentroll (verhuurde VVO, regels >0 m²) — STRIKT GESCHEIDEN van de financiële berekeningen, geen boekjaar/periode: dit is een actuele bronstand, geen periodegebonden cijfer. complex_totalen is uitsluitend een onafhankelijke controlebron; afwijkingen komen in controleVereist, worden nooit stilzwijgend gecorrigeerd. Geen renderer/HTML, alleen JSON op stdout, nog niet gekoppeld aan kerncijfers)",
       "  rentroll-diagnose <administratieId>",
       "      (TIJDELIJK, alleen-lezen: toont per rentroll-regel contractnummer/complexnr/unitnr/Vorderingsoort/prolongatie_bedrag_jaar/korting_bedrag_jaar/gehuurd_oppervlak/rapportage_datum, plus — uitsluitend bij een eenduidige (1-op-1) match op contractnummer — ingangsdatum/afloopdatum/expiratiedatum/check_lopend_contract uit contracten (geen match of meerdere matches wordt expliciet gemeld, nooit gegokt). Ook: aantal regels/som prolongatie_bedrag_jaar/som gehuurd_oppervlak/aantal unieke contracten per Vorderingsoort, en onverwachte Vorderingsoort-waarden. Geen huur-KPI, geen renderer, alleen JSON op stdout — bouwstap om te bepalen hoe Vorderingsoort 01/12/13 zich in de echte data gedraagt vóór een huur-KPI-module wordt ontworpen)",
+      "  servicekosten-bronkolommen <administratieId>",
+      "      (TIJDELIJK, alleen-lezen: leest het RUWE servicekosten-bronbestand rechtstreeks (niet de cache, niet het geparste schema) en toont ELKE kolomnaam die erin voorkomt — inclusief kolommen die nog niet in ServicekostenregelBronSchema staan — met aantal niet-lege waarden en max. 5 voorbeeldwaarden per kolom. Bouwstap om te bepalen of de bron een apart grootboekrekening/rekeningnummer-veld bevat vóórdat daar iets structureels mee gebouwd wordt. Geen KPI, geen classificatie, alleen JSON op stdout)",
+      "  servicekosten-afrekening-diagnose <administratieId>",
+      "      (TIJDELIJK, alleen-lezen: leest het RUWE servicekosten-bronbestand en analyseert Kostensoort_Soort (Kosten/Voorschotten/Nvt) + acht afrekeningsvelden (Jaar_Afrekening, Jaar_SV_Afrekening, Per_SV_Afrekening, Periode_Afrekening, SV_Afrekening_Soort(+Omschrijving/Vlgnr), Vdsrt_Opbrengsten(+Omschr)) + Service_Boeking_Saldo vs. herberekend saldo — per Kostensoort_Soort, apart voor kostensoort 9600 (nooit automatisch uit kosten/voorschotten gefilterd), met tekenpatroon-onderzoek. Geen KPI, geen classificatie, geen cache/rebuildCache-aanraking, alleen JSON op stdout)",
+      "  servicekosten-grootboek-reconciliatie <administratieId> --boekjaar N [--periodeVan P] --periodeTotEnMet P --rekeningen <lijst>",
+      "      (TIJDELIJK, alleen-lezen: reconcilieert de servicekosten-afrekeningsbron (Kostensoort_Soort Kosten/Voorschotten/Nvt) tegen de opgegeven grootboekrekeningen (kommagescheiden, bv. 1711,1712) uit de al-herbouwde cache `boekingen`. Koppelt uitsluitend op de natuurlijke sleutel boekjaar+dagboek+boekstuk+volgnummer — GEEN bedrag-matching. Toont per stroom welke grootboekrekening(en) daadwerkelijk gevonden zijn, een onafhankelijke grootboeksaldo-vs-gekoppeld-servicekostensaldo-vergelijking per doelrekening en per boekperiode, en houdt kostensoort 9600 altijd apart zichtbaar. Geen KPI, geen mapping, geen cache/rebuildCache-wijziging, geen koppeling aan management-rapport, alleen JSON op stdout)",
+      "  servicekosten-positie <administratieId> --boekjaar N [--periodeVan P] --periodeTotEnMet P --rekeningen <lijst>",
+      "      (v1: definitieve servicekostenmodule — A. actuele positie (werkelijke kosten + voorschotten in de gekozen periode, actueelSaldo = kostenSaldo + voorschottenSaldo, NOOIT aftrekken), B. afrekening voorgaand jaar (config-gestuurd uitgesloten kostensoorten, bv. 9600, altijd apart, nooit in de actuele positie), C. financiële reconciliatie tegen de opgegeven doelrekeningen (kommagescheiden, bv. 1711,1712 — PARAMETER, geen hardcoded aanname). Kostenallocatie per huurder wordt bewust NIET gebouwd (kosten zijn overwegend complexbreed); voorschotten/afrekening per contract-huurder waar rechtstreeks bewezen. Geen renderer, geen koppeling aan management-rapport, alleen JSON op stdout)",
       "  huur-kerncijfers <administratieId>",
       "      (TIJDELIJK, v1: bruto/netto jaarhuur, huurkortingen, verhuurde VVO en huur per m², per complex + portefeuille — Vorderingsoort 01=huur/13=korting (Vorderingsoort 12 en onverwachte waarden genegeerd+gemeld), alleen regels met een deterministische, op bronPeildatum geldige contractkoppeling tellen mee. STRIKT ZELFSTANDIG van vastgoed-kerncijfers/kerncijfersManagement/@bvc/domain/vastgoed.ts, geen boekjaar/periode: actuele bronstand. Geen renderer/HTML, alleen JSON op stdout)",
       "  management-rapport <administratieId> --boekjaar N [--periodeVan P] --periodeTotEnMet P [--tolerantie N]",
@@ -232,6 +244,55 @@ async function main() {
     const [administratieId] = rest;
     if (!administratieId) printGebruik();
     const resultaat = genereerRentrollDiagnose(root, administratieId);
+    console.log(JSON.stringify(resultaat, null, 2));
+    return;
+  }
+
+  if (command === "servicekosten-bronkolommen") {
+    const [administratieId] = rest;
+    if (!administratieId) printGebruik();
+    const resultaat = genereerServicekostenBronKolommenDiagnose(root, administratieId);
+    console.log(JSON.stringify(resultaat, null, 2));
+    return;
+  }
+
+  if (command === "servicekosten-afrekening-diagnose") {
+    const [administratieId] = rest;
+    if (!administratieId) printGebruik();
+    const resultaat = genereerServicekostenAfrekeningDiagnose(root, administratieId);
+    console.log(JSON.stringify(resultaat, null, 2));
+    return;
+  }
+
+  if (command === "servicekosten-positie") {
+    const [administratieId] = rest;
+    const boekjaarStr = parseFlag(rest, "boekjaar");
+    const boekperiodeTotEnMet = parseFlag(rest, "periodeTotEnMet");
+    const rekeningenStr = parseFlag(rest, "rekeningen");
+    if (!administratieId || !boekjaarStr || !boekperiodeTotEnMet || !rekeningenStr) printGebruik();
+    const resultaat = genereerServicekostenPositie(root, administratieId, {
+      boekjaar: Number(boekjaarStr),
+      boekperiodeVan: parseFlag(rest, "periodeVan"),
+      boekperiodeTotEnMet,
+      doelrekeningen: rekeningenStr.split(",").map((r) => r.trim()).filter((r) => r.length > 0),
+    });
+    console.log(JSON.stringify(resultaat, null, 2));
+    if (resultaat.controleVereist.some((i) => i.ernst === "KRITIEK")) process.exitCode = 1;
+    return;
+  }
+
+  if (command === "servicekosten-grootboek-reconciliatie") {
+    const [administratieId] = rest;
+    const boekjaarStr = parseFlag(rest, "boekjaar");
+    const boekperiodeTotEnMet = parseFlag(rest, "periodeTotEnMet");
+    const rekeningenStr = parseFlag(rest, "rekeningen");
+    if (!administratieId || !boekjaarStr || !boekperiodeTotEnMet || !rekeningenStr) printGebruik();
+    const resultaat = genereerServicekostenGrootboekReconciliatieDiagnose(root, administratieId, {
+      boekjaar: Number(boekjaarStr),
+      boekperiodeVan: parseFlag(rest, "periodeVan"),
+      boekperiodeTotEnMet,
+      doelrekeningen: rekeningenStr.split(",").map((r) => r.trim()).filter((r) => r.length > 0),
+    });
     console.log(JSON.stringify(resultaat, null, 2));
     return;
   }

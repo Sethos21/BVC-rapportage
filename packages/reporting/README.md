@@ -911,6 +911,96 @@ handmatig doorlopen administratie).
   administratie een apart rekeningschema te moeten aanleveren — nog niet
   aangenomen, alleen een mogelijkheid om te verifiëren.
 
+## Servicekosten (`servicekostenPositie.ts`, v1, 2026-08-27) — actuele positie, afrekening voorgaand jaar, grootboekreconciliatie
+
+Zelfstandig domein, gebouwd op twee onderzoeksrondes tegen de echte
+`070_Rooise_Zoom`-bron (`servicekostenAfrekeningDiagnose.ts` en
+`servicekostenGrootboekReconciliatieDiagnose.ts`, beide TIJDELIJK/
+alleen-lezen en nog steeds aanwezig als losstaande CLI-diagnosecommando's
+— zie hieronder). Drie conceptueel gescheiden onderdelen, altijd samen
+berekend door `samenstelServicekostenPositie`:
+
+- **A. Actuele positie** — werkelijke kosten + voorschotten in de
+  geselecteerde periode. `actueelSaldo = kostenSaldo + voorschottenSaldo`
+  (NOOIT `kosten - voorschotten` — voorschotten zijn credit-normaal, dus
+  al negatief onder de debet-credit-conventie). Portefeuille/complex
+  betrouwbaar; voorschotten per contract/huurder volledig herleidbaar;
+  kosten per huurder bewust NIET als allocatie gebouwd (slechts ~5% van
+  de kostenregels heeft een contract-/huurderkoppeling — een "kosten per
+  huurder"-tabel zou schijnprecisie zijn zonder bewezen verdeelsleutel).
+- **B. Afrekening voorgaand jaar** — kostensoorten in de bestaande,
+  config-gestuurde `uitgeslotenKostensoorten`-lijst (bij 070: "9600"),
+  NOOIT onderdeel van A, wel volledig traceerbaar per complex/contract-
+  huurder/afrekenjaar (`Service_BK_Jaar_SV_Afrekening`, als
+  `OnbekendOf<string>` — nooit gegokt als het veld ontbreekt).
+- **C. Financiële reconciliatie** — de doelrekeningen (bij 070: "1711"/
+  "1712") zijn een PARAMETER van de aanroep, geen aanname in de
+  rekenlaag. Koppeling uitsluitend op de natuurlijke sleutel
+  (boekjaar+dagboek+boekstuk+volgnummer) — nooit bedrag-matching. Elke
+  aanroep bewijst de aansluiting opnieuw, per rekening en per boekperiode.
+
+**Dubbele classificatie/vangrail** (`bepaalServicekostenStroom`) — twee
+onafhankelijke signalen moeten elkaar bevestigen: de bestaande
+`uitgeslotenKostensoorten`-config bepaalt AFREKENING_VOORGAAND_JAAR
+(verwacht: bron-native `Kostensoort_Soort = "Nvt"`); voor de overige
+regels bepaalt `Kostensoort_Soort` zelf WERKELIJKE_KOSTEN/VOORSCHOT. Bij
+tegenspraak — een uitgesloten kostensoort met een andere
+Kostensoort_Soort dan "Nvt", of een "Nvt"-regel die niet in de
+uitsluitingslijst staat — wordt de regel ONBEKEND: nooit meegeteld in A
+of B, saldo uitsluitend zichtbaar in `controleVereist`. Dit is de
+expliciete vangrail tegen stilzwijgend generaliseren van het
+070-patroon naar een administratie met een afwijkende structuur
+(getest met een bewust afwijkende fixture, zie `servicekostenPositie.test.ts`).
+
+**Schema/cache**: `Kostensoort_Soort`/`Service_BK_Jaar_SV_Afrekening` zijn
+sinds 2026-08-27 onderdeel van het PRODUCTIESCHEMA
+(`ServicekostenregelBronSchema`) en de `servicekosten`-cachetabel
+(`kostensoort_soort`/`jaar_sv_afrekening`) — pas toegevoegd nadat twee
+diagnoserondes tegen echte data het nut bewezen. Een cache die vóór deze
+datum is gebouwd mist deze kolommen; `rebuild-cache` opnieuw draaien is
+verplicht vóór `servicekosten-positie` bruikbare cijfers geeft.
+
+Worker: `genereerServicekostenPositie.ts` (`selecteerServicekosten`/
+`selecteerBoekingen`, exact dezelfde boekjaar/periodeVan/periodeTotEnMet
+voor servicekosten én boekingen — geen rekenlogica in de Worker). CLI:
+`bvc-worker servicekosten-positie <administratieId> --boekjaar N
+[--periodeVan P] --periodeTotEnMet P --rekeningen <lijst>`. Nog GEEN
+renderer, nog NIET gekoppeld aan `management-rapport`.
+
+### Regressiepunt: 070_Rooise_Zoom servicekosten-positie sluit (2026-08-27)
+
+`servicekosten-positie 070_Rooise_Zoom --boekjaar 2026 --periodeTotEnMet
+06 --rekeningen 1711,1712` is door de gebruiker persoonlijk geverifieerd
+tegen de echte productie-run (ná `rebuild-cache` met het uitgebreide
+schema) en bevestigd correct. Vastgelegde uitkomst:
+
+| Veld | Waarde |
+| --- | --- |
+| Kosten (actuele periode) | € 91.177,91 |
+| Voorschotten (actuele periode) | −€ 114.530,00 |
+| Actueel saldo (kosten + voorschotten) | −€ 23.352,09 |
+| Status | `VOORSCHOTTEN_HOGER_DAN_KOSTEN` |
+| Afrekening voorgaand jaar (kostensoort 9600) | 19 regels, saldo € 31.926,39 — apart, niet in bovenstaand actueel saldo |
+| Reconciliatie 1711 (grootboeksaldo € 106.080,00) | verschil € 0,00 |
+| Reconciliatie 1712 (grootboeksaldo −€ 97.505,70) | verschil € 0,00 |
+| Reconciliatie per periode (6 periodes × 2 rekeningen = 12 controles) | alle 12 verschil € 0,00 |
+| `controleVereist` | 2 regels, beide INFORMATIEF (225 kosten-regels zonder contract/huurder — verwacht; 19 afrekeningsregels apart gehouden) — GEEN WAARSCHUWING |
+
+**Expliciet niet generaliseren**: de 1711/1712-aansluiting is bewezen
+voor `070_Rooise_Zoom`, boekjaar 2026, periode 01–06 — dit is GEEN
+universele aanname dat elke administratie dezelfde grootboekrekeningen
+of dezelfde 100%-koppelgraad heeft. `doelrekeningen` blijft daarom een
+verplichte parameter, en de reconciliatiesectie (C) + de classificatie-
+vangrail draaien bij elke aanroep opnieuw, voor elke administratie
+opnieuw.
+
+**Tijdelijke diagnosecommando's blijven staan** (nog niet verwijderd,
+op expliciet verzoek): `servicekosten-bronkolommen`,
+`servicekosten-afrekening-diagnose`, `servicekosten-grootboek-
+reconciliatie`. Alle drie blijven waardevol als onafhankelijke
+patroonvalidatie/regressiecontrole vóór of náást de productiemodule,
+vooral bij een nieuwe administratie.
+
 ## Kerncijfers (sectie 01 — KPI-dashboard)
 
 `renderKerncijfersHtml` rendert het portefeuille-KPI-dashboard: 6
@@ -967,7 +1057,7 @@ Nog te porten secties (met bronregels in `legacy/index.html`):
 | 02 | Resultaat P&L per kwartaal | `renderPnl` | ~1580 | deels gebouwd — `plRapport.ts`/`renderHtml.ts` (jaarcijfers, ander datamodel/CSS dan kwartaal+begroting) én sinds 2026-08-21 `renderPlPeriode.ts` (mapping-gedreven periodecijfers, nu ook onderdeel van het gecombineerde `rapport-periode`-document hieronder) — nog geen kwartaal+begroting-vergelijking in de renderer zelf |
 | 03 | Kasstroom | `renderCashflow` | ~1647 | deels gebouwd — `kasstroomBerekening.ts` (mutatie bankstand) + `kasstroomManagementoverzicht.ts` (huurontvangsten/exploitatie-uitgaven/eigenaaronttrekkingen/kwartalen/uitbetalingsratio, zie sectie hierboven); renderer nog niet pixel-perfect gelijk aan het voorbeeldontwerp, en `kasstroomCategorie` nog niet bevestigd voor 070 |
 | 04 | Balans | `renderBalans` | ~1725 | ✅ gebouwd (`balansPeriodeBerekening.ts` + `renderBalansPeriode.ts`) — zie sectie hieronder |
-| 05 | Servicekosten (incl. stijgers/dalers, signaalbadges) | `renderServicekosten` | ~1859 | nog te bouwen |
+| 05 | Servicekosten (incl. stijgers/dalers, signaalbadges) | `renderServicekosten` | ~1859 | rekenlaag gebouwd (`servicekostenPositie.ts`, zie sectie hierboven — actuele positie/afrekening voorgaand jaar/grootboekreconciliatie, regressiepunt 070 bevestigd) — renderer en koppeling aan management-rapport nog te bouwen |
 | 06 | Verhuur / huuroverzicht (contracttabel, statusbadges op resterende looptijd) | `renderRentroll` | ~1897 | nog te bouwen |
 | 07 | Onderhoud & investeringen | `renderOnderhoud` | ~1983 | nog te bouwen |
 | 08 | Signalen & aandachtspunten | `renderSignalen` | ~2020 | nog te bouwen |

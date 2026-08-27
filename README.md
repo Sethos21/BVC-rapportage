@@ -254,7 +254,11 @@ Aandachtspunten:
   ontbrekende stuk is de rapportkoppeling/-weergave. `resultaat`
   (nettoresultaat over rapportagecategorieën heen) is bewust nog niet
   geformaliseerd — zie `packages/reporting/README.md`.
-- Contract-, huur- en servicekosten-rapportlogica, authenticatie/rollen.
+- Contract- en huur-rapportlogica, authenticatie/rollen. Servicekosten-
+  rekenlaag is inmiddels gebouwd (`servicekostenPositie.ts`, regressiepunt
+  070_Rooise_Zoom bevestigd — zie `packages/reporting/README.md`
+  "Servicekosten"); renderer en koppeling aan het managementrapport staan
+  nog open.
 - **Definitieve locatie** van `BVC_DATA_ROOT` en back-upeigenaar — open punt.
 - Deze repository blijft voorlopig op GitHub (`Sethos21/BVC-rapportage`,
   waar deze sessie al op werkte toen de "geen nieuwe repo zonder
