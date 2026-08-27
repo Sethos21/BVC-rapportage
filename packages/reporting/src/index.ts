@@ -23,6 +23,7 @@ export * from "./grootboekInventarisatie.js";
 export * from "./kerncijfersManagement.js";
 export * from "./vastgoedKerncijfers.js";
 export * from "./rentrollDiagnose.js";
+export * from "./contractHuurderDiagnose.js";
 export * from "./servicekostenBronKolommenDiagnose.js";
 export * from "./servicekostenDiagnose.js";
 export * from "./servicekostenAfrekeningDiagnose.js";

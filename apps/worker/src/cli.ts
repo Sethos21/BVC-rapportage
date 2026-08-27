@@ -12,6 +12,7 @@ import { genereerVastgoedKerncijfers } from "./genereerVastgoedKerncijfers.js";
 import { genereerRentrollDiagnose } from "./genereerRentrollDiagnose.js";
 import { genereerServicekostenBronKolommenDiagnose } from "./genereerServicekostenBronKolommenDiagnose.js";
 import { genereerContractenBronKolommenDiagnose } from "./genereerContractenBronKolommenDiagnose.js";
+import { genereerContractHuurderDiagnose } from "./genereerContractHuurderDiagnose.js";
 import { genereerServicekostenAfrekeningDiagnose } from "./genereerServicekostenAfrekeningDiagnose.js";
 import { genereerServicekostenGrootboekReconciliatieDiagnose } from "./genereerServicekostenGrootboekReconciliatieDiagnose.js";
 import { genereerServicekostenPositie } from "./genereerServicekostenPositie.js";
@@ -51,6 +52,8 @@ function printGebruik(): never {
       "      (TIJDELIJK, alleen-lezen: leest het RUWE servicekosten-bronbestand rechtstreeks (niet de cache, niet het geparste schema) en toont ELKE kolomnaam die erin voorkomt — inclusief kolommen die nog niet in ServicekostenregelBronSchema staan — met aantal niet-lege waarden en max. 5 voorbeeldwaarden per kolom. Bouwstap om te bepalen of de bron een apart grootboekrekening/rekeningnummer-veld bevat vóórdat daar iets structureels mee gebouwd wordt. Geen KPI, geen classificatie, alleen JSON op stdout)",
       "  contracten-bronkolommen <administratieId>",
       "      (TIJDELIJK, alleen-lezen: leest het RUWE contracten_huidig-bronbestand rechtstreeks (niet de cache, niet het geparste schema, dat 12 van de 170 bronkolommen dekt) en toont ELKE kolomnaam die erin voorkomt, met aantal niet-lege waarden en max. 5 voorbeeldwaarden per kolom. Bouwstap om een huurdernaam-achtig veld (bv. Naam_1) te bevestigen vóórdat dat structureel aan het schema/de cache wordt toegevoegd. Geen KPI, geen classificatie, alleen JSON op stdout)",
+      "  contract-huurder-diagnose <administratieId> [--boekjaar N --periodeTotEnMet P [--periodeVan P]]",
+      "      (TIJDELIJK, alleen-lezen, bouwstap voor een toekomstig Huurdersoverzicht: toont per contract naast elkaar — gecachte contracten/rentroll (alle regels)/ouderdomsanalyse (alle periodes op huurdernummer), een aantal nog NIET gemodelleerde raw contracten-kolommen (Waarborgsom/Waarborg_niet_geprolongeerd/Waarborgbeheer/Complexomschrijving/Datum+Jaar+Periode_laatst_geprolongreerd/Verhoging_datum+Jaar_vlgd+Periode_vlgd+percentage+methode/Omschrijving_indextabel, rechtstreeks uit het ruwe bronbestand — GEKOPPELD OP bedrijfsnr+contractnummer, want contracten_huidig.xlsx is gedeeld over alle administraties en Contract is niet globaal uniek; ruweContractvelden.alleRuweRijenMetDitContractnummer toont ALLE ruwe rijen met hetzelfde contractnummer, ongeacht bedrijfsnr, als botsingscontrole), en — alleen als --boekjaar/--periodeTotEnMet zijn opgegeven — de geboekte servicekostenvoorschotten uit servicekosten-positie's actuele positie. GEEN keuze van een authoritative einddatum, GEEN aanname dat rentroll.service_voorschot_jaar en geboekte servicekosten-voorschotten dezelfde grootheid zijn, GEEN classificatie — puur naast elkaar zetten. Geen KPI, geen schema/cache-wijziging, alleen JSON op stdout)",
       "  servicekosten-afrekening-diagnose <administratieId>",
       "      (TIJDELIJK, alleen-lezen: leest het RUWE servicekosten-bronbestand en analyseert Kostensoort_Soort (Kosten/Voorschotten/Nvt) + acht afrekeningsvelden (Jaar_Afrekening, Jaar_SV_Afrekening, Per_SV_Afrekening, Periode_Afrekening, SV_Afrekening_Soort(+Omschrijving/Vlgnr), Vdsrt_Opbrengsten(+Omschr)) + Service_Boeking_Saldo vs. herberekend saldo — per Kostensoort_Soort, apart voor kostensoort 9600 (nooit automatisch uit kosten/voorschotten gefilterd), met tekenpatroon-onderzoek. Geen KPI, geen classificatie, geen cache/rebuildCache-aanraking, alleen JSON op stdout)",
       "  servicekosten-grootboek-reconciliatie <administratieId> --boekjaar N [--periodeVan P] --periodeTotEnMet P --rekeningen <lijst>",
@@ -263,6 +266,21 @@ async function main() {
     const [administratieId] = rest;
     if (!administratieId) printGebruik();
     const resultaat = genereerContractenBronKolommenDiagnose(root, administratieId);
+    console.log(JSON.stringify(resultaat, null, 2));
+    return;
+  }
+
+  if (command === "contract-huurder-diagnose") {
+    const [administratieId] = rest;
+    if (!administratieId) printGebruik();
+    const boekjaarStr = parseFlag(rest, "boekjaar");
+    const boekperiodeTotEnMet = parseFlag(rest, "periodeTotEnMet");
+    if ((boekjaarStr && !boekperiodeTotEnMet) || (!boekjaarStr && boekperiodeTotEnMet)) printGebruik();
+    const resultaat = genereerContractHuurderDiagnose(root, administratieId, {
+      servicekostenPeriode: boekjaarStr && boekperiodeTotEnMet
+        ? { boekjaar: Number(boekjaarStr), boekperiodeVan: parseFlag(rest, "periodeVan"), boekperiodeTotEnMet }
+        : undefined,
+    });
     console.log(JSON.stringify(resultaat, null, 2));
     return;
   }

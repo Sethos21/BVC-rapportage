@@ -1001,6 +1001,115 @@ reconciliatie`. Alle drie blijven waardevol als onafhankelijke
 patroonvalidatie/regressiecontrole vóór of náást de productiemodule,
 vooral bij een nieuwe administratie.
 
+## Contract/huurder-diagnose (`contractHuurderDiagnose.ts`, TIJDELIJK, 2026-08-27) — bouwstap vóór een Huurdersoverzicht-module
+
+Alleen-lezen, geen KPI, geen renderer: zet per contract alle bronnen die
+potentieel relevant zijn voor een toekomstig Huurdersoverzicht (uit het
+externe Functioneel Ontwerp, niet in deze repository) naast elkaar, om vóór
+elke implementatiekeuze eerst de echte 070-data te kunnen inspecteren.
+Gebouwd na een bottom-up onderzoeksronde die vier correcties opleverde op
+een eerder onderzoeksvoorstel:
+
+1. **FO is leidend, legacy is alleen visuele referentie** — het onderzoek
+   classificeert nu elk FO-veld expliciet als v1/later onderzoek/bron
+   ontbreekt, in plaats van legacy's kolommen als scope te gebruiken.
+2. **`servicekostenPositie`'s `voorschottenPerContractHuurder` is GEEN
+   automatisch synoniem voor het FO-veld "servicekostenvoorschot"** — dat
+   is een geboekt bedrag over een gekozen periode, terwijl Huurdersoverzicht
+   een momentopname is. `rentroll.Service_voorschot_jaar` (gecached als
+   `service_voorschot_jaar`, tot nu toe door geen enkele module gebruikt)
+   is een kandidaat die qua vorm (rechtstreeks op de rentroll-regel, net
+   als `Prolongatie_bedrag_jaar`) beter aansluit, maar dit is NIET bewezen
+   — de diagnose toont beide apart naast elkaar, koppelt of vergelijkt ze
+   nooit tot één cijfer.
+3. **Geen einddatum/looptijdstatus kiezen vóór bronvergelijking** —
+   `contracten.afloopdatum`, `contracten.expiratie_expiratiedatum`/
+   `_opzegdatum` en `rentroll.contract_expiratiedatum`/`_opzegdatum` (vijf
+   velden, twee bronnen) staan alle vijf naast elkaar in de output; welk
+   veld authoritative is voor contracteinde/restlooptijd wordt hier NIET
+   bepaald.
+4. **Hercontrole van `contracten.Huurder_Naam_1`**: op commit `19be378`
+   bevestigd nog steeds NIET gewired naar `ContractRow`/de cache (alleen
+   `servicekosten.Naam_1` is gewired, sinds de huurdernaam-toevoeging aan
+   het managementrapport) — geen dubbel werk, de eerdere observatie klopte
+   nog.
+
+**Nieuwe bronvondsten** (via een hercontrole van de al-bestaande
+`contracten-bronkolommen-070.json`-diagnose-uitvoer, 197 rijen): het RUWE
+`contracten_huidig`-bestand bevat, nog ongemodelleerd, een uitgebreide
+waarborg-/indexeringsstructuur — `Waarborgsom` (197/197 gevuld, direct
+naamsmatch met het FO-veld), `Waarborg_niet_geprolongeerd`,
+`Waarborgbeheer`, `Bankgarantie_*` (alternatieve zekerheidsvorm),
+`Complexomschrijving` (197/197 gevuld — een leesbare complexnaam bestaat
+dus wél, eerder onterecht als "ontbrekend" gerapporteerd),
+`Datum_laatst_geprolongreerd`/`Jaar_laatst_geprolongreerd`/
+`Periode_laatst_geprolongreerd` (kandidaat voor "laatste huurverhoging"),
+en `Verhoging_datum`/`Verhoging_Jaar_vlgd`/`Verhoging_Periode_vlgd`/
+`Verhoging_percentage`/`Verhoging_methode`/`Omschrijving_indextabel`
+(kandidaat voor "indexeringsdatum"). Geen van deze kandidaten is
+semantisch bevestigd — "prolongatie" kan een breder begrip zijn dan
+"huurverhoging"; de diagnose toont de ruwe waarden zodat dat per contract
+te beoordelen is.
+
+**Wat de diagnose toont per contract** (`ChdRegel`): de gecachte
+`contracten`-regel; alle gecachte `rentroll`-regels (0..n, één per
+Vorderingsoort — geen optelling/classificatie); alle bovenstaande
+ruwe/ongemodelleerde contracten-kolommen, rechtstreeks uit het bronbestand
+gelezen (geen schema/cache-wijziging: dezelfde raw-read-techniek als
+`contracten-bronkolommen`); alle `ouderdomsanalyse`-regels op het
+huurdernummer van dit contract, over alle in de cache aanwezige
+boekjaar/boekperiodes (test van de openstaand-saldo-koppeling — bestaat
+en is gecached, maar nooit eerder tegen echte huurdernummer-waarden
+gecontroleerd); en — uitsluitend als de aanroeper `--boekjaar`/
+`--periodeTotEnMet` opgeeft — de geboekte servicekostenvoorschotten uit
+`genereerServicekostenPositie`'s A-sectie (`voorschottenPerContractHuurder`,
+ongewijzigd hergebruikt, `doelrekeningen: []` zodat alleen A wordt
+opgevraagd), expliciet gescheiden getoond van `rentroll.service_voorschot_jaar`
+(zie punt 2 hierboven). Overal waar geen deterministische 1-op-1 koppeling
+bestaat blijft het een array — nooit een eerste/beste/toevallige match
+kiezen (zelfde discipline als `rentrollDiagnose.ts`).
+
+Worker: `genereerContractHuurderDiagnose.ts`. CLI: `bvc-worker
+contract-huurder-diagnose <administratieId> [--boekjaar N
+--periodeTotEnMet P [--periodeVan P]]` — geen KPI, geen schema/cache-
+wijziging, alleen JSON op stdout.
+
+**Tegen de echte 070-cache gedraaid (2026-08-27)** — bevindingen die het
+Huurdersoverzicht-ontwerp direct hebben bijgestuurd (zie hieronder):
+`Datum_laatst_geprolongreerd` bleek voor alle 12 contracten identiek
+(01-08-2026) — een systeembrede batchdatum, GEEN per-contract "laatste
+huurverhoging" (kandidaat ingetrokken). `Complexomschrijving` bleek GEEN
+1-op-1 relatie met `Complexnummer` te hebben (complexnummer "003" komt
+voor met drie verschillende omschrijvingen; "Cuijk 33A" komt voor onder
+zowel complexnummer "002" als "003") — nooit een authoritative complexnaam,
+uitsluitend een aanduiding. `afloopdatum` bleek 0/12 gevuld terwijl
+`expiratie_expiratiedatum` 12/12 gevuld was — laatstgenoemde is daarom de
+basis voor contracteinde/status geworden, NIET `bepaalContractGeldigheid`.
+`rentroll.Service_voorschot_jaar` bleek voor 11/12 contracten precies het
+geboekte periodebedrag × 2 (halfjaarperiode) — sterke, niet-sluitende
+aanwijzing dat dit het contractuele jaarvoorschot is.
+
+**Bugfix (2026-08-27): ruwe contractvelden werden op contractnummer
+alleen gekoppeld, niet op bedrijfsnr+contractnummer.**
+`contracten_huidig.xlsx` is een GEDEELD bronbestand over alle
+administraties (`Contract` is uitsluitend uniek binnen een administratie,
+zie `contractNatuurlijkeSleutel`'s `bedrijfsnr::contract`-sleutel). De
+raw-row-`Map` in `genereerContractHuurderDiagnose.ts` sleutelde
+oorspronkelijk alleen op `Contract`, waardoor een botsend contractnummer in
+een ANDERE administratie de 070-rij stilzwijgend kon overschrijven — geen
+foutmelding, gewoon een plausibel-ogende verkeerde huurdernaam/
+Complexomschrijving/Waarborgsom. Ontdekt doordat een `huurdersoverzicht`-
+run (cache-gebaseerd, via `rebuildCache.ts`'s bedrijfsnr-filter altijd
+correct) voor drie contracten (0000000048/0000000051/0000000052) afweek
+van een eerdere `contract-huurder-diagnose`-run. **`huurdersoverzicht`/
+`genereerHuurdersoverzicht.ts` was NOOIT aangetast** — uitsluitend deze
+tijdelijke diagnose is gerepareerd: `ruweContractSleutel(bedrijfsnr,
+contractnummer)` als verplichte samengestelde sleutel, plus een nieuw,
+puur diagnostisch veld `alleRuweRijenMetDitContractnummer` (ALLE ruwe
+rijen met dat contractnummer, ongeacht bedrijfsnr) om een botsing direct
+zichtbaar te maken. Geregressietest in `contractHuurderDiagnose.test.ts`
+("BUGFIX: ...") bevestigt de juiste rij wordt gekozen bij een botsing.
+
 ## Kerncijfers (sectie 01 — KPI-dashboard)
 
 `renderKerncijfersHtml` rendert het portefeuille-KPI-dashboard: 6
