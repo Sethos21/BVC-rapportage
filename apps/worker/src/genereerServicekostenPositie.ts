@@ -43,6 +43,7 @@ function naarServicekostenregel(row: ServicekostenRow): Servicekostenregel {
     saldo: new Decimal(row.saldo),
     kostensoortSoort: row.kostensoort_soort,
     jaarSvAfrekening: row.jaar_sv_afrekening,
+    huurderNaam: row.huurder_naam,
   };
 }
 

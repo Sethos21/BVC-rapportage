@@ -28,7 +28,7 @@ const SERVICEKOSTEN_COLUMNS: (keyof ServicekostenRow)[] = [
   "bedrijfsnr", "boekjaar", "boekperiode", "dagboeknummer", "boekstuknummer", "volgnummer",
   "complexnummer", "unitnummer", "contractnummer", "huurdernummer", "kostensoort",
   "kostensoort_omschrijving", "omschrijving", "bedrag_debet", "bedrag_credit", "saldo",
-  "doorbelasten", "uitsluitingsstatus", "kostensoort_soort", "jaar_sv_afrekening",
+  "doorbelasten", "uitsluitingsstatus", "kostensoort_soort", "jaar_sv_afrekening", "huurder_naam",
 ];
 const CONTRACT_COLUMNS: (keyof ContractRow)[] = [
   "bedrijfsnr", "contract", "complexnummer", "unitnummer", "huurdernummer", "ingangsdatum",

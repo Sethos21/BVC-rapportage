@@ -21,6 +21,7 @@ import { leesAdministratieConfig } from "./administratie.js";
 import { STANDAARD_TEKEN_PER_CATEGORIE } from "./genereerBalansPeriode.js";
 import { genereerKerncijfers } from "./genereerKerncijfers.js";
 import { genereerHuurKerncijfers } from "./genereerHuurKerncijfers.js";
+import { genereerServicekostenPositie } from "./genereerServicekostenPositie.js";
 import { leesGrootboekMappingGesplitst } from "./grootboekmapping.js";
 import { naarBalansstand, naarBoekingsregel } from "./rowMappers.js";
 
@@ -51,6 +52,15 @@ import { naarBalansstand, naarBoekingsregel } from "./rowMappers.js";
  * `balansSluitBinnenTolerantie` en `vastgoed`. De rest van zijn output
  * (opbrengsten/kosten/bankstand/kasstroom, daar altijd YTD) wordt hier NIET
  * gebruikt — die worden voor dit rapport apart, periode-bewust herberekend.
+ *
+ * `genereerServicekostenPositie()` wordt ongewijzigd hergebruikt (zelfde
+ * boekperiodeVan/boekperiodeTotEnMet als `boekingenPeriode` hierboven — geen
+ * aparte periodeberekening). De doelrekeningen voor de grootboekreconciliatie
+ * komen uit `AdministratieConfig.servicekostenRekeningen` (administratie-
+ * specifiek, bv. "1711"/"1712" bij 070_Rooise_Zoom) — ontbreekt dat veld,
+ * dan wordt een lege lijst doorgegeven en meldt `samenstelServicekostenPositie`
+ * zelf duidelijk dat de reconciliatie is overgeslagen, nooit een stilzwijgende
+ * 1711/1712-aanname.
  */
 
 export interface GenereerManagementRapportOpties {
@@ -128,6 +138,19 @@ export function genereerManagementRapport(root: string, administratieId: string,
   const kerncijfers = genereerKerncijfers(root, administratieId, { boekjaar: opties.boekjaar, boekperiodeTotEnMet: opties.boekperiodeTotEnMet, toleranceEuro: opties.toleranceEuro });
   const huur = genereerHuurKerncijfers(root, administratieId);
 
+  // Administratie-specifiek, GEEN aanname (zie AdministratieConfig.servicekostenRekeningen) —
+  // ontbreekt de configuratie, dan geeft samenstelServicekostenPositie zelf een duidelijke
+  // controleVereist-melding i.p.v. stilzwijgend "1711"/"1712" aan te nemen.
+  const servicekostenDoelrekeningen = config.servicekostenRekeningen
+    ? [config.servicekostenRekeningen.kostenrekening, config.servicekostenRekeningen.voorschottenrekening]
+    : [];
+  const servicekosten = genereerServicekostenPositie(root, administratieId, {
+    boekjaar: opties.boekjaar,
+    boekperiodeVan,
+    boekperiodeTotEnMet: opties.boekperiodeTotEnMet,
+    doelrekeningen: servicekostenDoelrekeningen,
+  });
+
   const resultaat = samenstelManagementRapport({
     administratieNaam: config.weergavenaam,
     bedrijfsnr: config.bedrijfsnr,
@@ -150,6 +173,7 @@ export function genereerManagementRapport(root: string, administratieId: string,
     },
     vastgoed: kerncijfers.vastgoed,
     huur,
+    servicekosten,
   });
 
   const html = renderManagementRapportHtml(resultaat);

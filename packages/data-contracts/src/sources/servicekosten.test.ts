@@ -53,4 +53,9 @@ describe("parseServicekosten", () => {
     expect(rijen[0]?.kostensoortSoort).toBeNull();
     expect(rijen[0]?.jaarSvAfrekening).toBeNull();
   });
+
+  it("geeft Naam_1 door als huurderNaam", () => {
+    const { rijen } = parseServicekosten([{ ...basisRij, Naam_1: "Voorbeeld Huurder BV" }], STANDAARD_PARAMETERS.servicekosten);
+    expect(rijen[0]?.huurderNaam).toBe("Voorbeeld Huurder BV");
+  });
 });

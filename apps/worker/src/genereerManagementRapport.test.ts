@@ -143,7 +143,8 @@ describe("genereerManagementRapport — boekperiodeVan='01' (regressie)", () => 
     expect(resultaat.html).toContain("2. Vastgoed");
     expect(resultaat.html).toContain("3. Huur");
     expect(resultaat.html).toContain("4. Kasstroom");
-    expect(resultaat.html).toContain("5. Controle vereist");
+    expect(resultaat.html).toContain("5. Servicekosten");
+    expect(resultaat.html).toContain("6. Controle vereist");
   });
 
   it("gooit een duidelijke fout als de grootboekmapping ontbreekt", () => {
@@ -228,5 +229,75 @@ describe("genereerManagementRapport — boekperiodeVan='04' (subperiode)", () =>
     expect(resultaatVan04.resultaat.stand.balansSluit).toBe(resultaatVan01.resultaat.stand.balansSluit);
     expect(resultaatVan04.resultaat.vastgoed).toEqual(resultaatVan01.resultaat.vastgoed);
     expect(resultaatVan04.resultaat.huur).toEqual(resultaatVan01.resultaat.huur);
+  });
+});
+
+function servicekostenRij(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    Bedrijfsnr: "070", Service_BK_Boekjaar: "2026", Service_BK_Boekperiode: "01", Service_BK_Dagboeknummer: "50",
+    Service_BK_Boekstuknummer: "200", Service_BK_Volgnummer: "000001", Service_BK_Kostensoort: "0101",
+    Service_BK_Bedrag_debet: "100", Service_BK_Bedrag_credit: "0", Kostensoort_Soort: "Kosten",
+    ...overrides,
+  };
+}
+
+describe("genereerManagementRapport — servicekosten-sectie", () => {
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "bvc-management-rapport-servicekosten-"));
+    schrijfBasisAdministratie();
+
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "boekingen.xlsx"), [
+      boekingRij({ Boeking_Grootboeknr: "1010", Boeking_Bedrag_Debet: 500, Boeking_Bedrag_Credit: 0 }),
+      boekingRij({ Boekstuk_Sleutel: "0704020024002", Boeking_Boekstuknr: "024002", Boeking_Volgnr: "000002", Boeking_Grootboeknr: "8800", Boeking_Bedrag_Debet: 0, Boeking_Bedrag_Credit: 500 }),
+      // Servicekosten-tegenhanger op 1712, zelfde natuurlijke sleutel als servicekostenRij hieronder.
+      boekingRij({ Boekstuk_Sleutel: "0704020024005", Boeking_Dagboeknr: "50", Boeking_Boekstuknr: "200", Boeking_Volgnr: "000001", Boeking_Grootboeknr: "1712", Boeking_Bedrag_Debet: 100, Boeking_Bedrag_Credit: 0 }),
+    ]);
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "balans_per_jaar.xlsx"), [
+      balansRij({ Grootboekrekeningnr: "1010", Beginbalans_debet: 1000, Beginbalans_credit: 0, Rekening_omschrijving: "Bank" }),
+      balansRij({ Grootboekrekeningnr: "1711", Beginbalans_debet: 0, Beginbalans_credit: 1000, Rekening_omschrijving: "Crediteuren" }),
+    ]);
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "servicekosten.xlsx"), [servicekostenRij()]);
+    schrijfVastgoedEnHuurFixtures();
+
+    rebuildCache({ root, administratieId: "070_rooisezoom", onVoortgang: () => {} });
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("toont geen aparte gebruikersflag nodig: zonder servicekostenRekeningen in administratie.json wordt de reconciliatie overgeslagen met één duidelijke melding, nooit 1711/1712 aangenomen", () => {
+    const resultaat = genereerManagementRapport(root, "070_rooisezoom", { boekjaar: 2026, boekperiodeTotEnMet: "06" });
+
+    expect(resultaat.resultaat.servicekosten.actuelePositie.kostenSaldo.toString()).toBe("100");
+    expect(resultaat.resultaat.servicekosten.reconciliatie.doelrekeningen).toEqual([]);
+    expect(resultaat.resultaat.controleVereist).toContainEqual({
+      sectie: "Servicekosten",
+      ernst: "INFORMATIEF",
+      referentie: null,
+      bericht: expect.stringContaining("Geen doelrekeningen opgegeven"),
+    });
+  });
+
+  it("resolveert servicekostenRekeningen uit administratie.json en reconcilieert exact, zonder WAARSCHUWING", () => {
+    schrijfAdministratieConfig(root, "070_rooisezoom", {
+      ...nieuweAdministratieConfig("070", "Rooise Zoom"),
+      servicekostenRekeningen: { kostenrekening: "1712", voorschottenrekening: "1711" },
+    });
+
+    const resultaat = genereerManagementRapport(root, "070_rooisezoom", { boekjaar: 2026, boekperiodeTotEnMet: "06" });
+
+    expect(resultaat.resultaat.servicekosten.reconciliatie.doelrekeningen).toEqual(["1712", "1711"]);
+    const rek1712 = resultaat.resultaat.servicekosten.reconciliatie.perRekening.find((r) => r.grootboekrekening === "1712");
+    expect(rek1712?.grootboekSaldo.toString()).toBe("100");
+    expect(rek1712?.verschil.toString()).toBe("0");
+    expect(resultaat.resultaat.controleVereist.filter((c) => c.sectie === "Servicekosten" && c.ernst === "WAARSCHUWING")).toHaveLength(0);
+    expect(resultaat.html).toContain("5. Servicekosten");
+  });
+
+  it("houdt bestaande Financieel/Vastgoed/Huur/Kasstroom-cijfers ongewijzigd wanneer servicekosten wordt toegevoegd", () => {
+    const resultaat = genereerManagementRapport(root, "070_rooisezoom", { boekjaar: 2026, boekperiodeTotEnMet: "06" });
+    expect(resultaat.resultaat.periode.totaleOpbrengsten.toString()).toBe("500");
+    expect(resultaat.resultaat.stand.bankstandEinde.toString()).toBe("1500");
   });
 });

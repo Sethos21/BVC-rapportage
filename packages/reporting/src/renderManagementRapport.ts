@@ -1,9 +1,15 @@
 import type Decimal from "decimal.js";
-import { formatEUR } from "@bvc/domain";
+import { formatEUR, type OnbekendOf } from "@bvc/domain";
 import { escapeHtml, formatBedragHtml, formatM2Html, formatOnbekendOfHtml, formatPercentageHtml, renderRapportDocument } from "./huisstijl.js";
 import type { ManagementRapportControleItem, ManagementRapportResultaat } from "./managementRapport.js";
 import type { HuurComplexKpi } from "./huurKerncijfers.js";
 import type { VastgoedComplexKpi } from "./vastgoedKerncijfers.js";
+import type {
+  ServicekostenActuelePositieStatus,
+  ServicekostenActueleComplexTotaal,
+  ServicekostenAfrekeningComplexTotaal,
+  ServicekostenAfrekeningContractHuurderTotaal,
+} from "./servicekostenPositie.js";
 
 /**
  * HTML-renderer voor de gecombineerde managementrapportage (v1,
@@ -222,7 +228,95 @@ function renderKasstroom(resultaat: ManagementRapportResultaat): string {
     ${topUitgavenHtml}`;
 }
 
-// --- 5. Controle vereist -----------------------------------------------------------
+// --- 5. Servicekosten ------------------------------------------------------------
+
+function renderServicekostenStatusHtml(status: ServicekostenActuelePositieStatus): string {
+  const label = status === "KOSTEN_HOGER_DAN_VOORSCHOTTEN" ? "Kosten hoger dan voorschotten" : status === "VOORSCHOTTEN_HOGER_DAN_KOSTEN" ? "Voorschotten hoger dan kosten" : "In evenwicht";
+  return `<span class="ernst-informatief">${escapeHtml(label)}</span>`;
+}
+
+function renderOnbekendOfStringHtml(waarde: OnbekendOf<string>): string {
+  if (waarde.type === "bekend") return escapeHtml(waarde.waarde);
+  return `<span class="controle-vereist" title="${escapeHtml(waarde.reden)}">Controle vereist</span>`;
+}
+
+function renderServicekostenActueleComplexTabel(regels: readonly ServicekostenActueleComplexTotaal[]): string {
+  if (regels.length === 0) return `<div class="toelichting">Geen complexen beschikbaar.</div>`;
+  const rijen = regels
+    .map((c) => `<tr><td>${c.complexnummer ? escapeHtml(c.complexnummer) : "—"}</td><td>${formatBedragHtml(c.kostenSaldo)}</td><td>${formatBedragHtml(c.voorschottenSaldo)}</td><td>${formatBedragHtml(c.actueelSaldo)}</td></tr>`)
+    .join("");
+  return `
+    <table>
+      <thead><tr><th>Complex</th><th>Kosten</th><th>Voorschotten</th><th>Actueel saldo</th></tr></thead>
+      <tbody>${rijen}</tbody>
+    </table>`;
+}
+
+function renderServicekostenAfrekeningComplexTabel(regels: readonly ServicekostenAfrekeningComplexTotaal[]): string {
+  if (regels.length === 0) return `<div class="toelichting">Geen complexen beschikbaar.</div>`;
+  const rijen = regels.map((c) => `<tr><td>${c.complexnummer ? escapeHtml(c.complexnummer) : "—"}</td><td>${c.aantalRegels}</td><td>${formatBedragHtml(c.saldo)}</td></tr>`).join("");
+  return `
+    <table>
+      <thead><tr><th>Complex</th><th>Aantal regels</th><th>Saldo</th></tr></thead>
+      <tbody>${rijen}</tbody>
+    </table>`;
+}
+
+function renderServicekostenAfrekeningContractHuurderTabel(regels: readonly ServicekostenAfrekeningContractHuurderTotaal[]): string {
+  if (regels.length === 0) return `<div class="toelichting">Geen regels met een rechtstreekse contract-/huurderkoppeling in deze periode.</div>`;
+  const rijen = regels
+    .map(
+      (r) =>
+        `<tr><td>${r.complexnummer ? escapeHtml(r.complexnummer) : "—"}</td><td>${r.unitnummer ? escapeHtml(r.unitnummer) : "—"}</td><td>${r.contractnummer ? escapeHtml(r.contractnummer) : "—"}</td><td>${r.huurdernummer ? escapeHtml(r.huurdernummer) : "—"}</td><td>${r.huurderNaam ? escapeHtml(r.huurderNaam) : "—"}</td><td>${renderOnbekendOfStringHtml(r.afrekenjaar)}</td><td>${formatBedragHtml(r.saldo)}</td></tr>`,
+    )
+    .join("");
+  return `
+    <table>
+      <thead><tr><th>Complex</th><th>Unit</th><th>Contract</th><th>Huurder</th><th>Naam</th><th>Afrekenjaar</th><th>Saldo</th></tr></thead>
+      <tbody>${rijen}</tbody>
+    </table>`;
+}
+
+function renderServicekosten(resultaat: ManagementRapportResultaat): string {
+  const sk = resultaat.servicekosten;
+  const a = sk.actuelePositie;
+  const b = sk.afrekeningVoorgaandJaar;
+  return `
+    <h2>5. Servicekosten</h2>
+    <div class="toelichting" style="margin-bottom:16px">
+      ${renderPeriodeBadge(a.boekperiodeVan, a.boekperiodeTotEnMet)}
+      — actuele kosten/voorschotten uitsluitend over deze periode, zelfde selectie als sectie 4. De
+      financiële aansluiting op het grootboek is een controlemechanisme, geen managementcijfer — zie
+      sectie 6 bij een afwijking.
+    </div>
+
+    <h3 class="serif">Actuele positie</h3>
+    <div class="grid g4">
+      ${renderKpiKaart("Kosten", formatBedragHtml(a.kostenSaldo))}
+      ${renderKpiKaart("Voorschotten", formatBedragHtml(a.voorschottenSaldo))}
+      ${renderKpiKaart("Actueel saldo", formatBedragHtml(a.actueelSaldo))}
+      ${renderKpiKaart("Status", renderServicekostenStatusHtml(a.status))}
+    </div>
+    <h4 style="margin-top:20px">Per complex</h4>
+    ${renderServicekostenActueleComplexTabel(a.perComplex)}
+
+    <h3 class="serif" style="margin-top:32px">Afrekeningen voorgaande jaren (kostensoort 9600)</h3>
+    <div class="toelichting" style="margin-bottom:16px">
+      Losstaand van de actuele positie hierboven — telt daar nooit in mee. Per contract/huurder
+      uitsluitend waar de bron een rechtstreekse koppeling heeft; complexbrede regels blijven apart
+      zichtbaar, niet impliciet aan een huurder toegerekend.
+    </div>
+    <div class="grid g2">
+      ${renderKpiKaart("Totaal saldo", formatBedragHtml(b.totaalSaldo))}
+      ${renderKpiKaart("Aantal regels", String(b.aantalRegels))}
+    </div>
+    <h4 style="margin-top:20px">Per complex</h4>
+    ${renderServicekostenAfrekeningComplexTabel(b.perComplex)}
+    <h4 style="margin-top:20px">Per contract/huurder (rechtstreeks gekoppeld)</h4>
+    ${renderServicekostenAfrekeningContractHuurderTabel(b.perContractHuurderAfrekenjaar)}`;
+}
+
+// --- 6. Controle vereist -----------------------------------------------------------
 
 function renderErnstHtml(ernst: ManagementRapportControleItem["ernst"]): string {
   const klasse = ernst === "KRITIEK" ? "ernst-kritiek" : ernst === "WAARSCHUWING" ? "ernst-waarschuwing" : "ernst-informatief";
@@ -232,13 +326,13 @@ function renderErnstHtml(ernst: ManagementRapportControleItem["ernst"]): string 
 function renderControleVereist(resultaat: ManagementRapportResultaat): string {
   const items = resultaat.controleVereist;
   if (items.length === 0) {
-    return `<h2>5. Controle vereist</h2><div class="toelichting"><strong>Geen</strong> — alle onderliggende modules meldden geen datakwaliteitspunten voor deze run.</div>`;
+    return `<h2>6. Controle vereist</h2><div class="toelichting"><strong>Geen</strong> — alle onderliggende modules meldden geen datakwaliteitspunten voor deze run.</div>`;
   }
   const rijen = items
     .map((i) => `<tr><td>${escapeHtml(i.sectie)}</td><td>${renderErnstHtml(i.ernst)}</td><td>${i.referentie ? escapeHtml(i.referentie) : "—"}</td><td>${escapeHtml(i.bericht)}</td></tr>`)
     .join("");
   return `
-    <h2>5. Controle vereist</h2>
+    <h2>6. Controle vereist</h2>
     <div class="toelichting">
       Gecombineerd uit alle onderliggende modules — een waarschuwing hier verdwijnt niet omdat de
       KPI zelf wel berekend kon worden; beide kunnen tegelijk waar zijn.
@@ -257,6 +351,7 @@ export function renderManagementRapportBody(resultaat: ManagementRapportResultaa
     ${renderVastgoed(resultaat)}
     ${renderHuur(resultaat)}
     ${renderKasstroom(resultaat)}
+    ${renderServicekosten(resultaat)}
     ${renderControleVereist(resultaat)}`;
 }
 

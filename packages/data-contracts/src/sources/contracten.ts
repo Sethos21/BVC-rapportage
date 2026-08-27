@@ -20,6 +20,15 @@ export const ContractBronSchema = z.object({
   Expiratie_Opzegdatum: zDateOptional,
   Expiratie_Aantal_per_optie: zIntOptional,
   Expiratie_huidige: zCodeOptional,
+  /**
+   * Bevestigd via bronkolommen-diagnose (2026-08-27, 070_Rooise_Zoom, 197
+   * rijen): de huurdernaam, NIET "Naam_1" of "Bedrijfsnaam" (dat laatste
+   * bleek de eigenaarsnaam, matcht Eigenaar_Naam_1). Bewust het ENIGE
+   * naam-/contactveld dat uit de 170-kolommen-bron wordt overgenomen —
+   * overige contactgegevens (IBAN/e-mail/telefoon/adres) blijven buiten
+   * schema/rapportage (zelfde terughoudendheid als ouderdomsanalyse.ts).
+   */
+  Huurder_Naam_1: zCodeOptional,
 });
 
 export type ContractBron = z.infer<typeof ContractBronSchema>;
@@ -37,6 +46,7 @@ export interface GestaagdContract {
   expiratieOpzegdatum: Date | null;
   expiratieAantalPerOptie: number | null;
   expiratieHuidige: string | null;
+  huurderNaam: string | null;
   raw: ContractBron;
 }
 
@@ -54,6 +64,7 @@ function naarGestaagdContract(bron: ContractBron): GestaagdContract {
     expiratieOpzegdatum: bron.Expiratie_Opzegdatum,
     expiratieAantalPerOptie: bron.Expiratie_Aantal_per_optie,
     expiratieHuidige: bron.Expiratie_huidige,
+    huurderNaam: bron.Huurder_Naam_1,
     raw: bron,
   };
 }

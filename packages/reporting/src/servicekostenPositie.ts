@@ -61,6 +61,8 @@ export interface Servicekostenregel {
   kostensoortSoort: string | null;
   /** Uitsluitend een getoond attribuut van een afrekeningsregel — nooit een selectiecriterium. */
   jaarSvAfrekening: string | null;
+  /** Huurdernaam, rechtstreeks uit de servicekostenbron (bevestigd 2026-08-27) — puur presentatie, geen sleutel/classificatie. */
+  huurderNaam: string | null;
 }
 
 export interface ServicekostenBoekingRegel {
@@ -260,6 +262,8 @@ export interface ServicekostenAfrekeningContractHuurderTotaal {
   unitnummer: string | null;
   contractnummer: string | null;
   huurdernummer: string | null;
+  /** Puur presentatie, zie Servicekostenregel.huurderNaam — null als de bron geen naam gaf op de regels van deze groep. */
+  huurderNaam: string | null;
   afrekenjaar: OnbekendOf<string>;
   saldo: Decimal;
 }
@@ -308,6 +312,7 @@ function bouwAfrekeningVoorgaandJaar(regels: readonly Servicekostenregel[], boek
         unitnummer: eerste.unitnummer,
         contractnummer: eerste.contractnummer,
         huurdernummer: eerste.huurdernummer,
+        huurderNaam: groep.find((r) => r.huurderNaam !== null)?.huurderNaam ?? null,
         afrekenjaar,
         saldo: telOpMetAfronding(groep.map((r) => r.saldo)),
       };
@@ -357,7 +362,13 @@ export interface ServicekostenReconciliatiePeriodeTotaal {
 }
 
 export interface ServicekostenReconciliatie {
-  /** Parameter — GEEN aanname in deze module dat dit universeel "1711"/"1712" is. */
+  /**
+   * Parameter — GEEN aanname in deze module dat dit universeel "1711"/"1712"
+   * is. Een lege lijst betekent expliciet "geen doelrekeningen geconfigureerd
+   * voor deze administratie" — reconciliatie wordt dan overgeslagen (één
+   * duidelijke INFORMATIEF-melding in `controleVereist`, geen valse
+   * "onverwachte rekening"-waarschuwingen per regel).
+   */
   doelrekeningen: string[];
   aantalServicekostenTotaal: number;
   aantalServicekostenNietGekoppeld: number;
@@ -529,9 +540,18 @@ export function samenstelServicekostenPositie(invoer: ServicekostenPositieInvoer
       }
     }
   }
-  controleerOnverwachteRekeningen(kostenRegels, "Werkelijke kosten");
-  controleerOnverwachteRekeningen(voorschottenRegels, "Voorschotten");
-  controleerOnverwachteRekeningen(afrekeningRegels, "Afrekening voorgaand jaar");
+  if (invoer.doelrekeningen.length > 0) {
+    controleerOnverwachteRekeningen(kostenRegels, "Werkelijke kosten");
+    controleerOnverwachteRekeningen(voorschottenRegels, "Voorschotten");
+    controleerOnverwachteRekeningen(afrekeningRegels, "Afrekening voorgaand jaar");
+  } else {
+    controleVereist.push({
+      sectie: "Reconciliatie",
+      ernst: "INFORMATIEF",
+      referentie: null,
+      bericht: "Geen doelrekeningen opgegeven voor de grootboekreconciliatie — deze administratie heeft (nog) geen servicekostenRekeningen geconfigureerd, reconciliatie overgeslagen.",
+    });
+  }
 
   const perRekening: ServicekostenReconciliatieRekeningTotaal[] = invoer.doelrekeningen.map((grootboekrekening) => {
     const grootboekRegels = boekingenPerRekening.get(grootboekrekening) ?? [];

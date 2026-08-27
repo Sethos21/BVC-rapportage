@@ -57,6 +57,7 @@ export interface ServicekostenRow {
   uitsluitingsstatus: string;
   kostensoort_soort: string | null;
   jaar_sv_afrekening: string | null;
+  huurder_naam: string | null;
 }
 
 export interface ContractRow {

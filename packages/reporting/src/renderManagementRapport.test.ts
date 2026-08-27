@@ -5,8 +5,10 @@ import { samenstelManagementRapport, type ManagementRapportInvoer, type Manageme
 import type { HuurKerncijfersResultaat } from "./huurKerncijfers.js";
 import type { KasstroomManagementoverzichtResultaat } from "./kasstroomManagementoverzicht.js";
 import type { VastgoedKerncijfersResultaat } from "./vastgoedKerncijfers.js";
+import type { ServicekostenPositieResultaat } from "./servicekostenPositie.js";
 
 const BEKEND = (n: string) => ({ type: "bekend" as const, waarde: new Decimal(n) });
+const BEKEND_STRING = (s: string) => ({ type: "bekend" as const, waarde: s });
 
 function vastgoed(overrides: Partial<VastgoedKerncijfersResultaat> = {}): VastgoedKerncijfersResultaat {
   return {
@@ -81,6 +83,53 @@ function stand(overrides: Partial<ManagementRapportStandSectie> = {}): Managemen
   };
 }
 
+function servicekosten(overrides: Partial<ServicekostenPositieResultaat> = {}): ServicekostenPositieResultaat {
+  return {
+    administratieNaam: "Rooise Zoom",
+    bedrijfsnr: "070",
+    boekjaar: 2026,
+    boekperiodeVan: "04",
+    boekperiodeTotEnMet: "06",
+    gegenereerdOp: new Date("2026-08-26T12:00:00.000Z"),
+    actuelePositie: {
+      boekperiodeVan: "04",
+      boekperiodeTotEnMet: "06",
+      kostenSaldo: new Decimal("91177.91"),
+      voorschottenSaldo: new Decimal("-114530"),
+      actueelSaldo: new Decimal("-23352.09"),
+      status: "VOORSCHOTTEN_HOGER_DAN_KOSTEN",
+      perComplex: [{ complexnummer: "001", kostenSaldo: new Decimal("38408.88"), voorschottenSaldo: new Decimal("-46850"), actueelSaldo: new Decimal("-8441.12") }],
+      voorschottenPerContractHuurder: [],
+      aantalKostenRegelsZonderComplexnummer: 0,
+      aantalVoorschottenRegelsZonderComplexnummer: 0,
+      aantalKostenRegelsZonderContractOfHuurder: 225,
+      aantalVoorschottenRegelsZonderContractOfHuurder: 0,
+      kostenRechtstreeksGekoppeldTotaal: { aantalRegels: 5, saldo: new Decimal("1538.74") },
+    },
+    afrekeningVoorgaandJaar: {
+      boekperiodeVan: "04",
+      boekperiodeTotEnMet: "06",
+      totaalSaldo: new Decimal("31926.39"),
+      aantalRegels: 19,
+      perComplex: [{ complexnummer: "001", aantalRegels: 6, saldo: new Decimal("2756.13") }],
+      perContractHuurderAfrekenjaar: [
+        { complexnummer: "001", unitnummer: "0001", contractnummer: "0000000043", huurdernummer: "00000028", huurderNaam: "Voorbeeld Huurder BV", afrekenjaar: BEKEND_STRING("2025"), saldo: new Decimal("-1475.19") },
+      ],
+      complexbredeRegels: [],
+      aantalRegelsZonderComplexnummer: 0,
+    },
+    reconciliatie: {
+      doelrekeningen: ["1711", "1712"],
+      aantalServicekostenTotaal: 313,
+      aantalServicekostenNietGekoppeld: 0,
+      perRekening: [],
+      perRekeningPerPeriode: [],
+    },
+    controleVereist: [],
+    ...overrides,
+  };
+}
+
 function invoer(overrides: Partial<ManagementRapportInvoer> = {}): ManagementRapportInvoer {
   return {
     administratieNaam: "Rooise Zoom",
@@ -91,6 +140,7 @@ function invoer(overrides: Partial<ManagementRapportInvoer> = {}): ManagementRap
     stand: stand(),
     vastgoed: vastgoed(),
     huur: huur(),
+    servicekosten: servicekosten(),
     ...overrides,
   };
 }
@@ -172,14 +222,59 @@ describe("renderManagementRapportHtml", () => {
     expect(h).not.toContain("grootste overige uitgaven");
   });
 
-  it("toont sectie 5 met gecombineerde controleVereist uit alle modules, zichtbaar met sectielabel", () => {
+  it("toont sectie 5 (servicekosten) met actuele positie en afrekening voorgaande jaren strikt gescheiden", () => {
+    const h = html();
+    expect(h).toContain("5. Servicekosten");
+    expect(h).toContain("Actuele positie");
+    expect(h).toContain("€ 91.177,91"); // kostenSaldo
+    expect(h).toContain("(€ 114.530,00)"); // voorschottenSaldo, haakjes-stijl voor negatief
+    expect(h).toContain("(€ 23.352,09)"); // actueelSaldo, haakjes-stijl voor negatief
+    expect(h).toContain("Voorschotten hoger dan kosten");
+    expect(h).toContain("Afrekeningen voorgaande jaren (kostensoort 9600)");
+    expect(h).toContain("€ 31.926,39"); // afrekening totaalSaldo
+    // Geen 1711/1712-reconciliatiecijfers prominent in deze sectie.
+    const servicekostenSectie = h.slice(h.indexOf("5. Servicekosten"), h.indexOf("6. Controle vereist"));
+    expect(servicekostenSectie).not.toContain("1711");
+    expect(servicekostenSectie).not.toContain("1712");
+  });
+
+  it("toont per-huurder-afrekening uitsluitend waar rechtstreeks gekoppeld, met naam en afrekenjaar", () => {
+    const h = html();
+    expect(h).toContain("00000028"); // huurdernummer
+    expect(h).toContain("Voorbeeld Huurder BV"); // huurdernaam
+    expect(h).toContain("2025"); // afrekenjaar
+  });
+
+  it("toont een streepje i.p.v. een lege cel als de huurdernaam ontbreekt", () => {
+    const h = html({
+      servicekosten: servicekosten({
+        afrekeningVoorgaandJaar: {
+          boekperiodeVan: "04",
+          boekperiodeTotEnMet: "06",
+          totaalSaldo: new Decimal("-100"),
+          aantalRegels: 1,
+          perComplex: [],
+          perContractHuurderAfrekenjaar: [
+            { complexnummer: "001", unitnummer: "0001", contractnummer: "0000000099", huurdernummer: "00000099", huurderNaam: null, afrekenjaar: BEKEND_STRING("2025"), saldo: new Decimal("-100") },
+          ],
+          complexbredeRegels: [],
+          aantalRegelsZonderComplexnummer: 0,
+        },
+      }),
+    });
+    expect(h).toContain("00000099");
+  });
+
+  it("toont sectie 6 met gecombineerde controleVereist uit alle modules, zichtbaar met sectielabel", () => {
     const h = html({
       vastgoed: vastgoed({ controleVereist: [{ complexnr: "004", ernst: "WAARSCHUWING", bericht: "vastgoed-afwijking-004" }] }),
       huur: huur({ controleVereist: [{ complexnr: "003", ernst: "KRITIEK", bericht: "huur-afwijking-003" }] }),
+      servicekosten: servicekosten({ controleVereist: [{ sectie: "Reconciliatie", ernst: "WAARSCHUWING", referentie: "1712", bericht: "servicekosten-verschil-1712" }] }),
     });
-    expect(h).toContain("5. Controle vereist");
+    expect(h).toContain("6. Controle vereist");
     expect(h).toContain("vastgoed-afwijking-004");
     expect(h).toContain("huur-afwijking-003");
+    expect(h).toContain("servicekosten-verschil-1712");
     expect(h).toContain("KRITIEK");
     expect(h).toContain("WAARSCHUWING");
   });

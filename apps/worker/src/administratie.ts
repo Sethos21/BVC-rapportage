@@ -13,6 +13,17 @@ export interface AdministratieConfig {
   bronlocaties: Record<BronType, BronLocatie>;
   laatstGeopendBoekjaar?: number;
   laatstGeopendBoekperiode?: string;
+  /**
+   * Administratie-specifieke grootboekrekeningen voor de servicekosten-
+   * reconciliatie (`servicekostenPositie.ts`'s sectie C) — UITSLUITEND
+   * bewezen voor `070_Rooise_Zoom` (kostenrekening "1712", voorschotten-
+   * rekening "1711"), GEEN universele default voor andere administraties.
+   * Optioneel: ontbreekt dit veld, dan geeft de Worker een lege
+   * doelrekeningen-lijst door — de reconciliatie wordt dan overgeslagen met
+   * één duidelijke `controleVereist`-melding, nooit stilzwijgend 1711/1712
+   * aangenomen (zie `genereerManagementRapport.ts`/`genereerServicekostenPositie.ts`).
+   */
+  servicekostenRekeningen?: { kostenrekening: string; voorschottenrekening: string } | undefined;
 }
 
 /**

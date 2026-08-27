@@ -27,6 +27,7 @@ function regel(overrides: Partial<Servicekostenregel> = {}): Servicekostenregel 
     saldo: new Decimal("100"),
     kostensoortSoort: "Kosten",
     jaarSvAfrekening: null,
+    huurderNaam: null,
     ...overrides,
   };
 }
@@ -199,6 +200,21 @@ describe("samenstelServicekostenPositie — B. Afrekening voorgaand jaar", () =>
     expect(zonder.afrekenjaar.type).toBe("onbekend");
   });
 
+  it("neemt de huurdernaam over uit de servicekostenbron, en valt terug op null als geen enkele regel in de groep een naam heeft", () => {
+    const resultaat = samenstelServicekostenPositie(
+      invoer({
+        servicekosten: [
+          regel({ kostensoort: "9600", kostensoortSoort: "Nvt", contractnummer: "C1", huurdernummer: "H1", huurderNaam: "Voorbeeld Huurder BV", saldo: new Decimal("-100") }),
+          regel({ boekstuknummer: "2", kostensoort: "9600", kostensoortSoort: "Nvt", contractnummer: "C2", huurdernummer: "H2", huurderNaam: null, saldo: new Decimal("-50") }),
+        ],
+      }),
+    );
+    const metNaam = resultaat.afrekeningVoorgaandJaar.perContractHuurderAfrekenjaar.find((r) => r.huurdernummer === "H1")!;
+    expect(metNaam.huurderNaam).toBe("Voorbeeld Huurder BV");
+    const zonderNaam = resultaat.afrekeningVoorgaandJaar.perContractHuurderAfrekenjaar.find((r) => r.huurdernummer === "H2")!;
+    expect(zonderNaam.huurderNaam).toBeNull();
+  });
+
   it("houdt complexbrede 9600-regels (zonder contract/huurder) apart van de per-huurder uitsplitsing", () => {
     const resultaat = samenstelServicekostenPositie(
       invoer({
@@ -266,6 +282,20 @@ describe("samenstelServicekostenPositie — C. Financiële reconciliatie", () =>
     expect(rek1712.grootboekSaldo.toString()).toBe("130");
     expect(rek1712.verschil.toString()).toBe("30");
     expect(resultaat.controleVereist.some((c) => c.sectie === "Reconciliatie" && c.ernst === "WAARSCHUWING" && c.bericht.includes("verschil 30"))).toBe(true);
+  });
+
+  it("slaat de reconciliatie over met één duidelijke melding als er geen doelrekeningen zijn opgegeven (niet-geconfigureerde administratie), zonder valse 'onverwachte rekening'-ruis", () => {
+    const resultaat = samenstelServicekostenPositie(
+      invoer({
+        servicekosten: [regel({ kostensoortSoort: "Kosten", boekstuknummer: "1", saldo: new Decimal("100") })],
+        boekingen: [boeking({ boekstuknr: "1", grootboeknr: "1712", saldo: new Decimal("100") })],
+        doelrekeningen: [],
+      }),
+    );
+    expect(resultaat.reconciliatie.perRekening).toEqual([]);
+    expect(resultaat.controleVereist.filter((c) => c.sectie === "Reconciliatie")).toEqual([
+      { sectie: "Reconciliatie", ernst: "INFORMATIEF", referentie: null, bericht: expect.stringContaining("Geen doelrekeningen opgegeven") },
+    ]);
   });
 
   it("VANGRAIL: signaleert wanneer een stroom op een niet-opgegeven doelrekening koppelt (verkeerde doelrekening)", () => {

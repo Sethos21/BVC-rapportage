@@ -4,6 +4,7 @@ import type { HuurKerncijfersResultaat } from "./huurKerncijfers.js";
 import type { KasstroomManagementoverzichtResultaat } from "./kasstroomManagementoverzicht.js";
 import type { KasstroomTopUitgaveRegel } from "./kasstroomTopUitgaven.js";
 import type { VastgoedKerncijfersResultaat } from "./vastgoedKerncijfers.js";
+import type { ServicekostenPositieResultaat } from "./servicekostenPositie.js";
 
 /**
  * Eerste gecombineerde managementrapportage (v1, 2026-08-26; periode-van
@@ -28,6 +29,13 @@ import type { VastgoedKerncijfersResultaat } from "./vastgoedKerncijfers.js";
  *    blijven voor de balansaansluiting activa = passiva + resultaat).
  * 3. `vastgoed`/`huur` — momentopname, volledig los van boekjaar/periode
  *    (ongewijzigd, ook bij een periode-van-selectie).
+ * 4. `servicekosten` — UITSLUITEND boekperiodeVan t/m boekperiodeTotEnMet,
+ *    zelfde range als `periode` hierboven (`servicekostenPositie.ts`
+ *    kent geen YTD-variant, servicekosten zijn pure transactieregels
+ *    zonder beginsaldo-afhankelijkheid). De 1711/1712-grootboek-
+ *    reconciliatie daarin is een controlemechanisme, geen management-KPI
+ *    — wordt daarom NIET apart gerenderd, uitsluitend via `controleVereist`
+ *    bij een afwijking (zie `renderManagementRapport.ts`).
  *
  * `controleVereist` combineert de datakwaliteitsmeldingen van alle bronnen
  * tot één genormaliseerde lijst (sectie + ernst + referentie + bericht) —
@@ -35,7 +43,7 @@ import type { VastgoedKerncijfersResultaat } from "./vastgoedKerncijfers.js";
  */
 
 export type ManagementRapportControleErnst = "KRITIEK" | "WAARSCHUWING" | "INFORMATIEF";
-export type ManagementRapportSectie = "Financieel" | "Vastgoed" | "Huur" | "Kasstroom";
+export type ManagementRapportSectie = "Financieel" | "Vastgoed" | "Huur" | "Kasstroom" | "Servicekosten";
 
 export interface ManagementRapportControleItem {
   sectie: ManagementRapportSectie;
@@ -74,6 +82,8 @@ export interface ManagementRapportInvoer {
   stand: ManagementRapportStandSectie;
   vastgoed: VastgoedKerncijfersResultaat;
   huur: HuurKerncijfersResultaat;
+  /** Zelfde boekperiodeVan/boekperiodeTotEnMet als `periode` hierboven — geen aparte periodeselectie. */
+  servicekosten: ServicekostenPositieResultaat;
 }
 
 export interface ManagementRapportResultaat {
@@ -87,6 +97,8 @@ export interface ManagementRapportResultaat {
   vastgoed: VastgoedKerncijfersResultaat;
   /** Ongewijzigd doorgegeven (momentopname, eigen `bronPeildatum`/`controleVereist`) — zie `huurKerncijfers.ts`. */
   huur: HuurKerncijfersResultaat;
+  /** Ongewijzigd doorgegeven — zie `servicekostenPositie.ts`. De 1711/1712-reconciliatie (sectie C) wordt NIET apart getoond, uitsluitend via `controleVereist` bij een afwijking. */
+  servicekosten: ServicekostenPositieResultaat;
   controleVereist: ManagementRapportControleItem[];
 }
 
@@ -120,6 +132,10 @@ export function samenstelManagementRapport(invoer: ManagementRapportInvoer): Man
     });
   }
 
+  for (const item of invoer.servicekosten.controleVereist) {
+    controleVereist.push({ sectie: "Servicekosten", ernst: item.ernst, referentie: item.referentie, bericht: item.bericht });
+  }
+
   return {
     administratieNaam: invoer.administratieNaam,
     bedrijfsnr: invoer.bedrijfsnr,
@@ -129,6 +145,7 @@ export function samenstelManagementRapport(invoer: ManagementRapportInvoer): Man
     stand: invoer.stand,
     vastgoed: invoer.vastgoed,
     huur: invoer.huur,
+    servicekosten: invoer.servicekosten,
     controleVereist,
   };
 }

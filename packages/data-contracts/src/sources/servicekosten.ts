@@ -42,6 +42,13 @@ export const ServicekostenregelBronSchema = z.object({
   Kostensoort_Soort: zCodeOptional,
   /** Het jaar waarop een serviceafrekening (kostensoort 9600) betrekking heeft — uitsluitend een getoond attribuut, nooit een selectiecriterium (zie servicekostenPositie.ts). */
   Service_BK_Jaar_SV_Afrekening: zCodeOptional,
+  /**
+   * Huurdernaam — bevestigd door de gebruiker (2026-08-27) als "Naam_1" in
+   * deze bron (anders dan "Huurder_Naam_1" in contracten_huidig — twee
+   * verschillende bronnen, elk hun eigen kolomnaam). Bewust het enige
+   * naam-/contactveld dat uit deze 111-kolommen-bron wordt overgenomen.
+   */
+  Naam_1: zCodeOptional,
 });
 
 export type ServicekostenregelBron = z.infer<typeof ServicekostenregelBronSchema>;
@@ -90,6 +97,7 @@ export interface GestaagdeServicekostenregel {
   uitsluitingsstatus: ServicekostenUitsluitingsstatus;
   kostensoortSoort: string | null;
   jaarSvAfrekening: string | null;
+  huurderNaam: string | null;
   raw: ServicekostenregelBron;
 }
 
@@ -115,6 +123,7 @@ function naarGestaagdeServicekostenregel(bron: ServicekostenregelBron, serviceko
     uitsluitingsstatus: bepaalUitsluitingsstatus(bron.Service_BK_Kostensoort, bron.Service_BK_Omschrijving, servicekostenParams),
     kostensoortSoort: bron.Kostensoort_Soort,
     jaarSvAfrekening: bron.Service_BK_Jaar_SV_Afrekening,
+    huurderNaam: bron.Naam_1,
     raw: bron,
   };
 }

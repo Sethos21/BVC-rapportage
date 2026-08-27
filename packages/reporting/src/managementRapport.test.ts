@@ -4,6 +4,7 @@ import { samenstelManagementRapport, type ManagementRapportInvoer, type Manageme
 import type { HuurKerncijfersResultaat } from "./huurKerncijfers.js";
 import type { KasstroomManagementoverzichtResultaat } from "./kasstroomManagementoverzicht.js";
 import type { VastgoedKerncijfersResultaat } from "./vastgoedKerncijfers.js";
+import type { ServicekostenPositieResultaat } from "./servicekostenPositie.js";
 
 const BEKEND = (n: string) => ({ type: "bekend" as const, waarde: new Decimal(n) });
 
@@ -66,6 +67,51 @@ function stand(overrides: Partial<ManagementRapportStandSectie> = {}): Managemen
   };
 }
 
+function servicekosten(overrides: Partial<ServicekostenPositieResultaat> = {}): ServicekostenPositieResultaat {
+  return {
+    administratieNaam: "Rooise Zoom",
+    bedrijfsnr: "070",
+    boekjaar: 2026,
+    boekperiodeVan: "04",
+    boekperiodeTotEnMet: "06",
+    gegenereerdOp: new Date("2026-08-26T10:00:00.000Z"),
+    actuelePositie: {
+      boekperiodeVan: "04",
+      boekperiodeTotEnMet: "06",
+      kostenSaldo: new Decimal("100"),
+      voorschottenSaldo: new Decimal("-150"),
+      actueelSaldo: new Decimal("-50"),
+      status: "VOORSCHOTTEN_HOGER_DAN_KOSTEN",
+      perComplex: [],
+      voorschottenPerContractHuurder: [],
+      aantalKostenRegelsZonderComplexnummer: 0,
+      aantalVoorschottenRegelsZonderComplexnummer: 0,
+      aantalKostenRegelsZonderContractOfHuurder: 0,
+      aantalVoorschottenRegelsZonderContractOfHuurder: 0,
+      kostenRechtstreeksGekoppeldTotaal: { aantalRegels: 0, saldo: new Decimal("0") },
+    },
+    afrekeningVoorgaandJaar: {
+      boekperiodeVan: "04",
+      boekperiodeTotEnMet: "06",
+      totaalSaldo: new Decimal("0"),
+      aantalRegels: 0,
+      perComplex: [],
+      perContractHuurderAfrekenjaar: [],
+      complexbredeRegels: [],
+      aantalRegelsZonderComplexnummer: 0,
+    },
+    reconciliatie: {
+      doelrekeningen: [],
+      aantalServicekostenTotaal: 0,
+      aantalServicekostenNietGekoppeld: 0,
+      perRekening: [],
+      perRekeningPerPeriode: [],
+    },
+    controleVereist: [],
+    ...overrides,
+  };
+}
+
 function invoer(overrides: Partial<ManagementRapportInvoer> = {}): ManagementRapportInvoer {
   return {
     administratieNaam: "Rooise Zoom",
@@ -76,6 +122,7 @@ function invoer(overrides: Partial<ManagementRapportInvoer> = {}): ManagementRap
     stand: stand(),
     vastgoed: vastgoed(),
     huur: huur(),
+    servicekosten: servicekosten(),
     ...overrides,
   };
 }
@@ -90,12 +137,13 @@ describe("samenstelManagementRapport", () => {
     expect(resultaat.stand.boekperiodeTotEnMet).toBe("06");
   });
 
-  it("geeft vastgoed/huur/kasstroom ongewijzigd (identiek object) door, geen herberekening", () => {
+  it("geeft vastgoed/huur/kasstroom/servicekosten ongewijzigd (identiek object) door, geen herberekening", () => {
     const inv = invoer();
     const resultaat = samenstelManagementRapport(inv);
     expect(resultaat.vastgoed).toBe(inv.vastgoed);
     expect(resultaat.huur).toBe(inv.huur);
     expect(resultaat.periode.kasstroom).toBe(inv.periode.kasstroom);
+    expect(resultaat.servicekosten).toBe(inv.servicekosten);
   });
 
   it("voegt geen controleVereist toe als alles schoon is", () => {
@@ -130,5 +178,20 @@ describe("samenstelManagementRapport", () => {
     expect(resultaat.controleVereist).toContainEqual({ sectie: "Vastgoed", ernst: "WAARSCHUWING", referentie: "002", bericht: "vastgoed-afwijking" });
     expect(resultaat.controleVereist).toContainEqual({ sectie: "Huur", ernst: "KRITIEK", referentie: "003", bericht: "huur-afwijking" });
     expect(resultaat.controleVereist).toContainEqual({ sectie: "Kasstroom", ernst: "WAARSCHUWING", referentie: "9999", bericht: "onbekende rekening (saldo 50)" });
+  });
+
+  it("combineert servicekosten-controleVereist met de sectielabel 'Servicekosten', ongeacht de interne subsectie", () => {
+    const resultaat = samenstelManagementRapport(
+      invoer({
+        servicekosten: servicekosten({
+          controleVereist: [
+            { sectie: "ActuelePositie", ernst: "WAARSCHUWING", referentie: "0101", bericht: "onbekende classificatie" },
+            { sectie: "Reconciliatie", ernst: "WAARSCHUWING", referentie: "1712", bericht: "verschil 30" },
+          ],
+        }),
+      }),
+    );
+    expect(resultaat.controleVereist).toContainEqual({ sectie: "Servicekosten", ernst: "WAARSCHUWING", referentie: "0101", bericht: "onbekende classificatie" });
+    expect(resultaat.controleVereist).toContainEqual({ sectie: "Servicekosten", ernst: "WAARSCHUWING", referentie: "1712", bericht: "verschil 30" });
   });
 });

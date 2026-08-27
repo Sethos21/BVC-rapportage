@@ -114,6 +114,7 @@ function servicekostenregel(overrides: Partial<ServicekostenRow> = {}): Servicek
     uitsluitingsstatus: "GEEN",
     kostensoort_soort: "Kosten",
     jaar_sv_afrekening: null,
+    huurder_naam: null,
     ...overrides,
   };
 }
