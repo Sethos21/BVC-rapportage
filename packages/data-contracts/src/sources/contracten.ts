@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { zCode, zCodeOptional, zDateOptional, zIntOptional } from "../lib/coerce.js";
+import Decimal from "decimal.js";
+import { zCode, zCodeOptional, zDateOptional, zDecimalOptional, zIntOptional } from "../lib/coerce.js";
 import { parseRowsWithSchema, vindDubbeleNatuurlijkeSleutels, type ParseResult, type RowIssue } from "../lib/parseRows.js";
 
 /**
@@ -29,6 +30,26 @@ export const ContractBronSchema = z.object({
    * schema/rapportage (zelfde terughoudendheid als ouderdomsanalyse.ts).
    */
   Huurder_Naam_1: zCodeOptional,
+  /**
+   * Bevestigd via bronkolommen-diagnose (2026-08-27, 070_Rooise_Zoom):
+   * ongemodelleerde waarborg-/indexeringsvelden, opgehaald als bouwstap
+   * voor Huurdersoverzicht v1 (zie packages/reporting/README.md).
+   * Waarborgsom: 0 is een geldige waarde (geen waarborg), nooit een
+   * ontbrekende waarde impliceren. Complexomschrijving: BEWUST GEEN
+   * authoritative complexnaam — de echte 070-data toont geen 1-op-1
+   * relatie met Complexnummer (zelfde Complexnummer met verschillende
+   * omschrijvingen, en vice versa) — uitsluitend een presentatie-
+   * aanduiding naast het complexnummer, nooit gebruikt voor
+   * joins/aggregaties/reconciliaties.
+   */
+  Waarborgsom: zDecimalOptional,
+  Complexomschrijving: zCodeOptional,
+  Verhoging_datum: zDateOptional,
+  Verhoging_Jaar_vlgd: zCodeOptional,
+  Verhoging_Periode_vlgd: zCodeOptional,
+  Verhoging_percentage: zDecimalOptional,
+  Verhoging_methode: zCodeOptional,
+  Omschrijving_indextabel: zCodeOptional,
 });
 
 export type ContractBron = z.infer<typeof ContractBronSchema>;
@@ -47,6 +68,14 @@ export interface GestaagdContract {
   expiratieAantalPerOptie: number | null;
   expiratieHuidige: string | null;
   huurderNaam: string | null;
+  waarborgsom: Decimal | null;
+  complexomschrijving: string | null;
+  verhogingDatum: Date | null;
+  verhogingJaarVlgd: string | null;
+  verhogingPeriodeVlgd: string | null;
+  verhogingPercentage: Decimal | null;
+  verhogingMethode: string | null;
+  omschrijvingIndextabel: string | null;
   raw: ContractBron;
 }
 
@@ -65,6 +94,14 @@ function naarGestaagdContract(bron: ContractBron): GestaagdContract {
     expiratieAantalPerOptie: bron.Expiratie_Aantal_per_optie,
     expiratieHuidige: bron.Expiratie_huidige,
     huurderNaam: bron.Huurder_Naam_1,
+    waarborgsom: bron.Waarborgsom,
+    complexomschrijving: bron.Complexomschrijving,
+    verhogingDatum: bron.Verhoging_datum,
+    verhogingJaarVlgd: bron.Verhoging_Jaar_vlgd,
+    verhogingPeriodeVlgd: bron.Verhoging_Periode_vlgd,
+    verhogingPercentage: bron.Verhoging_percentage,
+    verhogingMethode: bron.Verhoging_methode,
+    omschrijvingIndextabel: bron.Omschrijving_indextabel,
     raw: bron,
   };
 }

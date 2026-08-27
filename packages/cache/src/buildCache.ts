@@ -33,7 +33,9 @@ const SERVICEKOSTEN_COLUMNS: (keyof ServicekostenRow)[] = [
 const CONTRACT_COLUMNS: (keyof ContractRow)[] = [
   "bedrijfsnr", "contract", "complexnummer", "unitnummer", "huurdernummer", "ingangsdatum",
   "afloopdatum", "check_lopend_contract", "expiratie_expiratiedatum", "expiratie_opzegdatum",
-  "expiratie_aantal_per_optie", "expiratie_huidige",
+  "expiratie_aantal_per_optie", "expiratie_huidige", "huurder_naam", "waarborgsom",
+  "complexomschrijving", "verhoging_datum", "verhoging_jaar_vlgd", "verhoging_periode_vlgd",
+  "verhoging_percentage", "verhoging_methode", "omschrijving_indextabel",
 ];
 const UNIT_COLUMNS: (keyof UnitRow)[] = [
   "bedrijfsnr", "complexnummer", "unitnummer", "unit_non_actief", "unitomschrijving", "unitsoort",

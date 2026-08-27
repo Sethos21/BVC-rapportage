@@ -172,7 +172,11 @@ export function rebuildCache(options: RebuildCacheOptions): RebuildCacheResultaa
               huurdernummer: r.huurdernummer, ingangsdatum: iso(r.ingangsdatum), afloopdatum: iso(r.afloopdatum),
               check_lopend_contract: r.checkLopendContract, expiratie_expiratiedatum: iso(r.expiratieExpiratiedatum),
               expiratie_opzegdatum: iso(r.expiratieOpzegdatum), expiratie_aantal_per_optie: r.expiratieAantalPerOptie,
-              expiratie_huidige: r.expiratieHuidige,
+              expiratie_huidige: r.expiratieHuidige, huurder_naam: r.huurderNaam, waarborgsom: dec(r.waarborgsom),
+              complexomschrijving: r.complexomschrijving, verhoging_datum: iso(r.verhogingDatum),
+              verhoging_jaar_vlgd: r.verhogingJaarVlgd, verhoging_periode_vlgd: r.verhogingPeriodeVlgd,
+              verhoging_percentage: dec(r.verhogingPercentage), verhoging_methode: r.verhogingMethode,
+              omschrijving_indextabel: r.omschrijvingIndextabel,
             }));
           log(`${bron.bronType}: ${cacheRijen.length} rijen voor deze administratie (van ${rijen.length} gevalideerd), wegschrijven naar cache…`);
           builder.insertContracten(cacheRijen);

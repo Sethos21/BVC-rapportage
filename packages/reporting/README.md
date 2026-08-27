@@ -1110,6 +1110,114 @@ rijen met dat contractnummer, ongeacht bedrijfsnr) om een botsing direct
 zichtbaar te maken. Geregressietest in `contractHuurderDiagnose.test.ts`
 ("BUGFIX: ...") bevestigt de juiste rij wordt gekozen bij een botsing.
 
+## Huurdersoverzicht v1 (`huurdersoverzicht.ts`, 2026-08-27) — contract-geankerd, eerste rapportonderdeel op basis van `contract-huurder-diagnose`
+
+Eerste contract-geankerde module: **één rij per contract** (nooit per
+rentroll-regel, nooit een kunstmatige unittoewijzing). Ontwerp vooraf
+expliciet goedgekeurd op basis van de `contract-huurder-diagnose`-run
+hierboven. `berekenHuurdersoverzicht(contracten, rentroll)` is puur en
+volledig los van `kerncijfersManagement.ts`/`plPeriodeBerekening.ts`/
+`balansPeriodeBerekening.ts`/`kasstroomManagementoverzicht.ts` — bewust GEEN
+boekjaar/periode, dit is een **momentopname** (`momentopname: true`),
+zelfde `bronPeildatum`-conventie als `vastgoedKerncijfers.ts`/
+`huurKerncijfers.ts` (alleen gevuld bij eenduidige `rentroll.rapportage_
+datum`, anders `null`, opnieuw lokaal gedefinieerd — zelfde precedent).
+
+**Huur/m² per contract — hergebruikt `bepaalContractGeldigheid`
+rechtstreeks** (ongewijzigd geïmporteerd uit `huurKerncijfers.ts`) voor de
+vraag welke rentroll-regels meetellen — dezelfde functie die het
+al-bevestigde portefeuillecijfer oplevert. Vorderingsoort 01/13-
+classificatie, geldigheids-/datakwaliteitscontroles zijn één-op-één
+gespiegeld aan `huurKerncijfers.ts` (nooit een tweede definitie), plus twee
+NIEUWE controles specifiek voor het contract-anker: een rentroll-regel se
+complexnummer/unitnummer die afwijkt van het contract se eigen waarde
+(WAARSCHUWING).
+
+**Contracteinde/status — NIET `bepaalContractGeldigheid`** (die is
+afloopdatum-gebaseerd, bij 070 vrijwel altijd "geldig" omdat `afloopdatum`
+zo goed als nooit gevuld is). Nieuwe, aparte functie
+`bepaalContracteindeStatus(expiratieExpiratiedatum, peildatum)`:
+`restlooptijdDagen = round((expiratie - peildatum) / 86.400.000)`; `< 0`
+dagen → `EXPIRATIEDATUM_GEPASSEERD` (WAARSCHUWING — een gepasseerde
+expiratiedatum is bewezen GEEN garantie dat het contract beëindigd is, zie
+`huurKerncijfers.ts`'s eigen reden om expiratie niet als harde
+geldigheidsgrens te gebruiken); `0–364` → `VERLOOPT_BINNENKORT`; `365–729`
+→ `AANDACHT`; `≥730` → `GEEN_URGENTIE`; onbekende expiratiedatum →
+`ONBEKEND`. `rentroll.contract_expiratiedatum`/`_opzegdatum` dienen
+uitsluitend als onafhankelijke reconciliatiecontrole (contracten blijft
+leidend voor weergave); een afwijking tussen beide bronnen levert een
+WAARSCHUWING op, nooit een stilzwijgende keuze.
+
+**`Complexomschrijving` → `objectomschrijving`** — uitsluitend een
+gebruiksvriendelijke aanduiding naast het authoritative `complexnummer`,
+ongevalideerd doorgegeven, NOOIT gebruikt voor joins/aggregaties/
+reconciliaties. Een afwijkende omschrijving tussen contracten binnen
+hetzelfde complex is dus bewust geen reden om cijfers anders te groeperen
+(zie de bevinding hierboven bij `contract-huurder-diagnose`).
+
+**Servicekostenvoorschot** — `rentroll.Service_voorschot_jaar`
+(contractueel). `servicekostenPositie.ts`'s `voorschottenPerContractHuurder`
+(geboekt, periodegebonden) is BEWUST NIET gebruikt/samengevoegd — een
+toekomstige reconciliatie tussen beide is een aparte, latere stap.
+
+**Waarborgsom** — `contracten.Waarborgsom`, rechtstreeks doorgegeven
+(`Decimal | null`): `0` is een geldige waarde (geen waarborg), `null`
+betekent "niet geregistreerd" en levert een INFORMATIEF-melding op — nooit
+verward.
+
+**Bewust GEEN velden in v1** (niet als `null`-placeholder, gewoon afwezig
+in het type): openstaand saldo/debiteuren (ouderdomsanalyse bestaat en is
+gecached, maar de koppeling op huurdernummer is nog niet bewezen — zie
+`contract-huurder-diagnose`'s bevindingen; vervolgactie: "ouderdomsanalyse-
+bron + koppeling op huurdernummer valideren"); kosten per huurder
+(`servicekostenPositie.ts` heeft al bewezen dat het grootste deel van de
+werkelijke kosten complexbreed is, geen bewezen verdeelsleutel); "laatste
+huurverhoging" (kandidaatveld `Datum_laatst_geprolongreerd` ingetrokken,
+zie hierboven — blijft "nog niet vastgesteld").
+
+**Schema/cache (2026-08-27)** — `ContractBronSchema`/`GestaagdContract`
+uitgebreid met `Waarborgsom`, `Complexomschrijving`, `Verhoging_datum`,
+`Verhoging_Jaar_vlgd`/`_Periode_vlgd`, `Verhoging_percentage`,
+`Verhoging_methode`, `Omschrijving_indextabel`. De `contracten`-cachetabel
+kreeg dezelfde velden plus `huurder_naam` (structureel gewired — dit was
+sinds de huurdernaam-toevoeging aan het managementrapport bewust nog niet
+gebeurd, zie eerdere onderzoeksronde). Een cache die vóór deze datum is
+gebouwd mist deze kolommen; `rebuild-cache` opnieuw draaien is verplicht.
+
+Worker: `genereerHuurdersoverzicht.ts` (`SELECT * FROM contracten`/
+`rentroll`, zelfde ongefilterde patroon als `genereerHuurKerncijfers.ts`).
+CLI: `bvc-worker huurdersoverzicht <administratieId>` — momentopname, geen
+`--boekjaar`/`--periodeTotEnMet`, JSON op stdout. Nog GEEN renderer, nog
+NIET gekoppeld aan `management-rapport`.
+
+### Regressiepunt: 070_Rooise_Zoom Huurdersoverzicht (in-repo, 2026-08-27)
+
+Twee regressietests — één puur (`huurdersoverzicht.test.ts`, met
+lokaal-geconstrueerde `HoContractRegel`/`HoRentrollRegel`-invoer) en één
+volledige pijplijn (`genereerHuurdersoverzicht.test.ts`, echte
+xlsx→cache→worker-route, incl. de nieuwe contracten-kolommen) — gebruiken
+de EXACTE cijfers van alle 12 echte 070-contracten uit de
+`contract-huurder-diagnose`-run hierboven. Beide bevestigen dat de som
+over de 12 contractregels exact aansluit op het al-bevestigde
+huur-kerncijfers-regressiepunt: bruto jaarhuur € 687.900,88,
+huurkortingen € 13.920,00, netto jaarhuur € 673.980,88, verhuurde VVO
+6.589,5 m². Contract `0000000043` (zonder unitnummer) blijft in beide
+tests expliciet `unitnummer: null`. Dit is nog GEEN vervanging van de
+verplichte, door de gebruiker persoonlijk gedraaide 070-regressie tegen de
+levende cache (zelfde discipline als elke eerdere module) — dat volgt
+zodra `huurdersoverzicht 070_Rooise_Zoom` na een `rebuild-cache` is
+gedraaid.
+
+**Update (2026-08-27): het inmiddels bevestigde `contract-huurder-
+diagnose`-cijfermateriaal voor 070 bleek voor drie contracten
+(0000000048/0000000051/0000000052) af te wijken van een botsend
+contractnummer uit een andere administratie — een bug in de TIJDELIJKE
+diagnose (zie de bugfix-paragraaf hierboven), niet in
+`huurdersoverzicht`/`genereerHuurdersoverzicht.ts`. De v2-herrun van
+`contract-huurder-diagnose` (na de bugfix) bevestigt dat
+`huurdersoverzicht`'s cache-gebaseerde output voor alle 12 contracten al
+correct was — inclusief deze drie.**
+
 ## Kerncijfers (sectie 01 — KPI-dashboard)
 
 `renderKerncijfersHtml` rendert het portefeuille-KPI-dashboard: 6

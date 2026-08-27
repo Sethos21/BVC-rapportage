@@ -80,6 +80,15 @@ export const CACHE_TABLES_DDL: readonly string[] = [
     expiratie_opzegdatum TEXT,
     expiratie_aantal_per_optie INTEGER,
     expiratie_huidige TEXT,
+    huurder_naam TEXT,
+    waarborgsom TEXT,
+    complexomschrijving TEXT,
+    verhoging_datum TEXT,
+    verhoging_jaar_vlgd TEXT,
+    verhoging_periode_vlgd TEXT,
+    verhoging_percentage TEXT,
+    verhoging_methode TEXT,
+    omschrijving_indextabel TEXT,
     PRIMARY KEY (bedrijfsnr, contract)
   )`,
   `CREATE TABLE units (

@@ -73,6 +73,15 @@ export interface ContractRow {
   expiratie_opzegdatum: string | null;
   expiratie_aantal_per_optie: number | null;
   expiratie_huidige: string | null;
+  huurder_naam: string | null;
+  waarborgsom: string | null;
+  complexomschrijving: string | null;
+  verhoging_datum: string | null;
+  verhoging_jaar_vlgd: string | null;
+  verhoging_periode_vlgd: string | null;
+  verhoging_percentage: string | null;
+  verhoging_methode: string | null;
+  omschrijving_indextabel: string | null;
 }
 
 export interface UnitRow {
