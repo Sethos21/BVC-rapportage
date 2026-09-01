@@ -36,4 +36,5 @@ export * from "./servicekostenPositie.js";
 export * from "./huurKerncijfers.js";
 export * from "./managementRapport.js";
 export * from "./renderManagementRapport.js";
+export * from "./begroting/begroteHuuropbrengsten.js";
 export { HUISSTIJL_CSS, escapeHtml, formatBedragHtml, renderRapportDocument } from "./huisstijl.js";
