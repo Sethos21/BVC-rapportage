@@ -1,7 +1,7 @@
 import Decimal from "decimal.js";
 import type { OnbekendOf } from "@bvc/domain";
 import { bepaalContractGeldigheid, type HuurContractRegel } from "./huurKerncijfers.js";
-import { berekenOpenstaandePosten, type DebiteurenbeheerStatus, type OpSaldoHuurderRegel, type OpVorderingRegel } from "./openstaandePosten.js";
+import { berekenOpenstaandePosten, classificeerOpenstaandePosten, type DebiteurenbeheerStatus, type OpSaldoHuurderRegel, type OpVorderingRegel } from "./openstaandePosten.js";
 
 /**
  * Huurdersoverzicht v1 (2026-08-27) — eerste contract-geankerde module
@@ -76,6 +76,26 @@ import { berekenOpenstaandePosten, type DebiteurenbeheerStatus, type OpSaldoHuur
  * contract) en de resulterende `controleVereist` (bankaflettering-context +
  * huurderniveau-reconciliatie) wordt ÉÉN keer samengevoegd, nooit
  * gedupliceerd per contract van eenzelfde huurder.
+ *
+ * **Vervallen posten / Openstaande credits (2026-09-01)** — bouwt voort op
+ * `berekenOpenstaandePosten`'s resultaat (ÉÉN keer aangeroepen, zie hierboven)
+ * via `classificeerOpenstaandePosten` (`openstaandePosten.ts`, geen tweede
+ * bronberekening). Drieluik, betekenissen NOOIT vermengen: `openstaandSaldo`
+ * per contract = volledige financiële positie (ongewijzigd); `vervallenPosten`
+ * = incassowerklijst (uitsluitend positieve, vervallen detailposten, hele
+ * rapport, niet per contract); `openstaandeCredits` = tegoeden die nog met
+ * huurders verrekend moeten worden (negatieve posten). Een credit is NOOIT
+ * een vervallen betalingsachterstand, ook niet als hij oud is.
+ *
+ * De peildatum voor deze classificatie (`vervallenPeildatum`) is BEWUST een
+ * apart, expliciet meegegeven veld — nooit stilzwijgend `bronPeildatum`
+ * (rentroll.rapportage_datum) hergebruikt. Bewezen: `vorderingen_met_
+ * afboekingen`/`saldo_huurders` en `rentroll` zijn aantoonbaar verschillende
+ * bronstanden (zie grootboekreconciliatie-onderzoek, packages/reporting/
+ * README.md) — één peildatum voor beide zou een niet-bewezen gelijkstelling
+ * zijn. `vervallenPeildatum = null` (geen classificatie opgegeven, maar er
+ * IS debiteurendata) levert een WAARSCHUWING op, nooit een gok met
+ * `new Date()` diep in deze functie.
  */
 
 export type ContracteindeStatus = "VERLOOPT_BINNENKORT" | "AANDACHT" | "GEEN_URGENTIE" | "EXPIRATIEDATUM_GEPASSEERD" | "ONBEKEND";
@@ -209,12 +229,52 @@ export interface HuurdersoverzichtPortefeuilleTotalen {
   gehuurdOppervlak: OnbekendOf<Decimal>;
 }
 
+/** Regel in de "Vervallen posten"-sectie (incassowerklijst) — zie moduledoc. */
+export interface HoVervallenPost {
+  huurdernummer: string;
+  huurderNaam: string | null;
+  /** Beschikbaar voor een latere drill-down — GEEN zichtbare kolom in v1, zie moduledoc/renderer. */
+  contractnummer: string;
+  complexnummer: string | null;
+  factuurnummer: string | null;
+  vorderingVolgnummer: string;
+  periodeWeergave: string;
+  datumVordering: Date;
+  dagenVervallen: number;
+  openstaand: Decimal;
+}
+
+/** Regel in de "Openstaande credits"-sectie (nog te verrekenen tegoeden) — zie moduledoc. */
+export interface HoOpenstaandeCredit {
+  huurdernummer: string;
+  huurderNaam: string | null;
+  contractnummer: string;
+  complexnummer: string | null;
+  factuurnummer: string | null;
+  vorderingVolgnummer: string;
+  omschrijving: string | null;
+  datumVordering: Date;
+  openstaand: Decimal;
+}
+
 export interface HuurdersoverzichtResultaat {
   /** Altijd `true`: een actuele bronstand, geen boekjaar/periode-gebonden cijfer. */
   momentopname: true;
   bronPeildatum: Date | null;
   contracten: HuurdersoverzichtContractRegel[];
   portefeuilleTotalen: HuurdersoverzichtPortefeuilleTotalen;
+  /**
+   * Peildatum voor de vervallen/credit-classificatie hieronder — BEWUST NIET
+   * hetzelfde veld als `bronPeildatum` (zie moduledoc). `null` = geen
+   * classificatie berekend (geen vervallenPeildatum meegegeven aan
+   * `berekenHuurdersoverzicht`); `vervallenPosten`/`openstaandeCredits` zijn
+   * dan leeg en er staat een WAARSCHUWING in `controleVereist`.
+   */
+  vervallenPeildatum: Date | null;
+  /** Uitsluitend positieve, vervallen posten — gesorteerd meeste dagen vervallen eerst. */
+  vervallenPosten: HoVervallenPost[];
+  /** Uitsluitend negatieve openstaande posten (tegoeden) — nooit vermengd met vervallenPosten. */
+  openstaandeCredits: HoOpenstaandeCredit[];
   controleVereist: HuurdersoverzichtControleItem[];
 }
 
@@ -389,11 +449,24 @@ export function berekenHuurdersoverzicht(
   vorderingen: readonly OpVorderingRegel[] = [],
   saldoHuurders: readonly OpSaldoHuurderRegel[] = [],
   debiteurenbeheer: DebiteurenbeheerStatus = "onbekend",
+  vervallenPeildatum: Date | null = null,
+  betaaltermijnDagen: number = 0,
 ): HuurdersoverzichtResultaat {
   const controleVereist: HuurdersoverzichtControleItem[] = [];
   const bronPeildatum = bepaalBronPeildatum(rentroll);
 
+  const huurderNaamPerNummer = new Map<string, string | null>();
+  for (const c of contracten) {
+    if (c.huurdernummer !== null && !huurderNaamPerNummer.has(c.huurdernummer)) {
+      huurderNaamPerNummer.set(c.huurdernummer, c.huurderNaam);
+    }
+  }
+  const complexPerContract = new Map<string, string | null>();
+  for (const c of contracten) complexPerContract.set(c.contractnummer, c.complexnummer);
+
   const openstaandPerContract = new Map<string, { saldo: Decimal; aantal: number }>();
+  let vervallenPosten: HoVervallenPost[] = [];
+  let openstaandeCredits: HoOpenstaandeCredit[] = [];
   // Eén keer berekend (nooit per contract) — zie moduledoc: voorkomt dubbeltelling van
   // saldo_huurders.Saldo over meerdere contracten van dezelfde huurder. Alleen aangeroepen
   // als er daadwerkelijk debiteurendata is meegegeven — een aanroeper die (nog) geen
@@ -410,6 +483,48 @@ export function berekenHuurdersoverzicht(
     }
     for (const item of opResultaat.controleVereist) {
       controleVereist.push({ contractnummer: null, ernst: item.ernst, bericht: item.bericht });
+    }
+
+    if (vervallenPeildatum === null) {
+      controleVereist.push({
+        contractnummer: null,
+        ernst: "WAARSCHUWING",
+        bericht: "Geen peildatum opgegeven voor de vervallen-classificatie — Vervallen posten/Openstaande credits zijn niet berekend (de Openstaand-kolom per contract blijft wel correct).",
+      });
+    } else {
+      const allePosten = opResultaat.huurders.flatMap((h) => h.openstaandePosten);
+      const geclassificeerd = classificeerOpenstaandePosten(allePosten, vervallenPeildatum, betaaltermijnDagen);
+
+      vervallenPosten = geclassificeerd
+        .filter((p) => p.classificatie === "VERVALLEN")
+        .map((p) => ({
+          huurdernummer: p.huurdernummer,
+          huurderNaam: huurderNaamPerNummer.get(p.huurdernummer) ?? null,
+          contractnummer: p.contractnummer,
+          complexnummer: complexPerContract.get(p.contractnummer) ?? p.complexnummer,
+          factuurnummer: p.factuurnummer,
+          vorderingVolgnummer: p.vorderingVolgnummer,
+          periodeWeergave: p.periodeWeergave,
+          datumVordering: p.datumVordering,
+          dagenVervallen: p.dagenVervallen!,
+          openstaand: p.openstaand,
+        }))
+        .sort((a, b) => b.dagenVervallen - a.dagenVervallen || a.huurdernummer.localeCompare(b.huurdernummer) || a.contractnummer.localeCompare(b.contractnummer) || a.vorderingVolgnummer.localeCompare(b.vorderingVolgnummer));
+
+      openstaandeCredits = geclassificeerd
+        .filter((p) => p.classificatie === "CREDIT")
+        .map((p) => ({
+          huurdernummer: p.huurdernummer,
+          huurderNaam: huurderNaamPerNummer.get(p.huurdernummer) ?? null,
+          contractnummer: p.contractnummer,
+          complexnummer: complexPerContract.get(p.contractnummer) ?? p.complexnummer,
+          factuurnummer: p.factuurnummer,
+          vorderingVolgnummer: p.vorderingVolgnummer,
+          omschrijving: p.omschrijving,
+          datumVordering: p.datumVordering,
+          openstaand: p.openstaand,
+        }))
+        .sort((a, b) => a.datumVordering.getTime() - b.datumVordering.getTime() || a.huurdernummer.localeCompare(b.huurdernummer) || a.contractnummer.localeCompare(b.contractnummer));
     }
   }
 
@@ -660,5 +775,5 @@ export function berekenHuurdersoverzicht(
         gehuurdOppervlak: { type: "onbekend", reden: "Eén of meer contracten hebben een onbekend gehuurd oppervlak." },
       };
 
-  return { momentopname: true, bronPeildatum, contracten: contractRegels, portefeuilleTotalen, controleVereist };
+  return { momentopname: true, bronPeildatum, contracten: contractRegels, portefeuilleTotalen, vervallenPeildatum, vervallenPosten, openstaandeCredits, controleVereist };
 }

@@ -107,6 +107,96 @@ function som(waarden: readonly Decimal[]): Decimal {
 }
 
 /**
+ * Vervallen/credit-classificatie (2026-09-01) — businessbeslissing, geen
+ * bronfeit: geen van de vier onderzochte bronnen (vorderingen_met_
+ * afboekingen, 1310-boekingen, contracten_huidig, rentroll) bevat een echt
+ * vervaldatum-/betaaltermijnveld (`Vordering_aut_incasso` is een ja/nee-vlag,
+ * geen termijn; `Debiteur_Betaaltermijn` op de 1310-boekingen is voor alle
+ * 070-rijen 0). Vastgesteld beleid: `vervaldatum = Datum_Vordering +
+ * betaaltermijnDagen`; vervallen zodra `peildatum > vervaldatum`. Voor 070
+ * geldt `betaaltermijnDagen = 0`, dus exact `Datum_Vordering < peildatum`
+ * (bewezen met de septemberposten op peildatum 2026-09-01: Datum_Vordering
+ * = peildatum → NIET_VERVALLEN, dus de dag zelf telt nog niet mee).
+ * `betaaltermijnDagen` is de enige knop voor een toekomstige administratie
+ * met een andere betaaltermijn — bewust GEEN eigen configbestand/-schema,
+ * één `number`-parameter volstaat (zie @bvc/worker's `administratie.ts`'s
+ * `DebiteurenbeheerConfig.betaaltermijnDagen`).
+ */
+export type OpClassificatie = "NIET_VERVALLEN" | "VERVALLEN" | "CREDIT";
+
+export interface OpGeclassificeerdePost extends OpVorderingRegel {
+  classificatie: OpClassificatie;
+  /** Alleen gevuld bij VERVALLEN: `peildatum - (Datum_Vordering + betaaltermijnDagen)` in hele dagen. */
+  dagenVervallen: number | null;
+  /** Bewezen periodeweergave uit `omschrijving`, of `"onbekend"` — zie `bepaalPeriodeWeergave`. */
+  periodeWeergave: string;
+}
+
+const MAANDNAMEN = ["januari", "februari", "maart", "april", "mei", "juni", "juli", "augustus", "september", "oktober", "november", "december"];
+const MAAND_PATROON = MAANDNAMEN.join("|");
+const PERIODE_ENKELE_MAAND = new RegExp(`^Periode\\s+(${MAAND_PATROON})\\s+(\\d{4})$`, "i");
+const PERIODE_MEERDERE_MAANDEN = new RegExp(`^Periode\\s+(${MAAND_PATROON})\\s+t/m\\s+(${MAAND_PATROON})\\s+(\\d{4})$`, "i");
+
+function hoofdletter(tekst: string): string {
+  return tekst.charAt(0).toUpperCase() + tekst.slice(1);
+}
+
+/**
+ * Bewezen periodeweergave voor een detailpost — UITSLUITEND de twee
+ * exact-geverifieerde patronen (070, 2026-08): `"Periode <maand> <jaar>"`
+ * (545/678 regels, één kalendermaand — Datum_Vordering bevestigd gelijk aan
+ * Vordering_Boekperiode/-Boekjaar) wordt teruggebracht tot `"<Maand> <jaar>"`;
+ * `"Periode <maand> t/m <maand> <jaar>"` (43/678, meerdere maanden) wordt
+ * VERBATIM getoond, nooit tot één maand teruggebracht. Al het overige
+ * (service-afrekening, suppletie, doorbelasting, correctie, boete, vrije
+ * tekst, of afwijkende varianten zoals "... correctie"-suffixen) → `"onbekend"`
+ * — geen periode verzinnen.
+ */
+export function bepaalPeriodeWeergave(omschrijving: string | null): string {
+  if (omschrijving === null) return "onbekend";
+  const enkeleMaand = PERIODE_ENKELE_MAAND.exec(omschrijving.trim());
+  if (enkeleMaand) return `${hoofdletter(enkeleMaand[1]!.toLowerCase())} ${enkeleMaand[2]}`;
+  const meerdereMaanden = PERIODE_MEERDERE_MAANDEN.exec(omschrijving.trim());
+  if (meerdereMaanden) return omschrijving.trim();
+  return "onbekend";
+}
+
+const DAG_IN_MS = 1000 * 60 * 60 * 24;
+
+/**
+ * Classificeert reeds-openstaande posten (`openstaand !== 0`) als
+ * NIET_VERVALLEN/VERVALLEN/CREDIT — zie moduledoc hierboven voor de
+ * vastgestelde vervaldatum-regel. Verwacht posten die AL uit
+ * `berekenOpenstaandePosten`'s resultaat komen (bv.
+ * `opResultaat.huurders.flatMap(h => h.openstaandePosten)`) — filtert hier
+ * dus NIET nogmaals op nul (voorkomt een tweede bronberekening/-filter,
+ * zie moduledoc). `peildatum` moet expliciet worden meegegeven (nooit
+ * `new Date()` hier).
+ */
+export function classificeerOpenstaandePosten(
+  posten: readonly OpVorderingRegel[],
+  peildatum: Date,
+  betaaltermijnDagen: number,
+): OpGeclassificeerdePost[] {
+  return posten
+    .filter((post) => !post.openstaand.isZero())
+    .map((post) => {
+      const periodeWeergave = bepaalPeriodeWeergave(post.omschrijving);
+
+      if (post.openstaand.isNegative()) {
+        return { ...post, classificatie: "CREDIT" as const, dagenVervallen: null, periodeWeergave };
+      }
+
+      const vervaldatum = new Date(post.datumVordering.getTime() + betaaltermijnDagen * DAG_IN_MS);
+      if (peildatum.getTime() > vervaldatum.getTime()) {
+        const dagenVervallen = Math.round((peildatum.getTime() - vervaldatum.getTime()) / DAG_IN_MS);
+        return { ...post, classificatie: "VERVALLEN" as const, dagenVervallen, periodeWeergave };
+      }
+      return { ...post, classificatie: "NIET_VERVALLEN" as const, dagenVervallen: null, periodeWeergave };
+    });
+}
+
+/**
  * De exacte tekst voor de debiteurenbeheer-melding, ÉÉN keer geformuleerd
  * (nooit dupliceren in een toekomstige renderer). `null` betekent: geen
  * melding nodig (bankaflettering wordt volledig door ons bijgehouden).

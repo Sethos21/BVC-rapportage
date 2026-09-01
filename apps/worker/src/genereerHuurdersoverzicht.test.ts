@@ -301,4 +301,28 @@ describe("genereerHuurdersoverzicht — openstaandSaldo per contract (echte 070-
     expect(c28.laatsteIndexatie?.effectiefPercentage.toFixed(2)).toBe("2.68");
     expect(c28.servicekostenvoorschotJaar?.toString()).toBe("21600");
   });
+
+  /**
+   * Bewijsrun Vervallen posten/Openstaande credits (2026-09-01, expliciete
+   * peildatum, betaaltermijnDagen default 0): alle negen positieve
+   * septemberposten hebben Datum_Vordering = peildatum → NIET_VERVALLEN
+   * (de dag zelf telt nog niet mee, zie de vastgestelde businessregel).
+   * De enige negatieve post (Bright, -€146,90) is een CREDIT. Dus: geen
+   * vervallen posten, precies één credit, en de bestaande Openstaand-kolom
+   * (som € 65.811,57) blijft ongewijzigd naast de nieuwe secties.
+   */
+  it("bewijsrun peildatum 2026-09-01: geen vervallen posten, precies de Bright-credit, Openstaand-totaal ongewijzigd", () => {
+    const resultaat = genereerHuurdersoverzicht(root, "070_rooisezoom", new Date("2026-09-01T00:00:00.000Z"));
+
+    expect(resultaat.vervallenPeildatum).toEqual(new Date("2026-09-01T00:00:00.000Z"));
+    expect(resultaat.vervallenPosten).toEqual([]);
+    expect(resultaat.openstaandeCredits).toHaveLength(1);
+    const credit = resultaat.openstaandeCredits[0]!;
+    expect(credit.huurderNaam).toBe("R. Duckers");
+    expect(credit.contractnummer).toBe("0000000048");
+    expect(credit.openstaand.toString()).toBe("-146.9");
+
+    const totaalOpenstaand = resultaat.contracten.reduce((som, c) => som.plus(c.openstaandSaldo), new Decimal(0));
+    expect(totaalOpenstaand.toString()).toBe("65811.57");
+  });
 });

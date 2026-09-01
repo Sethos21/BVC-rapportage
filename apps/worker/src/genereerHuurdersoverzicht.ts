@@ -18,13 +18,24 @@ import { leesAdministratieConfig } from "./administratie.js";
  * ontbrekende config leest `leesAdministratieConfig` al aan als
  * "onbekend"). Bewust GEEN boekjaar/periode: momentopname, zie de
  * moduledoc van `huurdersoverzicht.ts`.
+ *
+ * **Vervallen-peildatum (2026-09-01)** — `peildatum` is een expliciete,
+ * OPTIONELE parameter (bv. gevuld via de CLI's `--peildatum`-vlag). Geen
+ * enkele bron levert hiervoor een betrouwbare, aan de debiteurenbronnen
+ * gekoppelde datum (zie `huurdersoverzicht.ts`'s moduledoc: `bronPeildatum`
+ * is een ANDERE bronstand). Bij ontbreken valt UITSLUITEND deze buitenste
+ * orchestratielaag terug op "vandaag" (`new Date()`) — nooit dieper in de
+ * domeinlogica, en de gebruikte datum blijft altijd zichtbaar/traceerbaar
+ * via `resultaat.vervallenPeildatum` in de renderer. `betaaltermijnDagen`
+ * komt uit `administratie.json`'s `debiteurenbeheer.betaaltermijnDagen`
+ * (default `0`, zie `administratie.ts`).
  */
 
 const dec = (v: string | null): Decimal | null => (v === null ? null : new Decimal(v));
 const datum = (v: string | null): Date | null => (v === null ? null : new Date(v));
 const nietLeeg = (v: string | null): string | null => (v === null || v === "" ? null : v);
 
-export function genereerHuurdersoverzicht(root: string, administratieId: string): HuurdersoverzichtResultaat {
+export function genereerHuurdersoverzicht(root: string, administratieId: string, peildatum: Date = new Date()): HuurdersoverzichtResultaat {
   const config = leesAdministratieConfig(root, administratieId);
   const db = openCacheReadonly(administratieCachePad(root, administratieId));
 
@@ -107,8 +118,9 @@ export function genereerHuurdersoverzicht(root: string, administratieId: string)
     }));
 
     const debiteurenbeheer = config.debiteurenbeheer?.bankAfletteringDoorOns ?? "onbekend";
+    const betaaltermijnDagen = config.debiteurenbeheer?.betaaltermijnDagen ?? 0;
 
-    return berekenHuurdersoverzicht(contracten, rentroll, verhogingen, vorderingen, saldoHuurders, debiteurenbeheer);
+    return berekenHuurdersoverzicht(contracten, rentroll, verhogingen, vorderingen, saldoHuurders, debiteurenbeheer, peildatum, betaaltermijnDagen);
   } finally {
     db.close();
   }

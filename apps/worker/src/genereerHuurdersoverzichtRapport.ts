@@ -22,9 +22,9 @@ export interface GenereerHuurdersoverzichtRapportResultaat {
   resultaat: HuurdersoverzichtResultaat;
 }
 
-export function genereerHuurdersoverzichtRapport(root: string, administratieId: string): GenereerHuurdersoverzichtRapportResultaat {
+export function genereerHuurdersoverzichtRapport(root: string, administratieId: string, peildatum: Date = new Date()): GenereerHuurdersoverzichtRapportResultaat {
   const config = leesAdministratieConfig(root, administratieId);
-  const resultaat = genereerHuurdersoverzicht(root, administratieId);
+  const resultaat = genereerHuurdersoverzicht(root, administratieId, peildatum);
   const html = renderHuurdersoverzichtHtml(config.weergavenaam, resultaat);
 
   const rapportenDir = administratieRapportenDir(root, administratieId);

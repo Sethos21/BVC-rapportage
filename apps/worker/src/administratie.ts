@@ -21,6 +21,20 @@ export type DebiteurenbeheerStatus = boolean | "onbekend";
 
 export interface DebiteurenbeheerConfig {
   bankAfletteringDoorOns: DebiteurenbeheerStatus;
+  /**
+   * Betaaltermijn in kalenderdagen, ALLEEN gebruikt voor de vervallen-
+   * classificatie van openstaande posten (zie @bvc/reporting's
+   * `openstaandePosten.ts`'s `classificeerOpenstaandePosten`): een post is
+   * vervallen zodra `peildatum > Datum_Vordering + betaaltermijnDagen`.
+   * Optioneel — ontbreekt dit veld (of de hele config), dan valt de Worker
+   * terug op `0` (bewezen 070-regel: vervallen vanaf de kalenderdag ná
+   * Datum_Vordering, zie CLAUDE.md §"BESLUITEN"/2026-09-01). `0` is een
+   * bewust CONSERVATIEVE default (strengste uitleg, geen verzonnen
+   * coulanceperiode) — anders dan `bankAfletteringDoorOns` is hier geen
+   * "onbekend"-toestand nodig: een betaaltermijn van 0 dagen is nooit een
+   * gok over betrouwbaarheid, alleen een expliciete, aanpasbare parameter.
+   */
+  betaaltermijnDagen?: number;
 }
 
 export interface AdministratieConfig {
@@ -124,6 +138,10 @@ function valideerConfig(config: AdministratieConfig): void {
   const status = config.debiteurenbeheer?.bankAfletteringDoorOns;
   if (status !== undefined && status !== true && status !== false && status !== "onbekend") {
     throw new Error(`administratie.json: debiteurenbeheer.bankAfletteringDoorOns moet true, false of "onbekend" zijn, kreeg "${String(status)}".`);
+  }
+  const betaaltermijnDagen = config.debiteurenbeheer?.betaaltermijnDagen;
+  if (betaaltermijnDagen !== undefined && (!Number.isInteger(betaaltermijnDagen) || betaaltermijnDagen < 0)) {
+    throw new Error(`administratie.json: debiteurenbeheer.betaaltermijnDagen moet een geheel getal ≥ 0 zijn, kreeg "${String(betaaltermijnDagen)}".`);
   }
 }
 

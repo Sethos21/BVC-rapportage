@@ -1,6 +1,6 @@
 import Decimal from "decimal.js";
 import { describe, expect, it } from "vitest";
-import { berekenOpenstaandePosten, type OpSaldoHuurderRegel, type OpVorderingRegel } from "./openstaandePosten.js";
+import { bepaalPeriodeWeergave, berekenOpenstaandePosten, classificeerOpenstaandePosten, type OpSaldoHuurderRegel, type OpVorderingRegel } from "./openstaandePosten.js";
 
 function vordering(overrides: Partial<OpVorderingRegel> = {}): OpVorderingRegel {
   return {
@@ -168,5 +168,79 @@ describe("berekenOpenstaandePosten", () => {
     const resultaat = berekenOpenstaandePosten(posten, [saldoHuurder({ saldo: new Decimal("1.0") })], true);
     expect(resultaat.huurders[0]?.detailtotaal.toString()).toBe("1");
     expect(resultaat.controleVereist).toHaveLength(0);
+  });
+});
+
+describe("classificeerOpenstaandePosten", () => {
+  const PEILDATUM = new Date("2026-09-01T00:00:00.000Z");
+
+  it("Datum_Vordering = peildatum (betaaltermijn 0) → NIET_VERVALLEN, de dag zelf telt nog niet mee", () => {
+    const [p] = classificeerOpenstaandePosten([vordering({ datumVordering: new Date("2026-09-01T00:00:00.000Z") })], PEILDATUM, 0);
+    expect(p?.classificatie).toBe("NIET_VERVALLEN");
+    expect(p?.dagenVervallen).toBeNull();
+  });
+
+  it("Datum_Vordering één dag vóór peildatum → VERVALLEN, 1 dag vervallen", () => {
+    const [p] = classificeerOpenstaandePosten([vordering({ datumVordering: new Date("2026-08-31T00:00:00.000Z") })], PEILDATUM, 0);
+    expect(p?.classificatie).toBe("VERVALLEN");
+    expect(p?.dagenVervallen).toBe(1);
+  });
+
+  it("toekomstige Datum_Vordering → NIET_VERVALLEN", () => {
+    const [p] = classificeerOpenstaandePosten([vordering({ datumVordering: new Date("2026-09-15T00:00:00.000Z") })], PEILDATUM, 0);
+    expect(p?.classificatie).toBe("NIET_VERVALLEN");
+  });
+
+  it("positieve vervallen post: bedrag en dagenVervallen kloppen exact", () => {
+    const [p] = classificeerOpenstaandePosten(
+      [vordering({ datumVordering: new Date("2026-08-01T00:00:00.000Z"), totaalbedrag: new Decimal(5940.98), openstaand: new Decimal(5940.98) })],
+      PEILDATUM,
+      0,
+    );
+    expect(p?.classificatie).toBe("VERVALLEN");
+    expect(p?.dagenVervallen).toBe(31);
+    expect(p?.openstaand.toString()).toBe("5940.98");
+  });
+
+  it("negatieve oude post → CREDIT, nooit VERVALLEN, ongeacht hoe oud", () => {
+    const [p] = classificeerOpenstaandePosten(
+      [vordering({ datumVordering: new Date("2020-01-01T00:00:00.000Z"), totaalbedrag: new Decimal(-146.9), openstaand: new Decimal(-146.9) })],
+      PEILDATUM,
+      0,
+    );
+    expect(p?.classificatie).toBe("CREDIT");
+    expect(p?.dagenVervallen).toBeNull();
+  });
+
+  it("nulpost (openstaand = 0) wordt uitgesloten, niet geclassificeerd", () => {
+    const resultaat = classificeerOpenstaandePosten([vordering({ openstaand: new Decimal(0) })], PEILDATUM, 0);
+    expect(resultaat).toHaveLength(0);
+  });
+
+  it("betaaltermijnDagen > 0: vervaldatum schuift op, latere peildatum nodig voor VERVALLEN", () => {
+    const post = vordering({ datumVordering: new Date("2026-08-25T00:00:00.000Z") });
+    const metCoulance = classificeerOpenstaandePosten([post], PEILDATUM, 14);
+    expect(metCoulance[0]?.classificatie).toBe("NIET_VERVALLEN"); // vervaldatum 2026-09-08, nog niet bereikt op 2026-09-01
+    const zonderCoulance = classificeerOpenstaandePosten([post], PEILDATUM, 0);
+    expect(zonderCoulance[0]?.classificatie).toBe("VERVALLEN");
+  });
+});
+
+describe("bepaalPeriodeWeergave", () => {
+  it("reguliere maand: 'Periode september 2026' → 'September 2026'", () => {
+    expect(bepaalPeriodeWeergave("Periode september 2026")).toBe("September 2026");
+  });
+
+  it("meermaandsperiode blijft verbatim, wordt nooit tot één maand teruggebracht", () => {
+    expect(bepaalPeriodeWeergave("Periode juni t/m september 2026")).toBe("Periode juni t/m september 2026");
+  });
+
+  it("onbekende/vrije-tekst omschrijvingen blijven 'onbekend' — geen periode verzinnen", () => {
+    expect(bepaalPeriodeWeergave("Service-afrekening 0004")).toBe("onbekend");
+    expect(bepaalPeriodeWeergave("Suppletie 2026")).toBe("onbekend");
+    expect(bepaalPeriodeWeergave("Doorbelasting kosten")).toBe("onbekend");
+    expect(bepaalPeriodeWeergave("Boete te late betaling")).toBe("onbekend");
+    expect(bepaalPeriodeWeergave("Periode september 2026 correctie")).toBe("onbekend");
+    expect(bepaalPeriodeWeergave(null)).toBe("onbekend");
   });
 });

@@ -182,4 +182,67 @@ describe("renderHuurdersoverzichtHtml", () => {
     expect(html).toContain("Openstaand");
     expect(html).toContain(`<span class="subtekst">—</span>`);
   });
+
+  describe("Vervallen posten / Openstaande credits", () => {
+    const VERVALLEN_PEILDATUM = new Date("2026-09-01T00:00:00.000Z");
+
+    it("zonder vervallen posten: toont 'Geen vervallen posten.', geen lege tabel", () => {
+      const resultaat = berekenHuurdersoverzicht([contract()], [rentrollRegel()], [], [], [], "onbekend", VERVALLEN_PEILDATUM, 0);
+      const html = renderHuurdersoverzichtHtml("070 Rooise Zoom", resultaat);
+      expect(html).toContain("Vervallen posten");
+      expect(html).toContain("Geen vervallen posten.");
+      expect(html).toContain("Peildatum vervallen-classificatie: 2026-09-01");
+    });
+
+    it("met meerdere vervallen posten: rendert huurder/factuur/periode/datum/dagen/bedrag, meeste dagen eerst", () => {
+      const vordering1: OpVorderingRegel = {
+        bedrijfsnr: "070", contractnummer: "C1", vorderingVolgnummer: "1", huurdernummer: "H1",
+        complexnummer: "001", unitnummer: "0001", factuurnummer: "F1",
+        datumVordering: new Date("2026-08-01T00:00:00.000Z"), omschrijving: "Periode augustus 2026",
+        totaalbedrag: new Decimal(100), bedragAfgeboekt: new Decimal(0), openstaand: new Decimal(100),
+      };
+      const vordering2: OpVorderingRegel = {
+        bedrijfsnr: "070", contractnummer: "C1", vorderingVolgnummer: "2", huurdernummer: "H1",
+        complexnummer: "001", unitnummer: "0001", factuurnummer: "F2",
+        datumVordering: new Date("2026-07-01T00:00:00.000Z"), omschrijving: "Periode juli 2026",
+        totaalbedrag: new Decimal(200), bedragAfgeboekt: new Decimal(0), openstaand: new Decimal(200),
+      };
+      const saldoHuurder: OpSaldoHuurderRegel = {
+        huurdernummer: "H1", achterstand: new Decimal(300), achterstandTm30Dagen: new Decimal(300),
+        achterstandTm60Dagen: new Decimal(0), achterstandTm90Dagen: new Decimal(0), achterstand90PlusDagen: new Decimal(0),
+        vooruitbetaling: new Decimal(0), saldo: new Decimal(300),
+      };
+      const resultaat = berekenHuurdersoverzicht([contract()], [rentrollRegel()], [], [vordering1, vordering2], [saldoHuurder], true, VERVALLEN_PEILDATUM, 0);
+      const html = renderHuurdersoverzichtHtml("070 Rooise Zoom", resultaat);
+      expect(html).toContain("Juli 2026");
+      expect(html).toContain("Augustus 2026");
+      expect(html).toContain("€ 100,00");
+      expect(html).toContain("€ 200,00");
+      expect(html).not.toContain("Geen vervallen posten.");
+      // Meeste dagen vervallen (juli, 62 dagen) staat vóór augustus (31 dagen) in de HTML.
+      expect(html.indexOf("Juli 2026")).toBeLessThan(html.indexOf("Augustus 2026"));
+    });
+
+    it("Openstaande credits verschijnt uitsluitend als er daadwerkelijk credits zijn", () => {
+      const zonderCredits = berekenHuurdersoverzicht([contract()], [rentrollRegel()], [], [], [], "onbekend", VERVALLEN_PEILDATUM, 0);
+      expect(renderHuurdersoverzichtHtml("x", zonderCredits)).not.toContain("Openstaande credits");
+
+      const creditVordering: OpVorderingRegel = {
+        bedrijfsnr: "070", contractnummer: "C1", vorderingVolgnummer: "1", huurdernummer: "H1",
+        complexnummer: "001", unitnummer: "0001", factuurnummer: "F1",
+        datumVordering: new Date("2026-04-15T00:00:00.000Z"), omschrijving: "Service-afrekening 0004",
+        totaalbedrag: new Decimal(-146.9), bedragAfgeboekt: new Decimal(0), openstaand: new Decimal(-146.9),
+      };
+      const saldoHuurder: OpSaldoHuurderRegel = {
+        huurdernummer: "H1", achterstand: new Decimal(-146.9), achterstandTm30Dagen: new Decimal(0),
+        achterstandTm60Dagen: new Decimal(0), achterstandTm90Dagen: new Decimal(0), achterstand90PlusDagen: new Decimal(-146.9),
+        vooruitbetaling: new Decimal(0), saldo: new Decimal(-146.9),
+      };
+      const metCredits = berekenHuurdersoverzicht([contract()], [rentrollRegel()], [], [creditVordering], [saldoHuurder], true, VERVALLEN_PEILDATUM, 0);
+      const html = renderHuurdersoverzichtHtml("x", metCredits);
+      expect(html).toContain("Openstaande credits");
+      expect(html).toContain("class=\"negatief\"");
+      expect(html).toContain("146,90");
+    });
+  });
 });

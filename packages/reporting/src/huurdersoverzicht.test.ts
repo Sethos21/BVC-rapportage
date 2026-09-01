@@ -389,6 +389,7 @@ describe("berekenHuurdersoverzicht", () => {
         ],
         [saldoHuurderRegel({ huurdernummer: "00000030", achterstand: new Decimal(4953.71), achterstandTm30Dagen: new Decimal(4953.71), saldo: new Decimal(4953.71) })],
         true,
+        PEILDATUM,
       );
       const c044 = resultaat.contracten.find((c) => c.contractnummer === "0000000044")!;
       const c049 = resultaat.contracten.find((c) => c.contractnummer === "0000000049")!;
@@ -436,6 +437,7 @@ describe("berekenHuurdersoverzicht", () => {
         [vorderingRegel()],
         [saldoHuurderRegel({ saldo: new Decimal(9999) })],
         false,
+        PEILDATUM,
       );
       expect(resultaat.controleVereist.some((i) => i.ernst === "WAARSCHUWING" || i.ernst === "KRITIEK")).toBe(false);
       expect(resultaat.controleVereist.some((i) => i.ernst === "INFORMATIEF" && i.bericht.includes("niet door ons bijgehouden"))).toBe(true);
@@ -463,6 +465,140 @@ describe("berekenHuurdersoverzicht", () => {
       expect(resultaat.contracten[0]!.openstaandSaldo.toString()).toBe("0");
       expect(resultaat.contracten[0]!.aantalOpenstaandePosten).toBe(0);
       expect(resultaat.controleVereist).toEqual([]);
+    });
+  });
+
+  describe("Vervallen posten / Openstaande credits", () => {
+    const VERVALLEN_PEILDATUM = new Date("2026-09-01T00:00:00.000Z");
+
+    function vorderingRegel(overrides: Partial<OpVorderingRegel> = {}): OpVorderingRegel {
+      return {
+        bedrijfsnr: "070",
+        contractnummer: "0000000028",
+        vorderingVolgnummer: "00000093",
+        huurdernummer: "00000021",
+        complexnummer: "002",
+        unitnummer: "0001",
+        factuurnummer: "2670000108",
+        datumVordering: new Date("2026-08-01T00:00:00.000Z"),
+        omschrijving: "Periode augustus 2026",
+        totaalbedrag: new Decimal(5940.98),
+        bedragAfgeboekt: new Decimal(0),
+        openstaand: new Decimal(5940.98),
+        ...overrides,
+      };
+    }
+
+    function saldoHuurderRegel(overrides: Partial<OpSaldoHuurderRegel> = {}): OpSaldoHuurderRegel {
+      return {
+        huurdernummer: "00000021",
+        achterstand: new Decimal(5940.98),
+        achterstandTm30Dagen: new Decimal(5940.98),
+        achterstandTm60Dagen: new Decimal(0),
+        achterstandTm90Dagen: new Decimal(0),
+        achterstand90PlusDagen: new Decimal(0),
+        vooruitbetaling: new Decimal(0),
+        saldo: new Decimal(5940.98),
+        ...overrides,
+      };
+    }
+
+    it("zonder vervallenPeildatum: geen Vervallen posten/credits berekend, wel een WAARSCHUWING", () => {
+      const resultaat = berekenHuurdersoverzicht(
+        [contract({ contractnummer: "0000000028", huurdernummer: "00000021" })],
+        [rentrollRegel({ contractnummer: "0000000028" })],
+        [],
+        [vorderingRegel()],
+        [saldoHuurderRegel()],
+        true,
+      );
+      expect(resultaat.vervallenPeildatum).toBeNull();
+      expect(resultaat.vervallenPosten).toEqual([]);
+      expect(resultaat.openstaandeCredits).toEqual([]);
+      expect(resultaat.controleVereist.some((i) => i.ernst === "WAARSCHUWING" && i.bericht.includes("Geen peildatum opgegeven voor de vervallen-classificatie"))).toBe(true);
+    });
+
+    it("een vervallen post komt in vervallenPosten terecht met huurderNaam/periode/dagenVervallen", () => {
+      const resultaat = berekenHuurdersoverzicht(
+        [contract({ contractnummer: "0000000028", huurdernummer: "00000021", huurderNaam: "ACME BV" })],
+        [rentrollRegel({ contractnummer: "0000000028" })],
+        [],
+        [vorderingRegel()],
+        [saldoHuurderRegel()],
+        true,
+        VERVALLEN_PEILDATUM,
+        0,
+      );
+      expect(resultaat.vervallenPeildatum).toEqual(VERVALLEN_PEILDATUM);
+      expect(resultaat.vervallenPosten).toHaveLength(1);
+      const p = resultaat.vervallenPosten[0]!;
+      expect(p.huurderNaam).toBe("ACME BV");
+      expect(p.contractnummer).toBe("0000000028");
+      expect(p.periodeWeergave).toBe("Augustus 2026");
+      expect(p.dagenVervallen).toBe(31);
+      expect(p.openstaand.toString()).toBe("5940.98");
+      // Openstaand-kolom (contractniveau) blijft ONGEWIJZIGD naast de nieuwe sectie.
+      expect(resultaat.contracten[0]!.openstaandSaldo.toString()).toBe("5940.98");
+    });
+
+    it("een negatieve post (Bright-credit) komt in openstaandeCredits, NOOIT in vervallenPosten", () => {
+      const resultaat = berekenHuurdersoverzicht(
+        [contract({ contractnummer: "0000000048", huurdernummer: "00000033", huurderNaam: "Bright Accountants en Adviseurs B.V." })],
+        [rentrollRegel({ contractnummer: "0000000048" })],
+        [],
+        [vorderingRegel({ contractnummer: "0000000048", huurdernummer: "00000033", omschrijving: "Service-afrekening 0004", datumVordering: new Date("2026-04-15T00:00:00.000Z"), totaalbedrag: new Decimal(-146.9), openstaand: new Decimal(-146.9) })],
+        [saldoHuurderRegel({ huurdernummer: "00000033", achterstand: new Decimal(-146.9), achterstandTm30Dagen: new Decimal(0), achterstand90PlusDagen: new Decimal(-146.9), saldo: new Decimal(-146.9) })],
+        true,
+        VERVALLEN_PEILDATUM,
+        0,
+      );
+      expect(resultaat.vervallenPosten).toEqual([]);
+      expect(resultaat.openstaandeCredits).toHaveLength(1);
+      const c = resultaat.openstaandeCredits[0]!;
+      expect(c.huurderNaam).toBe("Bright Accountants en Adviseurs B.V.");
+      expect(c.openstaand.toString()).toBe("-146.9");
+    });
+
+    it("multi-contracthuurder (iTapToo 044/049): vervallen posten blijven per contract correct toegewezen", () => {
+      const resultaat = berekenHuurdersoverzicht(
+        [
+          contract({ contractnummer: "0000000044", huurdernummer: "00000030", huurderNaam: "iTapToo" }),
+          contract({ contractnummer: "0000000049", huurdernummer: "00000030", huurderNaam: "iTapToo" }),
+        ],
+        [rentrollRegel({ contractnummer: "0000000044" }), rentrollRegel({ contractnummer: "0000000049" })],
+        [],
+        [
+          vorderingRegel({ contractnummer: "0000000044", huurdernummer: "00000030", vorderingVolgnummer: "00000061", totaalbedrag: new Decimal(3544.33), openstaand: new Decimal(3544.33) }),
+          vorderingRegel({ contractnummer: "0000000049", huurdernummer: "00000030", vorderingVolgnummer: "00000030", totaalbedrag: new Decimal(1409.38), openstaand: new Decimal(1409.38) }),
+        ],
+        [saldoHuurderRegel({ huurdernummer: "00000030", achterstand: new Decimal(4953.71), achterstandTm30Dagen: new Decimal(4953.71), saldo: new Decimal(4953.71) })],
+        true,
+        VERVALLEN_PEILDATUM,
+        0,
+      );
+      expect(resultaat.vervallenPosten).toHaveLength(2);
+      expect(resultaat.vervallenPosten.map((p) => p.contractnummer).sort()).toEqual(["0000000044", "0000000049"]);
+      const c044 = resultaat.contracten.find((c) => c.contractnummer === "0000000044")!;
+      const c049 = resultaat.contracten.find((c) => c.contractnummer === "0000000049")!;
+      expect(c044.openstaandSaldo.toString()).toBe("3544.33");
+      expect(c049.openstaandSaldo.toString()).toBe("1409.38");
+    });
+
+    it("vervallenPosten sorteert meeste dagen vervallen eerst", () => {
+      const resultaat = berekenHuurdersoverzicht(
+        [contract({ contractnummer: "0000000028", huurdernummer: "00000021" })],
+        [rentrollRegel({ contractnummer: "0000000028" })],
+        [],
+        [
+          vorderingRegel({ vorderingVolgnummer: "1", datumVordering: new Date("2026-08-01T00:00:00.000Z"), totaalbedrag: new Decimal(100), openstaand: new Decimal(100) }), // 31 dagen
+          vorderingRegel({ vorderingVolgnummer: "2", datumVordering: new Date("2026-07-01T00:00:00.000Z"), totaalbedrag: new Decimal(200), openstaand: new Decimal(200) }), // 62 dagen
+        ],
+        [saldoHuurderRegel({ achterstand: new Decimal(300), achterstandTm30Dagen: new Decimal(300), saldo: new Decimal(300) })],
+        true,
+        VERVALLEN_PEILDATUM,
+        0,
+      );
+      expect(resultaat.vervallenPosten.map((p) => p.dagenVervallen)).toEqual([62, 31]);
     });
   });
 });

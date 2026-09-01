@@ -1,7 +1,7 @@
 import Decimal from "decimal.js";
 import type { OnbekendOf } from "@bvc/domain";
 import { escapeHtml, formatBedragHtml, formatM2Html, formatOnbekendOfHtml, renderRapportDocument } from "./huisstijl.js";
-import type { ContracteindeStatus, HoLaatsteIndexatie, HuurdersoverzichtContractRegel, HuurdersoverzichtControleErnst, HuurdersoverzichtResultaat } from "./huurdersoverzicht.js";
+import type { ContracteindeStatus, HoLaatsteIndexatie, HoOpenstaandeCredit, HoVervallenPost, HuurdersoverzichtContractRegel, HuurdersoverzichtControleErnst, HuurdersoverzichtResultaat } from "./huurdersoverzicht.js";
 
 /**
  * HTML-renderer voor Huurdersoverzicht v1 (2026-08-27) — rendert
@@ -44,6 +44,19 @@ import type { ContracteindeStatus, HoLaatsteIndexatie, HuurdersoverzichtContract
  * een rustige `—`; een credit (negatief saldo) via `formatBedragHtml`
  * (nooit `Math.abs()`). Geen uitgeklapte postenlijst in deze fase — alleen
  * het bedrag, met het aantal posten als tooltip.
+ *
+ * **Vervallen posten / Openstaande credits (2026-09-01)** — twee nieuwe
+ * secties ONDER Contractinformatie, rendert uitsluitend resultaat.vervallenPosten/
+ * resultaat.openstaandeCredits (al gesorteerd/geclassificeerd in
+ * huurdersoverzicht.ts, geen logica hier). "Vervallen posten" toont altijd
+ * de sectie, met een rustige melding bij een lege lijst (geen lege tabel).
+ * "Openstaande credits" verschijnt UITSLUITEND als de lijst niet leeg is
+ * (geen kopje, geen tabel bij nul credits). De gebruikte peildatum
+ * (resultaat.vervallenPeildatum) staat expliciet bij "Vervallen posten" —
+ * bewust een ander veld dan de Momentopname-badge hierboven (die toont
+ * bronPeildatum, een andere bronstand, zie moduledoc huurdersoverzicht.ts).
+ * Contractnummer/complex staan niet als kolom (compact houden) maar blijven
+ * in het domeinresultaat voor een latere drill-down.
  */
 
 function formatEurPerM2(waarde: Decimal): string {
@@ -203,6 +216,55 @@ function renderContractinformatieTabel(resultaat: HuurdersoverzichtResultaat): s
     </table>`;
 }
 
+function renderVervallenPeildatumHtml(vervallenPeildatum: Date | null): string {
+  const tekst = vervallenPeildatum ? escapeHtml(vervallenPeildatum.toISOString().slice(0, 10)) : "onbekend — geen peildatum opgegeven, zie Controle vereist";
+  return `<div class="sec-sub">Peildatum vervallen-classificatie: ${tekst}</div>`;
+}
+
+function renderVervallenPostenTabel(vervallenPosten: readonly HoVervallenPost[]): string {
+  if (vervallenPosten.length === 0) {
+    return `<div class="toelichting">Geen vervallen posten.</div>`;
+  }
+  const rijen = vervallenPosten
+    .map(
+      (p) => `<tr>
+        <td>${p.huurderNaam ? escapeHtml(p.huurderNaam) : `<span class="subtekst">Onbekend</span>`}</td>
+        <td>${p.factuurnummer ? escapeHtml(p.factuurnummer) : "—"}</td>
+        <td>${escapeHtml(p.periodeWeergave)}</td>
+        <td>${escapeHtml(p.datumVordering.toISOString().slice(0, 10))}</td>
+        <td>${p.dagenVervallen}</td>
+        <td>${formatBedragHtml(p.openstaand)}</td>
+      </tr>`,
+    )
+    .join("");
+  return `
+    <table>
+      <thead><tr><th>Huurder</th><th>Factuur</th><th>Periode</th><th>Datum</th><th>Dagen vervallen</th><th>Bedrag</th></tr></thead>
+      <tbody>${rijen}</tbody>
+    </table>`;
+}
+
+function renderOpenstaandeCreditsTabel(openstaandeCredits: readonly HoOpenstaandeCredit[]): string {
+  if (openstaandeCredits.length === 0) return "";
+  const rijen = openstaandeCredits
+    .map(
+      (c) => `<tr>
+        <td>${c.huurderNaam ? escapeHtml(c.huurderNaam) : `<span class="subtekst">Onbekend</span>`}</td>
+        <td>${c.factuurnummer ? escapeHtml(c.factuurnummer) : "—"}</td>
+        <td>${c.omschrijving ? escapeHtml(c.omschrijving) : "—"}</td>
+        <td>${escapeHtml(c.datumVordering.toISOString().slice(0, 10))}</td>
+        <td>${formatBedragHtml(c.openstaand)}</td>
+      </tr>`,
+    )
+    .join("");
+  return `
+    <h2 style="margin-top:32px">Openstaande credits</h2>
+    <table>
+      <thead><tr><th>Huurder</th><th>Factuur</th><th>Omschrijving</th><th>Datum</th><th>Bedrag</th></tr></thead>
+      <tbody>${rijen}</tbody>
+    </table>`;
+}
+
 function renderErnstHtml(ernst: HuurdersoverzichtControleErnst): string {
   const klasse = ernst === "KRITIEK" ? "ernst-kritiek" : ernst === "WAARSCHUWING" ? "ernst-waarschuwing" : "ernst-informatief";
   return `<span class="${klasse}">${escapeHtml(ernst)}</span>`;
@@ -248,6 +310,12 @@ export function renderHuurdersoverzichtBody(administratieNaam: string, resultaat
       historische indexatie bestaat.
     </div>
     ${renderContractinformatieTabel(resultaat)}
+
+    <h2 style="margin-top:32px">Vervallen posten</h2>
+    ${renderVervallenPeildatumHtml(resultaat.vervallenPeildatum)}
+    ${renderVervallenPostenTabel(resultaat.vervallenPosten)}
+
+    ${renderOpenstaandeCreditsTabel(resultaat.openstaandeCredits)}
 
     <h2 style="margin-top:32px">Controle vereist</h2>
     ${renderControleVereist(resultaat)}`;
