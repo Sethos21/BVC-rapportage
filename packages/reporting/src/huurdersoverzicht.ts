@@ -1,6 +1,7 @@
 import Decimal from "decimal.js";
 import type { OnbekendOf } from "@bvc/domain";
 import { bepaalContractGeldigheid, type HuurContractRegel } from "./huurKerncijfers.js";
+import { berekenOpenstaandePosten, type DebiteurenbeheerStatus, type OpSaldoHuurderRegel, type OpVorderingRegel } from "./openstaandePosten.js";
 
 /**
  * Huurdersoverzicht v1 (2026-08-27) — eerste contract-geankerde module
@@ -59,6 +60,22 @@ import { bepaalContractGeldigheid, type HuurContractRegel } from "./huurKerncijf
  * signaal — bewezen bij contract 048 (factor 3, vermoedelijk een
  * historische omvangswijziging) — en nulliseert de historische regel
  * nooit.
+ *
+ * **Openstaand saldo (2026-09-01)** — hergebruikt `berekenOpenstaandePosten`
+ * (`openstaandePosten.ts`) ONGEWIJZIGD, geen tweede reconciliatieberekening
+ * hier. Cruciale regel (bewezen met huurder iTapToo, contracten 044/049):
+ * Huurdersoverzicht heeft één regel per CONTRACT, dus `openstaandSaldo` per
+ * contractregel komt UITSLUITEND uit de som van `Vordering_openstaand` voor
+ * exact dat Bedrijfsnr+Contractnr — nooit `saldo_huurders.Saldo`
+ * (huurderniveau) rechtstreeks op een contractregel. iTapToo's
+ * huurdertotaal (€4.953,71) verschijnt dus NOOIT op beide contractregels
+ * (044: €3.544,33, 049: €1.409,38) — elk contract krijgt alleen zijn eigen
+ * detailsom. De huurderniveau-reconciliatie (detailsom van ALLE contracten
+ * van de huurder vs. `saldo_huurders.Saldo`) blijft ongewijzigd binnen
+ * `berekenOpenstaandePosten` — hier alleen ÉÉN keer aangeroepen (nooit per
+ * contract) en de resulterende `controleVereist` (bankaflettering-context +
+ * huurderniveau-reconciliatie) wordt ÉÉN keer samengevoegd, nooit
+ * gedupliceerd per contract van eenzelfde huurder.
  */
 
 export type ContracteindeStatus = "VERLOOPT_BINNENKORT" | "AANDACHT" | "GEEN_URGENTIE" | "EXPIRATIEDATUM_GEPASSEERD" | "ONBEKEND";
@@ -173,6 +190,16 @@ export interface HuurdersoverzichtContractRegel {
   indexering: HuurdersoverzichtIndexering;
   /** `null` = geen betrouwbare historische indexatie voor DIT contractnummer (geen historie, of geen regel voldoet aan de bewezen bronsemantiek) — zie `bepaalLaatsteIndexatie`. */
   laatsteIndexatie: HoLaatsteIndexatie | null;
+  /**
+   * Som van `vorderingen_met_afboekingen.Vordering_openstaand` voor EXACT
+   * dit Bedrijfsnr+Contractnr — NOOIT `saldo_huurders.Saldo` (huurderniveau,
+   * kan meerdere contracten omvatten, zie moduledoc). `0` bij geen
+   * openstaande posten voor dit contract (geen `OnbekendOf`: afwezigheid in
+   * de detailbron is hier een bekend feit, geen ambiguïteit).
+   */
+  openstaandSaldo: Decimal;
+  /** Aantal openstaande posten (Vordering_openstaand != 0) voor dit contract — bouwstap voor een latere drill-down naar de individuele vorderingen. */
+  aantalOpenstaandePosten: number;
 }
 
 export interface HuurdersoverzichtPortefeuilleTotalen {
@@ -359,9 +386,32 @@ export function berekenHuurdersoverzicht(
   contracten: readonly HoContractRegel[],
   rentroll: readonly HoRentrollRegel[],
   verhogingen: readonly HoVerhogingRegel[] = [],
+  vorderingen: readonly OpVorderingRegel[] = [],
+  saldoHuurders: readonly OpSaldoHuurderRegel[] = [],
+  debiteurenbeheer: DebiteurenbeheerStatus = "onbekend",
 ): HuurdersoverzichtResultaat {
   const controleVereist: HuurdersoverzichtControleItem[] = [];
   const bronPeildatum = bepaalBronPeildatum(rentroll);
+
+  const openstaandPerContract = new Map<string, { saldo: Decimal; aantal: number }>();
+  // Eén keer berekend (nooit per contract) — zie moduledoc: voorkomt dubbeltelling van
+  // saldo_huurders.Saldo over meerdere contracten van dezelfde huurder. Alleen aangeroepen
+  // als er daadwerkelijk debiteurendata is meegegeven — een aanroeper die (nog) geen
+  // vorderingen/saldoHuurders doorgeeft (bv. bestaande tests/aanroepen zonder deze fase)
+  // krijgt terecht geen debiteurenbeheer-classificatiemelding: die gaat over data die niet
+  // is opgevraagd, net zoals een lege `verhogingen`-lijst hierboven geen indexatiemelding geeft.
+  if (vorderingen.length > 0 || saldoHuurders.length > 0) {
+    const opResultaat = berekenOpenstaandePosten(vorderingen, saldoHuurders, debiteurenbeheer);
+    for (const huurderRegel of opResultaat.huurders) {
+      for (const post of huurderRegel.openstaandePosten) {
+        const bestaand = openstaandPerContract.get(post.contractnummer) ?? { saldo: new Decimal(0), aantal: 0 };
+        openstaandPerContract.set(post.contractnummer, { saldo: bestaand.saldo.plus(post.openstaand), aantal: bestaand.aantal + 1 });
+      }
+    }
+    for (const item of opResultaat.controleVereist) {
+      controleVereist.push({ contractnummer: null, ernst: item.ernst, bericht: item.bericht });
+    }
+  }
 
   const rentrollPerContract = new Map<string, HoRentrollRegel[]>();
   for (const regel of rentroll) {
@@ -539,6 +589,8 @@ export function berekenHuurdersoverzicht(
     );
     controleVereist.push(...indexatieControleVereist);
 
+    const openstaand = openstaandPerContract.get(contract.contractnummer) ?? { saldo: new Decimal(0), aantal: 0 };
+
     if (laatsteIndexatie !== null && isBekend(huur.brutoJaarhuur)) {
       const geimpliceerdeJaarhuur = laatsteIndexatie.nieuwMaandhuurbedrag.times(12);
       if (!geimpliceerdeJaarhuur.equals(huur.brutoJaarhuur.waarde)) {
@@ -579,6 +631,8 @@ export function berekenHuurdersoverzicht(
         omschrijvingIndextabel: contract.omschrijvingIndextabel,
       },
       laatsteIndexatie,
+      openstaandSaldo: openstaand.saldo,
+      aantalOpenstaandePosten: openstaand.aantal,
     };
   });
 

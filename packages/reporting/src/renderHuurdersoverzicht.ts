@@ -1,4 +1,4 @@
-import type Decimal from "decimal.js";
+import Decimal from "decimal.js";
 import type { OnbekendOf } from "@bvc/domain";
 import { escapeHtml, formatBedragHtml, formatM2Html, formatOnbekendOfHtml, renderRapportDocument } from "./huisstijl.js";
 import type { ContracteindeStatus, HoLaatsteIndexatie, HuurdersoverzichtContractRegel, HuurdersoverzichtControleErnst, HuurdersoverzichtResultaat } from "./huurdersoverzicht.js";
@@ -36,6 +36,14 @@ import type { ContracteindeStatus, HoLaatsteIndexatie, HuurdersoverzichtContract
  * contract 0000000052, dat bewust geen historie van een ander
  * contractnummer overneemt. Contractnummer/huurdernummer/methode/
  * percentageconfiguratie/indextabel staan bewust NIET meer in deze tabel.
+ *
+ * **Openstaand-kolom (2026-09-01)** — hoofdtabel, laatste kolom:
+ * `regel.openstaandSaldo` (al berekend in `huurdersoverzicht.ts`, UITSLUITEND
+ * de som van dat ene contract se `Vordering_openstaand`, nooit het
+ * huurderniveau-`saldo_huurders.Saldo`). `0`/geen openstaande posten toont
+ * een rustige `—`; een credit (negatief saldo) via `formatBedragHtml`
+ * (nooit `Math.abs()`). Geen uitgeklapte postenlijst in deze fase — alleen
+ * het bedrag, met het aantal posten als tooltip.
  */
 
 function formatEurPerM2(waarde: Decimal): string {
@@ -89,6 +97,13 @@ function renderKortingHtml(huurkorting: OnbekendOf<Decimal>): string {
   return formatBedragHtml(huurkorting.waarde);
 }
 
+/** `—` bij geen openstaande posten; bedrag anders — negatief (credit) via `formatBedragHtml`, nooit Math.abs(). */
+function renderOpenstaandHtml(regel: HuurdersoverzichtContractRegel): string {
+  if (regel.openstaandSaldo.isZero()) return `<span class="subtekst">—</span>`;
+  const titel = `${regel.aantalOpenstaandePosten} openstaande post${regel.aantalOpenstaandePosten === 1 ? "" : "en"}`;
+  return `<span title="${escapeHtml(titel)}">${formatBedragHtml(regel.openstaandSaldo)}</span>`;
+}
+
 function renderHuurderHtml(regel: HuurdersoverzichtContractRegel, controleVereistPerContract: ReadonlyMap<string, readonly string[]>): string {
   const naam = regel.huurderNaam ? escapeHtml(regel.huurderNaam) : `<span class="subtekst">Onbekend</span>`;
   const berichten = controleVereistPerContract.get(regel.contractnummer);
@@ -126,11 +141,13 @@ function renderHoofdtabel(resultaat: HuurdersoverzichtResultaat): string {
         <td>${r.contracteinde.expiratieExpiratiedatum ? escapeHtml(r.contracteinde.expiratieExpiratiedatum.toISOString().slice(0, 10)) : `<span class="subtekst">onbekend</span>`}</td>
         <td>${renderRestlooptijdHtml(r.restlooptijdDagen)}</td>
         <td>${renderStatusHtml(r.status)}</td>
+        <td>${renderOpenstaandHtml(r)}</td>
       </tr>`,
     )
     .join("");
 
   const t = resultaat.portefeuilleTotalen;
+  const totaalOpenstaand = resultaat.contracten.reduce((som, r) => som.plus(r.openstaandSaldo), new Decimal(0));
   const totaalrij = `<tr class="totaalrij">
     <td>Totaal</td>
     <td>${resultaat.contracten.length} contracten</td>
@@ -138,7 +155,8 @@ function renderHoofdtabel(resultaat: HuurdersoverzichtResultaat): string {
     <td>${formatOnbekendOfHtml(t.brutoJaarhuur, formatBedragHtml)}</td>
     <td>${formatOnbekendOfHtml(t.huurkorting, formatBedragHtml)}</td>
     <td>${formatOnbekendOfHtml(t.nettoJaarhuur, formatBedragHtml)}</td>
-    <td colspan="4"></td>
+    <td colspan="3"></td>
+    <td>${totaalOpenstaand.isZero() ? `<span class="subtekst">—</span>` : formatBedragHtml(totaalOpenstaand)}</td>
   </tr>`;
 
   return `
@@ -146,7 +164,7 @@ function renderHoofdtabel(resultaat: HuurdersoverzichtResultaat): string {
       <thead><tr>
         <th>Huurder</th><th>Complex</th><th>m²</th><th>Bruto jaarhuur</th><th>Korting</th>
         <th>Netto jaarhuur</th><th>€/m²</th><th>Servicekostenvoorschot</th><th>Expiratiedatum</th>
-        <th>Resterend</th><th>Status</th>
+        <th>Resterend</th><th>Status</th><th>Openstaand</th>
       </tr></thead>
       <tbody>${rijen}</tbody>
       <tfoot>${totaalrij}</tfoot>

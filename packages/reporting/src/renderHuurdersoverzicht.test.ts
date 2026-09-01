@@ -2,6 +2,7 @@ import Decimal from "decimal.js";
 import { describe, expect, it } from "vitest";
 import { renderHuurdersoverzichtHtml } from "./renderHuurdersoverzicht.js";
 import { berekenHuurdersoverzicht, type HoContractRegel, type HoRentrollRegel, type HoVerhogingRegel } from "./huurdersoverzicht.js";
+import type { OpSaldoHuurderRegel, OpVorderingRegel } from "./openstaandePosten.js";
 
 const PEILDATUM = new Date("2026-07-31T00:00:00.000Z");
 
@@ -155,5 +156,30 @@ describe("renderHuurdersoverzichtHtml", () => {
     expect(html).toContain("€ 673.980,88");
     expect(html).toContain("6.589,5 m²");
     expect(html).toContain("12 contracten");
+  });
+
+  it("toont de Openstaand-kolom met het bedrag als er openstaande posten zijn", () => {
+    const vordering: OpVorderingRegel = {
+      bedrijfsnr: "070", contractnummer: "C1", vorderingVolgnummer: "1", huurdernummer: "H1",
+      complexnummer: "001", unitnummer: "0001", factuurnummer: "F1",
+      datumVordering: new Date("2026-09-01T00:00:00.000Z"), omschrijving: "Periode september 2026",
+      totaalbedrag: new Decimal(5940.98), bedragAfgeboekt: new Decimal(0), openstaand: new Decimal(5940.98),
+    };
+    const saldoHuurder: OpSaldoHuurderRegel = {
+      huurdernummer: "H1", achterstand: new Decimal(5940.98), achterstandTm30Dagen: new Decimal(5940.98),
+      achterstandTm60Dagen: new Decimal(0), achterstandTm90Dagen: new Decimal(0), achterstand90PlusDagen: new Decimal(0),
+      vooruitbetaling: new Decimal(0), saldo: new Decimal(5940.98),
+    };
+    const resultaat = berekenHuurdersoverzicht([contract()], [rentrollRegel()], [], [vordering], [saldoHuurder], true);
+    const html = renderHuurdersoverzichtHtml("070 Rooise Zoom", resultaat);
+    expect(html).toContain("Openstaand");
+    expect(html).toContain("€ 5.940,98");
+  });
+
+  it("toont een rustige '—' in de Openstaand-kolom als er geen openstaande posten zijn", () => {
+    const resultaat = berekenHuurdersoverzicht([contract()], [rentrollRegel()]);
+    const html = renderHuurdersoverzichtHtml("070 Rooise Zoom", resultaat);
+    expect(html).toContain("Openstaand");
+    expect(html).toContain(`<span class="subtekst">—</span>`);
   });
 });

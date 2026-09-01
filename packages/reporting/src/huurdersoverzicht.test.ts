@@ -1,6 +1,7 @@
 import Decimal from "decimal.js";
 import { describe, expect, it } from "vitest";
 import { bepaalContracteindeStatus, bepaalLaatsteIndexatie, berekenHuurdersoverzicht, type HoContractRegel, type HoRentrollRegel, type HoVerhogingRegel } from "./huurdersoverzicht.js";
+import type { OpSaldoHuurderRegel, OpVorderingRegel } from "./openstaandePosten.js";
 
 const PEILDATUM = new Date("2026-07-31T00:00:00.000Z");
 
@@ -279,6 +280,189 @@ describe("berekenHuurdersoverzicht", () => {
       // Contract 0000000043: geen unitnummer, nooit afgeleid.
       const c43 = resultaat.contracten.find((c) => c.contractnummer === "0000000043")!;
       expect(c43.unitnummer).toBeNull();
+    });
+  });
+
+  describe("openstaandSaldo geïntegreerd in berekenHuurdersoverzicht", () => {
+    function vorderingRegel(overrides: Partial<OpVorderingRegel> = {}): OpVorderingRegel {
+      return {
+        bedrijfsnr: "070",
+        contractnummer: "0000000028",
+        vorderingVolgnummer: "00000093",
+        huurdernummer: "00000021",
+        complexnummer: "002",
+        unitnummer: "0001",
+        factuurnummer: "2670000108",
+        datumVordering: new Date("2026-09-01T00:00:00.000Z"),
+        omschrijving: "Periode september 2026",
+        totaalbedrag: new Decimal(5940.98),
+        bedragAfgeboekt: new Decimal(0),
+        openstaand: new Decimal(5940.98),
+        ...overrides,
+      };
+    }
+
+    function saldoHuurderRegel(overrides: Partial<OpSaldoHuurderRegel> = {}): OpSaldoHuurderRegel {
+      return {
+        huurdernummer: "00000021",
+        achterstand: new Decimal(5940.98),
+        achterstandTm30Dagen: new Decimal(5940.98),
+        achterstandTm60Dagen: new Decimal(0),
+        achterstandTm90Dagen: new Decimal(0),
+        achterstand90PlusDagen: new Decimal(0),
+        vooruitbetaling: new Decimal(0),
+        saldo: new Decimal(5940.98),
+        ...overrides,
+      };
+    }
+
+    it("contract zonder openstaande posten krijgt openstaandSaldo=0 en aantalOpenstaandePosten=0", () => {
+      const resultaat = berekenHuurdersoverzicht(
+        [contract({ contractnummer: "0000000028", huurdernummer: "00000021" })],
+        [rentrollRegel({ contractnummer: "0000000028" })],
+        [],
+        [], // geen vorderingen voor dit contract
+        [saldoHuurderRegel({ achterstand: new Decimal(0), achterstandTm30Dagen: new Decimal(0), saldo: new Decimal(0) })],
+        true,
+      );
+      const c = resultaat.contracten[0]!;
+      expect(c.openstaandSaldo.toString()).toBe("0");
+      expect(c.aantalOpenstaandePosten).toBe(0);
+    });
+
+    it("contract met één openstaande post", () => {
+      const resultaat = berekenHuurdersoverzicht(
+        [contract({ contractnummer: "0000000028", huurdernummer: "00000021" })],
+        [rentrollRegel({ contractnummer: "0000000028" })],
+        [],
+        [vorderingRegel()],
+        [saldoHuurderRegel()],
+        true,
+      );
+      const c = resultaat.contracten[0]!;
+      expect(c.openstaandSaldo.toString()).toBe("5940.98");
+      expect(c.aantalOpenstaandePosten).toBe(1);
+    });
+
+    it("contract met meerdere openstaande posten telt op tot de som", () => {
+      const resultaat = berekenHuurdersoverzicht(
+        [contract({ contractnummer: "0000000028", huurdernummer: "00000021" })],
+        [rentrollRegel({ contractnummer: "0000000028" })],
+        [],
+        [
+          vorderingRegel({ vorderingVolgnummer: "1", totaalbedrag: new Decimal(1000), openstaand: new Decimal(1000) }),
+          vorderingRegel({ vorderingVolgnummer: "2", totaalbedrag: new Decimal(500), openstaand: new Decimal(500) }),
+        ],
+        [saldoHuurderRegel({ achterstand: new Decimal(1500), achterstandTm30Dagen: new Decimal(1500), saldo: new Decimal(1500) })],
+        true,
+      );
+      const c = resultaat.contracten[0]!;
+      expect(c.openstaandSaldo.toString()).toBe("1500");
+      expect(c.aantalOpenstaandePosten).toBe(2);
+    });
+
+    it("negatieve credit blijft exact negatief — nooit Math.abs()", () => {
+      const resultaat = berekenHuurdersoverzicht(
+        [contract({ contractnummer: "0000000048", huurdernummer: "00000033" })],
+        [rentrollRegel({ contractnummer: "0000000048" })],
+        [],
+        [vorderingRegel({ contractnummer: "0000000048", huurdernummer: "00000033", omschrijving: "Service-afrekening 0004", totaalbedrag: new Decimal(-146.9), openstaand: new Decimal(-146.9) })],
+        [saldoHuurderRegel({ huurdernummer: "00000033", achterstand: new Decimal(-146.9), achterstandTm30Dagen: new Decimal(0), achterstand90PlusDagen: new Decimal(-146.9), saldo: new Decimal(-146.9) })],
+        true,
+      );
+      const c = resultaat.contracten[0]!;
+      expect(c.openstaandSaldo.toString()).toBe("-146.9");
+      expect(c.openstaandSaldo.isNegative()).toBe(true);
+    });
+
+    it("iTapToo: contracten 044/049 krijgen elk hun EIGEN saldo, nooit het huurdertotaal op beide", () => {
+      const resultaat = berekenHuurdersoverzicht(
+        [
+          contract({ contractnummer: "0000000044", huurdernummer: "00000030" }),
+          contract({ contractnummer: "0000000049", huurdernummer: "00000030" }),
+        ],
+        [rentrollRegel({ contractnummer: "0000000044" }), rentrollRegel({ contractnummer: "0000000049" })],
+        [],
+        [
+          vorderingRegel({ contractnummer: "0000000044", huurdernummer: "00000030", vorderingVolgnummer: "00000061", totaalbedrag: new Decimal(3544.33), openstaand: new Decimal(3544.33) }),
+          vorderingRegel({ contractnummer: "0000000049", huurdernummer: "00000030", vorderingVolgnummer: "00000030", totaalbedrag: new Decimal(1409.38), openstaand: new Decimal(1409.38) }),
+        ],
+        [saldoHuurderRegel({ huurdernummer: "00000030", achterstand: new Decimal(4953.71), achterstandTm30Dagen: new Decimal(4953.71), saldo: new Decimal(4953.71) })],
+        true,
+      );
+      const c044 = resultaat.contracten.find((c) => c.contractnummer === "0000000044")!;
+      const c049 = resultaat.contracten.find((c) => c.contractnummer === "0000000049")!;
+      expect(c044.openstaandSaldo.toString()).toBe("3544.33");
+      expect(c049.openstaandSaldo.toString()).toBe("1409.38");
+      // Cruciale regel: NOOIT het huurdertotaal (4953.71) op één van beide contractregels.
+      expect(c044.openstaandSaldo.toString()).not.toBe("4953.71");
+      expect(c049.openstaandSaldo.toString()).not.toBe("4953.71");
+      // Geen dubbeltelling: som van beide contractregels = huurdertotaal, geen enkel verschil (geen WAARSCHUWING).
+      expect(c044.openstaandSaldo.plus(c049.openstaandSaldo).toString()).toBe("4953.71");
+      expect(resultaat.controleVereist.some((i) => i.ernst === "WAARSCHUWING")).toBe(false);
+    });
+
+    it("Destiny (contract 0000000043, geen unitnummer) krijgt correct openstaandSaldo ondanks ontbrekende unit", () => {
+      const resultaat = berekenHuurdersoverzicht(
+        [contract({ contractnummer: "0000000043", huurdernummer: "00000028", unitnummer: null })],
+        [rentrollRegel({ contractnummer: "0000000043", unitnummer: null })],
+        [],
+        [vorderingRegel({ contractnummer: "0000000043", huurdernummer: "00000028", unitnummer: null, totaalbedrag: new Decimal(15384.74), openstaand: new Decimal(15384.74) })],
+        [saldoHuurderRegel({ huurdernummer: "00000028", achterstand: new Decimal(15384.74), achterstandTm30Dagen: new Decimal(15384.74), saldo: new Decimal(15384.74) })],
+        true,
+      );
+      const c = resultaat.contracten[0]!;
+      expect(c.unitnummer).toBeNull();
+      expect(c.openstaandSaldo.toString()).toBe("15384.74");
+    });
+
+    it("debiteurenbeheer=true met een reconciliatieverschil op huurderniveau: WAARSCHUWING", () => {
+      const resultaat = berekenHuurdersoverzicht(
+        [contract({ contractnummer: "0000000028", huurdernummer: "00000021" })],
+        [rentrollRegel({ contractnummer: "0000000028" })],
+        [],
+        [vorderingRegel()],
+        [saldoHuurderRegel({ saldo: new Decimal(9999) })], // wijkt af van de detailsom 5940.98
+        true,
+      );
+      expect(resultaat.controleVereist.some((i) => i.ernst === "WAARSCHUWING" && i.bericht.includes("00000021"))).toBe(true);
+    });
+
+    it("debiteurenbeheer=false: hetzelfde verschil geeft GEEN WAARSCHUWING, wel een INFORMATIEF-context-melding", () => {
+      const resultaat = berekenHuurdersoverzicht(
+        [contract({ contractnummer: "0000000028", huurdernummer: "00000021" })],
+        [rentrollRegel({ contractnummer: "0000000028" })],
+        [],
+        [vorderingRegel()],
+        [saldoHuurderRegel({ saldo: new Decimal(9999) })],
+        false,
+      );
+      expect(resultaat.controleVereist.some((i) => i.ernst === "WAARSCHUWING" || i.ernst === "KRITIEK")).toBe(false);
+      expect(resultaat.controleVereist.some((i) => i.ernst === "INFORMATIEF" && i.bericht.includes("niet door ons bijgehouden"))).toBe(true);
+      // De cijfers blijven gewoon getoond, alleen de ernst verandert.
+      expect(resultaat.contracten[0]!.openstaandSaldo.toString()).toBe("5940.98");
+    });
+
+    it('debiteurenbeheer="onbekend": neutrale WAARSCHUWING over niet-geclassificeerde betrouwbaarheid', () => {
+      const resultaat = berekenHuurdersoverzicht(
+        [contract({ contractnummer: "0000000028", huurdernummer: "00000021" })],
+        [rentrollRegel({ contractnummer: "0000000028" })],
+        [],
+        [vorderingRegel()],
+        [saldoHuurderRegel()],
+        "onbekend",
+      );
+      expect(resultaat.controleVereist.some((i) => i.ernst === "WAARSCHUWING" && i.bericht.includes("nog niet geclassificeerd"))).toBe(true);
+    });
+
+    it("zonder vorderingen/saldoHuurders (bestaande aanroepen zonder deze fase): geen debiteurenmelding, saldo blijft 0", () => {
+      const resultaat = berekenHuurdersoverzicht(
+        [contract({ contractnummer: "0000000028" })],
+        [rentrollRegel({ contractnummer: "0000000028" })],
+      );
+      expect(resultaat.contracten[0]!.openstaandSaldo.toString()).toBe("0");
+      expect(resultaat.contracten[0]!.aantalOpenstaandePosten).toBe(0);
+      expect(resultaat.controleVereist).toEqual([]);
     });
   });
 });

@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import Decimal from "decimal.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { genereerHuurdersoverzicht } from "./genereerHuurdersoverzicht.js";
 import { rebuildCache } from "./rebuildCache.js";
@@ -197,5 +198,107 @@ describe("genereerHuurdersoverzicht — 070_Rooise_Zoom regressie (volledige xls
     const c48 = resultaat.contracten.find((c) => c.contractnummer === "0000000048")!;
     expect(c48.laatsteIndexatie).not.toBeNull();
     expect(resultaat.controleVereist.some((i) => i.contractnummer === "0000000048" && i.ernst === "WAARSCHUWING" && i.bericht.includes("wijkt af van de actuele bruto jaarhuur"))).toBe(true);
+  });
+});
+
+/**
+ * Echte 070-openstaand-posten (2026-08-31, packages/reporting/README.md):
+ * 10 daadwerkelijk openstaande vorderingen_met_afboekingen-regels + alle 14
+ * saldo_huurders-regels — bewezen 14/14 exact MATCH, totaal € 65.811,57,
+ * inclusief de iTapToo-contractsplitsing (044/049) en de creditpost
+ * (huurder 00000033, -€146,90). Zelfde brondata als
+ * apps/worker/src/genereerOpenstaandePosten.test.ts, hier via
+ * genereerHuurdersoverzicht om de contract-niveau-koppeling te bewijzen.
+ */
+const OPEN_POSTEN_070: Record<string, unknown>[] = [
+  { Bedrijfsnr: "070", Contractnr: "0000000028", Vordering_Volgnr: "00000093", Huurdernr: "00000021", Complexnummer: "002", Unitnummer: "0001", Datum_Vordering: "01-09-2026", Omschrijving_Vordering: "Periode september 2026", Factuurnummer: "2670000108", Vordering_Totaalbedrag: 5940.98, Bedrag_afgeboekt: 0, Vordering_openstaand: 5940.98, Vordering_afgehandeld_periode: null, Vordering_afgehandeld_jaar: null },
+  { Bedrijfsnr: "070", Contractnr: "0000000029", Vordering_Volgnr: "00000092", Huurdernr: "00000022", Complexnummer: "002", Unitnummer: "0002", Datum_Vordering: "01-09-2026", Omschrijving_Vordering: "Periode september 2026", Factuurnummer: "2670000109", Vordering_Totaalbedrag: 2388.39, Bedrag_afgeboekt: 0, Vordering_openstaand: 2388.39, Vordering_afgehandeld_periode: null, Vordering_afgehandeld_jaar: null },
+  { Bedrijfsnr: "070", Contractnr: "0000000031", Vordering_Volgnr: "00000095", Huurdernr: "00000024", Complexnummer: "003", Unitnummer: "0001", Datum_Vordering: "01-09-2026", Omschrijving_Vordering: "Periode september 2026", Factuurnummer: "2670000110", Vordering_Totaalbedrag: 4814.17, Bedrag_afgeboekt: 0, Vordering_openstaand: 4814.17, Vordering_afgehandeld_periode: null, Vordering_afgehandeld_jaar: null },
+  { Bedrijfsnr: "070", Contractnr: "0000000043", Vordering_Volgnr: "00000063", Huurdernr: "00000028", Complexnummer: "001", Unitnummer: null, Datum_Vordering: "01-09-2026", Omschrijving_Vordering: "Periode september 2026", Factuurnummer: "2670000106", Vordering_Totaalbedrag: 15384.74, Bedrag_afgeboekt: 0, Vordering_openstaand: 15384.74, Vordering_afgehandeld_periode: null, Vordering_afgehandeld_jaar: null },
+  { Bedrijfsnr: "070", Contractnr: "0000000044", Vordering_Volgnr: "00000061", Huurdernr: "00000030", Complexnummer: "003", Unitnummer: "0003", Datum_Vordering: "01-09-2026", Omschrijving_Vordering: "Periode september 2026", Factuurnummer: "2670000112", Vordering_Totaalbedrag: 3544.33, Bedrag_afgeboekt: 0, Vordering_openstaand: 3544.33, Vordering_afgehandeld_periode: null, Vordering_afgehandeld_jaar: null },
+  { Bedrijfsnr: "070", Contractnr: "0000000049", Vordering_Volgnr: "00000030", Huurdernr: "00000030", Complexnummer: "003", Unitnummer: "0004", Datum_Vordering: "01-09-2026", Omschrijving_Vordering: "Periode september 2026", Factuurnummer: "2670000113", Vordering_Totaalbedrag: 1409.38, Bedrag_afgeboekt: 0, Vordering_openstaand: 1409.38, Vordering_afgehandeld_periode: null, Vordering_afgehandeld_jaar: null },
+  { Bedrijfsnr: "070", Contractnr: "0000000045", Vordering_Volgnr: "00000057", Huurdernr: "00000031", Complexnummer: "004", Unitnummer: "0001", Datum_Vordering: "01-09-2026", Omschrijving_Vordering: "Periode september 2026", Factuurnummer: "2670000114", Vordering_Totaalbedrag: 13970.47, Bedrag_afgeboekt: 0, Vordering_openstaand: 13970.47, Vordering_afgehandeld_periode: null, Vordering_afgehandeld_jaar: null },
+  { Bedrijfsnr: "070", Contractnr: "0000000046", Vordering_Volgnr: "00000058", Huurdernr: "00000032", Complexnummer: "004", Unitnummer: "0002", Datum_Vordering: "01-09-2026", Omschrijving_Vordering: "Periode september 2026", Factuurnummer: "2670000115", Vordering_Totaalbedrag: 14174.36, Bedrag_afgeboekt: 0, Vordering_openstaand: 14174.36, Vordering_afgehandeld_periode: null, Vordering_afgehandeld_jaar: null },
+  { Bedrijfsnr: "070", Contractnr: "0000000051", Vordering_Volgnr: "00000022", Huurdernr: "00000034", Complexnummer: "003", Unitnummer: "0002", Datum_Vordering: "01-09-2026", Omschrijving_Vordering: "Periode september 2026", Factuurnummer: "2670000111", Vordering_Totaalbedrag: 4331.65, Bedrag_afgeboekt: 0, Vordering_openstaand: 4331.65, Vordering_afgehandeld_periode: null, Vordering_afgehandeld_jaar: null },
+  { Bedrijfsnr: "070", Contractnr: "0000000048", Vordering_Volgnr: "00000023", Huurdernr: "00000033", Complexnummer: "001", Unitnummer: "0002", Datum_Vordering: "15-04-2026", Omschrijving_Vordering: "Service-afrekening 0004", Factuurnummer: "2670000047", Vordering_Totaalbedrag: -146.9, Bedrag_afgeboekt: 0, Vordering_openstaand: -146.9, Vordering_afgehandeld_periode: null, Vordering_afgehandeld_jaar: null },
+];
+
+const SALDO_HUURDERS_070: Record<string, unknown>[] = [
+  { Bedrijfsnr: "070", Huurdernr: "00000021", Naam_1: "Fruitcake BV", Achterstand: 5940.98, Achterstand_tm_30_dagen: 5940.98, Achterstand_tm_60_dagen: 0, Achterstand_tm_90_dagen: 0, Achterstand_90plus_dagen: 0, Vooruitbetaling: 0, Saldo: 5940.98 },
+  { Bedrijfsnr: "070", Huurdernr: "00000022", Naam_1: "JOB Personeelsmakelaar BV", Achterstand: 2388.39, Achterstand_tm_30_dagen: 2388.39, Achterstand_tm_60_dagen: 0, Achterstand_tm_90_dagen: 0, Achterstand_90plus_dagen: 0, Vooruitbetaling: 0, Saldo: 2388.39 },
+  { Bedrijfsnr: "070", Huurdernr: "00000023", Naam_1: "Vicoma Zuid BV", Achterstand: 0, Achterstand_tm_30_dagen: 0, Achterstand_tm_60_dagen: 0, Achterstand_tm_90_dagen: 0, Achterstand_90plus_dagen: 0, Vooruitbetaling: 0, Saldo: 0 },
+  { Bedrijfsnr: "070", Huurdernr: "00000024", Naam_1: "Meierij Accountancy & Advies B.V.", Achterstand: 4814.17, Achterstand_tm_30_dagen: 4814.17, Achterstand_tm_60_dagen: 0, Achterstand_tm_90_dagen: 0, Achterstand_90plus_dagen: 0, Vooruitbetaling: 0, Saldo: 4814.17 },
+  { Bedrijfsnr: "070", Huurdernr: "00000025", Naam_1: "Xxllnc Belastingen BV", Achterstand: 0, Achterstand_tm_30_dagen: 0, Achterstand_tm_60_dagen: 0, Achterstand_tm_90_dagen: 0, Achterstand_90plus_dagen: 0, Vooruitbetaling: 0, Saldo: 0 },
+  { Bedrijfsnr: "070", Huurdernr: "00000026", Naam_1: "Gebr. van Houtum", Achterstand: 0, Achterstand_tm_30_dagen: 0, Achterstand_tm_60_dagen: 0, Achterstand_tm_90_dagen: 0, Achterstand_90plus_dagen: 0, Vooruitbetaling: 0, Saldo: 0 },
+  { Bedrijfsnr: "070", Huurdernr: "00000027", Naam_1: "IT2 Informatie en Technology BV", Achterstand: 0, Achterstand_tm_30_dagen: 0, Achterstand_tm_60_dagen: 0, Achterstand_tm_90_dagen: 0, Achterstand_90plus_dagen: 0, Vooruitbetaling: 0, Saldo: 0 },
+  { Bedrijfsnr: "070", Huurdernr: "00000028", Naam_1: "Destiny B.V.", Achterstand: 15384.74, Achterstand_tm_30_dagen: 15384.74, Achterstand_tm_60_dagen: 0, Achterstand_tm_90_dagen: 0, Achterstand_90plus_dagen: 0, Vooruitbetaling: 0, Saldo: 15384.74 },
+  { Bedrijfsnr: "070", Huurdernr: "00000029", Naam_1: "Accountants Office B.V.", Achterstand: 0, Achterstand_tm_30_dagen: 0, Achterstand_tm_60_dagen: 0, Achterstand_tm_90_dagen: 0, Achterstand_90plus_dagen: 0, Vooruitbetaling: 0, Saldo: 0 },
+  { Bedrijfsnr: "070", Huurdernr: "00000030", Naam_1: "iTapToo Drinks B.V.", Achterstand: 4953.71, Achterstand_tm_30_dagen: 4953.71, Achterstand_tm_60_dagen: 0, Achterstand_tm_90_dagen: 0, Achterstand_90plus_dagen: 0, Vooruitbetaling: 0, Saldo: 4953.71 },
+  { Bedrijfsnr: "070", Huurdernr: "00000031", Naam_1: "Basic Fit Nederland B.V.", Achterstand: 13970.47, Achterstand_tm_30_dagen: 13970.47, Achterstand_tm_60_dagen: 0, Achterstand_tm_90_dagen: 0, Achterstand_90plus_dagen: 0, Vooruitbetaling: 0, Saldo: 13970.47 },
+  { Bedrijfsnr: "070", Huurdernr: "00000032", Naam_1: "Kinderopvang 't Kroontje Veghel", Achterstand: 14174.36, Achterstand_tm_30_dagen: 14174.36, Achterstand_tm_60_dagen: 0, Achterstand_tm_90_dagen: 0, Achterstand_90plus_dagen: 0, Vooruitbetaling: 0, Saldo: 14174.36 },
+  { Bedrijfsnr: "070", Huurdernr: "00000033", Naam_1: "Bright Accountants en Adviseurs B.V.", Achterstand: -146.9, Achterstand_tm_30_dagen: 0, Achterstand_tm_60_dagen: 0, Achterstand_tm_90_dagen: 0, Achterstand_90plus_dagen: -146.9, Vooruitbetaling: 0, Saldo: -146.9 },
+  { Bedrijfsnr: "070", Huurdernr: "00000034", Naam_1: "TEUN Marketing", Achterstand: 4331.65, Achterstand_tm_30_dagen: 4331.65, Achterstand_tm_60_dagen: 0, Achterstand_tm_90_dagen: 0, Achterstand_90plus_dagen: 0, Vooruitbetaling: 0, Saldo: 4331.65 },
+];
+
+describe("genereerHuurdersoverzicht — openstaandSaldo per contract (echte 070-openstaand-posten, 2026-09-01)", () => {
+  beforeEach(() => {
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "vorderingen_met_afboekingen.xlsx"), OPEN_POSTEN_070);
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "saldo_huurders.xlsx"), SALDO_HUURDERS_070);
+    schrijfAdministratieConfig(root, "070_rooisezoom", { ...nieuweAdministratieConfig("070", "Rooise Zoom"), debiteurenbeheer: { bankAfletteringDoorOns: true } });
+    rebuildCache({
+      root,
+      administratieId: "070_rooisezoom",
+      onVoortgang: () => {},
+      ouderdomsanalyseMetadata: { boekjaar: 2026, boekperiode: "09", peildatum: new Date(Date.UTC(2026, 8, 30)) },
+    });
+  });
+
+  it("elk contract krijgt uitsluitend zijn EIGEN detailsom als openstaandSaldo, nooit het huurderniveau-saldo", () => {
+    const resultaat = genereerHuurdersoverzicht(root, "070_rooisezoom");
+
+    const c044 = resultaat.contracten.find((c) => c.contractnummer === "0000000044")!;
+    const c049 = resultaat.contracten.find((c) => c.contractnummer === "0000000049")!;
+    expect(c044.openstaandSaldo.toString()).toBe("3544.33");
+    expect(c049.openstaandSaldo.toString()).toBe("1409.38");
+    expect(c044.aantalOpenstaandePosten).toBe(1);
+    expect(c049.aantalOpenstaandePosten).toBe(1);
+    // Cruciale regel: NOOIT het huurdertotaal (4953.71) op één van beide contractregels.
+    expect(c044.openstaandSaldo.toString()).not.toBe("4953.71");
+    expect(c049.openstaandSaldo.toString()).not.toBe("4953.71");
+    // Geen dubbeltelling: som van beide contractregels = het bewezen huurdertotaal.
+    expect(c044.openstaandSaldo.plus(c049.openstaandSaldo).toString()).toBe("4953.71");
+
+    const c028 = resultaat.contracten.find((c) => c.contractnummer === "0000000028")!;
+    expect(c028.openstaandSaldo.toString()).toBe("5940.98");
+
+    // Destiny (0000000043, geen unitnummer) blijft correct.
+    const c043 = resultaat.contracten.find((c) => c.contractnummer === "0000000043")!;
+    expect(c043.unitnummer).toBeNull();
+    expect(c043.openstaandSaldo.toString()).toBe("15384.74");
+
+    // Contract 0000000052: huurder zonder openstaande posten (Vicoma Zuid BV, saldo_huurders = 0).
+    const c052 = resultaat.contracten.find((c) => c.contractnummer === "0000000052")!;
+    expect(c052.openstaandSaldo.toString()).toBe("0");
+    expect(c052.aantalOpenstaandePosten).toBe(0);
+
+    // Credit (contract 0000000048) blijft exact negatief.
+    const c048 = resultaat.contracten.find((c) => c.contractnummer === "0000000048")!;
+    expect(c048.openstaandSaldo.toString()).toBe("-146.9");
+
+    // Totale detailpositie 070 blijft € 65.811,57, en de huurderniveau-reconciliatie sluit exact
+    // (geen WAARSCHUWING over een detail/saldo_huurders-verschil — de bekende contract-048-
+    // indexatiewaarschuwing hieronder is een ANDER, al-bestaand signaal, niet gerelateerd aan openstaand).
+    const totaalOpenstaand = resultaat.contracten.reduce((som, c) => som.plus(c.openstaandSaldo), new Decimal(0));
+    expect(totaalOpenstaand.toString()).toBe("65811.57");
+    expect(resultaat.controleVereist.some((i) => i.ernst === "WAARSCHUWING" && i.bericht.includes("saldo_huurders"))).toBe(false);
+    expect(resultaat.controleVereist.some((i) => i.ernst === "WAARSCHUWING" && i.bericht.includes("wijkt af van de actuele bruto jaarhuur"))).toBe(true); // bekend, al-bewezen contract-048-signaal.
+  });
+
+  it("laat de bestaande huur-/indexatie-/servicekostenfunctionaliteit onaangetast door de openstaandSaldo-integratie", () => {
+    const resultaat = genereerHuurdersoverzicht(root, "070_rooisezoom");
+    expect((resultaat.portefeuilleTotalen.brutoJaarhuur as { waarde: { toString(): string } }).waarde.toString()).toBe("687900.88");
+    const c28 = resultaat.contracten.find((c) => c.contractnummer === "0000000028")!;
+    expect(c28.laatsteIndexatie?.effectiefPercentage.toFixed(2)).toBe("2.68");
+    expect(c28.servicekostenvoorschotJaar?.toString()).toBe("21600");
   });
 });
