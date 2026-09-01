@@ -4,6 +4,7 @@ import {
   parseBoekingen,
   parseComplexTotalen,
   parseContracten,
+  parseContractVerhogingen,
   parseOuderdomsanalyse,
   parseRentroll,
   parseServicekosten,
@@ -248,6 +249,20 @@ export function rebuildCache(options: RebuildCacheOptions): RebuildCacheResultaa
             }));
           log(`${bron.bronType}: ${cacheRijen.length} rijen voor deze administratie (van ${rijen.length} gevalideerd), wegschrijven naar cache…`);
           builder.insertOuderdomsanalyse(cacheRijen);
+          break;
+        }
+        case "contract_verhogingen": {
+          const { rijen, issues: parseIssues } = parseContractVerhogingen(ruweRijen);
+          issues.push(...parseIssues);
+          const cacheRijen: CacheData["contract_verhogingen"] = rijen
+            .filter((r) => r.bedrijfsnr === bedrijfsnr)
+            .map((r) => ({
+              bedrijfsnr: r.bedrijfsnr, contract: r.contract, jaar: r.jaar, periode: r.periode,
+              status: r.status, toekomstige_verhoging: r.toekomstigeVerhoging,
+              bedrag_oud_vs01: dec(r.bedragOudVs01), bedrag_nieuw_vs01: dec(r.bedragNieuwVs01),
+            }));
+          log(`${bron.bronType}: ${cacheRijen.length} rijen voor deze administratie (van ${rijen.length} gevalideerd), wegschrijven naar cache…`);
+          builder.insertContractVerhogingen(cacheRijen);
           break;
         }
       }

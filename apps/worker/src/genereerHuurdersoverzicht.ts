@@ -1,15 +1,17 @@
 import Decimal from "decimal.js";
-import { openCacheReadonly, type ContractRow, type RentrollRow } from "@bvc/cache";
-import { berekenHuurdersoverzicht, type HoContractRegel, type HoRentrollRegel, type HuurdersoverzichtResultaat } from "@bvc/reporting";
+import { openCacheReadonly, type ContractRow, type ContractVerhogingRow, type RentrollRow } from "@bvc/cache";
+import { berekenHuurdersoverzicht, type HoContractRegel, type HoRentrollRegel, type HoVerhogingRegel, type HuurdersoverzichtResultaat } from "@bvc/reporting";
 import { administratieCachePad } from "./paths.js";
 
 /**
- * Huurdersoverzicht v1 (2026-08-27) — tijdelijk CLI-commando, nog GEEN
- * renderer/management-rapport-koppeling. Leest `contracten`/`rentroll`
+ * Huurdersoverzicht v1 (2026-08-27, laatste-indexatie 2026-08-28) —
+ * tijdelijk CLI-commando, nog GEEN renderer-koppeling aan management-
+ * rapport. Leest `contracten`/`rentroll`/`contract_verhogingen`
  * rechtstreeks uit de al-herbouwde cache (ongefilterde `SELECT * FROM
- * ...`, zelfde patroon als `genereerHuurKerncijfers.ts`) en geeft ze door
- * aan `@bvc/reporting`'s pure `berekenHuurdersoverzicht`. Bewust GEEN
- * boekjaar/periode: momentopname, zie de moduledoc van
+ * ...`, zelfde patroon als `genereerHuurKerncijfers.ts` — de cache is al
+ * per administratie bedrijfsnr-gescoped door `rebuildCache.ts`) en geeft
+ * ze door aan `@bvc/reporting`'s pure `berekenHuurdersoverzicht`. Bewust
+ * GEEN boekjaar/periode: momentopname, zie de moduledoc van
  * `huurdersoverzicht.ts`.
  */
 
@@ -59,7 +61,18 @@ export function genereerHuurdersoverzicht(root: string, administratieId: string)
       contractOpzegdatum: datum(r.contract_opzegdatum),
     }));
 
-    return berekenHuurdersoverzicht(contracten, rentroll);
+    const verhogingRows = db.prepare("SELECT * FROM contract_verhogingen").all() as unknown as ContractVerhogingRow[];
+    const verhogingen: HoVerhogingRegel[] = verhogingRows.map((v) => ({
+      contractnummer: v.contract,
+      jaar: v.jaar,
+      periode: v.periode,
+      status: v.status,
+      toekomstigeVerhoging: v.toekomstige_verhoging,
+      bedragOudVs01: dec(v.bedrag_oud_vs01),
+      bedragNieuwVs01: dec(v.bedrag_nieuw_vs01),
+    }));
+
+    return berekenHuurdersoverzicht(contracten, rentroll, verhogingen);
   } finally {
     db.close();
   }

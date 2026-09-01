@@ -61,10 +61,14 @@ export const HUISSTIJL_CSS = `
   .badge-momentopname{background:#fbf3e2;color:var(--gold);border:1px solid #ecdcb3}
   .badge-periode{background:var(--tintGreen);color:var(--green);border:1px solid #cfe1d8}
   .badge-stand{background:#eef2f6;color:#2b4a63;border:1px solid #cfdbe6}
+  .badge-status-geen-urgentie{background:var(--tintGreen);color:var(--green);border:1px solid #cfe1d8}
+  .badge-status-aandacht{background:#fbf3e2;color:var(--gold);border:1px solid #ecdcb3}
+  .badge-status-verloopt-binnenkort{background:#fbe9e5;color:var(--red);border:1px solid #f0c7bd}
   .controle-vereist{color:var(--gold);font-style:italic;cursor:help;border-bottom:1px dotted var(--gold)}
   .ernst-kritiek{color:var(--red);font-weight:600}
   .ernst-waarschuwing{color:var(--gold);font-weight:600}
   .ernst-informatief{color:var(--muted)}
+  .subtekst{color:var(--muted);font-size:12px;margin-top:2px}
 `;
 
 export function escapeHtml(tekst: string): string {

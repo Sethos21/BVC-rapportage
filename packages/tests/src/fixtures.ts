@@ -133,6 +133,13 @@ export function contractenRijen(): Record<string, unknown>[] {
   ];
 }
 
+export function contractVerhogingenRijen(): Record<string, unknown>[] {
+  return [
+    { Bedrijfsnr: "070", Contract: "C1", Jaar: "2026", Periode: "01", Status: "Verwerkt", Toekomstige_verhoging: "Nee", Bedrag_oud_VS_01: "1600,00", Bedrag_Nieuw_VS_01: "1650,00" },
+    { Bedrijfsnr: "074", Contract: "C9", Jaar: "2026", Periode: "01", Status: "Verwerkt", Toekomstige_verhoging: "Nee", Bedrag_oud_VS_01: "3100,00", Bedrag_Nieuw_VS_01: "3200,00" },
+  ];
+}
+
 export function unitsRijen(): Record<string, unknown>[] {
   return [
     {

@@ -26,6 +26,7 @@ export const BRON_TYPES = [
   "servicekosten",
   "ouderdomsanalyse",
   "begroting",
+  "contract_verhogingen",
 ] as const;
 
 export type BronType = (typeof BRON_TYPES)[number];
@@ -40,6 +41,7 @@ export const BRON_BESTANDSNAAM: Record<BronType, string> = {
   servicekosten: "servicekosten.xlsx",
   ouderdomsanalyse: "ouderdomsanalyse.xlsx",
   begroting: "begroting.xlsx",
+  contract_verhogingen: "contract_verhogingen.xlsx",
 };
 
 /**

@@ -1218,6 +1218,153 @@ diagnose (zie de bugfix-paragraaf hierboven), niet in
 `huurdersoverzicht`'s cache-gebaseerde output voor alle 12 contracten al
 correct was — inclusief deze drie.**
 
+## Huurdersoverzicht v1 — zelfstandig HTML-rapport (`renderHuurdersoverzicht.ts`, 2026-08-27)
+
+Eerste renderer voor Huurdersoverzicht v1, bewust **los van
+`renderManagementRapport.ts`** — een eigen document met eigen CLI-
+commando (`huurdersoverzicht-rapport <administratieId>`,
+`genereerHuurdersoverzichtRapport.ts`, HTML naar `rapporten/`), om eerst
+zelfstandig tegen echte 070-data visueel te beoordelen vóórdat besloten
+wordt of dit een sectie in het lange rapport wordt of een aparte
+"Huurders"-tab in de toekomstige UI. Rendert uitsluitend het al-bewezen
+`HuurdersoverzichtResultaat` — geen enkele berekening in de renderer.
+Bewust GEEN gebruik van de grote `.cover`-titelpaginaconventie van de
+overige rapporten (eigen `sec-kicker`/`sec-title`-kop i.p.v. een volle
+titelpagina), om geen van beide toekomstige integratiepaden vast te
+bakken.
+
+**Twee presentatiekeuzes** (zuivere weergave, geen nieuwe rekenlogica):
+- Resterende looptijd: `restlooptijdDagen` (bron, ongewijzigd) getoond als
+  `dagen / 365,25` afgerond op 1 decimaal ("3,4 jr"), exacte dagen als
+  tooltip.
+- €/m²: bruto is primair in de hoofdtabel; netto verschijnt alleen als
+  kleine tweede regel wanneer de huurkorting > 0 is (bij 070: 2 van de 12
+  contracten).
+
+**Complexomschrijving** verschijnt uitsluitend als kleine, gedempte
+aanduiding onder het complexnummer (nieuwe CSS-klasse `.subtekst` in
+`huisstijl.ts`) — nooit gebruikt om te sorteren/groeperen; de hoofdtabel
+sorteert op complexnummer, dan contractnummer.
+
+**Statusbadges** (vijf `ContracteindeStatus`-waarden, geen nieuwe
+grenswaarden — puur presentatie van het al-berekende veld): groene badge
+voor `GEEN_URGENTIE`, amber voor `AANDACHT`, rode badge voor
+`VERLOOPT_BINNENKORT`; `EXPIRATIEDATUM_GEPASSEERD` krijgt bewust GEEN
+effen badge maar de bestaande `.controle-vereist`-stijl (gestippelde
+onderstreping + tooltip) — een signaal dat om beoordeling vraagt, geen
+bekende naderende deadline; `ONBEKEND` is gedempte tekst zonder badge.
+Emoji-vrij (legacy's 🔴/⚠/✓ is uitsluitend visuele inspiratie geweest,
+niet overgenomen — de rest van dit rapport is ook emoji-vrij).
+
+**Twee tabellen** i.p.v. één brede: de hoofdtabel (Huurder/Complex+
+aanduiding/m²/Bruto/Korting/Netto/€m²/Servicekostenvoorschot/
+Expiratiedatum/Resterend/Status, met `.totaalrij`-voetregel uit
+`portefeuilleTotalen`) en een aparte "Contractinformatie"-tabel (zie
+hieronder, herbenoemd/herzien 2026-08-28) — minder frequent geraadpleegde
+velden blijven zo uit de hoofdtabel. Contract `0000000043` (geen
+unitnummer) toont `"niet geregistreerd"`, nooit een verzonnen unit. Rijen
+met een `controleVereist`-melding krijgen dezelfde
+gestippelde-onderstrepingstijl op de huurdernaam (tooltip = de
+melding(en)) i.p.v. dat inline te tonen — de volledige lijst staat in een
+aparte "Controle vereist"-tabel onderaan, zelfde opbouw als elders in dit
+rapport.
+
+### Regressiepunt: 070_Rooise_Zoom-render (in-repo, 2026-08-27)
+
+Testfixture met de exacte cijfers van alle 12 echte 070-contracten
+(zelfde bron als de rekenlaag-regressie hierboven) bevestigt dat de
+gerenderde HTML de bevestigde portefeuillecijfers ongewijzigd toont:
+bruto € 687.900,88, korting € 13.920,00, netto € 673.980,88, VVO
+6.589,5 m². Nog GEEN vervanging van de verplichte, persoonlijk door de
+gebruiker gedraaide visuele beoordeling tegen de levende 070-cache.
+
+## Huurdersoverzicht — laatste indexatie uit `contract_verhogingen` (2026-08-28)
+
+Na afronding van de tijdelijke `contract-verhogingen-diagnose` (v1→v4,
+zie hierboven) heeft de gebruiker expliciet 11 businessregels vastgesteld
+en is `contract_verhogingen.xlsx` een **structurele bron** geworden — geen
+diagnostisch onderzoek meer, gecontroleerd geïmplementeerd.
+
+**Nieuwe bron/cache** — `contractVerhogingen.ts` (`@bvc/data-contracts`)
+parseert `contract_verhogingen.xlsx` bewust minimaal:
+`Bedrijfsnr`/`Contract`/`Jaar`/`Periode`/`Status`/
+`Toekomstige_verhoging`/`Bedrag_oud_VS_01`/`Bedrag_Nieuw_VS_01`. `Waarde`
+en alle overige diagnostische velden (`Indexering_oud`/`_nieuw`,
+`Aanmaakwijze`, `IAH`, prijsindexopslag, CBS-afronding, Tabeljaar,
+Prijsindextabel) zijn **bewust niet** in het structurele schema
+opgenomen — bewezen onbetrouwbaar (zie hieronder) of niet architectonisch
+nodig. Natuurlijke sleutel: **`bedrijfsnr` + `contractnummer` + `jaar` +
+`periode`** — nooit contractnummer alleen, zelfde discipline als de
+`contract-huurder-diagnose`-bugfix hierboven (`contracten_huidig.xlsx` en
+`contract_verhogingen.xlsx` zijn beide gedeeld over administraties).
+Nieuwe cachetabel `contract_verhogingen`, nieuw `BronType`
+`"contract_verhogingen"` (gedeeld, `DEFAULT_BRONLOCATIES`). Bestaande
+`administratie.json`-bestanden van vóór deze datum missen deze sleutel;
+`leesAdministratieConfig` vult ontbrekende `BronType`-sleutels in-memory
+aan vanuit `DEFAULT_BRONLOCATIES` vóór validatie, zodat oudere configs
+niet stuklopen (geen automatische wegschrijving).
+
+**Bewezen bronsemantiek (defensief gefilterd, exacte string-match)**:
+alleen regels met `Status === "Verwerkt"` én
+`Toekomstige_verhoging === "Nee"` gelden als daadwerkelijk verwerkt. Een
+onverwachte waarde levert stilzwijgend uitsluiting op (nooit een gok) —
+bewust géén case-insensitive/fuzzy-match. VS_01 is de bewezen reguliere
+huurcomponent (33/33 regels wijzigen in de 070-data; overige
+VS-componenten nooit); `Bedrag_oud_VS_01`/`Bedrag_Nieuw_VS_01` zijn
+maandbedragen.
+
+**`bepaalLaatsteIndexatie`** (`huurdersoverzicht.ts`) kiest, per
+`bedrijfsnr`+`contractnummer`-groep, de chronologisch laatste
+kwalificerende regel (sorteersleutel `"jjjjpp"` uit `Jaar`+`Periode` — NOOIT
+naar een `Date` geconverteerd, de bron bewijst geen exacte dag) op of vóór
+`bronPeildatum`, en berekent het effectieve indexatiepercentage **altijd
+zelf met Decimal**: `(Bedrag_Nieuw_VS_01 / Bedrag_oud_VS_01 - 1) * 100`,
+mits `Bedrag_oud_VS_01 > 0`. `Waarde` wordt NOOIT als primair percentage
+gebruikt — bewezen onbetrouwbaar bij contracten 043/049 (`Waarde = 0`
+terwijl VS_01 aantoonbaar wijzigt; bij 049 zelfs
+`Indexering_oud`/`_nieuw = 0`). Geen contractspecifieke uitzonderingscode:
+de filtering/berekening is voor elk contract identiek, generiek over
+`bedrijfsnr`+`contractnummer`. Levert `null` (+ `WAARSCHUWING`) op zonder
+kwalificerende regel, zonder `Bedrag_oud`/`Nieuw_VS_01`, of bij
+`Bedrag_oud_VS_01 ≤ 0` (nooit delen door nul). Historie van een ánder
+contractnummer wordt NOOIT automatisch overgenomen, ook niet bij gelijk
+huurdernummer/complex/unit — bewezen met de 037→052-relatie uit de
+diagnose (4 gelijke identifiers, 5,4× bedragsverschil, geen expliciet
+koppelveld): contract 052 krijgt voorlopig `null`/"niet beschikbaar".
+
+**Reconciliatie is diagnostisch, geen afkeuringsgrond**:
+`berekenHuurdersoverzicht` vergelijkt `nieuwMaandhuurbedrag × 12` met de
+actuele bruto jaarhuur uit de rentroll; bij afwijking volgt een
+`WAARSCHUWING` ("wijkt af van de actuele bruto jaarhuur"/"contract
+048-bevinding"), maar `laatsteIndexatie` wordt NOOIT genulld vanwege dit
+verschil — contract 048 bewijst dat een latere contract-/prijswijziging
+historische VS_01 en actuele huur uiteen kan laten lopen zonder dat de
+historische regel ongeldig wordt.
+
+**Domeinmodel blijft minimaal**: `HoLaatsteIndexatie` bevat uitsluitend
+`jaar`/`periode`/`oudMaandhuurbedrag`/`nieuwMaandhuurbedrag`/
+`effectiefPercentage`; `HuurdersoverzichtContractRegel.laatsteIndexatie`
+is `HoLaatsteIndexatie | null`.
+
+**Renderer — "Contractinformatie"-tabel** (voorheen "Contractdetails",
+herzien): Huurder/Unit/Ingangsdatum/Waarborgsom/**Laatste indexatie**/
+Volgende indexeringsdatum. Contractnummer, huurdernummer, methode,
+percentageconfiguratie en indextabel worden NIET meer getoond.
+`renderLaatsteIndexatieHtml` toont compact op maandniveau, bijvoorbeeld
+`"07-2026 · +2,68%"` (`periode-jaar · teken+percentage%`, Nederlandse
+decimaalnotatie) — nooit een verzonnen exacte dag. Zonder betrouwbare
+historie: `"niet beschikbaar"` (gedempte `.subtekst`-stijl), zoals
+contract 052.
+
+**Getest (2026-08-28)**: `huurdersoverzicht.test.ts` (compound-key-
+isolatie 037→052, percentage-uit-VS_01-berekening, Waarde=0-scenario,
+geen deling door nul, contract-048-reconciliatiescenario blijft geldig),
+`genereerHuurdersoverzicht.test.ts` (volledige xlsx→cache→worker-pijplijn
+tegen de exacte echte 070-cijfers van alle 11 contracten met historie,
+contract 052 blijft `null`), `renderHuurdersoverzicht.test.ts` (compacte
+weergave + "niet beschikbaar"-fallback). Alle drie GROEN tegen echte
+070-cijfers.
+
 ## Kerncijfers (sectie 01 — KPI-dashboard)
 
 `renderKerncijfersHtml` rendert het portefeuille-KPI-dashboard: 6

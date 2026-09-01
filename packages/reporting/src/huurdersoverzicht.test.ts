@@ -1,6 +1,6 @@
 import Decimal from "decimal.js";
 import { describe, expect, it } from "vitest";
-import { bepaalContracteindeStatus, berekenHuurdersoverzicht, type HoContractRegel, type HoRentrollRegel } from "./huurdersoverzicht.js";
+import { bepaalContracteindeStatus, bepaalLaatsteIndexatie, berekenHuurdersoverzicht, type HoContractRegel, type HoRentrollRegel, type HoVerhogingRegel } from "./huurdersoverzicht.js";
 
 const PEILDATUM = new Date("2026-07-31T00:00:00.000Z");
 
@@ -44,6 +44,74 @@ function rentrollRegel(overrides: Partial<HoRentrollRegel> = {}): HoRentrollRege
     ...overrides,
   };
 }
+
+function verhogingRegel(overrides: Partial<HoVerhogingRegel> = {}): HoVerhogingRegel {
+  return {
+    contractnummer: "C1",
+    jaar: "2026",
+    periode: "01",
+    status: "Verwerkt",
+    toekomstigeVerhoging: "Nee",
+    bedragOudVs01: new Decimal(750),
+    bedragNieuwVs01: new Decimal(780),
+    ...overrides,
+  };
+}
+
+describe("bepaalLaatsteIndexatie", () => {
+  it("kiest de chronologisch laatste regel vóór/op de peildatum en berekent het percentage zelf uit oud/nieuw VS_01", () => {
+    const resultaat = bepaalLaatsteIndexatie(
+      "C1",
+      [
+        verhogingRegel({ jaar: "2024", periode: "07", bedragOudVs01: new Decimal(700), bedragNieuwVs01: new Decimal(722) }),
+        verhogingRegel({ jaar: "2026", periode: "07", bedragOudVs01: new Decimal(750), bedragNieuwVs01: new Decimal(780) }),
+        verhogingRegel({ jaar: "2025", periode: "07", bedragOudVs01: new Decimal(722), bedragNieuwVs01: new Decimal(750) }),
+      ],
+      PEILDATUM,
+    );
+    expect(resultaat.laatsteIndexatie).toEqual({
+      jaar: "2026",
+      periode: "07",
+      oudMaandhuurbedrag: new Decimal(750),
+      nieuwMaandhuurbedrag: new Decimal(780),
+      effectiefPercentage: new Decimal(780).dividedBy(750).minus(1).times(100),
+    });
+    expect(resultaat.laatsteIndexatie?.effectiefPercentage.toString()).toBe("4");
+  });
+
+  it("negeert regels die niet aan de bewezen bronsemantiek voldoen (Status/Toekomstige_verhoging), ook al liggen ze chronologisch later", () => {
+    const resultaat = bepaalLaatsteIndexatie(
+      "C1",
+      [
+        verhogingRegel({ jaar: "2025", periode: "07", status: "Verwerkt", toekomstigeVerhoging: "Nee" }),
+        verhogingRegel({ jaar: "2026", periode: "07", status: "Gepland", toekomstigeVerhoging: "Nee" }), // afwijkende Status — telt niet mee.
+      ],
+      PEILDATUM,
+    );
+    expect(resultaat.laatsteIndexatie?.jaar).toBe("2025");
+    expect(resultaat.controleVereist.some((c) => c.ernst === "INFORMATIEF" && c.bericht.includes("nieuwere verhogingsregel"))).toBe(true);
+  });
+
+  it("levert null zonder crash bij Bedrag_oud_VS_01 = 0 of negatief — nooit delen door nul", () => {
+    const nul = bepaalLaatsteIndexatie("C1", [verhogingRegel({ bedragOudVs01: new Decimal(0) })], PEILDATUM);
+    expect(nul.laatsteIndexatie).toBeNull();
+    expect(nul.controleVereist.some((c) => c.ernst === "WAARSCHUWING")).toBe(true);
+
+    const negatief = bepaalLaatsteIndexatie("C1", [verhogingRegel({ bedragOudVs01: new Decimal(-100) })], PEILDATUM);
+    expect(negatief.laatsteIndexatie).toBeNull();
+  });
+
+  it("levert null zonder melding bij een contract zonder enige verhogingsregel", () => {
+    const resultaat = bepaalLaatsteIndexatie("C1", [], PEILDATUM);
+    expect(resultaat.laatsteIndexatie).toBeNull();
+    expect(resultaat.controleVereist).toEqual([]);
+  });
+
+  it("vertrouwt uitsluitend op wat de aanroeper al gegroepeerd heeft aangeleverd (geen eigen contractnummer-filter) — de compound-key-isolatie zelf wordt bewezen op het niveau van berekenHuurdersoverzicht hieronder", () => {
+    const resultaat = bepaalLaatsteIndexatie("0000000052", [verhogingRegel({ contractnummer: "0000000037", jaar: "2025", periode: "04" })], PEILDATUM);
+    expect(resultaat.laatsteIndexatie).not.toBeNull();
+  });
+});
 
 describe("bepaalContracteindeStatus", () => {
   it("classificeert de vier looptijd-drempels en onbekend", () => {
@@ -129,6 +197,45 @@ describe("berekenHuurdersoverzicht", () => {
     const resultaat = berekenHuurdersoverzicht([contract({ expiratieExpiratiedatum: new Date("2026-01-01T00:00:00.000Z") })], [rentrollRegel({ contractExpiratiedatum: new Date("2026-01-01T00:00:00.000Z") })]);
     expect(resultaat.contracten[0]!.status).toBe("EXPIRATIEDATUM_GEPASSEERD");
     expect(resultaat.controleVereist.some((i) => i.ernst === "WAARSCHUWING" && i.bericht.includes("betekent NIET automatisch"))).toBe(true);
+  });
+
+  describe("laatsteIndexatie geïntegreerd in berekenHuurdersoverzicht", () => {
+    it("vult laatsteIndexatie voor een contract met historie, null voor een contract zonder", () => {
+      const resultaat = berekenHuurdersoverzicht(
+        [contract({ contractnummer: "0000000028" }), contract({ contractnummer: "0000000052" })],
+        [rentrollRegel({ contractnummer: "0000000028" }), rentrollRegel({ contractnummer: "0000000052" })],
+        [verhogingRegel({ contractnummer: "0000000028", jaar: "2026", periode: "07", bedragOudVs01: new Decimal(3028.6), bedragNieuwVs01: new Decimal(3109.9) })],
+      );
+      const c28 = resultaat.contracten.find((c) => c.contractnummer === "0000000028")!;
+      expect(c28.laatsteIndexatie?.jaar).toBe("2026");
+      expect(c28.laatsteIndexatie?.effectiefPercentage.toFixed(2)).toBe("2.68");
+
+      const c52 = resultaat.contracten.find((c) => c.contractnummer === "0000000052")!;
+      expect(c52.laatsteIndexatie).toBeNull();
+    });
+
+    it("bewijst dat historie van contract 0000000037 NOOIT aan contract 0000000052 wordt gekoppeld, ook niet met identieke huurder/complex/unit", () => {
+      // Zelfde bewezen 070-geval: alleen contractnummer verschilt, huurdernummer/complex/unit zijn identiek.
+      const resultaat = berekenHuurdersoverzicht(
+        [contract({ contractnummer: "0000000052", huurdernummer: "H23", complexnummer: "002", unitnummer: "0003" })],
+        [rentrollRegel({ contractnummer: "0000000052", complexnummer: "002", unitnummer: "0003" })],
+        [verhogingRegel({ contractnummer: "0000000037", jaar: "2025", periode: "04" })], // ander contractnummer, wordt nooit gezien voor 052.
+      );
+      expect(resultaat.contracten[0]!.laatsteIndexatie).toBeNull();
+    });
+
+    it("houdt een geldige laatsteIndexatie geldig ondanks een reconciliatieverschil met de actuele rentroll-bruto-jaarhuur (contract 048-bevinding)", () => {
+      const resultaat = berekenHuurdersoverzicht(
+        [contract({ contractnummer: "0000000048" })],
+        [rentrollRegel({ contractnummer: "0000000048", prolongatieBedragJaar: new Decimal(38137.44) })],
+        // Bedrag_Nieuw_VS_01 × 12 = 9534.36 × 12 = 114412.32 — exact 3× de rentroll-bruto-jaarhuur, precies het bewezen 048-geval.
+        [verhogingRegel({ contractnummer: "0000000048", jaar: "2026", periode: "01", bedragOudVs01: new Decimal(9232.03), bedragNieuwVs01: new Decimal(9534.36) })],
+      );
+      const c48 = resultaat.contracten[0]!;
+      expect(c48.laatsteIndexatie).not.toBeNull();
+      expect(c48.laatsteIndexatie?.nieuwMaandhuurbedrag.toString()).toBe("9534.36");
+      expect(resultaat.controleVereist.some((i) => i.ernst === "WAARSCHUWING" && i.bericht.includes("wijkt af van de actuele bruto jaarhuur"))).toBe(true);
+    });
   });
 
   describe("070_Rooise_Zoom regressie — echte contract-huurder-diagnose-data (2026-08-27)", () => {

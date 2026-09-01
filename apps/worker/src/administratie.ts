@@ -41,6 +41,7 @@ export const DEFAULT_BRONLOCATIES: Record<BronType, BronLocatie> = {
   servicekosten: "gedeeld",
   ouderdomsanalyse: "gedeeld",
   begroting: "eigen",
+  contract_verhogingen: "gedeeld",
 };
 
 export function nieuweAdministratieConfig(bedrijfsnr: string, weergavenaam: string): AdministratieConfig {
@@ -58,6 +59,15 @@ export function leesAdministratieConfig(root: string, administratieId: string): 
     throw new Error(`administratie.json ontbreekt voor "${administratieId}" op ${pad}.`);
   }
   const parsed = JSON.parse(readFileSync(pad, "utf-8")) as AdministratieConfig;
+  // Migratie in-memory (2026-08-28): een bestaand administratie.json van vóór een nieuw
+  // brontype (bv. contract_verhogingen) mist die sleutel nog — vul die dan aan met de
+  // standaardlocatie i.p.v. te falen. Schrijft niets terug; de volgende expliciete
+  // schrijfactie (replace/init-administratie) persisteert de aanvulling vanzelf.
+  for (const bronType of BRON_TYPES) {
+    if (parsed.bronlocaties[bronType] === undefined) {
+      parsed.bronlocaties[bronType] = DEFAULT_BRONLOCATIES[bronType];
+    }
+  }
   valideerConfig(parsed);
   return parsed;
 }

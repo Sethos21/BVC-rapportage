@@ -12,3 +12,4 @@ export * from "./sources/complexTotalen.js";
 export * from "./sources/servicekosten.js";
 export * from "./sources/servicekostenAfrekeningDiagnose.js";
 export * from "./sources/ouderdomsanalyse.js";
+export * from "./sources/contractVerhogingen.js";

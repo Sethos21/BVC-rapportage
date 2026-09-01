@@ -143,6 +143,17 @@ export const CACHE_TABLES_DDL: readonly string[] = [
     peildatum TEXT NOT NULL,
     PRIMARY KEY (bedrijfsnr, huurdernr, boekjaar, boekperiode)
   )`,
+  `CREATE TABLE contract_verhogingen (
+    bedrijfsnr TEXT NOT NULL,
+    contract TEXT NOT NULL,
+    jaar TEXT NOT NULL,
+    periode TEXT NOT NULL,
+    status TEXT,
+    toekomstige_verhoging TEXT,
+    bedrag_oud_vs01 TEXT,
+    bedrag_nieuw_vs01 TEXT,
+    PRIMARY KEY (bedrijfsnr, contract, jaar, periode)
+  )`,
   `CREATE TABLE cache_meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -157,4 +168,5 @@ export type CacheTableName =
   | "units"
   | "rentroll"
   | "complex_totalen"
-  | "ouderdomsanalyse";
+  | "ouderdomsanalyse"
+  | "contract_verhogingen";

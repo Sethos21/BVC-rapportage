@@ -9,6 +9,7 @@ import type {
   CacheData,
   ComplexTotaalRow,
   ContractRow,
+  ContractVerhogingRow,
   OuderdomsanalyseRow,
   RentrollRow,
   ServicekostenRow,
@@ -54,6 +55,10 @@ const OUDERDOMSANALYSE_COLUMNS: (keyof OuderdomsanalyseRow)[] = [
   "achterstand_tm_90_dagen", "achterstand_90plus_dagen", "vooruitbetaling", "saldo", "boekjaar",
   "boekperiode", "peildatum",
 ];
+const CONTRACT_VERHOGING_COLUMNS: (keyof ContractVerhogingRow)[] = [
+  "bedrijfsnr", "contract", "jaar", "periode", "status", "toekomstige_verhoging",
+  "bedrag_oud_vs01", "bedrag_nieuw_vs01",
+];
 
 export interface BuildCacheResult {
   path: string;
@@ -64,6 +69,7 @@ export interface BuildCacheResult {
 const LEGE_ROWCOUNTS: Record<keyof CacheData, number> = {
   boekingen: 0, balansstanden: 0, servicekosten: 0, contracten: 0,
   units: 0, rentroll: 0, complex_totalen: 0, ouderdomsanalyse: 0,
+  contract_verhogingen: 0,
 };
 
 /**
@@ -134,6 +140,11 @@ export class CacheBuilder {
     this.rowCounts.ouderdomsanalyse += rows.length;
   }
 
+  insertContractVerhogingen(rows: readonly ContractVerhogingRow[]): void {
+    insertAll(this.db, "contract_verhogingen", CONTRACT_VERHOGING_COLUMNS, rows);
+    this.rowCounts.contract_verhogingen += rows.length;
+  }
+
   /** Schrijft cache_meta, sluit de database en vervangt `targetPath` atomisch. */
   finish(): BuildCacheResult {
     const builtAt = new Date().toISOString();
@@ -170,6 +181,7 @@ export function buildCache(targetPath: string, data: CacheData): BuildCacheResul
     builder.insertRentroll(data.rentroll);
     builder.insertComplexTotalen(data.complex_totalen);
     builder.insertOuderdomsanalyse(data.ouderdomsanalyse);
+    builder.insertContractVerhogingen(data.contract_verhogingen);
     return builder.finish();
   } catch (error) {
     builder.abort();

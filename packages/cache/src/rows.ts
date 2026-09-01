@@ -136,6 +136,17 @@ export interface OuderdomsanalyseRow {
   peildatum: string;
 }
 
+export interface ContractVerhogingRow {
+  bedrijfsnr: string;
+  contract: string;
+  jaar: string;
+  periode: string;
+  status: string | null;
+  toekomstige_verhoging: string | null;
+  bedrag_oud_vs01: string | null;
+  bedrag_nieuw_vs01: string | null;
+}
+
 export interface CacheData {
   boekingen: BoekingRow[];
   balansstanden: BalansstandRow[];
@@ -145,6 +156,7 @@ export interface CacheData {
   rentroll: RentrollRow[];
   complex_totalen: ComplexTotaalRow[];
   ouderdomsanalyse: OuderdomsanalyseRow[];
+  contract_verhogingen: ContractVerhogingRow[];
 }
 
 export const EMPTY_CACHE_DATA: CacheData = {
@@ -156,4 +168,5 @@ export const EMPTY_CACHE_DATA: CacheData = {
   rentroll: [],
   complex_totalen: [],
   ouderdomsanalyse: [],
+  contract_verhogingen: [],
 };

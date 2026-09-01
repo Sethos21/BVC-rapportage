@@ -42,6 +42,23 @@ import { bepaalContractGeldigheid, type HuurContractRegel } from "./huurKerncijf
  * Openstaand saldo/debiteuren (ouderdomsanalyse) en kosten-per-huurder
  * zijn BEWUST GEEN velden in v1 — niet als `null`-placeholder, gewoon
  * afwezig in het type (zie README voor de vervolgacties).
+ *
+ * **Laatste indexatie (2026-08-28)** — `contract_verhogingen` (structurele
+ * bron sinds deze datum, bewezen via `contract-verhogingen-diagnose`).
+ * Koppelsleutel is bedrijfsnr+contractnummer (zoals bij elke andere bron
+ * hier); historie van een ander contractnummer wordt NOOIT overgenomen,
+ * ook niet als huurdernummer/complex/unit toevallig gelijk zijn (bewezen
+ * 070-geval: contract 0000000037 → 0000000052 blijft twee aparte
+ * contracten). VS_01 is de bewezen reguliere-huurcomponent (maandbedragen);
+ * het effectieve indexatiepercentage wordt ALTIJD zelf berekend uit
+ * `Bedrag_oud_VS_01`/`Bedrag_Nieuw_VS_01` — nooit uit een `Waarde`-veld
+ * (dat bestaat hier niet eens, zie `@bvc/data-contracts`' `contractVerhogingen.ts`).
+ * Zie `bepaalLaatsteIndexatie` voor de bewezen, defensieve Status/
+ * Toekomstige_verhoging-filtering. Een reconciliatieverschil met de
+ * actuele rentroll-bruto-jaarhuur (× 12) is uitsluitend een diagnostisch
+ * signaal — bewezen bij contract 048 (factor 3, vermoedelijk een
+ * historische omvangswijziging) — en nulliseert de historische regel
+ * nooit.
  */
 
 export type ContracteindeStatus = "VERLOOPT_BINNENKORT" | "AANDACHT" | "GEEN_URGENTIE" | "EXPIRATIEDATUM_GEPASSEERD" | "ONBEKEND";
@@ -91,6 +108,24 @@ export interface HoRentrollRegel {
   contractOpzegdatum: Date | null;
 }
 
+export interface HoVerhogingRegel {
+  contractnummer: string;
+  jaar: string;
+  periode: string;
+  status: string | null;
+  toekomstigeVerhoging: string | null;
+  bedragOudVs01: Decimal | null;
+  bedragNieuwVs01: Decimal | null;
+}
+
+export interface HoLaatsteIndexatie {
+  jaar: string;
+  periode: string;
+  oudMaandhuurbedrag: Decimal;
+  nieuwMaandhuurbedrag: Decimal;
+  effectiefPercentage: Decimal;
+}
+
 export interface HuurdersoverzichtHuur {
   brutoJaarhuur: OnbekendOf<Decimal>;
   huurkorting: OnbekendOf<Decimal>;
@@ -136,6 +171,8 @@ export interface HuurdersoverzichtContractRegel {
   /** contracten.Waarborgsom — 0 is geldig, `null` = niet geregistreerd. */
   waarborgsom: Decimal | null;
   indexering: HuurdersoverzichtIndexering;
+  /** `null` = geen betrouwbare historische indexatie voor DIT contractnummer (geen historie, of geen regel voldoet aan de bewezen bronsemantiek) — zie `bepaalLaatsteIndexatie`. */
+  laatsteIndexatie: HoLaatsteIndexatie | null;
 }
 
 export interface HuurdersoverzichtPortefeuilleTotalen {
@@ -191,6 +228,104 @@ export function bepaalContracteindeStatus(expiratieExpiratiedatum: Date | null, 
   return { status: "GEEN_URGENTIE", restlooptijdDagen };
 }
 
+/**
+ * Bewezen bronsemantiek voor `contract_verhogingen` bij 070 (contract-
+ * verhogingen-diagnose, 2026-08-28, alle 33 070-regels): Status="Verwerkt"
+ * en Toekomstige_verhoging="Nee" markeren een daadwerkelijk verwerkte,
+ * niet-toekomstige indexatie. Defensief toegepast — een regel die niet
+ * EXACT aan beide waarden voldoet telt nooit mee, ook niet als jaar+
+ * periode vóór de peildatum ligt. Voor een andere administratie met
+ * afwijkende Status-waarden levert dit terecht `laatsteIndexatie: null` +
+ * een WAARSCHUWING op, nooit een gok.
+ */
+const BEWEZEN_STATUS_VERWERKT = "Verwerkt";
+const BEWEZEN_TOEKOMSTIGE_VERHOGING_NEE = "Nee";
+
+/** "jjjj"+"pp" → lexicografisch sorteerbare sleutel — nooit omgezet naar een `Date` (zou een dag-van-de-maand verzinnen). Niet-numerieke jaar/periode blijven ongewijzigd (dan werkt de vergelijking niet, maar crasht ook niet). */
+function verhogingSorteersleutel(jaar: string, periode: string): string {
+  const jaarGetal = Number(jaar);
+  const periodeGetal = Number(periode);
+  const jaarDeel = Number.isFinite(jaarGetal) ? String(jaarGetal).padStart(4, "0") : jaar;
+  const periodeDeel = Number.isFinite(periodeGetal) ? String(periodeGetal).padStart(2, "0") : periode;
+  return `${jaarDeel}${periodeDeel}`;
+}
+
+/**
+ * Laatste betrouwbare indexatie voor ÉÉN contract (de aanroeper groepeert
+ * `verhogingen` al op bedrijfsnr+contractnummer — zie moduledoc: historie
+ * van een ander contractnummer wordt hier nooit gezien, laat staan
+ * gebruikt). Effectief percentage wordt ALTIJD zelf berekend uit
+ * Bedrag_oud_VS_01/Bedrag_Nieuw_VS_01 (Decimal), nooit uit een `Waarde`-
+ * veld gelezen.
+ */
+export function bepaalLaatsteIndexatie(
+  contractnummer: string,
+  verhogingen: readonly HoVerhogingRegel[],
+  bronPeildatum: Date | null,
+): { laatsteIndexatie: HoLaatsteIndexatie | null; controleVereist: HuurdersoverzichtControleItem[] } {
+  const controleVereist: HuurdersoverzichtControleItem[] = [];
+  if (verhogingen.length === 0) {
+    return { laatsteIndexatie: null, controleVereist };
+  }
+  if (bronPeildatum === null) {
+    controleVereist.push({ contractnummer, ernst: "WAARSCHUWING", bericht: `Contract ${contractnummer}: geen eenduidige bronPeildatum — laatste indexatie niet te bepalen.` });
+    return { laatsteIndexatie: null, controleVereist };
+  }
+
+  const bronPeildatumSleutel = `${String(bronPeildatum.getUTCFullYear()).padStart(4, "0")}${String(bronPeildatum.getUTCMonth() + 1).padStart(2, "0")}`;
+  const chronologisch = [...verhogingen].sort((a, b) => verhogingSorteersleutel(a.jaar, a.periode).localeCompare(verhogingSorteersleutel(b.jaar, b.periode)));
+
+  const kandidaten = chronologisch.filter(
+    (v) =>
+      v.status === BEWEZEN_STATUS_VERWERKT &&
+      v.toekomstigeVerhoging === BEWEZEN_TOEKOMSTIGE_VERHOGING_NEE &&
+      verhogingSorteersleutel(v.jaar, v.periode) <= bronPeildatumSleutel,
+  );
+
+  if (kandidaten.length === 0) {
+    controleVereist.push({
+      contractnummer,
+      ernst: "WAARSCHUWING",
+      bericht: `Contract ${contractnummer}: ${verhogingen.length} verhogingsregel(s) beschikbaar, maar geen enkele voldoet aan de bewezen bronsemantiek (Status="${BEWEZEN_STATUS_VERWERKT}", Toekomstige_verhoging="${BEWEZEN_TOEKOMSTIGE_VERHOGING_NEE}") vóór/op de peildatum — laatste indexatie onbekend.`,
+    });
+    return { laatsteIndexatie: null, controleVereist };
+  }
+
+  const laatste = kandidaten[kandidaten.length - 1]!;
+  const meestRecenteOverall = chronologisch[chronologisch.length - 1]!;
+  if (meestRecenteOverall !== laatste && verhogingSorteersleutel(meestRecenteOverall.jaar, meestRecenteOverall.periode) <= bronPeildatumSleutel) {
+    controleVereist.push({
+      contractnummer,
+      ernst: "INFORMATIEF",
+      bericht: `Contract ${contractnummer}: een nieuwere verhogingsregel (${meestRecenteOverall.jaar}-${meestRecenteOverall.periode}) bestaat maar voldeed niet aan de bewezen bronsemantiek — niet gebruikt als laatste indexatie.`,
+    });
+  }
+
+  if (laatste.bedragOudVs01 === null || laatste.bedragNieuwVs01 === null) {
+    controleVereist.push({
+      contractnummer,
+      ernst: "WAARSCHUWING",
+      bericht: `Contract ${contractnummer}: laatste indexatieregel (${laatste.jaar}-${laatste.periode}) mist Bedrag_oud_VS_01/Bedrag_Nieuw_VS_01 — percentage niet te berekenen.`,
+    });
+    return { laatsteIndexatie: null, controleVereist };
+  }
+  if (!laatste.bedragOudVs01.greaterThan(0)) {
+    controleVereist.push({
+      contractnummer,
+      ernst: "WAARSCHUWING",
+      bericht: `Contract ${contractnummer}: laatste indexatieregel (${laatste.jaar}-${laatste.periode}) heeft Bedrag_oud_VS_01 ≤ 0 — percentage niet te berekenen (deling door nul/negatief).`,
+    });
+    return { laatsteIndexatie: null, controleVereist };
+  }
+
+  const effectiefPercentage = laatste.bedragNieuwVs01.dividedBy(laatste.bedragOudVs01).minus(1).times(100);
+
+  return {
+    laatsteIndexatie: { jaar: laatste.jaar, periode: laatste.periode, oudMaandhuurbedrag: laatste.bedragOudVs01, nieuwMaandhuurbedrag: laatste.bedragNieuwVs01, effectiefPercentage },
+    controleVereist,
+  };
+}
+
 interface Bucket {
   brutoRegels: Decimal[];
   kortingRegels: Decimal[];
@@ -220,7 +355,11 @@ function naarHuurContractRegel(c: HoContractRegel): HuurContractRegel {
   return { contractnummer: c.contractnummer, ingangsdatum: c.ingangsdatum, afloopdatum: c.afloopdatum, checkLopendContract: c.checkLopendContract };
 }
 
-export function berekenHuurdersoverzicht(contracten: readonly HoContractRegel[], rentroll: readonly HoRentrollRegel[]): HuurdersoverzichtResultaat {
+export function berekenHuurdersoverzicht(
+  contracten: readonly HoContractRegel[],
+  rentroll: readonly HoRentrollRegel[],
+  verhogingen: readonly HoVerhogingRegel[] = [],
+): HuurdersoverzichtResultaat {
   const controleVereist: HuurdersoverzichtControleItem[] = [];
   const bronPeildatum = bepaalBronPeildatum(rentroll);
 
@@ -229,6 +368,13 @@ export function berekenHuurdersoverzicht(contracten: readonly HoContractRegel[],
     const groep = rentrollPerContract.get(regel.contractnummer) ?? [];
     groep.push(regel);
     rentrollPerContract.set(regel.contractnummer, groep);
+  }
+
+  const verhogingenPerContract = new Map<string, HoVerhogingRegel[]>();
+  for (const regel of verhogingen) {
+    const groep = verhogingenPerContract.get(regel.contractnummer) ?? [];
+    groep.push(regel);
+    verhogingenPerContract.set(regel.contractnummer, groep);
   }
 
   const portefeuilleBucket: Bucket = { brutoRegels: [], kortingRegels: [], vvoRegels: [] };
@@ -384,6 +530,26 @@ export function berekenHuurdersoverzicht(contracten: readonly HoContractRegel[],
       });
     }
 
+    const huur = berekenHuur(bucket);
+
+    const { laatsteIndexatie, controleVereist: indexatieControleVereist } = bepaalLaatsteIndexatie(
+      contract.contractnummer,
+      verhogingenPerContract.get(contract.contractnummer) ?? [],
+      bronPeildatum,
+    );
+    controleVereist.push(...indexatieControleVereist);
+
+    if (laatsteIndexatie !== null && isBekend(huur.brutoJaarhuur)) {
+      const geimpliceerdeJaarhuur = laatsteIndexatie.nieuwMaandhuurbedrag.times(12);
+      if (!geimpliceerdeJaarhuur.equals(huur.brutoJaarhuur.waarde)) {
+        controleVereist.push({
+          contractnummer: contract.contractnummer,
+          ernst: "WAARSCHUWING",
+          bericht: `Contract ${contract.contractnummer}: laatste indexatie (${laatsteIndexatie.nieuwMaandhuurbedrag.toString()}/maand × 12 = ${geimpliceerdeJaarhuur.toString()}) wijkt af van de actuele bruto jaarhuur (${huur.brutoJaarhuur.waarde.toString()}) — diagnostisch signaal (zie contract 048-bevinding, packages/reporting/README.md), de historische indexatie blijft geldig.`,
+        });
+      }
+    }
+
     return {
       bedrijfsnr: contract.bedrijfsnr,
       contractnummer: contract.contractnummer,
@@ -401,7 +567,7 @@ export function berekenHuurdersoverzicht(contracten: readonly HoContractRegel[],
       },
       restlooptijdDagen,
       status,
-      huur: berekenHuur(bucket),
+      huur,
       servicekostenvoorschotJaar: regels.find((r) => r.serviceVoorschotJaar !== null)?.serviceVoorschotJaar ?? null,
       waarborgsom: contract.waarborgsom,
       indexering: {
@@ -412,6 +578,7 @@ export function berekenHuurdersoverzicht(contracten: readonly HoContractRegel[],
         vastPercentage: contract.verhogingPercentage,
         omschrijvingIndextabel: contract.omschrijvingIndextabel,
       },
+      laatsteIndexatie,
     };
   });
 

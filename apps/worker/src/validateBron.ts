@@ -6,6 +6,7 @@ import {
   parseBoekingen,
   parseComplexTotalen,
   parseContracten,
+  parseContractVerhogingen,
   parseOuderdomsanalyse,
   parseRentroll,
   parseServicekosten,
@@ -109,6 +110,10 @@ export function valideerBron(bronType: BronType, buffer: Buffer, context: Valida
         boekperiode: context.boekperiode,
         peildatum: context.peildatum,
       });
+      return { rowCount: rijen.length, issues: [...issues, ...controleerBedrijfsnr(rijen, (r) => r.bedrijfsnr, context.verwachtBedrijfsnr)], duplicaatIssues };
+    }
+    case "contract_verhogingen": {
+      const { rijen, issues, duplicaatIssues } = parseContractVerhogingen(ruweRijen);
       return { rowCount: rijen.length, issues: [...issues, ...controleerBedrijfsnr(rijen, (r) => r.bedrijfsnr, context.verwachtBedrijfsnr)], duplicaatIssues };
     }
   }
