@@ -27,10 +27,19 @@ export const BRON_TYPES = [
   "ouderdomsanalyse",
   "begroting",
   "contract_verhogingen",
+  "vorderingen_met_afboekingen",
 ] as const;
 
 export type BronType = (typeof BRON_TYPES)[number];
 
+/**
+ * Migratie 2026-08-31: het brontype "ouderdomsanalyse" wijst voortaan naar
+ * `saldo_huurders.xlsx` — bewezen dezelfde Informant-export (identieke 33
+ * kolommen, zie packages/reporting/README.md) als het vervangen
+ * `ouderdomsanalyse.xlsx`, alleen actueler. Bewust GEEN nieuwe interne naam
+ * (BronType/cachetabel blijven "ouderdomsanalyse") om migratierisico te
+ * beperken — alleen de bestandsnaam-mapping verandert.
+ */
 export const BRON_BESTANDSNAAM: Record<BronType, string> = {
   boekingen: "boekingen.xlsx",
   balans_per_jaar: "balans_per_jaar.xlsx",
@@ -39,9 +48,10 @@ export const BRON_BESTANDSNAAM: Record<BronType, string> = {
   units: "units.xlsx",
   complex_totalen: "complex_totalen.xlsx",
   servicekosten: "servicekosten.xlsx",
-  ouderdomsanalyse: "ouderdomsanalyse.xlsx",
+  ouderdomsanalyse: "saldo_huurders.xlsx",
   begroting: "begroting.xlsx",
   contract_verhogingen: "contract_verhogingen.xlsx",
+  vorderingen_met_afboekingen: "vorderingen_met_afboekingen.xlsx",
 };
 
 /**

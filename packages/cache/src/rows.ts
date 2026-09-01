@@ -147,6 +147,23 @@ export interface ContractVerhogingRow {
   bedrag_nieuw_vs01: string | null;
 }
 
+export interface VorderingMetAfboekingRow {
+  bedrijfsnr: string;
+  contractnr: string;
+  vordering_volgnr: string;
+  huurdernr: string;
+  complexnummer: string | null;
+  unitnummer: string | null;
+  datum_vordering: string;
+  omschrijving_vordering: string | null;
+  factuurnummer: string | null;
+  totaalbedrag: string;
+  bedrag_afgeboekt: string;
+  openstaand: string;
+  afgehandeld_periode: string | null;
+  afgehandeld_jaar: string | null;
+}
+
 export interface CacheData {
   boekingen: BoekingRow[];
   balansstanden: BalansstandRow[];
@@ -157,6 +174,7 @@ export interface CacheData {
   complex_totalen: ComplexTotaalRow[];
   ouderdomsanalyse: OuderdomsanalyseRow[];
   contract_verhogingen: ContractVerhogingRow[];
+  vorderingen_met_afboekingen: VorderingMetAfboekingRow[];
 }
 
 export const EMPTY_CACHE_DATA: CacheData = {
@@ -169,4 +187,5 @@ export const EMPTY_CACHE_DATA: CacheData = {
   complex_totalen: [],
   ouderdomsanalyse: [],
   contract_verhogingen: [],
+  vorderingen_met_afboekingen: [],
 };

@@ -140,6 +140,13 @@ export function contractVerhogingenRijen(): Record<string, unknown>[] {
   ];
 }
 
+export function vorderingenMetAfboekingenRijen(): Record<string, unknown>[] {
+  return [
+    { Bedrijfsnr: "070", Contractnr: "C1", Vordering_Volgnr: "00000001", Huurdernr: "H1", Complexnummer: "01", Unitnummer: "001", Datum_Vordering: "01-09-2026", Omschrijving_Vordering: "Periode september 2026", Factuurnummer: "2070000001", Vordering_Totaalbedrag: "1000,00", Bedrag_afgeboekt: "0", Vordering_openstaand: "1000,00", Vordering_afgehandeld_periode: null, Vordering_afgehandeld_jaar: null },
+    { Bedrijfsnr: "074", Contractnr: "C9", Vordering_Volgnr: "00000001", Huurdernr: "H9", Complexnummer: "02", Unitnummer: "005", Datum_Vordering: "01-09-2026", Omschrijving_Vordering: "Periode september 2026", Factuurnummer: "2074000001", Vordering_Totaalbedrag: "2000,00", Bedrag_afgeboekt: "2000,00", Vordering_openstaand: "0", Vordering_afgehandeld_periode: "09", Vordering_afgehandeld_jaar: "2026" },
+  ];
+}
+
 export function unitsRijen(): Record<string, unknown>[] {
   return [
     {

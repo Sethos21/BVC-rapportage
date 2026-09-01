@@ -14,6 +14,7 @@ import type {
   RentrollRow,
   ServicekostenRow,
   UnitRow,
+  VorderingMetAfboekingRow,
 } from "./rows.js";
 
 const BOEKING_COLUMNS: (keyof BoekingRow)[] = [
@@ -59,6 +60,11 @@ const CONTRACT_VERHOGING_COLUMNS: (keyof ContractVerhogingRow)[] = [
   "bedrijfsnr", "contract", "jaar", "periode", "status", "toekomstige_verhoging",
   "bedrag_oud_vs01", "bedrag_nieuw_vs01",
 ];
+const VORDERING_MET_AFBOEKING_COLUMNS: (keyof VorderingMetAfboekingRow)[] = [
+  "bedrijfsnr", "contractnr", "vordering_volgnr", "huurdernr", "complexnummer", "unitnummer",
+  "datum_vordering", "omschrijving_vordering", "factuurnummer", "totaalbedrag", "bedrag_afgeboekt",
+  "openstaand", "afgehandeld_periode", "afgehandeld_jaar",
+];
 
 export interface BuildCacheResult {
   path: string;
@@ -69,7 +75,7 @@ export interface BuildCacheResult {
 const LEGE_ROWCOUNTS: Record<keyof CacheData, number> = {
   boekingen: 0, balansstanden: 0, servicekosten: 0, contracten: 0,
   units: 0, rentroll: 0, complex_totalen: 0, ouderdomsanalyse: 0,
-  contract_verhogingen: 0,
+  contract_verhogingen: 0, vorderingen_met_afboekingen: 0,
 };
 
 /**
@@ -145,6 +151,11 @@ export class CacheBuilder {
     this.rowCounts.contract_verhogingen += rows.length;
   }
 
+  insertVorderingenMetAfboekingen(rows: readonly VorderingMetAfboekingRow[]): void {
+    insertAll(this.db, "vorderingen_met_afboekingen", VORDERING_MET_AFBOEKING_COLUMNS, rows);
+    this.rowCounts.vorderingen_met_afboekingen += rows.length;
+  }
+
   /** Schrijft cache_meta, sluit de database en vervangt `targetPath` atomisch. */
   finish(): BuildCacheResult {
     const builtAt = new Date().toISOString();
@@ -182,6 +193,7 @@ export function buildCache(targetPath: string, data: CacheData): BuildCacheResul
     builder.insertComplexTotalen(data.complex_totalen);
     builder.insertOuderdomsanalyse(data.ouderdomsanalyse);
     builder.insertContractVerhogingen(data.contract_verhogingen);
+    builder.insertVorderingenMetAfboekingen(data.vorderingen_met_afboekingen);
     return builder.finish();
   } catch (error) {
     builder.abort();

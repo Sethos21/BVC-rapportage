@@ -18,6 +18,7 @@ import { genereerServicekostenGrootboekReconciliatieDiagnose } from "./genereerS
 import { genereerServicekostenPositie } from "./genereerServicekostenPositie.js";
 import { genereerHuurKerncijfers } from "./genereerHuurKerncijfers.js";
 import { genereerHuurdersoverzicht } from "./genereerHuurdersoverzicht.js";
+import { genereerOpenstaandePosten } from "./genereerOpenstaandePosten.js";
 import { genereerContractVerhogingenDiagnose } from "./genereerContractVerhogingenDiagnose.js";
 import { genereerHuurdersoverzichtRapport } from "./genereerHuurdersoverzichtRapport.js";
 import { genereerManagementRapport } from "./genereerManagementRapport.js";
@@ -67,6 +68,8 @@ function printGebruik(): never {
       "      (TIJDELIJK, v1: bruto/netto jaarhuur, huurkortingen, verhuurde VVO en huur per m², per complex + portefeuille — Vorderingsoort 01=huur/13=korting (Vorderingsoort 12 en onverwachte waarden genegeerd+gemeld), alleen regels met een deterministische, op bronPeildatum geldige contractkoppeling tellen mee. STRIKT ZELFSTANDIG van vastgoed-kerncijfers/kerncijfersManagement/@bvc/domain/vastgoed.ts, geen boekjaar/periode: actuele bronstand. Geen renderer/HTML, alleen JSON op stdout)",
       "  huurdersoverzicht <administratieId>",
       "      (v1: contract-geankerd huurdersoverzicht — één regel per contract, GEEN rij per rentroll-regel, GEEN kunstmatige unittoewijzing. Hergebruikt bepaalContractGeldigheid uit huur-kerncijfers voor de huur-eligibility (bruto/netto jaarhuur, huurkorting, m², €/m²) — regressie-eis: som over alle contracten reconcilieert exact naar huur-kerncijfers' portefeuillecijfer. Contracteinde/restlooptijd/status komen uit contracten.expiratie_expiratiedatum (NIET afloopdatum, bij 070 vrijwel altijd leeg), met rentroll.contract_expiratiedatum als onafhankelijke controle. Complexomschrijving wordt uitsluitend als aanduiding naast complexnummer getoond, nooit als authoritative complexnaam of voor joins/aggregaties. Servicekostenvoorschot komt uit rentroll.Service_voorschot_jaar (contractueel), NIET uit servicekosten-positie's geboekte voorschotten. Openstaand saldo/kosten-per-huurder zijn GEEN velden in v1. Momentopname, geen boekjaar/periode. Geen renderer/HTML, geen management-rapport-koppeling, alleen JSON op stdout)",
+      "  openstaande-posten <administratieId>",
+      "      (v1: pure domeinlogica voor openstaande posten — detailbron vorderingen_met_afboekingen (individuele posten, contractattributie, bewezen sleutel Bedrijfsnr+Contractnr+Vordering_Volgnr), control-/ouderdomsbron saldo_huurders (= de cachetabel 'ouderdomsanalyse', huurderniveau officieel saldo + Informant-buckets, NOOIT zelfberekend). Reconciliatie-ernst hangt af van administratie.json's debiteurenbeheer.bankAfletteringDoorOns (true/false/'onbekend', nooit een aanname bij ontbrekende config): true geeft een WAARSCHUWING bij een verschil, false geeft uitsluitend een structurele INFORMATIEF-melding (geen technische foutmelding), onbekend geeft een neutrale WAARSCHUWING. Nog GEEN renderer/HTML, geen koppeling aan Huurdersoverzicht/management-rapport, alleen JSON op stdout)",
       "  contract-verhogingen-diagnose <administratieId>",
       "      (TIJDELIJK, alleen-lezen: onderzoekt bron_gedeeld/contract_verhogingen.xlsx (nog GEEN onderdeel van BRON_TYPES/cache/schema, rechtstreeks gelezen, gefilterd op Bedrijfsnr) op betrouwbaarheid voor historische huurindexaties. Koppeling tegen de bekende contracten uit de cache, chronologische historie per contract incl. VS_01..VS_20-bedragen, en een puur-Decimal (geen JS floating point) vergelijking van de chronologisch laatste regel vóór/op bronPeildatum tegen rentroll's huidige bruto jaarhuur/huurkorting per VS-code. Trekt zelf GEEN conclusie welke VS-code kale huur is of wat Waarde betekent — toont uitsluitend de vergelijkingen. Geen schema/cache-wijziging, alleen JSON op stdout)",
       "  huurdersoverzicht-rapport <administratieId>",
@@ -348,6 +351,15 @@ async function main() {
     const [administratieId] = rest;
     if (!administratieId) printGebruik();
     const resultaat = genereerHuurdersoverzicht(root, administratieId);
+    console.log(JSON.stringify(resultaat, null, 2));
+    if (resultaat.controleVereist.some((i) => i.ernst === "KRITIEK")) process.exitCode = 1;
+    return;
+  }
+
+  if (command === "openstaande-posten") {
+    const [administratieId] = rest;
+    if (!administratieId) printGebruik();
+    const resultaat = genereerOpenstaandePosten(root, administratieId);
     console.log(JSON.stringify(resultaat, null, 2));
     if (resultaat.controleVereist.some((i) => i.ernst === "KRITIEK")) process.exitCode = 1;
     return;

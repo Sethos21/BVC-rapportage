@@ -55,7 +55,7 @@ beforeEach(() => {
     },
   ]);
 
-  schrijfXlsxFixture(join(bronGedeeldDir(root), "ouderdomsanalyse.xlsx"), [
+  schrijfXlsxFixture(join(bronGedeeldDir(root), "saldo_huurders.xlsx"), [
     { Bedrijfsnr: "070", Huurdernr: "H1", Achterstand: "500", Achterstand_tm_30_dagen: "500", Achterstand_tm_60_dagen: "0", Achterstand_tm_90_dagen: "0", Achterstand_90plus_dagen: "0", Vooruitbetaling: "0", Saldo: "500" },
   ]);
 

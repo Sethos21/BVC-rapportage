@@ -22,6 +22,7 @@ import {
   schrijfXlsxFixture,
   servicekostenRijen,
   unitsRijen,
+  vorderingenMetAfboekingenRijen,
 } from "./fixtures.js";
 
 const OUDERDOMSANALYSE_METADATA = { boekjaar: 2026, boekperiode: "06", peildatum: new Date(Date.UTC(2026, 5, 30)) };
@@ -48,8 +49,9 @@ function schrijfAlleGedeeldeBronnen(): void {
   schrijfXlsxFixture(join(dir, "contracten_huidig.xlsx"), contractenRijen());
   schrijfXlsxFixture(join(dir, "units.xlsx"), unitsRijen());
   schrijfXlsxFixture(join(dir, "complex_totalen.xlsx"), complexTotalenRijen());
-  schrijfXlsxFixture(join(dir, "ouderdomsanalyse.xlsx"), ouderdomsanalyseRijen());
+  schrijfXlsxFixture(join(dir, "saldo_huurders.xlsx"), ouderdomsanalyseRijen());
   schrijfXlsxFixture(join(dir, "contract_verhogingen.xlsx"), contractVerhogingenRijen());
+  schrijfXlsxFixture(join(dir, "vorderingen_met_afboekingen.xlsx"), vorderingenMetAfboekingenRijen());
 }
 
 beforeEach(() => {
@@ -271,7 +273,7 @@ describe("7. SQLite-cache-inhoud komt inhoudelijk overeen met de brondata", () =
     expect(resultaat070.rowCounts["boekingen"]).toBe(2);
     expect(resultaat074.rowCounts["boekingen"]).toBe(1);
     // Alle overige bronnen: 1 rij per administratie in de fixtures.
-    for (const tabel of ["balansstanden", "servicekosten", "contracten", "units", "rentroll", "complex_totalen", "ouderdomsanalyse"]) {
+    for (const tabel of ["balansstanden", "servicekosten", "contracten", "units", "rentroll", "complex_totalen", "ouderdomsanalyse", "vorderingen_met_afboekingen"]) {
       expect(resultaat070.rowCounts[tabel], tabel).toBe(tabel === "servicekosten" ? 2 : 1);
       expect(resultaat074.rowCounts[tabel], tabel).toBe(1);
     }

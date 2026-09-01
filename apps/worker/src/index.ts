@@ -16,3 +16,4 @@ export * from "./replace.js";
 export * from "./validateBron.js";
 export * from "./lock.js";
 export * from "./audit.js";
+export * from "./genereerOpenstaandePosten.js";

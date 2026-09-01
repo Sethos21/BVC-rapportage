@@ -10,6 +10,15 @@ import { parseRowsWithSchema, vindDubbeleNatuurlijkeSleutels, type ParseResult, 
  * rekenvelden, contactgegevens blijven uitsluitend in `raw` — persoons-
  * velden gaan niet naar rapportage-/AI-context tenzij functioneel nodig).
  *
+ * Migratie 2026-08-31: het onderliggende bronbestand is `saldo_huurders.xlsx`
+ * geworden (BRON_BESTANDSNAAM in apps/worker/src/paths.ts) — bewezen
+ * dezelfde Informant-export, exact dezelfde 33 kolommen, alleen actueler
+ * dan het vervangen `ouderdomsanalyse.xlsx`. Schema/interne naamgeving
+ * (`ouderdomsanalyse`, deze functie/cachetabel) blijven bewust ongewijzigd
+ * om migratierisico te beperken — zie packages/reporting/README.md voor
+ * de volledige onderbouwing en de nieuwe openstaande-posten-module die
+ * deze bron als control-/ouderdomstotaal gebruikt.
+ *
  * De export bevat GEEN peildatumveld: boekjaar en boekperiode zijn daarom
  * verplichte importmetadata (niet kolommen in het bestand zelf) en de
  * peildatum is de laatste kalenderdag van die boekperiode.

@@ -25,6 +25,7 @@ export * from "./vastgoedKerncijfers.js";
 export * from "./rentrollDiagnose.js";
 export * from "./contractHuurderDiagnose.js";
 export * from "./huurdersoverzicht.js";
+export * from "./openstaandePosten.js";
 export * from "./renderHuurdersoverzicht.js";
 export * from "./contractVerhogingenDiagnose.js";
 export * from "./servicekostenBronKolommenDiagnose.js";

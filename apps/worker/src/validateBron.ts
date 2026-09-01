@@ -11,6 +11,7 @@ import {
   parseRentroll,
   parseServicekosten,
   parseUnits,
+  parseVorderingenMetAfboekingen,
   readFirstSheetAsRows,
   type RowIssue,
 } from "@bvc/data-contracts";
@@ -114,6 +115,10 @@ export function valideerBron(bronType: BronType, buffer: Buffer, context: Valida
     }
     case "contract_verhogingen": {
       const { rijen, issues, duplicaatIssues } = parseContractVerhogingen(ruweRijen);
+      return { rowCount: rijen.length, issues: [...issues, ...controleerBedrijfsnr(rijen, (r) => r.bedrijfsnr, context.verwachtBedrijfsnr)], duplicaatIssues };
+    }
+    case "vorderingen_met_afboekingen": {
+      const { rijen, issues, duplicaatIssues } = parseVorderingenMetAfboekingen(ruweRijen);
       return { rowCount: rijen.length, issues: [...issues, ...controleerBedrijfsnr(rijen, (r) => r.bedrijfsnr, context.verwachtBedrijfsnr)], duplicaatIssues };
     }
   }

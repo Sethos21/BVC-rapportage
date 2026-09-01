@@ -9,6 +9,7 @@ import {
   parseRentroll,
   parseServicekosten,
   parseUnits,
+  parseVorderingenMetAfboekingen,
   type RowIssue,
 } from "@bvc/data-contracts";
 import { CacheBuilder, type CacheData } from "@bvc/cache";
@@ -263,6 +264,22 @@ export function rebuildCache(options: RebuildCacheOptions): RebuildCacheResultaa
             }));
           log(`${bron.bronType}: ${cacheRijen.length} rijen voor deze administratie (van ${rijen.length} gevalideerd), wegschrijven naar cache…`);
           builder.insertContractVerhogingen(cacheRijen);
+          break;
+        }
+        case "vorderingen_met_afboekingen": {
+          const { rijen, issues: parseIssues } = parseVorderingenMetAfboekingen(ruweRijen);
+          issues.push(...parseIssues);
+          const cacheRijen: CacheData["vorderingen_met_afboekingen"] = rijen
+            .filter((r) => r.bedrijfsnr === bedrijfsnr)
+            .map((r) => ({
+              bedrijfsnr: r.bedrijfsnr, contractnr: r.contractnr, vordering_volgnr: r.vorderingVolgnr,
+              huurdernr: r.huurdernr, complexnummer: r.complexnummer, unitnummer: r.unitnummer,
+              datum_vordering: iso(r.datumVordering)!, omschrijving_vordering: r.omschrijvingVordering,
+              factuurnummer: r.factuurnummer, totaalbedrag: dec(r.totaalbedrag)!, bedrag_afgeboekt: dec(r.bedragAfgeboekt)!,
+              openstaand: dec(r.openstaand)!, afgehandeld_periode: r.afgehandeldPeriode, afgehandeld_jaar: r.afgehandeldJaar,
+            }));
+          log(`${bron.bronType}: ${cacheRijen.length} rijen voor deze administratie (van ${rijen.length} gevalideerd), wegschrijven naar cache…`);
+          builder.insertVorderingenMetAfboekingen(cacheRijen);
           break;
         }
       }
