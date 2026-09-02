@@ -226,6 +226,8 @@ export interface BgPortefeuilleTotalen extends BgJaartotalen {
 
 export interface BgHuurResultaat {
   begrotingsjaar: number;
+  /** Het bevroren bronmoment waartegen `Verhoging_datum` als "eerstvolgend" is beoordeeld — expliciet meegegeven, nooit hier herleid. */
+  bronPeildatum: Date;
   indexatiePercentageAlgemeen: Decimal;
   contracten: BgContractUitkomst[];
   portefeuilleTotalen: BgPortefeuilleTotalen;
@@ -342,8 +344,27 @@ function maandBereik(jaar: number, maand: number): { start: Date; eind: Date } {
   return { start: new Date(Date.UTC(jaar, maand - 1, 1)), eind: new Date(Date.UTC(jaar, maand, 0)) };
 }
 
+/**
+ * Telt `aantalMaanden` op bij `datum`, met de doelmaand berekend via
+ * gehele-getallen-rekenkunde (jaar*12+maand) — niet via `Date.UTC`'s eigen
+ * dag-normalisatie. Reden: `new Date(Date.UTC(jaar, maand+n, dag))` laat
+ * een dag die niet in de doelmaand past (bv. dag 31 in een doelmaand met
+ * 28/29/30 dagen) stilzwijgend doorlopen naar de VOLGENDE maand — dat zou
+ * de businessregel "voor de begroting is de indexatiemaand leidend"
+ * schenden. Deze functie KLEMT de dag daarom af op de laatste dag van de
+ * daadwerkelijke doelmaand (net als vrijwel elke kalenderbibliotheek: 31
+ * januari + 1 maand = 28/29 februari, nooit 2/3 maart). Voor alle bewezen
+ * gevallen (Verhoging_Dag altijd "01") heeft dit geen effect — dit is
+ * uitsluitend een defensieve correctie voor een dag > 28 die (nog) niet in
+ * de bron is waargenomen.
+ */
 function addMaandenUTC(datum: Date, aantalMaanden: number): Date {
-  return new Date(Date.UTC(datum.getUTCFullYear(), datum.getUTCMonth() + aantalMaanden, datum.getUTCDate()));
+  const jaarMaandIndex = datum.getUTCFullYear() * 12 + datum.getUTCMonth() + aantalMaanden;
+  const doelJaar = Math.floor(jaarMaandIndex / 12);
+  const doelMaand0 = jaarMaandIndex - doelJaar * 12;
+  const laatsteDagVanDoelMaand = new Date(Date.UTC(doelJaar, doelMaand0 + 1, 0)).getUTCDate();
+  const dag = Math.min(datum.getUTCDate(), laatsteDagVanDoelMaand);
+  return new Date(Date.UTC(doelJaar, doelMaand0, dag));
 }
 
 /** Dagfractie (0..1) van overlap tussen [ingangsdatum, einddatum] en de kalendermaand [maandStart, maandEind]. */
@@ -356,37 +377,56 @@ function bepaalActieveDagfractie(maandStart: Date, maandEind: Date, ingangsdatum
   return new Decimal(actieveDagen).dividedBy(dagenInMaand);
 }
 
+/** Normaliseert naar UTC-middernacht van dezelfde kalenderdag — zodat datumvergelijkingen nooit door een tijdstip-component worden beïnvloed. */
+function naarKalenderDag(datum: Date): Date {
+  return new Date(Date.UTC(datum.getUTCFullYear(), datum.getUTCMonth(), datum.getUTCDate()));
+}
+
 /**
  * Bepaalt de effectieve indexatiedatum voor het begrotingsjaar.
  *
  * Bewezen bronsemantiek: `Verhoging_datum` is de EERSTVOLGENDE geplande
- * indexatiedatum op het moment van bevriezen — nooit een historische/laatst-
- * toegepaste datum. Daarom:
- * - valt de bronwaarde al in het begrotingsjaar → ongewijzigd gebruiken;
- * - ligt de bronwaarde VÓÓR het begrotingsjaar → uitsluitend VOORWAARTS
- *   projecteren met `indexatieHerhalingMaanden` (Verhoging_opnieuw_na) —
- *   nooit een ander interval verzinnen;
- * - ligt de bronwaarde NÁ het begrotingsjaar → GEEN achterwaartse
- *   reconstructie van een oudere, niet-geregistreerde indexatiedatum. Dit
- *   contract is voor dít begrotingsjaar simpelweg nog niet aan de beurt
- *   (bv. een meerjarig herhalingsinterval) — geen indexatie toegepast, wel
- *   een informatieve melding waarom.
- * Ontbreekt een betrouwbare indexatiedatum, of is voorwaartse doorprojectie
- * nodig maar het interval onbekend/ongeldig, dan is het resultaat `null`
- * (geen indexatie dit jaar) — nooit een gok. (De "ontbrekende indexatiedatum
- * bekend" - melding zelf wordt door de aanroeper toegevoegd, alleen als het
- * contract daadwerkelijk huur genereert in het begrotingsjaar — zie
- * `berekenBegroteHuuropbrengsten`.)
+ * indexatiedatum OP HET MOMENT VAN DE BRONEXPORT/-SNAPSHOT (`bronPeildatum`)
+ * — nooit een historische/laatst-toegepaste datum. Ligt `indexatiedatum` op
+ * de bronpeildatum al in het verleden, dan is de bronwaarde zelf STALE
+ * (een mogelijk achterlopende/niet-verwerkte Informant-batch) en mag hij
+ * nooit worden doorgeprojecteerd — dat zou een gegokte indexatie zijn.
+ * Daarom, in deze volgorde:
+ * 1. `indexatiedatum === null` → geen indexatie (melding: zie aanroeper).
+ * 2. `indexatiedatum < bronPeildatum` (kalenderdag-vergelijking, geen
+ *    tijdstip-effecten) → STALE, geen projectie, geen indexatie, WAARSCHUWING.
+ * 3. `indexatiedatum` valt in het begrotingsjaar → ongewijzigd gebruiken.
+ * 4. `indexatiedatum` vóór het begrotingsjaar (en niet stale) → uitsluitend
+ *    VOORWAARTS projecteren met `indexatieHerhalingMaanden` (Verhoging_
+ *    opnieuw_na) — nooit een ander interval verzinnen.
+ * 5. `indexatiedatum` ná het begrotingsjaar → GEEN achterwaartse
+ *    reconstructie van een oudere, niet-geregistreerde indexatiedatum —
+ *    geen indexatie toegepast, wel een informatieve melding waarom.
  */
 function bepaalEffectieveIndexatiedatum(
   contractnummer: string,
   indexatiedatum: Date | null,
   herhalingMaanden: number | null,
   begrotingsjaar: number,
+  bronPeildatum: Date,
 ): { datum: Date | null; controleVereist: BgControleItem[] } {
   if (indexatiedatum === null) {
     return { datum: null, controleVereist: [] };
   }
+
+  if (naarKalenderDag(indexatiedatum).getTime() < naarKalenderDag(bronPeildatum).getTime()) {
+    return {
+      datum: null,
+      controleVereist: [
+        {
+          contractnummer,
+          ernst: "WAARSCHUWING",
+          bericht: `Contract ${contractnummer}: de geregistreerde eerstvolgende indexatiedatum (${indexatiedatum.toISOString().slice(0, 10)}) lag op de bronpeildatum (${bronPeildatum.toISOString().slice(0, 10)}) al in het verleden — mogelijk een achterlopende/niet-verwerkte Informant-batch. Niet doorgeprojecteerd, geen indexatie toegepast.`,
+        },
+      ],
+    };
+  }
+
   const bronjaar = indexatiedatum.getUTCFullYear();
   if (bronjaar === begrotingsjaar) {
     return { datum: indexatiedatum, controleVereist: [] };
@@ -445,6 +485,18 @@ export function berekenBegroteHuuropbrengsten(
   contracten: readonly BgContractFeiten[],
   overrides: readonly BgContractOverride[],
   aannames: BgHuurAannames,
+  /**
+   * Het bevroren bronmoment (uit het snapshot, NOOIT tijdens herberekening
+   * opnieuw uit de actuele cache gehaald) waartegen `Verhoging_datum` als
+   * "eerstvolgende geplande indexatiedatum" geldig is. Bewust GEEN veld op
+   * `BgHuurAannames` — dit is een bronfeit van het snapshot, geen
+   * begrotingsaanname. Eén waarde voor de hele aanroep (niet per contract):
+   * alle contracten in één aanroep komen uit hetzelfde bevroren bronmoment
+   * (zelfde invariant als "één administratie per aanroep" hierboven) —
+   * een per-contract veld zou dat alleen maar kunnen laten uiteenlopen
+   * zonder een geldige reden.
+   */
+  bronPeildatum: Date,
 ): BgHuurResultaat {
   // Invariant (fase 1A, expliciet vastgesteld): deze functie verwerkt EXACT
   // één administratie per aanroep. `contractnummer` is daarmee een geldige
@@ -516,6 +568,7 @@ export function berekenBegroteHuuropbrengsten(
       contract.indexatiedatum,
       contract.indexatieHerhalingMaanden,
       aannames.begrotingsjaar,
+      bronPeildatum,
     );
     controleVereist.push(...indexatieMeldingen);
     if (contract.indexatiedatum === null && heeftOverlap) {
@@ -599,6 +652,7 @@ export function berekenBegroteHuuropbrengsten(
 
   return {
     begrotingsjaar: aannames.begrotingsjaar,
+    bronPeildatum,
     indexatiePercentageAlgemeen: aannames.indexatiePercentage,
     contracten: contractUitkomsten,
     portefeuilleTotalen,

@@ -35,9 +35,13 @@ function aannames(overrides: Partial<BgHuurAannames> = {}): BgHuurAannames {
   return { begrotingsjaar: 2027, indexatiePercentage: new Decimal(3), ...overrides };
 }
 
+// Standaard bronpeildatum voor de meeste tests — ruim vóór alle in dit bestand gebruikte
+// indexatiedatums binnen 2027, zodat die scenario's niet per ongeluk als "stale" gelden.
+const BRON_PEILDATUM = new Date("2026-09-01T00:00:00.000Z");
+
 describe("berekenBegroteHuuropbrengsten", () => {
   it("contract volledig jaar zonder indexatie: elke maand gelijk, geen effect", () => {
-    const resultaat = berekenBegroteHuuropbrengsten([contract()], [], aannames());
+    const resultaat = berekenBegroteHuuropbrengsten([contract()], [], aannames(), BRON_PEILDATUM);
     const c = resultaat.contracten[0]!;
     expect(c.regels).toHaveLength(12);
     for (const regel of c.regels) {
@@ -55,6 +59,7 @@ describe("berekenBegroteHuuropbrengsten", () => {
       [contract({ indexatiedatum: new Date("2027-01-01T00:00:00.000Z") })],
       [],
       aannames(),
+      BRON_PEILDATUM,
     );
     const c = resultaat.contracten[0]!;
     for (const regel of c.regels) {
@@ -70,6 +75,7 @@ describe("berekenBegroteHuuropbrengsten", () => {
       [contract({ indexatiedatum: new Date("2027-05-01T00:00:00.000Z") })],
       [],
       aannames(),
+      BRON_PEILDATUM,
     );
     const c = resultaat.contracten[0]!;
     for (const regel of c.regels) {
@@ -86,6 +92,7 @@ describe("berekenBegroteHuuropbrengsten", () => {
       [contract({ indexatiedatum: new Date("2027-08-01T00:00:00.000Z") })],
       [],
       aannames(),
+      BRON_PEILDATUM,
     );
     const c = resultaat.contracten[0]!;
     const juli = c.regels.find((r) => r.maand === 7)!;
@@ -101,6 +108,7 @@ describe("berekenBegroteHuuropbrengsten", () => {
       [contract({ indexatiedatum: new Date("2027-08-15T00:00:00.000Z") })], // dag 15, niet dag 1
       [],
       aannames(),
+      BRON_PEILDATUM,
     );
     const c = resultaat.contracten[0]!;
     const juli = c.regels.find((r) => r.maand === 7)!;
@@ -116,6 +124,7 @@ describe("berekenBegroteHuuropbrengsten", () => {
       [contract({ ingangsdatum: new Date("2027-04-15T00:00:00.000Z") })],
       [],
       aannames(),
+      BRON_PEILDATUM,
     );
     const c = resultaat.contracten[0]!;
     for (let maand = 1; maand <= 3; maand += 1) {
@@ -134,6 +143,7 @@ describe("berekenBegroteHuuropbrengsten", () => {
       [contract({ einddatum: new Date("2027-09-10T00:00:00.000Z") })],
       [],
       aannames(),
+      BRON_PEILDATUM,
     );
     const c = resultaat.contracten[0]!;
     for (let maand = 1; maand <= 8; maand += 1) {
@@ -152,6 +162,7 @@ describe("berekenBegroteHuuropbrengsten", () => {
       [contract({ rentrollComponenten: [vs01(120000), vs13(-6000)], indexatiedatum: new Date("2027-01-01T00:00:00.000Z") })],
       [],
       aannames(),
+      BRON_PEILDATUM,
     );
     const c = resultaat.contracten[0]!;
     for (const regel of c.regels) {
@@ -167,6 +178,7 @@ describe("berekenBegroteHuuropbrengsten", () => {
       [contract({ rentrollComponenten: [vs01(80000), vs01(40000)] })],
       [],
       aannames(),
+      BRON_PEILDATUM,
     );
     const c = resultaat.contracten[0]!;
     expect(c.regels[0]!.brutoHuurZonderIndexatie.toString()).toBe("10000"); // (80000+40000)/12
@@ -182,6 +194,7 @@ describe("berekenBegroteHuuropbrengsten", () => {
       ],
       [],
       aannames(),
+      BRON_PEILDATUM,
     );
     const belast = resultaat.contracten.find((c) => c.contractnummer === "C-BELAST")!;
     const onbelast = resultaat.contracten.find((c) => c.contractnummer === "C-ONBELAST")!;
@@ -196,6 +209,7 @@ describe("berekenBegroteHuuropbrengsten", () => {
       [contract({ rentrollComponenten: [vs01(120000, "Y"), vs13(-6000, "N")] })],
       [],
       aannames(),
+      BRON_PEILDATUM,
     );
     const c = resultaat.contracten[0]!;
     expect(c.belastOnbelast).toBe("ONBEKEND");
@@ -210,6 +224,7 @@ describe("berekenBegroteHuuropbrengsten", () => {
       [contract({ indexatiedatum: new Date("2027-01-01T00:00:00.000Z") })],
       [override],
       aannames({ indexatiePercentage: new Decimal(3) }),
+      BRON_PEILDATUM,
     );
     const c = resultaat.contracten[0]!;
     expect(resultaat.indexatiePercentageAlgemeen.toString()).toBe("3"); // systeemwaarde blijft beschikbaar
@@ -219,11 +234,15 @@ describe("berekenBegroteHuuropbrengsten", () => {
     expect(c.regels[0]!.indexatieEffect.toString()).toBe("500"); // 10000 * 5%
   });
 
-  it("projectie van de indexatiedatum via Verhoging_opnieuw_na naar het begrotingsjaar", () => {
+  it("projectie van de indexatiedatum via Verhoging_opnieuw_na naar het begrotingsjaar (niet-stale bronwaarde)", () => {
+    // bronPeildatum vóór de indexatiedatum zelf: op het moment van bevriezen was
+    // 2025-07-01 nog daadwerkelijk de eerstvolgende geplande indexatie — een geldig,
+    // niet-stale uitgangspunt om voorwaarts te projecteren.
     const resultaat = berekenBegroteHuuropbrengsten(
       [contract({ indexatiedatum: new Date("2025-07-01T00:00:00.000Z"), indexatieHerhalingMaanden: 12 })],
       [],
       aannames({ begrotingsjaar: 2027 }),
+      new Date("2025-06-01T00:00:00.000Z"),
     );
     const c = resultaat.contracten[0]!;
     expect(c.effectieveIndexatiedatum).toEqual(new Date("2027-07-01T00:00:00.000Z"));
@@ -238,6 +257,7 @@ describe("berekenBegroteHuuropbrengsten", () => {
       [contract({ indexatiedatum: new Date("2025-07-01T00:00:00.000Z"), indexatieHerhalingMaanden: null })],
       [],
       aannames({ begrotingsjaar: 2027 }),
+      new Date("2025-06-01T00:00:00.000Z"), // niet-stale bronpeildatum, zodat dit specifiek het "geen interval"-pad test.
     );
     const c = resultaat.contracten[0]!;
     expect(c.effectieveIndexatiedatum).toBeNull();
@@ -250,11 +270,7 @@ describe("berekenBegroteHuuropbrengsten", () => {
   });
 
   it("tekenconventie: een positieve VS=13 of negatieve VS=01 wordt als KRITIEK gemeld en buiten de som gehouden", () => {
-    const resultaat = berekenBegroteHuuropbrengsten(
-      [contract({ rentrollComponenten: [vs01(-1000), vs13(500)] })],
-      [],
-      aannames(),
-    );
+    const resultaat = berekenBegroteHuuropbrengsten([contract({ rentrollComponenten: [vs01(-1000), vs13(500)] })], [], aannames(), BRON_PEILDATUM);
     const c = resultaat.contracten[0]!;
     expect(c.jaartotaal.brutoHuurZonderIndexatie.toString()).toBe("0");
     expect(c.jaartotaal.huurkorting.toString()).toBe("0");
@@ -266,6 +282,7 @@ describe("berekenBegroteHuuropbrengsten", () => {
       [contract({ contractnummer: "C1" }), contract({ contractnummer: "C2", rentrollComponenten: [vs01(60000)] })],
       [],
       aannames(),
+      BRON_PEILDATUM,
     );
     const handmatigeSom = resultaat.contracten.reduce((s, c) => s.plus(c.jaartotaal.nettoHuur), new Decimal(0));
     expect(resultaat.portefeuilleTotalen.nettoHuur.toString()).toBe(handmatigeSom.toString());
@@ -277,6 +294,7 @@ describe("berekenBegroteHuuropbrengsten", () => {
       [contract({ indexatiedatum: new Date("2028-07-01T00:00:00.000Z"), indexatieHerhalingMaanden: 12 })],
       [],
       aannames({ begrotingsjaar: 2027 }),
+      BRON_PEILDATUM,
     );
     const c = resultaat.contracten[0]!;
     expect(c.effectieveIndexatiedatum).toBeNull(); // geen fictieve 2027-07-01-indexatie
@@ -293,6 +311,7 @@ describe("berekenBegroteHuuropbrengsten", () => {
       [contract({ contractnummer: "MET-OVERLAP", indexatiedatum: null })],
       [],
       aannames(),
+      BRON_PEILDATUM,
     );
     expect(
       metOverlap.controleVereist.some(
@@ -311,6 +330,7 @@ describe("berekenBegroteHuuropbrengsten", () => {
       ],
       [],
       aannames(),
+      BRON_PEILDATUM,
     );
     expect(
       zonderOverlap.controleVereist.some((i) => i.contractnummer === "ZONDER-OVERLAP" && i.bericht.includes("geen betrouwbare indexatiedatum")),
@@ -318,7 +338,7 @@ describe("berekenBegroteHuuropbrengsten", () => {
   });
 
   it("correctie 3: VS=01 = 0 is ongeldig (tekenconventie eist > 0), wordt niet meegeteld en geeft een controle-item", () => {
-    const resultaat = berekenBegroteHuuropbrengsten([contract({ rentrollComponenten: [vs01(0)] })], [], aannames());
+    const resultaat = berekenBegroteHuuropbrengsten([contract({ rentrollComponenten: [vs01(0)] })], [], aannames(), BRON_PEILDATUM);
     const c = resultaat.contracten[0]!;
     expect(c.jaartotaal.brutoHuurZonderIndexatie.toString()).toBe("0");
     expect(
@@ -332,7 +352,80 @@ describe("berekenBegroteHuuropbrengsten", () => {
         [contract({ bedrijfsnr: "070", contractnummer: "C1" }), contract({ bedrijfsnr: "010", contractnummer: "C2" })],
         [],
         aannames(),
+        BRON_PEILDATUM,
       ),
     ).toThrow(/exact één administratie per aanroep/);
+  });
+
+  describe("correctie 5: bronPeildatum bewaakt tegen stale doorprojectie van Verhoging_datum", () => {
+    it("A. geldige voorwaartse projectie: indexatiedatum was op de bronpeildatum nog de eerstvolgende, geldige toekomstige datum", () => {
+      const resultaat = berekenBegroteHuuropbrengsten(
+        [contract({ indexatiedatum: new Date("2027-07-01T00:00:00.000Z"), indexatieHerhalingMaanden: 12 })],
+        [],
+        aannames({ begrotingsjaar: 2028 }),
+        new Date("2026-09-01T00:00:00.000Z"),
+      );
+      const c = resultaat.contracten[0]!;
+      expect(c.effectieveIndexatiedatum).toEqual(new Date("2028-07-01T00:00:00.000Z"));
+      expect(c.jaartotaal.indexatieEffect.greaterThan(0)).toBe(true);
+      expect(resultaat.controleVereist).toHaveLength(0);
+    });
+
+    it("B. stale bronwaarde: indexatiedatum lag op de bronpeildatum al in het verleden — geen projectie, geen indexatie", () => {
+      const resultaat = berekenBegroteHuuropbrengsten(
+        [contract({ indexatiedatum: new Date("2025-07-01T00:00:00.000Z"), indexatieHerhalingMaanden: 12 })],
+        [],
+        aannames({ begrotingsjaar: 2027 }),
+        new Date("2026-09-01T00:00:00.000Z"),
+      );
+      const c = resultaat.contracten[0]!;
+      expect(c.effectieveIndexatiedatum).toBeNull();
+      expect(c.jaartotaal.indexatieEffect.toString()).toBe("0");
+      expect(
+        resultaat.controleVereist.some(
+          (i) => i.contractnummer === "C1" && i.ernst === "WAARSCHUWING" && i.bericht.includes("al in het verleden") && i.bericht.includes("2025-07-01"),
+        ),
+      ).toBe(true);
+    });
+
+    it("C. grensgeval: indexatiedatum exact gelijk aan bronPeildatum wordt NIET als stale behandeld", () => {
+      const resultaat = berekenBegroteHuuropbrengsten(
+        [contract({ indexatiedatum: new Date("2026-09-01T00:00:00.000Z"), indexatieHerhalingMaanden: 12 })],
+        [],
+        aannames({ begrotingsjaar: 2026 }),
+        new Date("2026-09-01T00:00:00.000Z"),
+      );
+      const c = resultaat.contracten[0]!;
+      expect(c.effectieveIndexatiedatum).toEqual(new Date("2026-09-01T00:00:00.000Z"));
+      expect(resultaat.controleVereist.some((i) => i.bericht.includes("al in het verleden"))).toBe(false);
+    });
+  });
+
+  describe("technisch randgeval: maandprojectie bij dag 29/30/31 mag nooit in de verkeerde maand belanden", () => {
+    it("31 december + 2 maanden interval landt in februari (28 dagen), niet in maart", () => {
+      const resultaat = berekenBegroteHuuropbrengsten(
+        [contract({ indexatiedatum: new Date("2026-12-31T00:00:00.000Z"), indexatieHerhalingMaanden: 2 })],
+        [],
+        aannames({ begrotingsjaar: 2027 }),
+        new Date("2026-01-01T00:00:00.000Z"),
+      );
+      const c = resultaat.contracten[0]!;
+      expect(c.effectieveIndexatiedatum).not.toBeNull();
+      expect(c.effectieveIndexatiedatum!.getUTCMonth()).toBe(1); // februari (0-indexed), NIET maart (2)
+      expect(c.effectieveIndexatiedatum!.getUTCDate()).toBe(28); // afgeklemd op de laatste dag van februari 2027
+    });
+
+    it("31 december + 2 maanden interval in een schrikkeljaar landt op 29 februari", () => {
+      const resultaat = berekenBegroteHuuropbrengsten(
+        [contract({ indexatiedatum: new Date("2027-12-31T00:00:00.000Z"), indexatieHerhalingMaanden: 2 })],
+        [],
+        aannames({ begrotingsjaar: 2028 }), // 2028 is een schrikkeljaar
+        new Date("2027-01-01T00:00:00.000Z"),
+      );
+      const c = resultaat.contracten[0]!;
+      expect(c.effectieveIndexatiedatum).not.toBeNull();
+      expect(c.effectieveIndexatiedatum!.getUTCMonth()).toBe(1); // februari, niet maart
+      expect(c.effectieveIndexatiedatum!.getUTCDate()).toBe(29); // 2028 is een schrikkeljaar
+    });
   });
 });
