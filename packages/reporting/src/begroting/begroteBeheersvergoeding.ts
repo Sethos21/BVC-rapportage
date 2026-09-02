@@ -199,8 +199,9 @@ interface OpgelosteComplexConfig {
  */
 function valideerComplexConfigs(
   configs: readonly BgBeheerComplexConfig[],
-): { configPerComplex: Map<string, OpgelosteComplexConfig>; controleVereist: BgBeheerControleItem[] } {
+): { configPerComplex: Map<string, OpgelosteComplexConfig>; ongeldigeComplexnummers: Set<string>; controleVereist: BgBeheerControleItem[] } {
   const controleVereist: BgBeheerControleItem[] = [];
+  const ongeldigeComplexnummers = new Set<string>();
   const perComplex = new Map<string, BgBeheerComplexConfig[]>();
   for (const config of configs) {
     const groep = perComplex.get(config.complexnummer) ?? [];
@@ -211,6 +212,7 @@ function valideerComplexConfigs(
   const configPerComplex = new Map<string, OpgelosteComplexConfig>();
   for (const [complexnummer, groep] of perComplex) {
     if (groep.length > 1) {
+      ongeldigeComplexnummers.add(complexnummer);
       controleVereist.push({
         complexnummer,
         ernst: "KRITIEK",
@@ -248,7 +250,7 @@ function valideerComplexConfigs(
     });
   }
 
-  return { configPerComplex, controleVereist };
+  return { configPerComplex, ongeldigeComplexnummers, controleVereist };
 }
 
 export function berekenBegroteBeheersvergoeding(
@@ -260,14 +262,12 @@ export function berekenBegroteBeheersvergoeding(
   const { grondslagPerComplex, controleVereist: grondslagMeldingen } = bepaalComplexHuurGrondslagen(module1);
   controleVereist.push(...grondslagMeldingen);
 
-  const { configPerComplex, controleVereist: configMeldingen } = valideerComplexConfigs(configs);
+  const { configPerComplex, ongeldigeComplexnummers: complexenMetOngeldigeConfig, controleVereist: configMeldingen } = valideerComplexConfigs(configs);
   controleVereist.push(...configMeldingen);
 
   // Complexen met een meervoudige (ongeldige) config blijven bewust buiten configPerComplex — die
   // hebben hun eigen KRITIEK-melding al gehad en mogen niet nogmaals als "config ontbreekt" gemeld worden.
-  const complexenMetOngeldigeConfig = new Set(
-    configMeldingen.filter((m) => m.bericht.includes("niet stilzwijgend één gekozen")).map((m) => m.complexnummer),
-  );
+  // `complexenMetOngeldigeConfig` komt structureel uit valideerComplexConfigs (nooit via berichttekst afgeleid).
 
   const alleComplexnummers = new Set([...grondslagPerComplex.keys(), ...configPerComplex.keys()]);
 
