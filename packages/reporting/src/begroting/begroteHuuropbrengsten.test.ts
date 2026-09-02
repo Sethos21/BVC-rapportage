@@ -271,4 +271,68 @@ describe("berekenBegroteHuuropbrengsten", () => {
     expect(resultaat.portefeuilleTotalen.nettoHuur.toString()).toBe(handmatigeSom.toString());
     expect(resultaat.portefeuilleTotalen.nettoHuur.toString()).toBe("180000");
   });
+
+  it("correctie 1: Verhoging_datum ná het begrotingsjaar wordt NOOIT achterwaarts gereconstrueerd", () => {
+    const resultaat = berekenBegroteHuuropbrengsten(
+      [contract({ indexatiedatum: new Date("2028-07-01T00:00:00.000Z"), indexatieHerhalingMaanden: 12 })],
+      [],
+      aannames({ begrotingsjaar: 2027 }),
+    );
+    const c = resultaat.contracten[0]!;
+    expect(c.effectieveIndexatiedatum).toBeNull(); // geen fictieve 2027-07-01-indexatie
+    expect(c.jaartotaal.indexatieEffect.toString()).toBe("0");
+    expect(
+      resultaat.controleVereist.some(
+        (i) => i.contractnummer === "C1" && i.bericht.includes("ligt ná begrotingsjaar") && i.bericht.includes("2028-07-01"),
+      ),
+    ).toBe(true);
+  });
+
+  it("correctie 2: ontbrekende indexatiedatum geeft een controle-item, maar alleen als het contract huur genereert in het begrotingsjaar", () => {
+    const metOverlap = berekenBegroteHuuropbrengsten(
+      [contract({ contractnummer: "MET-OVERLAP", indexatiedatum: null })],
+      [],
+      aannames(),
+    );
+    expect(
+      metOverlap.controleVereist.some(
+        (i) => i.contractnummer === "MET-OVERLAP" && i.ernst === "WAARSCHUWING" && i.bericht.includes("geen betrouwbare indexatiedatum"),
+      ),
+    ).toBe(true);
+
+    const zonderOverlap = berekenBegroteHuuropbrengsten(
+      [
+        contract({
+          contractnummer: "ZONDER-OVERLAP",
+          indexatiedatum: null,
+          ingangsdatum: new Date("2020-01-01T00:00:00.000Z"),
+          einddatum: new Date("2026-12-31T00:00:00.000Z"), // volledig vóór begrotingsjaar 2027
+        }),
+      ],
+      [],
+      aannames(),
+    );
+    expect(
+      zonderOverlap.controleVereist.some((i) => i.contractnummer === "ZONDER-OVERLAP" && i.bericht.includes("geen betrouwbare indexatiedatum")),
+    ).toBe(false);
+  });
+
+  it("correctie 3: VS=01 = 0 is ongeldig (tekenconventie eist > 0), wordt niet meegeteld en geeft een controle-item", () => {
+    const resultaat = berekenBegroteHuuropbrengsten([contract({ rentrollComponenten: [vs01(0)] })], [], aannames());
+    const c = resultaat.contracten[0]!;
+    expect(c.jaartotaal.brutoHuurZonderIndexatie.toString()).toBe("0");
+    expect(
+      resultaat.controleVereist.some((i) => i.ernst === "KRITIEK" && i.bericht.includes("niet-positief bedrag") && i.bericht.includes("0")),
+    ).toBe(true);
+  });
+
+  it("correctie 4: gemengde bedrijfsnr's in één aanroep falen hard (fail-fast, geen stil gemengd resultaat)", () => {
+    expect(() =>
+      berekenBegroteHuuropbrengsten(
+        [contract({ bedrijfsnr: "070", contractnummer: "C1" }), contract({ bedrijfsnr: "010", contractnummer: "C2" })],
+        [],
+        aannames(),
+      ),
+    ).toThrow(/exact één administratie per aanroep/);
+  });
 });

@@ -12,6 +12,13 @@ import Decimal from "decimal.js";
  * is verantwoordelijk voor het bevriezen van de bronfeiten in een snapshot
  * vóórdat deze functie wordt aangeroepen.
  *
+ * Invariant (2026-09-01, expliciet vastgesteld): `berekenBegroteHuuropbrengsten`
+ * verwerkt EXACT ÉÉN administratie (één `bedrijfsnr`) per aanroep — bewaakt
+ * met een harde fail-fast (zie de functie zelf), geen KRITIEK-melding met
+ * doorgaan. Daarmee is `contractnummer` een geldige lokale sleutel voor
+ * overrides binnen één begrotingsversie, zonder dat de interface zelf
+ * `bedrijfsnr + contractnummer` als samengestelde sleutel hoeft te gebruiken.
+ *
  * BEWEZEN BRONREGELS (niet opnieuw interpreteren, zie brononderzoeksrapport
  * in de sessie-geschiedenis):
  * - Contractidentiteit: Bedrijfsnr + Contract (bevestigd uniek binnen één
@@ -258,11 +265,11 @@ function aggregeerRentrollComponenten(
 
   for (const c of componenten) {
     if (c.vorderingsoort === "01") {
-      if (c.bedragJaar.isNegative()) {
+      if (!c.bedragJaar.greaterThan(0)) {
         controleVereist.push({
           contractnummer,
           ernst: "KRITIEK",
-          bericht: `Contract ${contractnummer}: Vorderingsoort "01"-regel heeft een negatief bedrag (${c.bedragJaar.toString()}) — buiten de som gehouden.`,
+          bericht: `Contract ${contractnummer}: Vorderingsoort "01"-regel heeft een niet-positief bedrag (${c.bedragJaar.toString()}, bewezen tekenconventie eist > 0) — buiten de som gehouden.`,
         });
         continue;
       }
@@ -350,13 +357,26 @@ function bepaalActieveDagfractie(maandStart: Date, maandEind: Date, ingangsdatum
 }
 
 /**
- * Bepaalt de effectieve indexatiedatum voor het begrotingsjaar. Valt de
- * bronwaarde al in het begrotingsjaar, dan wordt die ongewijzigd gebruikt.
- * Anders wordt UITSLUITEND met `indexatieHerhalingMaanden` (Verhoging_
- * opnieuw_na) doorgeprojecteerd — nooit een ander interval verzonnen.
- * Ontbreekt een betrouwbare indexatiedatum, of is doorprojectie nodig maar
- * het interval onbekend/ongeldig, dan is het resultaat `null` (geen
- * indexatie dit jaar) + een controle-item — nooit een gok.
+ * Bepaalt de effectieve indexatiedatum voor het begrotingsjaar.
+ *
+ * Bewezen bronsemantiek: `Verhoging_datum` is de EERSTVOLGENDE geplande
+ * indexatiedatum op het moment van bevriezen — nooit een historische/laatst-
+ * toegepaste datum. Daarom:
+ * - valt de bronwaarde al in het begrotingsjaar → ongewijzigd gebruiken;
+ * - ligt de bronwaarde VÓÓR het begrotingsjaar → uitsluitend VOORWAARTS
+ *   projecteren met `indexatieHerhalingMaanden` (Verhoging_opnieuw_na) —
+ *   nooit een ander interval verzinnen;
+ * - ligt de bronwaarde NÁ het begrotingsjaar → GEEN achterwaartse
+ *   reconstructie van een oudere, niet-geregistreerde indexatiedatum. Dit
+ *   contract is voor dít begrotingsjaar simpelweg nog niet aan de beurt
+ *   (bv. een meerjarig herhalingsinterval) — geen indexatie toegepast, wel
+ *   een informatieve melding waarom.
+ * Ontbreekt een betrouwbare indexatiedatum, of is voorwaartse doorprojectie
+ * nodig maar het interval onbekend/ongeldig, dan is het resultaat `null`
+ * (geen indexatie dit jaar) — nooit een gok. (De "ontbrekende indexatiedatum
+ * bekend" - melding zelf wordt door de aanroeper toegevoegd, alleen als het
+ * contract daadwerkelijk huur genereert in het begrotingsjaar — zie
+ * `berekenBegroteHuuropbrengsten`.)
  */
 function bepaalEffectieveIndexatiedatum(
   contractnummer: string,
@@ -367,10 +387,25 @@ function bepaalEffectieveIndexatiedatum(
   if (indexatiedatum === null) {
     return { datum: null, controleVereist: [] };
   }
-  if (indexatiedatum.getUTCFullYear() === begrotingsjaar) {
+  const bronjaar = indexatiedatum.getUTCFullYear();
+  if (bronjaar === begrotingsjaar) {
     return { datum: indexatiedatum, controleVereist: [] };
   }
 
+  if (bronjaar > begrotingsjaar) {
+    return {
+      datum: null,
+      controleVereist: [
+        {
+          contractnummer,
+          ernst: "INFORMATIEF",
+          bericht: `Contract ${contractnummer}: de eerstvolgende geplande indexatiedatum (${indexatiedatum.toISOString().slice(0, 10)}) ligt ná begrotingsjaar ${begrotingsjaar} — geen indexatie toegepast (geen achterwaartse reconstructie van een oudere indexatiedatum).`,
+        },
+      ],
+    };
+  }
+
+  // bronjaar < begrotingsjaar: uitsluitend voorwaarts projecteren.
   if (herhalingMaanden === null || !Number.isFinite(herhalingMaanden) || herhalingMaanden <= 0) {
     return {
       datum: null,
@@ -385,10 +420,9 @@ function bepaalEffectieveIndexatiedatum(
   }
 
   let kandidaat = indexatiedatum;
-  const richting = indexatiedatum.getUTCFullYear() < begrotingsjaar ? 1 : -1;
   let iteraties = 0;
-  while (kandidaat.getUTCFullYear() !== begrotingsjaar && iteraties < MAX_PROJECTIE_ITERATIES) {
-    kandidaat = addMaandenUTC(kandidaat, herhalingMaanden * richting);
+  while (kandidaat.getUTCFullYear() < begrotingsjaar && iteraties < MAX_PROJECTIE_ITERATIES) {
+    kandidaat = addMaandenUTC(kandidaat, herhalingMaanden);
     iteraties += 1;
   }
 
@@ -399,7 +433,7 @@ function bepaalEffectieveIndexatiedatum(
         {
           contractnummer,
           ernst: "WAARSCHUWING",
-          bericht: `Contract ${contractnummer}: doorprojectie van de indexatiedatum met interval ${herhalingMaanden} maand(en) landt niet in begrotingsjaar ${begrotingsjaar} — geen indexatie toegepast.`,
+          bericht: `Contract ${contractnummer}: voorwaartse doorprojectie van de indexatiedatum met interval ${herhalingMaanden} maand(en) landt niet in begrotingsjaar ${begrotingsjaar} — geen indexatie toegepast.`,
         },
       ],
     };
@@ -412,6 +446,20 @@ export function berekenBegroteHuuropbrengsten(
   overrides: readonly BgContractOverride[],
   aannames: BgHuurAannames,
 ): BgHuurResultaat {
+  // Invariant (fase 1A, expliciet vastgesteld): deze functie verwerkt EXACT
+  // één administratie per aanroep. `contractnummer` is daarmee een geldige
+  // lokale sleutel voor overrides binnen één begrotingsversie — de bredere
+  // sleutel Bedrijfsnr+Contract is dan altijd al uniek. Gemengde
+  // administraties in één aanroep zijn een aanroepersfout (geen datakwaliteits-
+  // signaal van een individueel contract) en falen daarom hard, i.p.v. een
+  // mogelijk misleidend resultaat te retourneren.
+  const bedrijfsnrs = new Set(contracten.map((c) => c.bedrijfsnr));
+  if (bedrijfsnrs.size > 1) {
+    throw new Error(
+      `berekenBegroteHuuropbrengsten verwerkt exact één administratie per aanroep — kreeg contracten van meerdere bedrijfsnr's (${[...bedrijfsnrs].sort().join(", ")}). De aanroeper moet per administratie apart aanroepen.`,
+    );
+  }
+
   const controleVereist: BgControleItem[] = [];
 
   const overridePerContract = new Map<string, BgContractOverride>();
@@ -451,6 +499,18 @@ export function berekenBegroteHuuropbrengsten(
     const indexatiePercentageGebruikt = override?.indexatiePercentage ?? aannames.indexatiePercentage;
     const indexatiePercentageBron: "ALGEMEEN" | "OVERRIDE" = override ? "OVERRIDE" : "ALGEMEEN";
 
+    // Dagfracties eerst bepalen (onafhankelijk van indexatie) — nodig om te weten of dit
+    // contract daadwerkelijk huur genereert in het begrotingsjaar, VOORDAT een eventuele
+    // "indexatiebron ontbreekt"-melding wordt overwogen (geen ruis voor niet-overlappende contracten).
+    const dagfracties: Decimal[] = [];
+    for (let maand = 1; maand <= 12; maand += 1) {
+      const { start, eind } = maandBereik(aannames.begrotingsjaar, maand);
+      dagfracties.push(
+        contract.ingangsdatum === null ? new Decimal(0) : bepaalActieveDagfractie(start, eind, contract.ingangsdatum, contract.einddatum),
+      );
+    }
+    const heeftOverlap = dagfracties.some((f) => f.greaterThan(0));
+
     const { datum: effectieveIndexatiedatum, controleVereist: indexatieMeldingen } = bepaalEffectieveIndexatiedatum(
       contract.contractnummer,
       contract.indexatiedatum,
@@ -458,19 +518,21 @@ export function berekenBegroteHuuropbrengsten(
       aannames.begrotingsjaar,
     );
     controleVereist.push(...indexatieMeldingen);
+    if (contract.indexatiedatum === null && heeftOverlap) {
+      controleVereist.push({
+        contractnummer: contract.contractnummer,
+        ernst: "WAARSCHUWING",
+        bericht: `Contract ${contract.contractnummer}: genereert huur in begrotingsjaar ${aannames.begrotingsjaar}, maar er is geen betrouwbare indexatiedatum (Verhoging_datum) bekend — geen indexatie toegepast.`,
+      });
+    }
 
     const brutoMaandBasis = brutoJaarhuur.dividedBy(12);
     const kortingMaandBasis = huurkorting.dividedBy(12);
     const indexatiemaand = effectieveIndexatiedatum !== null ? effectieveIndexatiedatum.getUTCMonth() + 1 : null;
 
-    let heeftOverlap = false;
     const regels: BgHuurMaandRegel[] = [];
     for (let maand = 1; maand <= 12; maand += 1) {
-      const { start, eind } = maandBereik(aannames.begrotingsjaar, maand);
-      const dagfractie =
-        contract.ingangsdatum === null ? new Decimal(0) : bepaalActieveDagfractie(start, eind, contract.ingangsdatum, contract.einddatum);
-      if (dagfractie.greaterThan(0)) heeftOverlap = true;
-
+      const dagfractie = dagfracties[maand - 1]!;
       const brutoHuurZonderIndexatie = brutoMaandBasis.times(dagfractie);
       const indexatieActief = indexatiemaand !== null && maand >= indexatiemaand;
       const indexatieEffect = indexatieActief ? brutoHuurZonderIndexatie.times(indexatiePercentageGebruikt).dividedBy(100) : new Decimal(0);
