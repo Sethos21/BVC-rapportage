@@ -140,6 +140,158 @@ export const MIGRATIONS: readonly Migration[] = [
        END`,
     ],
   },
+  /**
+   * Migratie 3 — de bevroren Module-1-inputsnapshot: `BgContractFeiten`
+   * (exact zoals `packages/reporting/src/begroting/begroteHuuropbrengsten.ts`
+   * die op HEAD kent), plus haar twee array-velden als child-tabellen.
+   * Uitsluitend reeds-genormaliseerde bronfeiten — GEEN aannames, GEEN
+   * overrides, GEEN Module-2-config, GEEN berekeningsoutput (die volgen in
+   * latere, apart te reviewen migraties, 1D.4+).
+   *
+   * `begroting_contract_snapshot` is uniek per (begroting_versie_id,
+   * contractnummer) — een dubbel contractnummer binnen dezelfde versie is
+   * een extractie-/persistencefout, geen legitieme businesssituatie (zelfde
+   * redenering als het fase-1D-ontwerp: contractuniciteit binnen één
+   * administratie is al BRONFEIT).
+   *
+   * Cascade-keten: begrotingsversies --ON DELETE CASCADE--> snapshot
+   * --ON DELETE CASCADE--> beide child-tabellen. Zo laat het verwijderen van
+   * een CONCEPT-versie (zie `verwijderConceptVersie`) nooit orphan-snapshot-
+   * data achter. Een VASTGESTELDE versie kan sowieso nooit verwijderd worden
+   * (bestaande trigger op `begrotingsversies` zelf) — de cascade wordt dus
+   * per definitie nooit vanuit een VASTGESTELDE rij getriggerd.
+   *
+   * Immutability: alle drie tabellen krijgen elk drie triggers (INSERT/
+   * UPDATE/DELETE) die weigeren zodra de bijbehorende `begrotingsversies`-rij
+   * `status = 'VASTGESTELD'` heeft — bewust simpele, herhaalde WHEN-subquery-
+   * triggers per tabel/actie, geen generiek triggerframework.
+   *
+   * Structurele consistentie-invariant (geen nieuwe businessregel, een
+   * technische koppeling tussen twee al bestaande velden): `begroting_
+   * contract_snapshot.bedrijfsnr` moet exact gelijk zijn aan het `bedrijfsnr`
+   * van de bijbehorende `begrotingsversies`-rij — één begrotingsversie hoort
+   * bij precies één administratie, en Module 1 zelf staat nooit meerdere
+   * bedrijfsnr's in één aanroep toe. De FK bewaakt "parent bestaat"; deze
+   * twee extra triggers (INSERT/UPDATE) bewaken uitsluitend "bedrijfsnr hoort
+   * bij die parent" — een gewone CHECK kan de parenttabel niet raadplegen.
+   */
+  {
+    version: 3,
+    description: "Module-1-inputsnapshot: begroting_contract_snapshot + rentroll-componenten + kortingswijzigingen",
+    ddl: [
+      `CREATE TABLE begroting_contract_snapshot (
+        begroting_versie_id TEXT NOT NULL REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        contractnummer TEXT NOT NULL,
+        bedrijfsnr TEXT NOT NULL,
+        huurdernummer TEXT NULL,
+        huurder_naam TEXT NULL,
+        complexnummer TEXT NULL,
+        ingangsdatum TEXT NULL,
+        einddatum TEXT NULL,
+        indexatiedatum TEXT NULL,
+        indexatie_herhaling_maanden INTEGER NULL,
+        PRIMARY KEY (begroting_versie_id, contractnummer)
+      )`,
+      `CREATE TABLE begroting_contract_rentroll_component (
+        begroting_versie_id TEXT NOT NULL,
+        contractnummer TEXT NOT NULL,
+        volgnr INTEGER NOT NULL,
+        vorderingsoort TEXT NOT NULL,
+        bedrag_jaar TEXT NOT NULL,
+        btw_yn TEXT NULL,
+        PRIMARY KEY (begroting_versie_id, contractnummer, volgnr),
+        FOREIGN KEY (begroting_versie_id, contractnummer)
+          REFERENCES begroting_contract_snapshot(begroting_versie_id, contractnummer) ON DELETE CASCADE
+      )`,
+      `CREATE TABLE begroting_contract_kortingswijziging (
+        begroting_versie_id TEXT NOT NULL,
+        contractnummer TEXT NOT NULL,
+        volgnr INTEGER NOT NULL,
+        ingangsdatum TEXT NOT NULL,
+        nieuwe_korting_per_maand TEXT NOT NULL,
+        PRIMARY KEY (begroting_versie_id, contractnummer, volgnr),
+        FOREIGN KEY (begroting_versie_id, contractnummer)
+          REFERENCES begroting_contract_snapshot(begroting_versie_id, contractnummer) ON DELETE CASCADE
+      )`,
+      `CREATE TRIGGER trg_begroting_contract_snapshot_bedrijfsnr_insert
+       BEFORE INSERT ON begroting_contract_snapshot
+       FOR EACH ROW
+       WHEN NEW.bedrijfsnr <> (SELECT bedrijfsnr FROM begrotingsversies WHERE id = NEW.begroting_versie_id)
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_contract_snapshot: bedrijfsnr moet exact overeenkomen met het bedrijfsnr van de begrotingsversie');
+       END`,
+      `CREATE TRIGGER trg_begroting_contract_snapshot_bedrijfsnr_update
+       BEFORE UPDATE ON begroting_contract_snapshot
+       FOR EACH ROW
+       WHEN NEW.bedrijfsnr <> (SELECT bedrijfsnr FROM begrotingsversies WHERE id = NEW.begroting_versie_id)
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_contract_snapshot: bedrijfsnr moet exact overeenkomen met het bedrijfsnr van de begrotingsversie');
+       END`,
+      `CREATE TRIGGER trg_begroting_contract_snapshot_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_contract_snapshot
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_contract_snapshot: begrotingsversie is VASTGESTELD, snapshot is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_contract_snapshot_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_contract_snapshot
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_contract_snapshot: begrotingsversie is VASTGESTELD, snapshot is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_contract_snapshot_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_contract_snapshot
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_contract_snapshot: begrotingsversie is VASTGESTELD, snapshot is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_contract_rentroll_component_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_contract_rentroll_component
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_contract_rentroll_component: begrotingsversie is VASTGESTELD, snapshot is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_contract_rentroll_component_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_contract_rentroll_component
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_contract_rentroll_component: begrotingsversie is VASTGESTELD, snapshot is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_contract_rentroll_component_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_contract_rentroll_component
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_contract_rentroll_component: begrotingsversie is VASTGESTELD, snapshot is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_contract_kortingswijziging_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_contract_kortingswijziging
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_contract_kortingswijziging: begrotingsversie is VASTGESTELD, snapshot is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_contract_kortingswijziging_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_contract_kortingswijziging
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_contract_kortingswijziging: begrotingsversie is VASTGESTELD, snapshot is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_contract_kortingswijziging_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_contract_kortingswijziging
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_contract_kortingswijziging: begrotingsversie is VASTGESTELD, snapshot is immutable');
+       END`,
+    ],
+  },
 ];
 
 function schemaMetaTableExists(db: DatabaseSync): boolean {

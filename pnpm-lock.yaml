@@ -87,6 +87,13 @@ importers:
         version: 0.18.5
 
   packages/begroting-data:
+    dependencies:
+      '@bvc/reporting':
+        specifier: workspace:*
+        version: link:../reporting
+      decimal.js:
+        specifier: ^10.6.0
+        version: 10.6.0
     devDependencies:
       '@types/node':
         specifier: ^24.13.2

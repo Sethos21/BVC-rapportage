@@ -21,3 +21,9 @@ export {
   type BegrotingsversieOriginType,
   type NieuweBegrotingsversieInput,
 } from "./begrotingsversies.js";
+
+// De Module-1-snapshot zelf is uitsluitend `BgContractFeiten[]` (uit
+// `@bvc/reporting`) — geen eigen, gedupliceerd type hier. Consumers
+// importeren `BgContractFeiten`/`BgRentrollComponent`/
+// `BgToekomstigeKortingswijziging` rechtstreeks vanuit `@bvc/reporting`.
+export { schrijfModule1Snapshot, leesModule1Snapshot } from "./module1Snapshot.js";
