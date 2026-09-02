@@ -89,20 +89,40 @@ import Decimal from "decimal.js";
  *    huurkortingscomponent; VS=13 wordt niet automatisch verhoogd met de
  *    reguliere huurindexatie (contracten 049/051: bij de laatste twee
  *    verwerkte indexaties bleef Bedrag_oud_VS_13 = Bedrag_Nieuw_VS_13 terwijl
- *    VS=01 wél steeg). NOG NIET BEWEZEN: dat een actuele korting het hele
- *    toekomstige begrotingsjaar ongewijzigd blijft bestaan, of dat een
- *    toekomstige wijziging/einddatum in Informant bestaat die nog niet via
- *    de huidige bronset wordt ontsloten (geen enkele 070-rij in
- *    `contract_verhogingen.xlsx` heeft `Toekomstige_verhoging="Ja"`). Het
- *    vlak/ongewijzigd doorzetten van een bestaande korting over het hele
- *    begrotingsjaar is daarom EXPLICIET een huidige begrotingsaanname/
- *    fallback van deze module — GEEN bewezen bronfeit — en moet worden
- *    herzien zodra een betrouwbare toekomstige-prijsregel-bron beschikbaar
- *    komt (zie punt 5).
+ *    VS=01 wél steeg). Het vlak/ongewijzigd doorzetten van de huidige korting
+ *    over het hele begrotingsjaar blijft de fallback-begrotingsaanname voor
+ *    een contract ZONDER bekende toekomstige mutatie (geen bewezen bronfeit
+ *    voor dat contract) — zie punt 4 voor de situatie mét een bewezen
+ *    toekomstige mutatie.
+ *
+ * 4. TOEKOMSTIGE VS13-KORTINGSWIJZIGING (bronfeit-stap, 2026-09-02,
+ *    businessbesluit vastgesteld na het Contract_prijsspecificatie-/
+ *    contracten_huidig_met_prijzen-brononderzoek) — BEWEZEN: `contract_
+ *    prijsregels.xlsx` bevat voor sommige contracten (070: 049 en 051) een
+ *    reeds bronfeit-bewezen, gedateerde toekomstige wijziging van het
+ *    VS=13-bedrag (contract 049: −500 → 0 per 01-07-2027; contract 051:
+ *    −660 → −250 per 01-05-2027 — beide unaniem over alle kandidaatregels
+ *    voor die datum). Dit is GEEN begrotingsaanname en GEEN override: een
+ *    bekend contractueel feit gaat vóór een begrotingsaanname. Businessbe-
+ *    sluit (expliciet, 2026-09-02): een dergelijke wijziging wordt uitsluitend
+ *    toegepast als de bronextractielaag hem al tot één eenduidig bedrag per
+ *    kalendermaand heeft herleid (`BgToekomstigeKortingswijziging` op
+ *    `BgContractFeiten`) — deze module kiest zelf NOOIT tussen conflicterende
+ *    kandidaten (geen "hoogste Prijs_regelnr wint"-logica hier). Uitdrukkelijk
+ *    NIET meegenomen: een eventuele toekomstige bruto-huurwaarde uit
+ *    `contract_prijsregels.xlsx`/`contracten_huidig_met_prijzen.xlsx` — die
+ *    bleek een vóór-indexatie placeholder (`Verhoging_methode=Prijsindex`
+ *    berekent het werkelijke bedrag pas op het indexatiemoment zelf), en de
+ *    bestaande aannamegebaseerde bruto-huurindexatie (punt 2) blijft daarom
+ *    ongewijzigd leidend. `Prolongeren_na_perioden` is bewezen voor VS=01,
+ *    maar NIET bewezen voor VS=13 (0 testbare gevallen in de volledige bron)
+ *    — blijft daarom volledig buiten deze module; de bronextractielaag mag
+ *    nooit stilzwijgend dezelfde deel-regel toepassen op een toekomstige
+ *    VS13-mutatie.
  *
  * OPENSTAANDE ONDERZOEKS-/CONTROLEPUNTEN (blokkeren fase 1A niet):
  *
- * 4. De exacte inclusief/exclusief-semantiek van het bronveld
+ * 5. De exacte inclusief/exclusief-semantiek van het bronveld
  *    `Expiratie_Expiratiedatum` zelf is niet onafhankelijk bevestigd — bij
  *    het 015/0002-bewijs (punt 1) is het onderliggende contract niet meer
  *    zichtbaar in `contracten_huidig`, dus kon niet gecontroleerd worden of
@@ -111,15 +131,14 @@ import Decimal from "decimal.js";
  *    rekening worden gebracht) is wel bewezen; deze module gaat er
  *    vooralsnog van uit dat `einddatum` de laatste actieve dag is
  *    (inclusief).
- * 5. Toekomstige prijsregels: Informant bevat aantoonbaar veel meer
- *    tabellen (≈281, zie het Informant-ODBC-onderzoeksdocument) dan de
- *    huidige exportset (11 brontypen). Toekomstige, contractueel al
- *    vastgelegde VS=01/VS=13-mutaties kunnen dus mogelijk in een nog niet
- *    ontsloten bron/tabel bestaan. Zodra die bron beschikbaar komt, moet
- *    worden onderzocht of contractueel bekende toekomstige mutaties vóór
- *    de begrotingsaannames van deze module moeten worden toegepast (bewezen
- *    toekomstige prijsregel gaat dan vóór een zelf geprojecteerde aanname).
- *    Er is GEEN fictieve bron/tabel aan dit project toegevoegd.
+ * 6. Toekomstige prijsregels voor de bruto huur (in tegenstelling tot VS=13,
+ *    zie punt 4): Informant bevat aantoonbaar veel meer tabellen (≈281, zie
+ *    het Informant-ODBC-onderzoeksdocument) dan de huidige exportset (11
+ *    brontypen). Mocht een toekomstige bron ooit een bewezen NA-indexatie
+ *    bruto-huurbedrag leveren (in plaats van de nu bewezen vóór-indexatie
+ *    placeholder), dan moet opnieuw worden beoordeeld of dat vóór de
+ *    begrotingsaanname van punt 2 moet gaan. Er is GEEN fictieve bron/tabel
+ *    aan dit project toegevoegd.
  */
 
 export type BgBelastOnbelast = "BELAST" | "ONBELAST" | "ONBEKEND";
@@ -146,6 +165,24 @@ export interface BgRentrollComponent {
   btwYn: string | null;
 }
 
+/**
+ * Eén bronfeit-bewezen, door de (toekomstige) bronextractielaag reeds
+ * eenduidig geselecteerde toekomstige wijziging van de VS=13-huurkorting
+ * (bv. uit `contract_prijsregels.xlsx`) — GEEN begrotingsaanname, GEEN
+ * override. Bedrag in de RUWE brontekenconventie (0 of negatief, nooit
+ * positief) — dezelfde conventie als `BgRentrollComponent.bedragJaar` voor
+ * VS=13. `ingangsdatum` geldt voor de VOLLEDIGE kalendermaand (zelfde regel
+ * als indexatie) — geen dagpro-rata op de wijziging zelf. Bewust GEEN
+ * `Prijs_regelnr`/herkomstveld — conflictresolutie tussen kandidaatregels op
+ * dezelfde datum is een verantwoordelijkheid van de bronextractielaag, deze
+ * module verwacht al een eenduidige lijst (met een lichte defensieve
+ * dubbelcheck, zie `bepaalKortingBasisPerMaand`).
+ */
+export interface BgToekomstigeKortingswijziging {
+  ingangsdatum: Date;
+  nieuweKortingPerMaand: Decimal;
+}
+
 export interface BgContractFeiten {
   bedrijfsnr: string;
   contractnummer: string;
@@ -160,6 +197,13 @@ export interface BgContractFeiten {
   indexatiedatum: Date | null;
   /** Verhoging_opnieuw_na — herhalingsinterval in maanden. `null` = onbekend. */
   indexatieHerhalingMaanden: number | null;
+  /**
+   * Bronfeit-bewezen, reeds eenduidig geselecteerde toekomstige VS=13-
+   * kortingswijzigingen. Lege array = geen bekende toekomstige mutatie — de
+   * huidige korting geldt dan ongewijzigd het hele begrotingsjaar (bestaand
+   * gedrag, ongewijzigd).
+   */
+  toekomstigeKortingswijzigingen: readonly BgToekomstigeKortingswijziging[];
 }
 
 export type BgOverrideScope = "VERSIE" | "STRUCTUREEL";
@@ -193,6 +237,8 @@ export interface BgHuurMaandRegel {
   brutoHuurMetIndexatie: Decimal;
   huurkorting: Decimal;
   nettoHuur: Decimal;
+  /** Ingangsdatum van de bronfeit-kortingswijziging die deze maand bepaalt, of `null` = de basis (huidige) korting geldt nog. */
+  kortingswijzigingToegepast: Date | null;
 }
 
 interface BgJaartotalen {
@@ -481,6 +527,136 @@ function bepaalEffectieveIndexatiedatum(
   return { datum: kandidaat, controleVereist: [] };
 }
 
+/**
+ * Bepaalt de effectieve kortingsbasis (VS=13, per maand, in de interne
+ * POSITIEVE presentatievorm — zelfde conventie als `huurkorting`/
+ * `kortingMaandBasis` elders in deze functie) voor elke maand van het
+ * begrotingsjaar: de huidige (rentroll-afgeleide) korting, eventueel
+ * overschreven door bronfeit-bewezen toekomstige `BgToekomstigeKortingswijziging`-
+ * stappen (zie punt 4 van de moduledocumentatie hierboven).
+ *
+ * WEL een `bronPeildatum`-staleness-guard — `huidigeKortingMaandBasis` is
+ * zelf een bevroren bronfeit ZOALS HET GOLD OP `bronPeildatum`. Een
+ * `BgToekomstigeKortingswijziging` met `ingangsdatum < bronPeildatum` zou, als
+ * hij echt is, allang in die bevroren basis verwerkt moeten zijn — hem dan
+ * ALSNOG als losse tijdlijnstap toepassen zou een niet-bewezen aanname
+ * introduceren over welke (oudere) waarde vóór die datum gold. Zo'n
+ * wijziging wordt daarom als stale behandeld: gemeld, niet toegepast, de
+ * bevroren basis blijft ongewijzigd gelden. `ingangsdatum === bronPeildatum`
+ * is WEL geldig (geen stale) — op kalenderdag vergeleken, geen tijdstip-
+ * effecten (analoog aan `bepaalEffectieveIndexatiedatum`'s grensgeval).
+ *
+ * Validatievolgorde: (1) ongeldige datum (`Invalid Date`) → KRITIEK; (2)
+ * positief bedrag (> 0) → KRITIEK; (3) `ingangsdatum < bronPeildatum` →
+ * WAARSCHUWING (stale); (4) ingangsdatum ná `contractEinddatum` →
+ * WAARSCHUWING; (5) groeperen op kalendermaand — gelijke bedragen binnen de
+ * groep dedupliceren (vroegste datum als traceerbare datum, geen melding),
+ * verschillende bedragen → WAARSCHUWING, hele maandgroep niet toegepast; (6)
+ * resterende, unieke wijzigingen oplopend toepassen (jaar < begrotingsjaar →
+ * vanaf januari; jaar === begrotingsjaar → vanaf die maand; jaar >
+ * begrotingsjaar → INFORMATIEF, niet toegepast) — een latere wijziging
+ * overschrijft een eerdere voor de overlappende staartmaanden.
+ */
+function bepaalKortingBasisPerMaand(
+  contractnummer: string,
+  huidigeKortingMaandBasis: Decimal,
+  wijzigingen: readonly BgToekomstigeKortingswijziging[],
+  begrotingsjaar: number,
+  contractEinddatum: Date | null,
+  bronPeildatum: Date,
+): { basisPerMaand: Decimal[]; toegepastPerMaand: (Date | null)[]; controleVereist: BgControleItem[] } {
+  const controleVereist: BgControleItem[] = [];
+
+  const gevalideerd: BgToekomstigeKortingswijziging[] = [];
+  for (const wijziging of wijzigingen) {
+    if (Number.isNaN(wijziging.ingangsdatum.getTime())) {
+      controleVereist.push({
+        contractnummer,
+        ernst: "KRITIEK",
+        bericht: `Contract ${contractnummer}: een toekomstige VS13-kortingswijziging heeft een ongeldige ingangsdatum (Invalid Date) — niet toegepast, basiskorting blijft gelden.`,
+      });
+      continue;
+    }
+    if (wijziging.nieuweKortingPerMaand.greaterThan(0)) {
+      controleVereist.push({
+        contractnummer,
+        ernst: "KRITIEK",
+        bericht: `Contract ${contractnummer}: een toekomstige VS13-kortingswijziging per ${wijziging.ingangsdatum.toISOString().slice(0, 10)} heeft een positief bedrag (${wijziging.nieuweKortingPerMaand.toString()}, bewezen tekenconventie eist ≤ 0) — niet toegepast, basiskorting blijft gelden.`,
+      });
+      continue;
+    }
+    if (naarKalenderDag(wijziging.ingangsdatum).getTime() < naarKalenderDag(bronPeildatum).getTime()) {
+      controleVereist.push({
+        contractnummer,
+        ernst: "WAARSCHUWING",
+        bericht: `Contract ${contractnummer}: een toekomstige VS13-kortingswijziging per ${wijziging.ingangsdatum.toISOString().slice(0, 10)} lag op de bronpeildatum (${bronPeildatum.toISOString().slice(0, 10)}) al in het verleden — hoort dan al in de bevroren huidige korting verwerkt te zijn, niet toegepast als losse tijdlijnstap.`,
+      });
+      continue;
+    }
+    if (contractEinddatum !== null && naarKalenderDag(wijziging.ingangsdatum).getTime() > naarKalenderDag(contractEinddatum).getTime()) {
+      controleVereist.push({
+        contractnummer,
+        ernst: "WAARSCHUWING",
+        bericht: `Contract ${contractnummer}: een toekomstige VS13-kortingswijziging per ${wijziging.ingangsdatum.toISOString().slice(0, 10)} ligt ná het contracteinde (${contractEinddatum.toISOString().slice(0, 10)}) — niet toegepast (kan sowieso geen effect hebben).`,
+      });
+      continue;
+    }
+    gevalideerd.push(wijziging);
+  }
+
+  const perMaandGroep = new Map<string, BgToekomstigeKortingswijziging[]>();
+  for (const wijziging of gevalideerd) {
+    const sleutel = `${wijziging.ingangsdatum.getUTCFullYear()}-${wijziging.ingangsdatum.getUTCMonth()}`;
+    const groep = perMaandGroep.get(sleutel) ?? [];
+    groep.push(wijziging);
+    perMaandGroep.set(sleutel, groep);
+  }
+
+  const gededupliceerd: BgToekomstigeKortingswijziging[] = [];
+  for (const groep of perMaandGroep.values()) {
+    const uniekeBedragen = new Set(groep.map((w) => w.nieuweKortingPerMaand.toString()));
+    if (uniekeBedragen.size > 1) {
+      const voorbeeld = groep[0]!;
+      controleVereist.push({
+        contractnummer,
+        ernst: "WAARSCHUWING",
+        bericht: `Contract ${contractnummer}: meerdere toekomstige VS13-kortingswijzigingen voor dezelfde kalendermaand (${voorbeeld.ingangsdatum.getUTCFullYear()}-${String(voorbeeld.ingangsdatum.getUTCMonth() + 1).padStart(2, "0")}) geven verschillende bedragen — geen van beide toegepast, de korting van vóór die maand blijft doorlopen.`,
+      });
+      continue;
+    }
+    const vroegste = groep.reduce((a, b) => (a.ingangsdatum.getTime() <= b.ingangsdatum.getTime() ? a : b));
+    gededupliceerd.push(vroegste);
+  }
+
+  gededupliceerd.sort((a, b) => a.ingangsdatum.getTime() - b.ingangsdatum.getTime());
+
+  const basisPerMaand: Decimal[] = new Array(12).fill(huidigeKortingMaandBasis);
+  const toegepastPerMaand: (Date | null)[] = new Array(12).fill(null);
+
+  for (const wijziging of gededupliceerd) {
+    const wijzigingsjaar = wijziging.ingangsdatum.getUTCFullYear();
+    if (wijzigingsjaar > begrotingsjaar) {
+      controleVereist.push({
+        contractnummer,
+        ernst: "INFORMATIEF",
+        bericht: `Contract ${contractnummer}: een bekende toekomstige VS13-kortingswijziging per ${wijziging.ingangsdatum.toISOString().slice(0, 10)} ligt ná begrotingsjaar ${begrotingsjaar} — nog niet van toepassing dit jaar.`,
+      });
+      continue;
+    }
+    const vanafMaand = wijzigingsjaar < begrotingsjaar ? 1 : wijziging.ingangsdatum.getUTCMonth() + 1;
+    for (let maand = vanafMaand; maand <= 12; maand += 1) {
+      // `.abs()` hier is GEEN validatie — die is hierboven al gebeurd (positief bedrag is KRITIEK-
+      // geweigerd vóórdat een wijziging ooit hier komt). Dit zet een reeds-geldig, ruw brontekenbedrag
+      // (0 of negatief) uitsluitend om naar dezelfde interne POSITIEVE magnitudeconventie als
+      // `huidigeKortingMaandBasis`/`kortingMaandBasis` — nooit gebruikt om een ongeldige waarde geldig te maken.
+      basisPerMaand[maand - 1] = wijziging.nieuweKortingPerMaand.abs();
+      toegepastPerMaand[maand - 1] = wijziging.ingangsdatum;
+    }
+  }
+
+  return { basisPerMaand, toegepastPerMaand, controleVereist };
+}
+
 export function berekenBegroteHuuropbrengsten(
   contracten: readonly BgContractFeiten[],
   overrides: readonly BgContractOverride[],
@@ -583,6 +759,20 @@ export function berekenBegroteHuuropbrengsten(
     const kortingMaandBasis = huurkorting.dividedBy(12);
     const indexatiemaand = effectieveIndexatiedatum !== null ? effectieveIndexatiedatum.getUTCMonth() + 1 : null;
 
+    const {
+      basisPerMaand: kortingBasisPerMaand,
+      toegepastPerMaand: kortingswijzigingPerMaand,
+      controleVereist: kortingswijzigingMeldingen,
+    } = bepaalKortingBasisPerMaand(
+      contract.contractnummer,
+      kortingMaandBasis,
+      contract.toekomstigeKortingswijzigingen,
+      aannames.begrotingsjaar,
+      contract.einddatum,
+      bronPeildatum,
+    );
+    controleVereist.push(...kortingswijzigingMeldingen);
+
     const regels: BgHuurMaandRegel[] = [];
     for (let maand = 1; maand <= 12; maand += 1) {
       const dagfractie = dagfracties[maand - 1]!;
@@ -590,10 +780,18 @@ export function berekenBegroteHuuropbrengsten(
       const indexatieActief = indexatiemaand !== null && maand >= indexatiemaand;
       const indexatieEffect = indexatieActief ? brutoHuurZonderIndexatie.times(indexatiePercentageGebruikt).dividedBy(100) : new Decimal(0);
       const brutoHuurMetIndexatie = brutoHuurZonderIndexatie.plus(indexatieEffect);
-      const huurkortingMaand = kortingMaandBasis.times(dagfractie);
+      const huurkortingMaand = kortingBasisPerMaand[maand - 1]!.times(dagfractie);
       const nettoHuur = brutoHuurMetIndexatie.minus(huurkortingMaand);
 
-      regels.push({ maand, brutoHuurZonderIndexatie, indexatieEffect, brutoHuurMetIndexatie, huurkorting: huurkortingMaand, nettoHuur });
+      regels.push({
+        maand,
+        brutoHuurZonderIndexatie,
+        indexatieEffect,
+        brutoHuurMetIndexatie,
+        huurkorting: huurkortingMaand,
+        nettoHuur,
+        kortingswijzigingToegepast: kortingswijzigingPerMaand[maand - 1] ?? null,
+      });
     }
 
     if (contract.ingangsdatum === null) {
