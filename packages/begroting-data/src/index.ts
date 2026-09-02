@@ -34,3 +34,8 @@ export { schrijfModule1Snapshot, leesModule1Snapshot } from "./module1Snapshot.j
 export { schrijfModule1Aannames, leesModule1Aannames } from "./module1Aannames.js";
 export { schrijfModule1Overrides, leesModule1Overrides } from "./module1Overrides.js";
 export { schrijfModule2Config, leesModule2Config } from "./module2Config.js";
+
+// Orchestratie (uitsluitend lezen + pure berekening, GEEN schrijfeffecten) —
+// bundelt de al bestaande `Begrotingsversie`/`BgHuurResultaat`/`BgBeheerResultaat`,
+// geen shadow-rekenresultaattype.
+export { herberekenBegroting, type HerberekendeBegroting } from "./herberekenen.js";
