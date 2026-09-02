@@ -35,10 +35,10 @@ describe("runMigrations", () => {
     const tabelNaUpgrade = db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'begrotingsversies'`).get();
     db.close();
 
-    // Sinds 1D.3 bevat de volledige migratielijst ook migratie 3 — een open vanaf schema-v1 upgradet dus
-    // in één stap door tot en met v3. Migratie 2's eigen tabel (begrotingsversies) is hier het bewijs dat
-    // die stap daadwerkelijk is doorlopen; zie test "1D.3-1" voor de losstaande 2→3-transitie.
-    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3]);
+    // Sinds 1D.4 bevat de volledige migratielijst ook migratie 4 — een open vanaf schema-v1 upgradet dus
+    // in één stap door tot en met v4. Migratie 2's eigen tabel (begrotingsversies) is hier het bewijs dat
+    // die stap daadwerkelijk is doorlopen; zie test "1D.3-1"/"1D.4-1" voor de losstaande transities.
+    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4]);
     expect(tabelNaUpgrade).toBeDefined();
   });
 
@@ -61,7 +61,7 @@ describe("runMigrations", () => {
     // tijdstempels (bewijst dat geen enkele migratie opnieuw is uitgevoerd, niet alleen dat het
     // eindresultaat toevallig gelijk is).
     expect(rijenNaTweedeOpen).toEqual(eersteRijen);
-    expect(rijenNaTweedeOpen.map((r) => r.schema_version)).toEqual([1, 2, 3]);
+    expect(rijenNaTweedeOpen.map((r) => r.schema_version)).toEqual([1, 2, 3, 4]);
   });
 
   it("1D.3-1. migratie 2 → 3 wordt correct toegepast op een bestaande schema-v2-database", () => {
@@ -73,7 +73,7 @@ describe("runMigrations", () => {
     dbV2.close();
     expect(tabelVoorUpgrade).toBeUndefined();
 
-    const db = openOrCreateDatabase(dbPad); // volledige, huidige migratielijst — moet naar schema 3 upgraden
+    const db = openOrCreateDatabase(dbPad); // volledige, huidige migratielijst — upgradet in één keer door tot de nieuwste schema-versie
     const versies = db.prepare(`SELECT schema_version FROM begroting_schema_meta ORDER BY schema_version`).all() as {
       schema_version: number;
     }[];
@@ -85,7 +85,9 @@ describe("runMigrations", () => {
       .all() as { name: string }[];
     db.close();
 
-    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3]);
+    // Sinds 1D.4 bevat de volledige migratielijst ook migratie 4 — deze test blijft gericht op het bewijs
+    // dat migratie 3's eigen tabellen bestaan; zie test "1D.4-1" voor de losstaande 3→4-transitie.
+    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4]);
     expect(tabellenNaUpgrade.map((t) => t.name).sort()).toEqual([
       "begroting_contract_kortingswijziging",
       "begroting_contract_rentroll_component",
@@ -109,14 +111,62 @@ describe("runMigrations", () => {
     db2.close();
 
     expect(rijenNaTweedeOpen).toEqual(eersteRijen);
-    expect(rijenNaTweedeOpen.map((r) => r.schema_version)).toEqual([1, 2, 3]);
+    expect(rijenNaTweedeOpen.map((r) => r.schema_version)).toEqual([1, 2, 3, 4]);
+  });
+
+  it("1D.4-1. migratie 3 → 4 wordt correct toegepast op een bestaande schema-v3-database", () => {
+    // Simuleert een bestaande database die alleen migratie 1+2+3 heeft ondergaan (zoals een echte
+    // database die met het 1D.3-schema is aangemaakt, vóór migratie 4 bestond).
+    const dbV3 = new DatabaseSync(dbPad);
+    runMigrations(dbV3, [MIGRATIONS[0]!, MIGRATIONS[1]!, MIGRATIONS[2]!]);
+    const tabelVoorUpgrade = dbV3.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'begroting_aannames'`).get();
+    dbV3.close();
+    expect(tabelVoorUpgrade).toBeUndefined();
+
+    const db = openOrCreateDatabase(dbPad); // volledige, huidige migratielijst — moet naar schema 4 upgraden
+    const versies = db.prepare(`SELECT schema_version FROM begroting_schema_meta ORDER BY schema_version`).all() as {
+      schema_version: number;
+    }[];
+    const tabellenNaUpgrade = db
+      .prepare(
+        `SELECT name FROM sqlite_master WHERE type = 'table' AND name IN
+           ('begroting_aannames', 'begroting_contract_override', 'begroting_complex_config')`,
+      )
+      .all() as { name: string }[];
+    db.close();
+
+    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4]);
+    expect(tabellenNaUpgrade.map((t) => t.name).sort()).toEqual([
+      "begroting_aannames",
+      "begroting_complex_config",
+      "begroting_contract_override",
+    ]);
+  });
+
+  it("1D.4-2. een tweede open ná schema-v4 is idempotent: geen enkele migratie wordt opnieuw uitgevoerd", () => {
+    const db1 = openOrCreateDatabase(dbPad);
+    const eersteRijen = db1.prepare(`SELECT schema_version, applied_at FROM begroting_schema_meta ORDER BY schema_version`).all() as {
+      schema_version: number;
+      applied_at: string;
+    }[];
+    db1.close();
+
+    const db2 = openOrCreateDatabase(dbPad);
+    const rijenNaTweedeOpen = db2.prepare(`SELECT schema_version, applied_at FROM begroting_schema_meta ORDER BY schema_version`).all() as {
+      schema_version: number;
+      applied_at: string;
+    }[];
+    db2.close();
+
+    expect(rijenNaTweedeOpen).toEqual(eersteRijen);
+    expect(rijenNaTweedeOpen.map((r) => r.schema_version)).toEqual([1, 2, 3, 4]);
   });
 
   it("8. een geforceerde migratiefout laat geen half toegepaste migratie achter", () => {
-    const db = openOrCreateDatabase(dbPad); // past migraties 1, 2 én 3 normaal toe
+    const db = openOrCreateDatabase(dbPad); // past migraties 1, 2, 3 én 4 normaal toe
 
     const kapotteMigratie: Migration = {
-      version: 4, // versie 4: de eerstvolgende, nog niet bestaande versie na de huidige (1, 2 en 3) migraties.
+      version: 5, // versie 5: de eerstvolgende, nog niet bestaande versie na de huidige (1, 2, 3 en 4) migraties.
       description: "geforceerde testfout",
       ddl: [
         "CREATE TABLE test_fail_tabel (id INTEGER)", // deze DDL-statement slaagt op zichzelf...
@@ -124,13 +174,13 @@ describe("runMigrations", () => {
       ],
     };
 
-    expect(() => runMigrations(db, [...MIGRATIONS, kapotteMigratie])).toThrow(/Migratie 4/);
+    expect(() => runMigrations(db, [...MIGRATIONS, kapotteMigratie])).toThrow(/Migratie 5/);
 
-    // Geen dubbele/kapotte registratie: nog steeds uitsluitend schema_version 1, 2 en 3 geregistreerd.
+    // Geen dubbele/kapotte registratie: nog steeds uitsluitend schema_version 1, 2, 3 en 4 geregistreerd.
     const rijen = db.prepare(`SELECT schema_version FROM begroting_schema_meta ORDER BY schema_version`).all() as {
       schema_version: number;
     }[];
-    expect(rijen.map((r) => r.schema_version)).toEqual([1, 2, 3]);
+    expect(rijen.map((r) => r.schema_version)).toEqual([1, 2, 3, 4]);
 
     // De eerste (op zichzelf geslaagde) DDL-statement van de kapotte migratie is volledig teruggedraaid —
     // de tabel bestaat niet, want hij hoorde bij dezelfde transactie als de daaropvolgende foutieve statement.

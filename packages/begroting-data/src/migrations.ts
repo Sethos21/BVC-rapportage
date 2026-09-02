@@ -292,6 +292,140 @@ export const MIGRATIONS: readonly Migration[] = [
        END`,
     ],
   },
+  /**
+   * Migratie 4 — Module-1-begrotingsaannames (`BgHuurAannames`), Module-1-
+   * contractoverrides (`BgContractOverride`) en Module-2-complexconfiguratie
+   * (`BgBeheerComplexConfig`) — exact zoals `begroteHuuropbrengsten.ts`/
+   * `begroteBeheersvergoeding.ts` die op HEAD kennen. Uitsluitend INPUT voor
+   * de reeds bestaande pure berekeningen — geen berekende output, geen
+   * bronfeiten (die staan al in migratie 3).
+   *
+   * `begroting_aannames` is bewust 1-op-1 met de versie (PK = FK =
+   * `begroting_versie_id`, geen apart `id`) — er hoort functioneel maximaal
+   * één aannameset per versie te bestaan. `begrotingsjaar` staat NIET in deze
+   * tabel: dat is al write-once op `begrotingsversies` en wordt bij lezen
+   * van daar gereconstrueerd (geen tweede authoritative begrotingsjaar).
+   *
+   * `begroting_contract_override` en `begroting_complex_config` hebben BEIDE
+   * bewust GEEN unieke constraint op resp. `(begroting_versie_id,
+   * contractnummer)` / `(begroting_versie_id, complexnummer)` — meerdere
+   * rijen voor hetzelfde contract/complex binnen één versie zijn toegestaan
+   * op databaseniveau, want de bestaande pure Module-1/2-validatielogica
+   * (dubbele/conflicterende invoer detecteren en melden) moet dat zelf
+   * blijven zien; een DB-uniciteitsdwang zou die logica verbergen/dupliceren
+   * met een striktere regel. Technische `id INTEGER PRIMARY KEY` als lokale
+   * sleutel, uitsluitend voor deterministische leesvolgorde — geen
+   * businessbetekenis.
+   *
+   * Geen FK van `begroting_contract_override.contractnummer` naar het
+   * snapshot, en geen FK van `begroting_complex_config.complexnummer` naar
+   * enige complexlijst — bewust: de pure Module-1/2-laag valideert zelf of
+   * een override/config bij een bestaand contract/complex hoort, CONCEPT-
+   * invoer mag tijdelijk incompleet zijn, en er wordt geen nieuwe
+   * authoritative complexlijst geïntroduceerd.
+   *
+   * `scope` op `begroting_contract_override` krijgt een CHECK met exact de
+   * huidige `BgOverrideScope`-waarden ('VERSIE'/'STRUCTUREEL'). Op
+   * `begroting_complex_config` komt bewust GEEN vergelijkbare CHECK — de
+   * actuele `BgBeheerComplexConfig`-interface heeft geen gesloten
+   * enumwaarde om af te dwingen (alle vier velden zijn `Decimal | null` /
+   * `Date | null`).
+   *
+   * Immutability: alle drie tabellen krijgen dezelfde drie triggers
+   * (INSERT/UPDATE/DELETE geweigerd zodra de bijbehorende
+   * `begrotingsversies`-rij `status = 'VASTGESTELD'` heeft) als migratie 3 —
+   * zelfde bewust simpele, herhaalde WHEN-subquery-triggers per tabel/actie.
+   */
+  {
+    version: 4,
+    description: "Module-1-aannames/overrides + Module-2-complexconfiguratie",
+    ddl: [
+      `CREATE TABLE begroting_aannames (
+        begroting_versie_id TEXT PRIMARY KEY REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        indexatie_percentage TEXT NOT NULL
+      )`,
+      `CREATE TABLE begroting_contract_override (
+        id INTEGER PRIMARY KEY,
+        begroting_versie_id TEXT NOT NULL REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        contractnummer TEXT NOT NULL,
+        indexatie_percentage TEXT NOT NULL,
+        scope TEXT NOT NULL CHECK (scope IN ('VERSIE', 'STRUCTUREEL')),
+        reden TEXT NULL
+      )`,
+      `CREATE TABLE begroting_complex_config (
+        id INTEGER PRIMARY KEY,
+        begroting_versie_id TEXT NOT NULL REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        complexnummer TEXT NOT NULL,
+        vast_bedrag_jaar TEXT NULL,
+        vast_indexatie_percentage TEXT NULL,
+        vast_indexatiedatum TEXT NULL,
+        variabel_percentage TEXT NULL
+      )`,
+      `CREATE TRIGGER trg_begroting_aannames_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_aannames
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_aannames: begrotingsversie is VASTGESTELD, aannames zijn immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_aannames_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_aannames
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_aannames: begrotingsversie is VASTGESTELD, aannames zijn immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_aannames_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_aannames
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_aannames: begrotingsversie is VASTGESTELD, aannames zijn immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_contract_override_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_contract_override
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_contract_override: begrotingsversie is VASTGESTELD, overrides zijn immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_contract_override_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_contract_override
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_contract_override: begrotingsversie is VASTGESTELD, overrides zijn immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_contract_override_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_contract_override
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_contract_override: begrotingsversie is VASTGESTELD, overrides zijn immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_complex_config_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_complex_config
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_complex_config: begrotingsversie is VASTGESTELD, configuratie is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_complex_config_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_complex_config
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_complex_config: begrotingsversie is VASTGESTELD, configuratie is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_complex_config_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_complex_config
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_complex_config: begrotingsversie is VASTGESTELD, configuratie is immutable');
+       END`,
+    ],
+  },
 ];
 
 function schemaMetaTableExists(db: DatabaseSync): boolean {

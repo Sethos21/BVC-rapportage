@@ -27,3 +27,10 @@ export {
 // importeren `BgContractFeiten`/`BgRentrollComponent`/
 // `BgToekomstigeKortingswijziging` rechtstreeks vanuit `@bvc/reporting`.
 export { schrijfModule1Snapshot, leesModule1Snapshot } from "./module1Snapshot.js";
+
+// Zelfde principe: `BgHuurAannames`, `BgContractOverride`/`BgOverrideScope`
+// en `BgBeheerComplexConfig` komen rechtstreeks uit `@bvc/reporting` —
+// geen shadow-types in dit package.
+export { schrijfModule1Aannames, leesModule1Aannames } from "./module1Aannames.js";
+export { schrijfModule1Overrides, leesModule1Overrides } from "./module1Overrides.js";
+export { schrijfModule2Config, leesModule2Config } from "./module2Config.js";
