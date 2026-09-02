@@ -37,4 +37,5 @@ export * from "./huurKerncijfers.js";
 export * from "./managementRapport.js";
 export * from "./renderManagementRapport.js";
 export * from "./begroting/begroteHuuropbrengsten.js";
+export * from "./begroting/begroteBeheersvergoeding.js";
 export { HUISSTIJL_CSS, escapeHtml, formatBedragHtml, renderRapportDocument } from "./huisstijl.js";
