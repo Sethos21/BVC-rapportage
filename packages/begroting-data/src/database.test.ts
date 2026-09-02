@@ -33,16 +33,19 @@ describe("openOrCreateDatabase", () => {
   });
 
   it("3. schema-versie 1 is geregistreerd in begroting_schema_meta", () => {
+    // Sinds 1D.2 bevat de standaard-migratielijst ook migratie 2 (begrotingsversies) — een verse open
+    // past dus beide toe. Deze test blijft gericht op uitsluitend het bestaan van de schema_version=1-rij
+    // (1D.1's eigen scope); zie migrations.test.ts's tests 1/2 voor de volledige (1 én 2) migratieketen.
     const db = openOrCreateDatabase(dbPad);
     const rijen = db.prepare(`SELECT schema_version, applied_at FROM begroting_schema_meta ORDER BY schema_version`).all() as {
       schema_version: number;
       applied_at: string;
     }[];
     db.close();
-    expect(rijen).toHaveLength(1);
-    expect(rijen[0]!.schema_version).toBe(1);
-    expect(typeof rijen[0]!.applied_at).toBe("string");
-    expect(rijen[0]!.applied_at.length).toBeGreaterThan(0);
+    const rijVoorVersie1 = rijen.find((r) => r.schema_version === 1);
+    expect(rijVoorVersie1).toBeDefined();
+    expect(typeof rijVoorVersie1!.applied_at).toBe("string");
+    expect(rijVoorVersie1!.applied_at.length).toBeGreaterThan(0);
   });
 
   it("5. PRAGMA foreign_keys staat ON", () => {

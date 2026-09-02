@@ -39,6 +39,107 @@ export const MIGRATIONS: readonly Migration[] = [
       )`,
     ],
   },
+  /**
+   * Migratie 2 — de begrotingsversie-entity zelf, inclusief haar volledige
+   * levenscyclus/immutability-invariant. Bewust NOG GEEN child-tabellen
+   * (contract-snapshot, aannames, overrides, Module-2-config, frozen
+   * output) — die volgen in latere, apart te reviewen migraties (1D.3+).
+   *
+   * Write-once (technisch afgedwongen, zie trg_begrotingsversies_write_once
+   * hieronder): id, bedrijfsnr, begrotingsjaar, bron_peildatum, created_at,
+   * based_on_version_id, origin_type — mogen na INSERT nooit meer wijzigen,
+   * ongeacht status. `vastgesteld_at` staat BEWUST niet in deze trigger: hij
+   * gaat één keer van NULL naar een tijdstip tijdens de CONCEPT→VASTGESTELD-
+   * overgang zelf (die overgang wijzigt geen write-once-veld, dus de trigger
+   * hoeft daar niet voor uit te zonderen) — en is daarna vanzelf al bevroren
+   * doordat de VASTGESTELD-immutability-trigger op dat moment elke verdere
+   * UPDATE blokkeert.
+   *
+   * Lineage-integriteit als CHECK-constraint (structurele data-invariant,
+   * geen rekenbusinesslogica): origin_type NIEUW vereist based_on_version_id
+   * IS NULL; GEBASEERD_OP_VERSIE vereist based_on_version_id IS NOT NULL.
+   * Losse CHECK tegen zelfreferentie (based_on_version_id = id). Geen
+   * bredere cycle-detectie in deze fase (expliciet uitgesteld).
+   *
+   * Status/tijdstip-koppeling, EVENEENS als eenvoudige structurele CHECK
+   * (geen aparte trigger nodig): CONCEPT vereist vastgesteld_at IS NULL;
+   * VASTGESTELD vereist vastgesteld_at IS NOT NULL. Dit voorkomt een
+   * inconsistente tussenstate die de bestaande triggers alléén niet konden
+   * afvangen — die blokkeren pas UPDATE/DELETE NÁ het bereiken van
+   * VASTGESTELD, niet een enkele INSERT/UPDATE die de twee velden los van
+   * elkaar (of via rechtstreekse SQL) op een niet-samenhangende combinatie
+   * zet. `markeerVastgesteld` zet beide velden altijd al in dezelfde UPDATE
+   * (zie begrotingsversies.ts) — deze CHECK is de databasegarantie die dat
+   * ook afdwingt voor elk ander schrijfpad.
+   *
+   * Twee immutability-triggers, met bewust gescheiden verantwoordelijkheid:
+   * - trg_begrotingsversies_write_once: blokkeert de zeven write-once-velden,
+   *   ALTIJD (ongeacht status) — behalve de eerste INSERT zelf (triggers
+   *   vuren nooit op INSERT).
+   * - trg_begrotingsversies_vastgesteld_immutable_update /
+   *   trg_begrotingsversies_vastgesteld_no_delete: vuren uitsluitend als
+   *   `OLD.status = 'VASTGESTELD'` — dus NOOIT op de ENE toegestane
+   *   CONCEPT→VASTGESTELD-overgang zelf (daar is OLD.status nog 'CONCEPT'),
+   *   maar WEL op elke latere UPDATE/DELETE, inclusief een poging tot
+   *   VASTGESTELD→CONCEPT (die verandert OLD.status vanuit 'VASTGESTELD',
+   *   dus wordt hierdoor al geblokkeerd zonder een aparte richtingscontrole).
+   */
+  {
+    version: 2,
+    description: "begrotingsversies: entity + lifecycle/immutability-invarianten",
+    ddl: [
+      `CREATE TABLE begrotingsversies (
+        id TEXT PRIMARY KEY,
+        bedrijfsnr TEXT NOT NULL,
+        begrotingsjaar INTEGER NOT NULL,
+        bron_peildatum TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('CONCEPT', 'VASTGESTELD')),
+        naam TEXT NULL,
+        notitie TEXT NULL,
+        created_at TEXT NOT NULL,
+        vastgesteld_at TEXT NULL,
+        based_on_version_id TEXT NULL REFERENCES begrotingsversies(id),
+        origin_type TEXT NOT NULL CHECK (origin_type IN ('NIEUW', 'GEBASEERD_OP_VERSIE')),
+        CHECK (
+          (origin_type = 'NIEUW' AND based_on_version_id IS NULL)
+          OR (origin_type = 'GEBASEERD_OP_VERSIE' AND based_on_version_id IS NOT NULL)
+        ),
+        CHECK (based_on_version_id IS NULL OR based_on_version_id <> id),
+        CHECK (
+          (status = 'CONCEPT' AND vastgesteld_at IS NULL)
+          OR (status = 'VASTGESTELD' AND vastgesteld_at IS NOT NULL)
+        )
+      )`,
+      `CREATE TRIGGER trg_begrotingsversies_write_once
+       BEFORE UPDATE ON begrotingsversies
+       FOR EACH ROW
+       WHEN
+         NEW.id <> OLD.id
+         OR NEW.bedrijfsnr <> OLD.bedrijfsnr
+         OR NEW.begrotingsjaar <> OLD.begrotingsjaar
+         OR NEW.bron_peildatum <> OLD.bron_peildatum
+         OR NEW.created_at <> OLD.created_at
+         OR NEW.origin_type <> OLD.origin_type
+         OR NEW.based_on_version_id IS NOT OLD.based_on_version_id
+       BEGIN
+         SELECT RAISE(ABORT, 'begrotingsversies: write-once veld (id/bedrijfsnr/begrotingsjaar/bron_peildatum/created_at/based_on_version_id/origin_type) mag na aanmaak niet meer wijzigen');
+       END`,
+      `CREATE TRIGGER trg_begrotingsversies_vastgesteld_immutable_update
+       BEFORE UPDATE ON begrotingsversies
+       FOR EACH ROW
+       WHEN OLD.status = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begrotingsversies: een VASTGESTELDE versie is volledig immutable — geen enkele UPDATE toegestaan');
+       END`,
+      `CREATE TRIGGER trg_begrotingsversies_vastgesteld_no_delete
+       BEFORE DELETE ON begrotingsversies
+       FOR EACH ROW
+       WHEN OLD.status = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begrotingsversies: een VASTGESTELDE versie mag nooit worden verwijderd');
+       END`,
+    ],
+  },
 ];
 
 function schemaMetaTableExists(db: DatabaseSync): boolean {
