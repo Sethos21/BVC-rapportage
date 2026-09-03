@@ -37,6 +37,13 @@ export { schrijfModule1Aannames, leesModule1Aannames } from "./module1Aannames.j
 export { schrijfModule1Overrides, leesModule1Overrides } from "./module1Overrides.js";
 export { schrijfModule2Config, leesModule2Config } from "./module2Config.js";
 
+// Zelfde principe voor Module 3 (Managementvergoeding, fase 2C.2):
+// `BgManagementInvoer` komt rechtstreeks uit `@bvc/reporting` — geen
+// shadow-type hier. `leesModule3Invoer` geeft `null` terug als er nog geen
+// invoer is opgeslagen — dat is een eigen, betekenisvolle "nog niet
+// beoordeeld"-toestand, nooit een impliciet €0-resultaat (zie module3Invoer.js).
+export { schrijfModule3Invoer, leesModule3Invoer } from "./module3Invoer.js";
+
 // Orchestratie (uitsluitend lezen + pure berekening, GEEN schrijfeffecten) —
 // bundelt de al bestaande `Begrotingsversie`/`BgHuurResultaat`/`BgBeheerResultaat`,
 // geen shadow-rekenresultaattype.

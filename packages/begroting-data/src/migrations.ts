@@ -771,6 +771,112 @@ export const MIGRATIONS: readonly Migration[] = [
        END`,
     ],
   },
+  /**
+   * Migratie 6 — Module-3-inputtabel (`BgManagementInvoer`, Managementvergoeding,
+   * fase 2C.2). UITSLUITEND de rekeninput van de drie exclusieve wijzen die
+   * `packages/reporting/src/begroting/begroteManagementvergoeding.ts` op HEAD
+   * kent (`INDEXEER_BESTAAND`/`WIJZIG_BESTAAND_BEDRAG`/`NIEUWE_VERGOEDING`) —
+   * nog GEEN frozen Module-3-output (die volgt in een latere, apart te
+   * reviewen migratie, fase 2C.4), geen wijziging aan `herberekenen`/
+   * `vaststellen`.
+   *
+   * 1-op-1 met de versie (PK = FK = `begroting_versie_id`, geen apart `id`) —
+   * zelfde precedent als `begroting_aannames` (migratie 4): functioneel
+   * hoort er maximaal één Module-3-inputrij per versie te bestaan.
+   * `begrotingsjaar` staat hier NIET (al write-once op `begrotingsversies`).
+   *
+   * BUSINESSBESLISSING (2026-09-03, fase 2C.1/2C.2-review): "geen rij" is een
+   * eigen, betekenisvolle derde toestand ("nog niet beoordeeld") — expliciet
+   * ANDERS dan "wél een rij, met een bedrag van €0" (een bewuste
+   * begrotingswaarde). Deze tabel dwingt dat onderscheid af door simpelweg
+   * GEEN rij te vereisen tijdens CONCEPT (0..1, geen NOT NULL-kolommen die een
+   * default zouden forceren) — nooit een placeholder-rij met `0`-waarden.
+   *
+   * Kolomnamen volgen de CONCEPTEN, niet de letterlijke TypeScript-veldnamen
+   * per invoerwijze: `bestaand_bedrag`/`bestaand_eenheid` dekken zowel
+   * `INDEXEER_BESTAAND.bestaandBedrag`+`eenheid` als
+   * `WIJZIG_BESTAAND_BEDRAG.bestaandBedrag`+`bestaandEenheid` (beide zijn
+   * letterlijk "het bestaande bedrag"); `nieuw_bedrag`/`nieuwe_eenheid` dekken
+   * zowel `WIJZIG_BESTAAND_BEDRAG.nieuwBedrag`+`nieuweEenheid` als
+   * `NIEUWE_VERGOEDING.bedrag`+`eenheid`. Dit is exact hetzelfde patroon als
+   * het reeds goedgekeurde `begroting_complex_config` (migratie 4): één rij,
+   * meerdere onafhankelijk-nullable, wijze-/modus-afhankelijke kolommen.
+   *
+   * CHECK-constraint (`chk_begroting_management_invoer_wijze_kolommen`) dwingt
+   * per `wijze` exact af welke kolommen wel/niet mogen zijn ingevuld — de
+   * database mag nooit een semantisch onmogelijke combinatie bevatten, ook
+   * niet via een rechtstreekse SQL-insert buiten de TypeScript-laag om:
+   * - INDEXEER_BESTAAND: bestaand_bedrag/bestaand_eenheid/indexatie_percentage/
+   *   indexatiedatum verplicht; nieuw_bedrag/nieuwe_eenheid/ingangsdatum MOET NULL.
+   * - WIJZIG_BESTAAND_BEDRAG: bestaand_bedrag/bestaand_eenheid/nieuw_bedrag/
+   *   nieuwe_eenheid/ingangsdatum verplicht; indexatie_percentage/indexatiedatum MOET NULL.
+   * - NIEUWE_VERGOEDING: nieuw_bedrag/nieuwe_eenheid verplicht; ingangsdatum
+   *   optioneel (NULL = vanaf begin begrotingsjaar); bestaand_bedrag/
+   *   bestaand_eenheid/indexatie_percentage/indexatiedatum MOET NULL.
+   *
+   * Immutability: dezelfde drie triggers (INSERT/UPDATE/DELETE geweigerd
+   * zodra de bijbehorende `begrotingsversies`-rij `status = 'VASTGESTELD'`
+   * heeft) als elke eerdere migratie — bewust hetzelfde simpele,
+   * herhaalde WHEN-subquery-patroon, geen generiek triggerframework.
+   */
+  {
+    version: 6,
+    description: "Module-3-inputtabel (Managementvergoeding-rekeninvoer)",
+    ddl: [
+      `CREATE TABLE begroting_management_invoer (
+        begroting_versie_id TEXT PRIMARY KEY REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        wijze TEXT NOT NULL CHECK (wijze IN ('INDEXEER_BESTAAND', 'WIJZIG_BESTAAND_BEDRAG', 'NIEUWE_VERGOEDING')),
+        bestaand_bedrag TEXT NULL,
+        bestaand_eenheid TEXT NULL CHECK (bestaand_eenheid IS NULL OR bestaand_eenheid IN ('MAAND', 'JAAR')),
+        nieuw_bedrag TEXT NULL,
+        nieuwe_eenheid TEXT NULL CHECK (nieuwe_eenheid IS NULL OR nieuwe_eenheid IN ('MAAND', 'JAAR')),
+        indexatie_percentage TEXT NULL,
+        indexatiedatum TEXT NULL,
+        ingangsdatum TEXT NULL,
+        CONSTRAINT chk_begroting_management_invoer_wijze_kolommen CHECK (
+          (
+            wijze = 'INDEXEER_BESTAAND'
+            AND bestaand_bedrag IS NOT NULL AND bestaand_eenheid IS NOT NULL
+            AND indexatie_percentage IS NOT NULL AND indexatiedatum IS NOT NULL
+            AND nieuw_bedrag IS NULL AND nieuwe_eenheid IS NULL AND ingangsdatum IS NULL
+          )
+          OR (
+            wijze = 'WIJZIG_BESTAAND_BEDRAG'
+            AND bestaand_bedrag IS NOT NULL AND bestaand_eenheid IS NOT NULL
+            AND nieuw_bedrag IS NOT NULL AND nieuwe_eenheid IS NOT NULL AND ingangsdatum IS NOT NULL
+            AND indexatie_percentage IS NULL AND indexatiedatum IS NULL
+          )
+          OR (
+            wijze = 'NIEUWE_VERGOEDING'
+            AND nieuw_bedrag IS NOT NULL AND nieuwe_eenheid IS NOT NULL
+            AND bestaand_bedrag IS NULL AND bestaand_eenheid IS NULL
+            AND indexatie_percentage IS NULL AND indexatiedatum IS NULL
+          )
+        )
+      )`,
+      `CREATE TRIGGER trg_begroting_management_invoer_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_management_invoer
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_management_invoer: begrotingsversie is VASTGESTELD, Module-3-invoer is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_management_invoer_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_management_invoer
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_management_invoer: begrotingsversie is VASTGESTELD, Module-3-invoer is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_management_invoer_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_management_invoer
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_management_invoer: begrotingsversie is VASTGESTELD, Module-3-invoer is immutable');
+       END`,
+    ],
+  },
 ];
 
 function schemaMetaTableExists(db: DatabaseSync): boolean {
