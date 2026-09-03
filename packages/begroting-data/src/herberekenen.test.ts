@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { BgBeheerComplexConfig, BgContractFeiten, BgContractOverride, BgHuurAannames } from "@bvc/reporting";
+import type { BgBeheerComplexConfig, BgContractFeiten, BgContractOverride, BgHuurAannames, BgManagementInvoer } from "@bvc/reporting";
 import { maakBegrotingsversie, markeerVastgesteld, type NieuweBegrotingsversieInput } from "./begrotingsversies.js";
 import { openOrCreateDatabase } from "./database.js";
 import { herberekenBegroting } from "./herberekenen.js";
@@ -12,6 +12,7 @@ import { schrijfModule1Aannames } from "./module1Aannames.js";
 import { schrijfModule1Overrides } from "./module1Overrides.js";
 import { schrijfModule1Snapshot } from "./module1Snapshot.js";
 import { schrijfModule2Config } from "./module2Config.js";
+import { schrijfModule3Invoer } from "./module3Invoer.js";
 
 let dir: string;
 let dbPad: string;
@@ -411,5 +412,151 @@ describe("herberekenBegroting — 070-integratietest (echte, eerder bewezen bron
     expect(complex001.jaartotaal.vastNaIndexatie.toString()).toBe("12000");
     expect(complex001.variabelToegepast).toBe(true);
     expect(complex001.jaartotaal.variabeleVergoeding.toString()).toBe(contract.jaartotaal.nettoHuur.times(6).dividedBy(100).toString());
+  });
+});
+
+describe("herberekenBegroting — Module 3 (Managementvergoeding, fase 2C.3)", () => {
+  const WIJZIG_REGRESSIE: BgManagementInvoer = {
+    wijze: "WIJZIG_BESTAAND_BEDRAG",
+    bestaandBedrag: new Decimal(1000),
+    bestaandEenheid: "MAAND",
+    nieuwBedrag: new Decimal(1200),
+    nieuweEenheid: "MAAND",
+    ingangsdatum: new Date(Date.UTC(2027, 6, 1)),
+  };
+
+  it("21. CONCEPT zonder Module-3-invoer: herberekenen slaagt, module3 is null, Module 1/2 blijven correct", () => {
+    const versieId = (() => {
+      const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+      schrijfModule1Snapshot(db, versie.id, [maakContract("0000000028", { complexnummer: "001" })]);
+      schrijfModule1Aannames(db, versie.id, STANDAARD_AANNAMES);
+      schrijfModule2Config(db, versie.id, [
+        { complexnummer: "001", vastBedragJaar: new Decimal(1000), vastIndexatiePercentage: null, vastIndexatiedatum: null, variabelPercentage: new Decimal(6) },
+      ]);
+      return versie.id;
+    })();
+
+    const resultaat = herberekenBegroting(db, versieId);
+
+    expect(resultaat.module3).toBeNull();
+    expect(resultaat.module1.contracten).toHaveLength(1);
+    expect(resultaat.module2.complexen.find((c) => c.complexnummer === "001")?.vastToegepast).toBe(true);
+  });
+
+  it("22. CONCEPT met INDEXEER_BESTAAND: persistente invoer wordt gelezen en correct berekend, resultaat niet null", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    const invoer: BgManagementInvoer = {
+      wijze: "INDEXEER_BESTAAND",
+      bestaandBedrag: new Decimal(1000),
+      eenheid: "MAAND",
+      indexatiePercentage: new Decimal(3),
+      indexatiedatum: new Date(Date.UTC(2027, 6, 1)),
+    };
+    schrijfModule3Invoer(db, versie.id, invoer);
+
+    const resultaat = herberekenBegroting(db, versie.id);
+
+    expect(resultaat.module3).not.toBeNull();
+    expect(resultaat.module3!.invoer).toEqual(invoer);
+    for (let i = 0; i < 6; i += 1) expect(resultaat.module3!.regels[i]!.bedrag.toString()).toBe("1000");
+    for (let i = 6; i < 12; i += 1) expect(resultaat.module3!.regels[i]!.bedrag.toString()).toBe("1030");
+    expect(resultaat.module3!.jaartotaal.bedrag.toString()).toBe("12180");
+  });
+
+  it("23. CONCEPT met WIJZIG_BESTAAND_BEDRAG: volledige persistence → rekenlaag-keten (regressievoorbeeld, jaartotaal €13.200)", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfModule3Invoer(db, versie.id, WIJZIG_REGRESSIE);
+
+    const resultaat = herberekenBegroting(db, versie.id);
+
+    expect(resultaat.module3).not.toBeNull();
+    for (let i = 0; i < 6; i += 1) expect(resultaat.module3!.regels[i]!.bedrag.toString()).toBe("1000");
+    for (let i = 6; i < 12; i += 1) expect(resultaat.module3!.regels[i]!.bedrag.toString()).toBe("1200");
+    expect(resultaat.module3!.jaartotaal.bedrag.toString()).toBe("13200");
+  });
+
+  it("24. CONCEPT met NIEUWE_VERGOEDING: €1.200/mnd vanaf 1 juli, jaartotaal €7.200", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    const invoer: BgManagementInvoer = {
+      wijze: "NIEUWE_VERGOEDING",
+      bedrag: new Decimal(1200),
+      eenheid: "MAAND",
+      ingangsdatum: new Date(Date.UTC(2027, 6, 1)),
+    };
+    schrijfModule3Invoer(db, versie.id, invoer);
+
+    const resultaat = herberekenBegroting(db, versie.id);
+
+    expect(resultaat.module3).not.toBeNull();
+    for (let i = 0; i < 6; i += 1) expect(resultaat.module3!.regels[i]!.bedrag.toString()).toBe("0");
+    for (let i = 6; i < 12; i += 1) expect(resultaat.module3!.regels[i]!.bedrag.toString()).toBe("1200");
+    expect(resultaat.module3!.jaartotaal.bedrag.toString()).toBe("7200");
+  });
+
+  it("25. expliciete €0-invoer: module3 is NIET null en jaartotaal is exact €0 — bewijst INGEVULD €0 ≠ NIET INGEVULD", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    const invoer: BgManagementInvoer = { wijze: "NIEUWE_VERGOEDING", bedrag: new Decimal(0), eenheid: "MAAND", ingangsdatum: null };
+    schrijfModule3Invoer(db, versie.id, invoer);
+
+    const resultaat = herberekenBegroting(db, versie.id);
+
+    expect(resultaat.module3).not.toBeNull();
+    expect(resultaat.module3!.jaartotaal.bedrag.toString()).toBe("0");
+    expect(resultaat.module3!.jaartotaal.bedrag.isZero()).toBe(true);
+
+    // Contrast: een andere, volledig lege versie (geen Module-3-invoer geschreven) blijft null —
+    // een ingevulde €0 en een niet-ingevulde versie zijn nooit hetzelfde resultaat.
+    const legeVersie = maakMinimaalGeldigeConceptVersie();
+    expect(herberekenBegroting(db, legeVersie.id).module3).toBeNull();
+  });
+
+  it("26. herberekenen heeft geen schrijfeffect, ook niet op begroting_management_invoer", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfModule3Invoer(db, versie.id, WIJZIG_REGRESSIE);
+
+    const dump = () => ({
+      versies: db.prepare(`SELECT * FROM begrotingsversies`).all(),
+      module3: db.prepare(`SELECT * FROM begroting_management_invoer`).all(),
+    });
+
+    const voor = dump();
+    herberekenBegroting(db, versie.id);
+    const na = dump();
+
+    expect(na).toEqual(voor);
+  });
+
+  it("27. Module-1/2-regressie: resultaten blijven byte-identiek, ongeacht of Module-3-invoer aanwezig is", () => {
+    function maakVersieMetModule1En2(): string {
+      const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+      schrijfModule1Snapshot(db, versie.id, [
+        maakContract("0000000049", {
+          complexnummer: "001",
+          rentrollComponenten: [
+            { vorderingsoort: "01", bedragJaar: new Decimal(12777.36), btwYn: "Y" },
+            { vorderingsoort: "13", bedragJaar: new Decimal(-6000), btwYn: "Y" },
+          ],
+        }),
+      ]);
+      schrijfModule1Aannames(db, versie.id, STANDAARD_AANNAMES);
+      schrijfModule2Config(db, versie.id, [
+        { complexnummer: "001", vastBedragJaar: new Decimal(12000), vastIndexatiePercentage: null, vastIndexatiedatum: null, variabelPercentage: new Decimal(6) },
+      ]);
+      return versie.id;
+    }
+
+    const zonderModule3 = maakVersieMetModule1En2();
+    const metModule3 = maakVersieMetModule1En2();
+    schrijfModule3Invoer(db, metModule3, WIJZIG_REGRESSIE);
+
+    const resultaatZonder = herberekenBegroting(db, zonderModule3);
+    const resultaatMet = herberekenBegroting(db, metModule3);
+
+    const normaliseer = (waarde: unknown) => JSON.stringify(waarde, (_key, v) => (v instanceof Decimal ? v.toString() : v));
+
+    expect(normaliseer(resultaatZonder.module1)).toBe(normaliseer(resultaatMet.module1));
+    expect(normaliseer(resultaatZonder.module2)).toBe(normaliseer(resultaatMet.module2));
+    expect(resultaatZonder.module3).toBeNull();
+    expect(resultaatMet.module3).not.toBeNull();
   });
 });

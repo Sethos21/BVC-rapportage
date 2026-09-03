@@ -2,18 +2,22 @@ import type { DatabaseSync } from "node:sqlite";
 import {
   berekenBegroteBeheersvergoeding,
   berekenBegroteHuuropbrengsten,
+  berekenBegroteManagementvergoeding,
   type BgBeheerComplexConfig,
   type BgBeheerResultaat,
   type BgContractFeiten,
   type BgContractOverride,
   type BgHuurAannames,
   type BgHuurResultaat,
+  type BgManagementInvoer,
+  type BgManagementResultaat,
 } from "@bvc/reporting";
 import { leesBegrotingsversie, type Begrotingsversie } from "./begrotingsversies.js";
 import { leesModule1Aannames } from "./module1Aannames.js";
 import { leesModule1Overrides } from "./module1Overrides.js";
 import { leesModule1Snapshot } from "./module1Snapshot.js";
 import { leesModule2Config } from "./module2Config.js";
+import { leesModule3Invoer } from "./module3Invoer.js";
 
 /**
  * Orchestratie: herberekent Module 1 + Module 2 voor één CONCEPT-
@@ -33,11 +37,22 @@ import { leesModule2Config } from "./module2Config.js";
  * (`vaststellen.ts`) exact dezelfde lees-/rekenlogica kan hergebruiken
  * bínnen haar eigen, grotere schrijftransactie — zonder de geneste-`BEGIN`-
  * val van `herberekenBegroting`'s eigen leestransactie.
+ *
+ * MODULE 3 (fase 2C.3, businessbeslissing 2026-09-03): `module3` is bewust
+ * `BgManagementResultaat | null`, GEEN default/leeg resultaat. `null`
+ * betekent "nog geen Module-3-invoer opgeslagen" — een CONCEPT-versie mag
+ * zonder Module-3-invoer bestaan en herberekend worden; dat is een expliciet
+ * ANDERE toestand dan een daadwerkelijk berekend resultaat met jaartotaal
+ * €0 (dat is wél een `BgManagementResultaat`, nooit `null`). Module 3 heeft
+ * GEEN functionele afhankelijkheid van Module 1/2 (in tegenstelling tot
+ * Module 2, die Module 1's netto huur als grondslag gebruikt) — er wordt
+ * hier dan ook bewust geen koppeling geïntroduceerd die niet bestaat.
  */
 export interface HerberekendeBegroting {
   versie: Begrotingsversie;
   module1: BgHuurResultaat;
   module2: BgBeheerResultaat;
+  module3: BgManagementResultaat | null;
 }
 
 /** Kleine, herbruikbare read-transactie-helper — zelfde BEGIN/COMMIT/ROLLBACK-idioom als elders in dit package (bewust hier gedupliceerd, zie 1D.5-rapport). */
@@ -53,13 +68,21 @@ function withReadTransaction<T>(db: DatabaseSync, fn: () => T): T {
   }
 }
 
-/** Alle persistente input die nodig is voor exact één Module-1+Module-2-berekening — het tussenresultaat van de leesstap, vóór pure calculatie. */
+/**
+ * Alle persistente input die nodig is voor exact één Module-1+Module-2(+Module-3)-
+ * berekening — het tussenresultaat van de leesstap, vóór pure calculatie.
+ * `module3Invoer` is bewust `BgManagementInvoer | null` — `null` is een
+ * geldige, veelvoorkomende CONCEPT-toestand ("nog niet beoordeeld"), geen
+ * foutgeval en geen aanleiding voor een default-invoer (zie
+ * `HerberekendeBegroting`'s moduledoc).
+ */
 export interface HerberekenInvoer {
   versie: Begrotingsversie;
   contracten: readonly BgContractFeiten[];
   aannames: BgHuurAannames;
   overrides: readonly BgContractOverride[];
   configs: readonly BgBeheerComplexConfig[];
+  module3Invoer: BgManagementInvoer | null;
 }
 
 /**
@@ -95,20 +118,27 @@ export function leesHerberekenInvoerZonderTransactie(db: DatabaseSync, versieId:
     aannames,
     overrides: leesModule1Overrides(db, versieId),
     configs: leesModule2Config(db, versieId),
+    module3Invoer: leesModule3Invoer(db, versieId),
   };
 }
 
 /**
- * Voert de pure Module-1- en Module-2-berekening uit op reeds-gelezen
- * invoer — GEEN eigen transactie, raakt de database niet. Rekenfouten uit de
- * pure lagen worden nooit verborgen — uitsluitend aangevuld met
- * `versieId`/module-context in de foutmelding (de oorspronkelijke boodschap
- * blijft letterlijk aanwezig, plus `cause`).
+ * Voert de pure Module-1-, Module-2- en (indien aanwezig) Module-3-
+ * berekening uit op reeds-gelezen invoer — GEEN eigen transactie, raakt de
+ * database niet. Rekenfouten uit de pure lagen worden nooit verborgen —
+ * uitsluitend aangevuld met `versieId`/module-context in de foutmelding (de
+ * oorspronkelijke boodschap blijft letterlijk aanwezig, plus `cause`).
+ *
+ * Module 3: bij `invoer.module3Invoer === null` wordt `berekenBegroteManagement
+ * vergoeding` NIET aangeroepen — het resultaat is `module3: null` (geen
+ * default-invoer, geen `Decimal(0)`-injectie, zie `HerberekendeBegroting`'s
+ * moduledoc). Bij geldige invoer wordt uitsluitend de bestaande, ongewijzigde
+ * pure functie aangeroepen — geen tweede/parallelle rekenroute.
  */
 export function berekenBegrotingUitInvoer(
   versieId: string,
   invoer: HerberekenInvoer,
-): { module1: BgHuurResultaat; module2: BgBeheerResultaat } {
+): { module1: BgHuurResultaat; module2: BgBeheerResultaat; module3: BgManagementResultaat | null } {
   let module1: BgHuurResultaat;
   try {
     module1 = berekenBegroteHuuropbrengsten(invoer.contracten, invoer.overrides, invoer.aannames, invoer.versie.bronPeildatum);
@@ -129,7 +159,19 @@ export function berekenBegrotingUitInvoer(
     );
   }
 
-  return { module1, module2 };
+  let module3: BgManagementResultaat | null = null;
+  if (invoer.module3Invoer !== null) {
+    try {
+      module3 = berekenBegroteManagementvergoeding(invoer.module3Invoer, { begrotingsjaar: invoer.versie.begrotingsjaar });
+    } catch (error) {
+      throw new Error(
+        `Berekening van begrotingsversie ${versieId} is mislukt tijdens Module 3: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
+      );
+    }
+  }
+
+  return { module1, module2, module3 };
 }
 
 /**
@@ -154,6 +196,6 @@ export function berekenBegrotingUitInvoer(
  */
 export function herberekenBegroting(db: DatabaseSync, versieId: string): HerberekendeBegroting {
   const invoer = withReadTransaction(db, () => leesHerberekenInvoerZonderTransactie(db, versieId));
-  const { module1, module2 } = berekenBegrotingUitInvoer(versieId, invoer);
-  return { versie: invoer.versie, module1, module2 };
+  const { module1, module2, module3 } = berekenBegrotingUitInvoer(versieId, invoer);
+  return { versie: invoer.versie, module1, module2, module3 };
 }
