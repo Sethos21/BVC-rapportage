@@ -22,6 +22,14 @@ import { leesBegrotingsversie, type Begrotingsversie } from "./begrotingsversies
  * — geen formules, geen totalen/controles opnieuw afgeleid, geen aanroep
  * van `berekenBegroteHuuropbrengsten`/`berekenBegroteBeheersvergoeding`/
  * `herberekenBegroting`.
+ *
+ * `schrijfFrozenBegrotingsresultaatZonderTransactie` is bewust als los,
+ * transactievrij bouwblok geexporteerd (niet via `index.ts` - intern
+ * hergebruik, zelfde grens als `markeerVastgesteld` in
+ * `begrotingsversies.ts`) zodat Fase 1D.6b's `stelBegrotingVast`
+ * (`vaststellen.ts`) exact dezelfde schrijflogica kan hergebruiken binnen
+ * haar eigen, grotere schrijftransactie - zonder de geneste-`BEGIN`-val van
+ * `schrijfFrozenBegrotingsresultaat`'s eigen transactie.
  */
 export interface FrozenBegrotingsresultaat {
   module1: BgHuurResultaat;
@@ -151,15 +159,18 @@ interface Module2ControlRow {
 
 /**
  * Schrijft het COMPLETE bevroren Module-1+Module-2-resultaat voor één
- * begrotingsversie, atomair (vervangt — geen gedeeltelijke Module-1/Module-2-
- * state; beide modules worden in dezelfde transactie vervangen). Faalt vóór
- * de transactie als de parent niet bestaat, geen CONCEPT is, of als
- * `begrotingsjaar`/`bronPeildatum` in het resultaat niet overeenkomen met de
- * parent-versie — dit zijn geen nieuwe businessregels, maar reeds bestaande
- * structurele invarianten (`herberekenBegroting` geeft deze waarden altijd
- * ongewijzigd door vanuit de versie).
+ * begrotingsversie — vervangt, geen gedeeltelijke Module-1/Module-2-state.
+ * GEEN eigen transactie (de aanroeper bepaalt de transactiegrens; zie
+ * `schrijfFrozenBegrotingsresultaat` voor de publieke, op zichzelf staande
+ * variant en `stelBegrotingVast` (`vaststellen.ts`) voor hergebruik binnen
+ * één grotere schrijftransactie). Faalt vóór enige schrijfactie als de
+ * parent niet bestaat, geen CONCEPT is, of als `begrotingsjaar`/
+ * `bronPeildatum` in het resultaat niet overeenkomen met de parent-versie —
+ * dit zijn geen nieuwe businessregels, maar reeds bestaande structurele
+ * invarianten (`herberekenBegroting` geeft deze waarden altijd ongewijzigd
+ * door vanuit de versie).
  */
-export function schrijfFrozenBegrotingsresultaat(db: DatabaseSync, versieId: string, resultaat: FrozenBegrotingsresultaat): void {
+export function schrijfFrozenBegrotingsresultaatZonderTransactie(db: DatabaseSync, versieId: string, resultaat: FrozenBegrotingsresultaat): void {
   const versie = leesBegrotingsversie(db, versieId);
   if (versie === null) {
     throw new Error(`Begrotingsversie ${versieId} bestaat niet.`);
@@ -183,7 +194,7 @@ export function schrijfFrozenBegrotingsresultaat(db: DatabaseSync, versieId: str
     throw new Error(`Module-1-resultaat bronPeildatum komt niet overeen met begrotingsversie ${versieId}.`);
   }
 
-  withTransaction(db, () => {
+  {
     db.prepare(`DELETE FROM begroting_frozen_module1_control WHERE begroting_versie_id = ?`).run(versieId);
     db.prepare(`DELETE FROM begroting_frozen_module1_maandregel WHERE begroting_versie_id = ?`).run(versieId);
     db.prepare(`DELETE FROM begroting_frozen_module1_contract WHERE begroting_versie_id = ?`).run(versieId);
@@ -339,7 +350,17 @@ export function schrijfFrozenBegrotingsresultaat(db: DatabaseSync, versieId: str
     m2.controleVereist.forEach((control, volgnr) => {
       insertControl2.run(versieId, volgnr, control.complexnummer, control.ernst, control.bericht);
     });
-  });
+  }
+}
+
+/**
+ * Publieke, op zichzelf staande variant: exact `schrijfFrozenBegrotingsresultaatZonderTransactie`,
+ * maar binnen haar eigen complete `BEGIN`…`COMMIT`/`ROLLBACK`-transactie —
+ * voor aanroepers die frozen output als losstaande operatie willen
+ * schrijven (bv. tijdens CONCEPT, ter voorbereiding/test — zie moduledoc).
+ */
+export function schrijfFrozenBegrotingsresultaat(db: DatabaseSync, versieId: string, resultaat: FrozenBegrotingsresultaat): void {
+  withTransaction(db, () => schrijfFrozenBegrotingsresultaatZonderTransactie(db, versieId, resultaat));
 }
 
 function reconstrueerModule1(db: DatabaseSync, versieId: string, versie: Begrotingsversie, header: Module1ResultaatRow): BgHuurResultaat {

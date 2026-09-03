@@ -7,10 +7,12 @@
 export * from "./database.js";
 
 // `markeerVastgesteld` (begrotingsversies.js) is BEWUST niet hier
-// herexporteerd — het is een intern lifecycle-bouwblok, gereserveerd voor de
-// échte VASTSTELLEN-transactie van Fase 1D.6 (die Module 1/2 berekent, frozen
-// output schrijft, én deze statusovergang uitvoert, alles atomair). Deze
-// fase's eigen tests importeren hem rechtstreeks via "./begrotingsversies.js".
+// herexporteerd — het is een intern lifecycle-bouwblok. Sinds Fase 1D.6b
+// wordt het daadwerkelijk gebruikt door `stelBegrotingVast`
+// (vaststellen.js, hieronder) binnen diens ene atomaire transactie; de
+// publieke ingang blijft `stelBegrotingVast` zelf, nooit `markeerVastgesteld`
+// rechtstreeks. Eerdere fases' tests importeren het nog steeds rechtstreeks
+// via "./begrotingsversies.js" om de immutability-invariant te bewijzen.
 export {
   maakBegrotingsversie,
   leesBegrotingsversie,
@@ -42,5 +44,12 @@ export { herberekenBegroting, type HerberekendeBegroting } from "./herberekenen.
 
 // Bevroren Module-1/Module-2-output (1D.6a) — uitsluitend serialisatie/
 // deserialisatie van de bestaande `BgHuurResultaat`/`BgBeheerResultaat`,
-// geen shadow-resultaattype. GEEN vaststellen-service hier (1D.6b).
+// geen shadow-resultaattype. `schrijfFrozenBegrotingsresultaatZonderTransactie`
+// blijft bewust intern (zie vaststellen.js) — de publieke schrijf-ingang is
+// en blijft `schrijfFrozenBegrotingsresultaat`.
 export { schrijfFrozenBegrotingsresultaat, leesFrozenBegrotingsresultaat, type FrozenBegrotingsresultaat } from "./frozenResultaat.js";
+
+// De atomaire VASTSTELLEN-operatie (1D.6b) — de enige publieke weg om een
+// CONCEPT-versie definitief VASTGESTELD te maken. Bundelt uitsluitend de
+// bestaande `Begrotingsversie`/`BgHuurResultaat`/`BgBeheerResultaat`.
+export { stelBegrotingVast, type VastgesteldeBegroting } from "./vaststellen.js";
