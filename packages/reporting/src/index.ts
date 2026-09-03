@@ -38,4 +38,5 @@ export * from "./managementRapport.js";
 export * from "./renderManagementRapport.js";
 export * from "./begroting/begroteHuuropbrengsten.js";
 export * from "./begroting/begroteBeheersvergoeding.js";
+export * from "./begroting/begroteManagementvergoeding.js";
 export { HUISSTIJL_CSS, escapeHtml, formatBedragHtml, renderRapportDocument } from "./huisstijl.js";
