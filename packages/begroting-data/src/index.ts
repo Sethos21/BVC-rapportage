@@ -39,3 +39,8 @@ export { schrijfModule2Config, leesModule2Config } from "./module2Config.js";
 // bundelt de al bestaande `Begrotingsversie`/`BgHuurResultaat`/`BgBeheerResultaat`,
 // geen shadow-rekenresultaattype.
 export { herberekenBegroting, type HerberekendeBegroting } from "./herberekenen.js";
+
+// Bevroren Module-1/Module-2-output (1D.6a) — uitsluitend serialisatie/
+// deserialisatie van de bestaande `BgHuurResultaat`/`BgBeheerResultaat`,
+// geen shadow-resultaattype. GEEN vaststellen-service hier (1D.6b).
+export { schrijfFrozenBegrotingsresultaat, leesFrozenBegrotingsresultaat, type FrozenBegrotingsresultaat } from "./frozenResultaat.js";

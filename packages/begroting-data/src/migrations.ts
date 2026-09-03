@@ -426,6 +426,351 @@ export const MIGRATIONS: readonly Migration[] = [
        END`,
     ],
   },
+  /**
+   * Migratie 5 — bevroren Module-1/Module-2-OUTPUT (`BgHuurResultaat`/
+   * `BgBeheerResultaat`, exact zoals `begroteHuuropbrengsten.ts`/
+   * `begroteBeheersvergoeding.ts` die op HEAD kennen). Uitsluitend
+   * serialisatie/deserialisatie van reeds berekende, pure resultaten — geen
+   * nieuwe formules, geen totalen/controles opnieuw afgeleid.
+   *
+   * Bewust NIET opgeslagen (gereconstrueerd uit reeds-bestaande, op dat
+   * moment al-immutable brontabellen): `begrotingsjaar` (module1 én module2)
+   * — al write-once op `begrotingsversies`; `bronPeildatum` (module1) — al
+   * write-once op `begrotingsversies`; `indexatiePercentageAlgemeen`
+   * (module1) — is exact de reeds opgeslagen `begroting_aannames.
+   * indexatie_percentage`, die zelf ook al immutable wordt zodra de versie
+   * VASTGESTELD is (migratie 4), dus kan nooit na het bevriezen afwijken.
+   * WEL opgeslagen, ondanks een oppervlakkige gelijkenis met bestaande
+   * inputtabellen: `indexatiePercentageGebruikt`/`indexatiePercentageBron`/
+   * `overrideToegepast` (contract) en `vastToegepast`/`variabelToegepast`/
+   * `variabelPercentageGebruikt` (complex) — dit zijn afgeleide
+   * UITKOMSTEN van de pure validatie/dedupliceerlogica (bv. bij meerdere
+   * conflicterende overrides/configs), niet 1-op-1 herleidbaar uit de
+   * ruwe inputtabellen zonder die pure logica te herhalen.
+   *
+   * Arrayvolgorde: frozen output bewaart de FEITELIJKE, op het moment van
+   * schrijven waargenomen arrayvolgorde — nooit een achteraf op de huidige
+   * sorteersemantiek van de pure functies gebaseerde herordening, ook niet
+   * als die op dit moment toevallig samenvalt (bv. contractnummer-/
+   * complexnummer-sortering). Frozen output mag na een latere wijziging in
+   * hoe de pure functies intern ordenen nooit stilzwijgend een andere
+   * volgorde teruggeven dan destijds vastgesteld.
+   * - contracten (`begroting_frozen_module1_contract`) en complexen
+   *   (`begroting_frozen_module2_complex`) krijgen daarom een technisch
+   *   `volgnr` (exact de arraypositie op schrijfmoment), met
+   *   `UNIQUE (begroting_versie_id, volgnr)` — gelezen via `ORDER BY
+   *   volgnr`, nooit via `ORDER BY contractnummer`/`complexnummer`.
+   *   `volgnr` heeft uitsluitend technische betekenis, geen business-
+   *   betekenis; de bestaande PK op (begroting_versie_id, contractnummer/
+   *   complexnummer) blijft ongewijzigd.
+   * - maandregels: `maand` (1-12) blijft ONGEWIJZIGD de sorteersleutel —
+   *   dat is de werkelijke, semantische kalendervolgorde (1-12), geen
+   *   sorteerkeuze van de pure functie die kan wijzigen.
+   * - controls: GEEN natuurlijk sorteerbaar veld (contractnummer/
+   *   complexnummer kan null zijn of herhalen, bericht kan herhalen) —
+   *   blijven ONGEWIJZIGD hun bestaande expliciete `volgnr`.
+   *
+   * Elk van de acht tabellen draagt `begroting_versie_id` rechtstreeks
+   * (ook de "diepere" child-tabellen, niet uitsluitend via de FK-keten) —
+   * zelfde denormalisatie als 1D.3's rentroll-/kortingswijziging-
+   * child-tabellen, uitsluitend om de VASTGESTELD-immutability-trigger op
+   * elke tabel met dezelfde simpele WHEN-subquery te kunnen schrijven,
+   * zonder meerstaps-joins.
+   *
+   * Cascade-ketens: begrotingsversies --CASCADE--> *_resultaat (header)
+   * --CASCADE--> *_contract/*_complex --CASCADE--> *_maandregel;
+   * *_control hangt rechtstreeks aan *_resultaat. Zo verwijdert
+   * `verwijderConceptVersie` (of een rechtstreekse delete van de header
+   * tijdens CONCEPT) altijd de volledige boom.
+   *
+   * Immutability: alle acht tabellen krijgen dezelfde drie triggers
+   * (INSERT/UPDATE/DELETE geweigerd zodra de bijbehorende
+   * `begrotingsversies`-rij `status = 'VASTGESTELD'` heeft) — exact
+   * hetzelfde patroon als migratie 3/4. Dit maakt 1D.6b's toekomstige
+   * transactie ("frozen output schrijven, dán status VASTGESTELD zetten")
+   * technisch mogelijk: de write moet vóór de statusovergang gebeuren
+   * (terwijl de versie nog CONCEPT is), daarna is alles in één klap
+   * immutable.
+   */
+  {
+    version: 5,
+    description: "Bevroren Module-1/Module-2-output (frozen resultaat)",
+    ddl: [
+      `CREATE TABLE begroting_frozen_module1_resultaat (
+        begroting_versie_id TEXT PRIMARY KEY REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        indexatie_percentage_algemeen TEXT NOT NULL,
+        portefeuille_bruto_huur_zonder_indexatie TEXT NOT NULL,
+        portefeuille_indexatie_effect TEXT NOT NULL,
+        portefeuille_bruto_huur_met_indexatie TEXT NOT NULL,
+        portefeuille_huurkorting TEXT NOT NULL,
+        portefeuille_netto_huur TEXT NOT NULL,
+        portefeuille_netto_huur_belast TEXT NOT NULL,
+        portefeuille_netto_huur_onbelast TEXT NOT NULL,
+        portefeuille_netto_huur_onbekende_btw TEXT NOT NULL
+      )`,
+      `CREATE TABLE begroting_frozen_module1_contract (
+        begroting_versie_id TEXT NOT NULL,
+        contractnummer TEXT NOT NULL,
+        volgnr INTEGER NOT NULL,
+        huurdernummer TEXT NULL,
+        huurder_naam TEXT NULL,
+        complexnummer TEXT NULL,
+        belast_onbelast TEXT NOT NULL CHECK (belast_onbelast IN ('BELAST', 'ONBELAST', 'ONBEKEND')),
+        indexatie_percentage_gebruikt TEXT NOT NULL,
+        indexatie_percentage_bron TEXT NOT NULL CHECK (indexatie_percentage_bron IN ('ALGEMEEN', 'OVERRIDE')),
+        override_scope TEXT NULL CHECK (override_scope IS NULL OR override_scope IN ('VERSIE', 'STRUCTUREEL')),
+        override_reden TEXT NULL CHECK (override_scope IS NOT NULL OR override_reden IS NULL),
+        effectieve_indexatiedatum TEXT NULL,
+        jaartotaal_bruto_huur_zonder_indexatie TEXT NOT NULL,
+        jaartotaal_indexatie_effect TEXT NOT NULL,
+        jaartotaal_bruto_huur_met_indexatie TEXT NOT NULL,
+        jaartotaal_huurkorting TEXT NOT NULL,
+        jaartotaal_netto_huur TEXT NOT NULL,
+        PRIMARY KEY (begroting_versie_id, contractnummer),
+        UNIQUE (begroting_versie_id, volgnr),
+        FOREIGN KEY (begroting_versie_id) REFERENCES begroting_frozen_module1_resultaat(begroting_versie_id) ON DELETE CASCADE
+      )`,
+      `CREATE TABLE begroting_frozen_module1_maandregel (
+        begroting_versie_id TEXT NOT NULL,
+        contractnummer TEXT NOT NULL,
+        maand INTEGER NOT NULL CHECK (maand BETWEEN 1 AND 12),
+        bruto_huur_zonder_indexatie TEXT NOT NULL,
+        indexatie_effect TEXT NOT NULL,
+        bruto_huur_met_indexatie TEXT NOT NULL,
+        huurkorting TEXT NOT NULL,
+        netto_huur TEXT NOT NULL,
+        kortingswijziging_toegepast TEXT NULL,
+        PRIMARY KEY (begroting_versie_id, contractnummer, maand),
+        FOREIGN KEY (begroting_versie_id, contractnummer)
+          REFERENCES begroting_frozen_module1_contract(begroting_versie_id, contractnummer) ON DELETE CASCADE
+      )`,
+      `CREATE TABLE begroting_frozen_module1_control (
+        begroting_versie_id TEXT NOT NULL,
+        volgnr INTEGER NOT NULL,
+        contractnummer TEXT NULL,
+        ernst TEXT NOT NULL CHECK (ernst IN ('KRITIEK', 'WAARSCHUWING', 'INFORMATIEF')),
+        bericht TEXT NOT NULL,
+        PRIMARY KEY (begroting_versie_id, volgnr),
+        FOREIGN KEY (begroting_versie_id) REFERENCES begroting_frozen_module1_resultaat(begroting_versie_id) ON DELETE CASCADE
+      )`,
+      `CREATE TABLE begroting_frozen_module2_resultaat (
+        begroting_versie_id TEXT PRIMARY KEY REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        portefeuille_netto_huur_grondslag TEXT NOT NULL,
+        portefeuille_vast_voor_indexatie TEXT NOT NULL,
+        portefeuille_vast_indexatie_effect TEXT NOT NULL,
+        portefeuille_vast_na_indexatie TEXT NOT NULL,
+        portefeuille_variabele_vergoeding TEXT NOT NULL,
+        portefeuille_totale_vergoeding TEXT NOT NULL
+      )`,
+      `CREATE TABLE begroting_frozen_module2_complex (
+        begroting_versie_id TEXT NOT NULL,
+        complexnummer TEXT NOT NULL,
+        volgnr INTEGER NOT NULL,
+        vast_toegepast INTEGER NOT NULL CHECK (vast_toegepast IN (0, 1)),
+        variabel_toegepast INTEGER NOT NULL CHECK (variabel_toegepast IN (0, 1)),
+        variabel_percentage_gebruikt TEXT NULL,
+        jaartotaal_netto_huur_grondslag TEXT NOT NULL,
+        jaartotaal_vast_voor_indexatie TEXT NOT NULL,
+        jaartotaal_vast_indexatie_effect TEXT NOT NULL,
+        jaartotaal_vast_na_indexatie TEXT NOT NULL,
+        jaartotaal_variabele_vergoeding TEXT NOT NULL,
+        jaartotaal_totale_vergoeding TEXT NOT NULL,
+        PRIMARY KEY (begroting_versie_id, complexnummer),
+        UNIQUE (begroting_versie_id, volgnr),
+        FOREIGN KEY (begroting_versie_id) REFERENCES begroting_frozen_module2_resultaat(begroting_versie_id) ON DELETE CASCADE
+      )`,
+      `CREATE TABLE begroting_frozen_module2_maandregel (
+        begroting_versie_id TEXT NOT NULL,
+        complexnummer TEXT NOT NULL,
+        maand INTEGER NOT NULL CHECK (maand BETWEEN 1 AND 12),
+        vast_voor_indexatie TEXT NOT NULL,
+        vast_indexatie_effect TEXT NOT NULL,
+        vast_na_indexatie TEXT NOT NULL,
+        variabele_vergoeding TEXT NOT NULL,
+        totale_vergoeding TEXT NOT NULL,
+        PRIMARY KEY (begroting_versie_id, complexnummer, maand),
+        FOREIGN KEY (begroting_versie_id, complexnummer)
+          REFERENCES begroting_frozen_module2_complex(begroting_versie_id, complexnummer) ON DELETE CASCADE
+      )`,
+      `CREATE TABLE begroting_frozen_module2_control (
+        begroting_versie_id TEXT NOT NULL,
+        volgnr INTEGER NOT NULL,
+        complexnummer TEXT NULL,
+        ernst TEXT NOT NULL CHECK (ernst IN ('KRITIEK', 'WAARSCHUWING', 'INFORMATIEF')),
+        bericht TEXT NOT NULL,
+        PRIMARY KEY (begroting_versie_id, volgnr),
+        FOREIGN KEY (begroting_versie_id) REFERENCES begroting_frozen_module2_resultaat(begroting_versie_id) ON DELETE CASCADE
+      )`,
+      `CREATE TRIGGER trg_begroting_frozen_module1_resultaat_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_frozen_module1_resultaat
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_module1_resultaat: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_module1_resultaat_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_frozen_module1_resultaat
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_module1_resultaat: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_module1_resultaat_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_frozen_module1_resultaat
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_module1_resultaat: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_module1_contract_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_frozen_module1_contract
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_module1_contract: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_module1_contract_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_frozen_module1_contract
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_module1_contract: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_module1_contract_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_frozen_module1_contract
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_module1_contract: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_module1_maandregel_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_frozen_module1_maandregel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_module1_maandregel: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_module1_maandregel_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_frozen_module1_maandregel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_module1_maandregel: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_module1_maandregel_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_frozen_module1_maandregel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_module1_maandregel: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_module1_control_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_frozen_module1_control
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_module1_control: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_module1_control_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_frozen_module1_control
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_module1_control: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_module1_control_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_frozen_module1_control
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_module1_control: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_module2_resultaat_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_frozen_module2_resultaat
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_module2_resultaat: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_module2_resultaat_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_frozen_module2_resultaat
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_module2_resultaat: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_module2_resultaat_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_frozen_module2_resultaat
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_module2_resultaat: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_module2_complex_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_frozen_module2_complex
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_module2_complex: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_module2_complex_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_frozen_module2_complex
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_module2_complex: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_module2_complex_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_frozen_module2_complex
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_module2_complex: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_module2_maandregel_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_frozen_module2_maandregel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_module2_maandregel: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_module2_maandregel_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_frozen_module2_maandregel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_module2_maandregel: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_module2_maandregel_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_frozen_module2_maandregel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_module2_maandregel: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_module2_control_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_frozen_module2_control
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_module2_control: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_module2_control_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_frozen_module2_control
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_module2_control: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_module2_control_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_frozen_module2_control
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_module2_control: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+    ],
+  },
 ];
 
 function schemaMetaTableExists(db: DatabaseSync): boolean {
