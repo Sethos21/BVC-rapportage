@@ -877,6 +877,215 @@ export const MIGRATIONS: readonly Migration[] = [
        END`,
     ],
   },
+  /**
+   * Migratie 7 — bevroren Module-3-OUTPUT (`BgManagementResultaat`, fase
+   * 2C.4, exact zoals `packages/reporting/src/begroting/
+   * begroteManagementvergoeding.ts` op HEAD die kent). Uitsluitend
+   * serialisatie/deserialisatie van een reeds berekend, puur resultaat —
+   * geen formules, geen totalen opnieuw afgeleid. Migratie 6 (input) en
+   * migratie 7 (output) zijn bewust strikt gescheiden verantwoordelijkheden:
+   * de tabellen hier verwijzen NIET naar `begroting_management_invoer` en
+   * zijn zelfstandig, volledig terugleesbaar — precies zoals migratie 5 t.o.v.
+   * migratie 4 voor Module 1/2.
+   *
+   * GEEN contract-/complex-tussenlaag: Module 3 heeft, in tegenstelling tot
+   * Module 1/2, geen sub-entiteiten — `begroting_frozen_module3_resultaat` is
+   * de enige headertabel (1-op-1 met de versie, PK = FK =
+   * `begroting_versie_id`), met de 12 maandregels rechtstreeks eraan
+   * gekoppeld op de natuurlijke sleutel `(begroting_versie_id, maand)` — GEEN
+   * `volgnr` nodig (in tegenstelling tot migratie 5's contract-/complexrijen,
+   * die geen natuurlijke unieke sleutel hebben): `maand` (1-12) is zelf al
+   * uniek en semantisch betekenisvol, en blijft daarmee ongewijzigd de
+   * sorteersleutel bij lezen (`ORDER BY maand`), zelfde principe als migratie
+   * 5's eigen maandregeltabellen.
+   *
+   * `begroting_frozen_module3_control` heeft, net als
+   * `begroting_frozen_module1/2_control`, geen natuurlijke unieke sleutel
+   * (`BgManagementControleItem` is uitsluitend `{ ernst, bericht }` — geen
+   * contractnummer/complexnummer-achtig veld, Module 3 heeft geen
+   * sub-entiteit om aan te koppelen) en krijgt daarom hetzelfde bestaande
+   * `volgnr`-patroon (exact de arraypositie op schrijfmoment) als bewezen
+   * precedent.
+   *
+   * Kolomindeling op de header, EXPLICIET in twee groepen — nooit door elkaar
+   * gehaald, want dit zijn twee verschillende velden van `BgManagementResultaat`:
+   * - `invoer_*`: een letterlijke kopie van de toegepaste `invoer:
+   *   BgManagementInvoer` (wijze-afhankelijk, nooit een formule om terug te
+   *   herleiden uit de resultaatvelden — ook al zijn sommige waarden
+   *   mathematisch gerelateerd, frozen output leidt nooit iets opnieuw af).
+   * - `resultaat_*`: de TOP-LEVEL afgeleide velden van `BgManagementResultaat`
+   *   zelf (`bestaandBedrag`/`nieuwBedrag` als `{maand, jaar}` of `null` —
+   *   `null` specifiek wanneer de pure laag het ingevoerde bedrag als
+   *   ongeldig heeft afgewezen, zie `geldigBedragEenhedenOfNull` op HEAD;
+   *   dat kan dus afwijken van de altijd-aanwezige `invoer_bestaand_bedrag`/
+   *   `invoer_nieuw_bedrag`, die de ruwe invoer blijft tonen ongeacht
+   *   geldigheid).
+   * - `effectieve_indexatiedatum`/`effectieve_ingangsdatum`: eveneens
+   *   top-level resultaatvelden, expliciet ANDERS dan `invoer_indexatiedatum`/
+   *   `invoer_ingangsdatum` (de ruwe invoerdatum kan afwijken van de
+   *   effectieve datum, bv. wanneer de datum buiten het begrotingsjaar valt
+   *   en het effect daardoor niet is toegepast — zie de pure module).
+   * - `jaartotaal_*`: `BgManagementJaartotalen` (basisBedrag/effect/bedrag),
+   *   altijd aanwezig (nooit `null` — een berekening levert altijd een
+   *   jaartotaal, ook als dat €0 is).
+   *
+   * `begrotingsjaar` wordt hier NIET opgeslagen — al write-once op
+   * `begrotingsversies` (zelfde precedent als migratie 5).
+   *
+   * Cascade-keten: begrotingsversies --CASCADE--> *_resultaat (header)
+   * --CASCADE--> *_maandregel/*_control (beide rechtstreeks aan de header,
+   * geen tussenlaag). Immutability: dezelfde drie triggers per tabel
+   * (INSERT/UPDATE/DELETE geweigerd zodra `begrotingsversies.status =
+   * 'VASTGESTELD'`) als elke eerdere migratie.
+   *
+   * `wijze` krijgt een CHECK met de drie bekende enumwaarden (zelfde
+   * bescherming als migratie 6). BUSINESSBESLISSING (2026-09-03, review):
+   * `begroting_frozen_module3_resultaat` krijgt daarnaast — net als migratie
+   * 6's invoertabel — een volledige, wijze-afhankelijke CHECK-constraint op
+   * de `invoer_*`-kolommen (`chk_begroting_frozen_module3_resultaat_wijze_
+   * kolommen`): het argument "uitsluitend bereikbaar via de getypeerde
+   * TypeScript-API" is onvoldoende reden om een databaseconstraint weg te
+   * laten — deze architectuur gebruikt bewust twee beschermingslagen
+   * (applicatie/API én databaseconstraints/triggers), ook voor bevroren
+   * historische gegevens. Deze CHECK bewijst uitsluitend de STRUCTURELE
+   * invariant van de invoer-echo per wijze (welke `invoer_*`-kolommen
+   * verplicht/NULL moeten zijn) — bewust GEEN validatie van de rekenkundige
+   * correctheid van het resultaat zelf (geen "jaartotaal = som maandregels",
+   * geen "effect = nieuw − bestaand", geen indexatieberekening): dat blijft
+   * de verantwoordelijkheid van de pure rekenlaag en de frozen
+   * roundtrip-tests, een CHECK-constraint is er niet voor bedoeld en zou de
+   * migratie onnodig complex maken. De `resultaat_*`/`effectieve_*`-kolommen
+   * (top-level, wijze-onafhankelijke velden van `BgManagementResultaat`,
+   * inclusief hun eigen "ongeldige invoer → null"-semantiek, zie
+   * `frozenModule3Resultaat.ts`) blijven bewust buiten deze CHECK — hun
+   * geldige combinaties volgen niet uit `wijze` alleen.
+   */
+  {
+    version: 7,
+    description: "Bevroren Module-3-output (frozen Managementvergoeding-resultaat)",
+    ddl: [
+      `CREATE TABLE begroting_frozen_module3_resultaat (
+        begroting_versie_id TEXT PRIMARY KEY REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        wijze TEXT NOT NULL CHECK (wijze IN ('INDEXEER_BESTAAND', 'WIJZIG_BESTAAND_BEDRAG', 'NIEUWE_VERGOEDING')),
+        invoer_bestaand_bedrag TEXT NULL,
+        invoer_bestaand_eenheid TEXT NULL,
+        invoer_nieuw_bedrag TEXT NULL,
+        invoer_nieuwe_eenheid TEXT NULL,
+        invoer_indexatie_percentage TEXT NULL,
+        invoer_indexatiedatum TEXT NULL,
+        invoer_ingangsdatum TEXT NULL,
+        resultaat_bestaand_bedrag_maand TEXT NULL,
+        resultaat_bestaand_bedrag_jaar TEXT NULL,
+        resultaat_nieuw_bedrag_maand TEXT NULL,
+        resultaat_nieuw_bedrag_jaar TEXT NULL,
+        effectieve_indexatiedatum TEXT NULL,
+        effectieve_ingangsdatum TEXT NULL,
+        jaartotaal_basis_bedrag TEXT NOT NULL,
+        jaartotaal_effect TEXT NOT NULL,
+        jaartotaal_bedrag TEXT NOT NULL,
+        CONSTRAINT chk_begroting_frozen_module3_resultaat_wijze_kolommen CHECK (
+          (
+            wijze = 'INDEXEER_BESTAAND'
+            AND invoer_bestaand_bedrag IS NOT NULL AND invoer_bestaand_eenheid IS NOT NULL
+            AND invoer_indexatie_percentage IS NOT NULL AND invoer_indexatiedatum IS NOT NULL
+            AND invoer_nieuw_bedrag IS NULL AND invoer_nieuwe_eenheid IS NULL AND invoer_ingangsdatum IS NULL
+          )
+          OR (
+            wijze = 'WIJZIG_BESTAAND_BEDRAG'
+            AND invoer_bestaand_bedrag IS NOT NULL AND invoer_bestaand_eenheid IS NOT NULL
+            AND invoer_nieuw_bedrag IS NOT NULL AND invoer_nieuwe_eenheid IS NOT NULL AND invoer_ingangsdatum IS NOT NULL
+            AND invoer_indexatie_percentage IS NULL AND invoer_indexatiedatum IS NULL
+          )
+          OR (
+            wijze = 'NIEUWE_VERGOEDING'
+            AND invoer_nieuw_bedrag IS NOT NULL AND invoer_nieuwe_eenheid IS NOT NULL
+            AND invoer_bestaand_bedrag IS NULL AND invoer_bestaand_eenheid IS NULL
+            AND invoer_indexatie_percentage IS NULL AND invoer_indexatiedatum IS NULL
+          )
+        )
+      )`,
+      `CREATE TABLE begroting_frozen_module3_maandregel (
+        begroting_versie_id TEXT NOT NULL,
+        maand INTEGER NOT NULL CHECK (maand BETWEEN 1 AND 12),
+        basis_bedrag TEXT NOT NULL,
+        effect TEXT NOT NULL,
+        bedrag TEXT NOT NULL,
+        PRIMARY KEY (begroting_versie_id, maand),
+        FOREIGN KEY (begroting_versie_id) REFERENCES begroting_frozen_module3_resultaat(begroting_versie_id) ON DELETE CASCADE
+      )`,
+      `CREATE TABLE begroting_frozen_module3_control (
+        begroting_versie_id TEXT NOT NULL,
+        volgnr INTEGER NOT NULL,
+        ernst TEXT NOT NULL CHECK (ernst IN ('KRITIEK', 'WAARSCHUWING', 'INFORMATIEF')),
+        bericht TEXT NOT NULL,
+        PRIMARY KEY (begroting_versie_id, volgnr),
+        FOREIGN KEY (begroting_versie_id) REFERENCES begroting_frozen_module3_resultaat(begroting_versie_id) ON DELETE CASCADE
+      )`,
+      `CREATE TRIGGER trg_begroting_frozen_module3_resultaat_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_frozen_module3_resultaat
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_module3_resultaat: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_module3_resultaat_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_frozen_module3_resultaat
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_module3_resultaat: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_module3_resultaat_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_frozen_module3_resultaat
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_module3_resultaat: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_module3_maandregel_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_frozen_module3_maandregel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_module3_maandregel: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_module3_maandregel_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_frozen_module3_maandregel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_module3_maandregel: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_module3_maandregel_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_frozen_module3_maandregel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_module3_maandregel: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_module3_control_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_frozen_module3_control
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_module3_control: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_module3_control_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_frozen_module3_control
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_module3_control: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_module3_control_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_frozen_module3_control
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_module3_control: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+    ],
+  },
 ];
 
 function schemaMetaTableExists(db: DatabaseSync): boolean {

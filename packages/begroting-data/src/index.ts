@@ -56,6 +56,17 @@ export { herberekenBegroting, type HerberekendeBegroting } from "./herberekenen.
 // en blijft `schrijfFrozenBegrotingsresultaat`.
 export { schrijfFrozenBegrotingsresultaat, leesFrozenBegrotingsresultaat, type FrozenBegrotingsresultaat } from "./frozenResultaat.js";
 
+// Bevroren Module-3-output (fase 2C.4) — uitsluitend serialisatie/
+// deserialisatie van de bestaande `BgManagementResultaat`, geen
+// shadow-resultaattype. Strikt gescheiden van `module3Invoer.js` (de
+// persistente INVOER): deze laag leest die tabel nooit terug om een
+// resultaat te reconstrueren. `schrijfFrozenModule3ResultaatZonderTransactie`
+// blijft bewust intern (zelfde grens als `schrijfFrozenBegrotingsresultaat
+// ZonderTransactie`) — de publieke schrijf-ingang is en blijft
+// `schrijfFrozenModule3Resultaat`. `leesFrozenModule3Resultaat` geeft `null`
+// terug als er nog geen frozen output is — nooit een default/`Decimal(0)`.
+export { schrijfFrozenModule3Resultaat, leesFrozenModule3Resultaat } from "./frozenModule3Resultaat.js";
+
 // De atomaire VASTSTELLEN-operatie (1D.6b) — de enige publieke weg om een
 // CONCEPT-versie definitief VASTGESTELD te maken. Bundelt uitsluitend de
 // bestaande `Begrotingsversie`/`BgHuurResultaat`/`BgBeheerResultaat`.
