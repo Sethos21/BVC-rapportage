@@ -1207,6 +1207,254 @@ export const MIGRATIONS: readonly Migration[] = [
        END`,
     ],
   },
+  /**
+   * Migratie 9 — bevroren Gepland-Onderhoud-OUTPUT (fase GO-P3, exact zoals
+   * `packages/reporting/src/begroting/begroteGeplandOnderhoud.ts` op HEAD
+   * kent). Uitsluitend serialisatie/deserialisatie van een reeds berekend,
+   * puur resultaat — geen formules, geen totalen opnieuw afgeleid. Migratie 8
+   * (input) en migratie 9 (output) zijn bewust strikt gescheiden
+   * verantwoordelijkheden, zelfde precedent als migratie 6/7 voor Module 3:
+   * de tabellen hier verwijzen NIET naar `begroting_gepland_onderhoud_
+   * activiteit`/`begroting_gepland_onderhoud_module` en zijn zelfstandig,
+   * volledig terugleesbaar.
+   *
+   * VIER TABELLEN (in tegenstelling tot Module 3's ene headertabel): Gepland
+   * Onderhoud heeft, anders dan Module 3, WEL sub-entiteiten — activiteiten
+   * en complexen — dus volgt hier het Module-1/2-patroon (migratie 5) van een
+   * headertabel + child-tabellen, niet Module 3's 1-op-1-patroon.
+   *
+   * `begroting_frozen_gepland_onderhoud_activiteit`: PK = `(begroting_versie_id,
+   * activiteit_id)` — GEEN apart `volgnr` nodig (in tegenstelling tot Module
+   * 1's contract-/Module 2's complexrijen): `activiteit_id` is zelf al een
+   * stabiele, unieke, monotoon oplopende technische sleutel (GO-P1's SQLite-
+   * rowid) die de feitelijke schrijf-/leesvolgorde al ondubbelzinnig
+   * vastlegt — een tweede volgordeveld zou hier geen informatie toevoegen.
+   *
+   * `begroting_frozen_gepland_onderhoud_complex`: WEL een `volgnr`
+   * (`UNIQUE (begroting_versie_id, volgnr)`), ondanks dat `complexnummer` een
+   * natuurlijke, sorteerbare sleutel is — exact hetzelfde precedent als
+   * Module 1's `begroting_frozen_module1_contract`/Module 2's `begroting_
+   * frozen_module2_complex` (migratie 5): frozen output bewaart de
+   * FEITELIJKE array-volgorde op schrijfmoment, nooit een achteraf op de
+   * huidige sorteersemantiek van de pure functie gebaseerde herordening —
+   * ook al sorteert `berekenBegroteGeplandOnderhoud` vandaag toevallig al
+   * alfabetisch op complexnummer, dat mag in een latere codewijziging nooit
+   * stilzwijgend een andere frozen leesvolgorde opleveren.
+   *
+   * `begroting_frozen_gepland_onderhoud_control`: zelfde `volgnr`-patroon als
+   * elke eerdere control-tabel (geen natuurlijke sleutel). `activiteit_id`
+   * is NULLABLE (een module-brede control heeft geen activiteit) en bevat,
+   * waar van toepassing, het STABIELE persistentie-`id` — NOOIT de tijdelijke
+   * pure-calculator-`activiteitIndex` (die correlatie is uitsluitend geldig
+   * binnen één functie-aanroep, zie `begroteGeplandOnderhoud.ts`'s
+   * moduledoc). De vertaling `activiteitIndex → persistentieId` gebeurt in
+   * `frozenGeplandOnderhoudResultaat.ts`'s schrijffunctie, met een defensieve
+   * bounds-check (fail-fast, geen stille NULL) — zie dat bestand.
+   *
+   * ÉÉN q1-q4/jaartotaal-set per activiteit, GEEN aparte `invoer_*`-kolommen
+   * (in tegenstelling tot Module 3's `invoer_*`/`resultaat_*`-splitsing,
+   * migratie 7): Module 3's splitsing bestaat omdat Module 3's eigen
+   * controls vaststellen NOOIT blokkeren (Module 1/2/3-precedent, ongewijzigd
+   * — zie `vaststellen.ts`), waardoor een frozen Module-3-rij een ongeldige
+   * ingevoerde waarde (naar 0 herleid) kón bevatten naast de oorspronkelijke
+   * ruwe invoer. Voor Gepland Onderhoud geldt vanaf GO-P3 juist het
+   * omgekeerde: een KRITIEK-control (waaronder een ongeldig/NaN-kwartaal)
+   * BLOKKEERT vaststellen (zie `vaststellen.ts`), dus bij elke succesvolle
+   * bevriezing zijn de ingevoerde en de berekende kwartaalbedragen per
+   * activiteit altijd al aan elkaar gelijk — een aparte `invoer_*`-set zou
+   * hier uitsluitend exacte duplicatie zijn, geen aanvullende informatie.
+   *
+   * FROZEN-STATE INVARIANTEN OP DE HEADER, GEEN VERVANGING VAN DE LIFECYCLE-
+   * VALIDATIE (businessbeslissing, correctie 2026-09-04): deze headertabel
+   * bestaat per definitie uitsluitend voor een SUCCESVOL VASTGESTELD Gepland-
+   * Onderhoud-resultaat — er is geen ander pad waarlangs een rij hier ooit
+   * ontstaat. De header krijgt daarom `CHECK (beoordeeld = 1)` en
+   * `CHECK (review_status IN ('REVIEWED_ZERO_ACTIVITIES',
+   * 'REVIEWED_WITH_ACTIVITIES'))` (nooit `NOT_REVIEWED`) — zelfde precedent
+   * als migratie 7's `chk_begroting_frozen_module3_resultaat_wijze_kolommen`-
+   * correctie ("uitsluitend bereikbaar via de getypeerde TypeScript-API" is
+   * onvoldoende reden om een databaseconstraint weg te laten). Dit zijn GEEN
+   * nieuwe businessregels, uitsluitend een structurele bevestiging van een
+   * toestand die de applicatielaag (`vaststellen.ts`) al garandeert vóórdat
+   * deze functie ooit wordt aangeroepen — de authoritative lifecycle-regel
+   * ("beoordeeld moet true zijn, geen KRITIEK") staat en blijft UITSLUITEND
+   * in `vaststellen.ts`.
+   *
+   * DE ACTIVITEITENTABEL krijgt CHECKs op `aanleiding_type`/`status` (beide
+   * NOT NULL, geldige enumwaarden) — een ontbrekende/ongeldige waarde zou al
+   * een KRITIEK-control en dus een vaststel-blokkade hebben veroorzaakt, dus
+   * is op dit punt al bewezen geldig. `complexnummer`/`omschrijving`/
+   * `aanleiding_toelichting` blijven bewust ZONDER expliciete "niet-leeg"-
+   * CHECK — geen bestaande tabel in dit schema controleert lege strings, dus
+   * dat zou een nieuw, ongebruikt controlepatroon introduceren.
+   *
+   * DE CONTROL-TABEL krijgt BEWUST UITSLUITEND een volledige structurele
+   * domein-CHECK op `ernst` (`IN ('KRITIEK', 'WAARSCHUWING', 'INFORMATIEF')`,
+   * exact de bestaande `BgControleErnst`-waarden) — GEEN `CHECK (ernst <>
+   * 'KRITIEK')` (vroegere, teruggedraaide versie van deze migratie, review-
+   * correctie 2026-09-04). Reden: die tweede CHECK zou de lifecycle-regel
+   * "KRITIEK blokkeert vaststellen" op databaseniveau DUPLICEREN in plaats
+   * van uitsluitend het controle-domein te structureren — `stelBegrotingVast`
+   * blijft de ENIGE, authoritative plek die bepaalt of vaststellen mag
+   * doorgaan; deze tabel structureert alleen welke `ernst`-waarden geldig
+   * zijn, ongeacht welke daarvan de lifecycle-laag toestaat te bevriezen. Bij
+   * een correcte vaststelling komt een KRITIEK-control hier feitelijk nooit
+   * in terecht — dat is een GEVOLG van `vaststellen.ts`'s validatie, geen
+   * eigen regel van deze tabel.
+   *
+   * Cascade-keten: begrotingsversies --CASCADE--> *_resultaat (header)
+   * --CASCADE--> *_activiteit/*_complex/*_control (alle drie rechtstreeks aan
+   * de header, geen tussenlaag — Gepland Onderhoud kent geen "activiteit
+   * binnen complex"-hiërarchie zoals Module 1's maandregel-binnen-contract).
+   *
+   * Immutability: dezelfde drie triggers per tabel (INSERT/UPDATE/DELETE
+   * geweigerd zodra `begrotingsversies.status = 'VASTGESTELD'`) als elke
+   * eerdere migratie — twaalf triggers totaal voor deze vier tabellen, geen
+   * generiek triggerframework.
+   */
+  {
+    version: 9,
+    description: "Bevroren Gepland-Onderhoud-output (frozen resultaat)",
+    ddl: [
+      `CREATE TABLE begroting_frozen_gepland_onderhoud_resultaat (
+        begroting_versie_id TEXT PRIMARY KEY REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        totaal_q1 TEXT NOT NULL,
+        totaal_q2 TEXT NOT NULL,
+        totaal_q3 TEXT NOT NULL,
+        totaal_q4 TEXT NOT NULL,
+        totaal_jaar TEXT NOT NULL,
+        totaal_zonder_geldig_complex TEXT NOT NULL,
+        beoordeeld INTEGER NOT NULL CHECK (beoordeeld = 1),
+        review_status TEXT NOT NULL CHECK (review_status IN ('REVIEWED_ZERO_ACTIVITIES', 'REVIEWED_WITH_ACTIVITIES'))
+      )`,
+      `CREATE TABLE begroting_frozen_gepland_onderhoud_activiteit (
+        begroting_versie_id TEXT NOT NULL,
+        activiteit_id INTEGER NOT NULL,
+        complexnummer TEXT NOT NULL,
+        omschrijving TEXT NOT NULL,
+        aanleiding_type TEXT NOT NULL CHECK (aanleiding_type IN ('MJOP', 'INSPECTIE', 'OFFERTE', 'ERVARING_BEHEERDER', 'OVERIG')),
+        aanleiding_toelichting TEXT NOT NULL,
+        q1 TEXT NOT NULL,
+        q2 TEXT NOT NULL,
+        q3 TEXT NOT NULL,
+        q4 TEXT NOT NULL,
+        jaartotaal TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('GEPLAND', 'IN_UITVOERING', 'UITGESTELD', 'VERVALLEN', 'AFGEROND', 'ONVOORZIEN')),
+        leverancier TEXT NULL,
+        offertebedrag TEXT NULL,
+        notitie TEXT NULL,
+        PRIMARY KEY (begroting_versie_id, activiteit_id),
+        FOREIGN KEY (begroting_versie_id) REFERENCES begroting_frozen_gepland_onderhoud_resultaat(begroting_versie_id) ON DELETE CASCADE
+      )`,
+      `CREATE TABLE begroting_frozen_gepland_onderhoud_complex (
+        begroting_versie_id TEXT NOT NULL,
+        complexnummer TEXT NOT NULL,
+        volgnr INTEGER NOT NULL,
+        aantal_activiteiten INTEGER NOT NULL,
+        q1 TEXT NOT NULL,
+        q2 TEXT NOT NULL,
+        q3 TEXT NOT NULL,
+        q4 TEXT NOT NULL,
+        jaartotaal TEXT NOT NULL,
+        PRIMARY KEY (begroting_versie_id, complexnummer),
+        UNIQUE (begroting_versie_id, volgnr),
+        FOREIGN KEY (begroting_versie_id) REFERENCES begroting_frozen_gepland_onderhoud_resultaat(begroting_versie_id) ON DELETE CASCADE
+      )`,
+      `CREATE TABLE begroting_frozen_gepland_onderhoud_control (
+        begroting_versie_id TEXT NOT NULL,
+        volgnr INTEGER NOT NULL,
+        activiteit_id INTEGER NULL,
+        ernst TEXT NOT NULL CHECK (ernst IN ('KRITIEK', 'WAARSCHUWING', 'INFORMATIEF')),
+        bericht TEXT NOT NULL,
+        PRIMARY KEY (begroting_versie_id, volgnr),
+        FOREIGN KEY (begroting_versie_id) REFERENCES begroting_frozen_gepland_onderhoud_resultaat(begroting_versie_id) ON DELETE CASCADE
+      )`,
+      `CREATE TRIGGER trg_begroting_frozen_gepland_onderhoud_resultaat_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_frozen_gepland_onderhoud_resultaat
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_gepland_onderhoud_resultaat: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_gepland_onderhoud_resultaat_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_frozen_gepland_onderhoud_resultaat
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_gepland_onderhoud_resultaat: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_gepland_onderhoud_resultaat_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_frozen_gepland_onderhoud_resultaat
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_gepland_onderhoud_resultaat: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_gepland_onderhoud_activiteit_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_frozen_gepland_onderhoud_activiteit
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_gepland_onderhoud_activiteit: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_gepland_onderhoud_activiteit_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_frozen_gepland_onderhoud_activiteit
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_gepland_onderhoud_activiteit: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_gepland_onderhoud_activiteit_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_frozen_gepland_onderhoud_activiteit
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_gepland_onderhoud_activiteit: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_gepland_onderhoud_complex_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_frozen_gepland_onderhoud_complex
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_gepland_onderhoud_complex: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_gepland_onderhoud_complex_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_frozen_gepland_onderhoud_complex
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_gepland_onderhoud_complex: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_gepland_onderhoud_complex_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_frozen_gepland_onderhoud_complex
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_gepland_onderhoud_complex: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_gepland_onderhoud_control_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_frozen_gepland_onderhoud_control
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_gepland_onderhoud_control: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_gepland_onderhoud_control_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_frozen_gepland_onderhoud_control
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_gepland_onderhoud_control: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_gepland_onderhoud_control_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_frozen_gepland_onderhoud_control
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_gepland_onderhoud_control: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+    ],
+  },
 ];
 
 function schemaMetaTableExists(db: DatabaseSync): boolean {

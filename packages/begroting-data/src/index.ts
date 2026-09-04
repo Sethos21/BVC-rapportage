@@ -76,15 +76,28 @@ export { schrijfFrozenBegrotingsresultaat, leesFrozenBegrotingsresultaat, type F
 // terug als er nog geen frozen output is — nooit een default/`Decimal(0)`.
 export { schrijfFrozenModule3Resultaat, leesFrozenModule3Resultaat } from "./frozenModule3Resultaat.js";
 
+// Bevroren Gepland-Onderhoud-output (fase GO-P3) — uitsluitend serialisatie/
+// deserialisatie van de bestaande `HerberekendGeplandOnderhoudResultaat`,
+// geen shadow-resultaattype. Strikt gescheiden van
+// `geplandOnderhoudActiviteiten.js`/`geplandOnderhoudBeoordeeld.js` (de
+// persistente CONCEPT-input): deze laag leest die tabellen nooit terug om
+// een resultaat te reconstrueren. `schrijfFrozenGeplandOnderhoudResultaat
+// ZonderTransactie` blijft bewust intern (zelfde grens als de Module-3-
+// variant) — de publieke schrijf-ingang is en blijft
+// `schrijfFrozenGeplandOnderhoudResultaat`.
+export { schrijfFrozenGeplandOnderhoudResultaat, leesFrozenGeplandOnderhoudResultaat } from "./frozenGeplandOnderhoudResultaat.js";
+
 // De atomaire VASTSTELLEN-operatie (1D.6b) — de enige publieke weg om een
 // CONCEPT-versie definitief VASTGESTELD te maken. Bundelt uitsluitend de
-// bestaande `Begrotingsversie`/`BgHuurResultaat`/`BgBeheerResultaat`.
+// bestaande `Begrotingsversie`/`BgHuurResultaat`/`BgBeheerResultaat`/
+// `HerberekendGeplandOnderhoudResultaat`.
 export { stelBegrotingVast, type VastgesteldeBegroting } from "./vaststellen.js";
 
 // Gepland Onderhoud — fase GO-P1, UITSLUITEND concept-persistence (geen
-// pure-calculator-integratie, geen herberekening, geen frozen output; die
-// volgen in GO-P2/GO-P3). Bewust GEEN `@bvc/reporting`-enum-types hier
-// hergebruikt — zie `geplandOnderhoudActiviteiten.ts`'s moduledoc.
+// pure-calculator-integratie in dit bestand zelf; herberekening/frozen output
+// zitten in herberekenen.js/frozenGeplandOnderhoudResultaat.js hierboven).
+// Bewust GEEN `@bvc/reporting`-enum-types hier hergebruikt — zie
+// `geplandOnderhoudActiviteiten.ts`'s moduledoc.
 export {
   schrijfGeplandOnderhoudActiviteiten,
   leesGeplandOnderhoudActiviteiten,

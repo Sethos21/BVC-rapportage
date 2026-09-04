@@ -38,7 +38,7 @@ describe("runMigrations", () => {
     // Sinds 1D.4 bevat de volledige migratielijst ook migratie 4 — een open vanaf schema-v1 upgradet dus
     // in één stap door tot en met v4. Migratie 2's eigen tabel (begrotingsversies) is hier het bewijs dat
     // die stap daadwerkelijk is doorlopen; zie test "1D.3-1"/"1D.4-1" voor de losstaande transities.
-    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
     expect(tabelNaUpgrade).toBeDefined();
   });
 
@@ -61,7 +61,7 @@ describe("runMigrations", () => {
     // tijdstempels (bewijst dat geen enkele migratie opnieuw is uitgevoerd, niet alleen dat het
     // eindresultaat toevallig gelijk is).
     expect(rijenNaTweedeOpen).toEqual(eersteRijen);
-    expect(rijenNaTweedeOpen.map((r) => r.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(rijenNaTweedeOpen.map((r) => r.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
   });
 
   it("1D.3-1. migratie 2 → 3 wordt correct toegepast op een bestaande schema-v2-database", () => {
@@ -87,7 +87,7 @@ describe("runMigrations", () => {
 
     // Sinds 1D.4 bevat de volledige migratielijst ook migratie 4 — deze test blijft gericht op het bewijs
     // dat migratie 3's eigen tabellen bestaan; zie test "1D.4-1" voor de losstaande 3→4-transitie.
-    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
     expect(tabellenNaUpgrade.map((t) => t.name).sort()).toEqual([
       "begroting_contract_kortingswijziging",
       "begroting_contract_rentroll_component",
@@ -111,7 +111,7 @@ describe("runMigrations", () => {
     db2.close();
 
     expect(rijenNaTweedeOpen).toEqual(eersteRijen);
-    expect(rijenNaTweedeOpen.map((r) => r.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(rijenNaTweedeOpen.map((r) => r.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
   });
 
   it("1D.4-1. migratie 3 → 4 wordt correct toegepast op een bestaande schema-v3-database", () => {
@@ -135,7 +135,7 @@ describe("runMigrations", () => {
       .all() as { name: string }[];
     db.close();
 
-    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
     expect(tabellenNaUpgrade.map((t) => t.name).sort()).toEqual([
       "begroting_aannames",
       "begroting_complex_config",
@@ -159,7 +159,7 @@ describe("runMigrations", () => {
     db2.close();
 
     expect(rijenNaTweedeOpen).toEqual(eersteRijen);
-    expect(rijenNaTweedeOpen.map((r) => r.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(rijenNaTweedeOpen.map((r) => r.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
   });
 
   it("1D.6a-1. migratie 4 → 5 wordt correct toegepast op een bestaande schema-v4-database", () => {
@@ -191,7 +191,7 @@ describe("runMigrations", () => {
       .all() as { name: string }[];
     db.close();
 
-    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
     expect(tabellenNaUpgrade.map((t) => t.name).sort()).toEqual([
       "begroting_frozen_module1_contract",
       "begroting_frozen_module1_control",
@@ -303,7 +303,7 @@ describe("runMigrations", () => {
     db2.close();
 
     expect(rijenNaTweedeOpen).toEqual(eersteRijen);
-    expect(rijenNaTweedeOpen.map((r) => r.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(rijenNaTweedeOpen.map((r) => r.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
   });
 
   it("2C.2-1. migratie 5 → 6 wordt correct toegepast op een bestaande schema-v5-database", () => {
@@ -325,7 +325,7 @@ describe("runMigrations", () => {
       .all() as { name: string }[];
     db.close();
 
-    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
     expect(tabelNaUpgrade).toBeDefined();
     // 1 tabel × 3 triggers (INSERT/UPDATE/DELETE).
     expect(triggersNaUpgrade).toHaveLength(3);
@@ -355,7 +355,7 @@ describe("runMigrations", () => {
       .all() as { name: string }[];
     db.close();
 
-    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
     expect(tabellenNaUpgrade.map((t) => t.name).sort()).toEqual([
       "begroting_frozen_module3_control",
       "begroting_frozen_module3_maandregel",
@@ -397,7 +397,7 @@ describe("runMigrations", () => {
       .all() as { name: string }[];
     db.close();
 
-    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
     expect(tabellenNaUpgrade.map((t) => t.name).sort()).toEqual(["begroting_gepland_onderhoud_activiteit", "begroting_gepland_onderhoud_module"]);
     // 2 tabellen × 3 triggers (INSERT/UPDATE/DELETE) = 6.
     expect(triggersNaUpgrade).toHaveLength(6);
@@ -411,11 +411,64 @@ describe("runMigrations", () => {
     expect(tabel).toBeDefined();
   });
 
+  it("GO-P3-1. migratie 8 → 9 wordt correct toegepast op een bestaande schema-v8-database", () => {
+    // Simuleert een bestaande database die alleen migratie 1..8 heeft ondergaan (zoals een echte
+    // database die met het GO-P1-schema is aangemaakt, vóór migratie 9 bestond).
+    const dbV8 = new DatabaseSync(dbPad);
+    runMigrations(dbV8, [
+      MIGRATIONS[0]!,
+      MIGRATIONS[1]!,
+      MIGRATIONS[2]!,
+      MIGRATIONS[3]!,
+      MIGRATIONS[4]!,
+      MIGRATIONS[5]!,
+      MIGRATIONS[6]!,
+      MIGRATIONS[7]!,
+    ]);
+    const tabelVoorUpgrade = dbV8.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'begroting_frozen_gepland_onderhoud_resultaat'`).get();
+    dbV8.close();
+    expect(tabelVoorUpgrade).toBeUndefined();
+
+    const db = openOrCreateDatabase(dbPad); // volledige, huidige migratielijst — moet naar schema 9 upgraden
+    const versies = db.prepare(`SELECT schema_version FROM begroting_schema_meta ORDER BY schema_version`).all() as {
+      schema_version: number;
+    }[];
+    const tabellenNaUpgrade = db
+      .prepare(
+        `SELECT name FROM sqlite_master WHERE type = 'table' AND name IN
+           ('begroting_frozen_gepland_onderhoud_resultaat', 'begroting_frozen_gepland_onderhoud_activiteit',
+            'begroting_frozen_gepland_onderhoud_complex', 'begroting_frozen_gepland_onderhoud_control')`,
+      )
+      .all() as { name: string }[];
+    const triggersNaUpgrade = db
+      .prepare(`SELECT name FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'trg_begroting_frozen_gepland_onderhoud_%'`)
+      .all() as { name: string }[];
+    db.close();
+
+    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    expect(tabellenNaUpgrade.map((t) => t.name).sort()).toEqual([
+      "begroting_frozen_gepland_onderhoud_activiteit",
+      "begroting_frozen_gepland_onderhoud_complex",
+      "begroting_frozen_gepland_onderhoud_control",
+      "begroting_frozen_gepland_onderhoud_resultaat",
+    ]);
+    // 4 tabellen × 3 triggers (INSERT/UPDATE/DELETE) = 12.
+    expect(triggersNaUpgrade).toHaveLength(12);
+  });
+
+  it("GO-P3-2. begroting_gepland_onderhoud_activiteit (migratie 8) blijft ongewijzigd aanwezig na de upgrade naar migratie 9", () => {
+    // Bewijst dat migratie 9 uitsluitend Gepland-Onderhoud-frozen-output toevoegt en migratie 8 (input) niet raakt.
+    const db = openOrCreateDatabase(dbPad);
+    const tabel = db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'begroting_gepland_onderhoud_activiteit'`).get();
+    db.close();
+    expect(tabel).toBeDefined();
+  });
+
   it("8. een geforceerde migratiefout laat geen half toegepaste migratie achter", () => {
-    const db = openOrCreateDatabase(dbPad); // past migraties 1 t/m 8 normaal toe
+    const db = openOrCreateDatabase(dbPad); // past migraties 1 t/m 9 normaal toe
 
     const kapotteMigratie: Migration = {
-      version: 9, // versie 9: de eerstvolgende, nog niet bestaande versie na de huidige (1 t/m 8) migraties.
+      version: 10, // versie 10: de eerstvolgende, nog niet bestaande versie na de huidige (1 t/m 9) migraties.
       description: "geforceerde testfout",
       ddl: [
         "CREATE TABLE test_fail_tabel (id INTEGER)", // deze DDL-statement slaagt op zichzelf...
@@ -423,13 +476,13 @@ describe("runMigrations", () => {
       ],
     };
 
-    expect(() => runMigrations(db, [...MIGRATIONS, kapotteMigratie])).toThrow(/Migratie 9/);
+    expect(() => runMigrations(db, [...MIGRATIONS, kapotteMigratie])).toThrow(/Migratie 10/);
 
     // Geen dubbele/kapotte registratie: nog steeds uitsluitend schema_version 1 t/m 8 geregistreerd.
     const rijen = db.prepare(`SELECT schema_version FROM begroting_schema_meta ORDER BY schema_version`).all() as {
       schema_version: number;
     }[];
-    expect(rijen.map((r) => r.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(rijen.map((r) => r.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
 
     // De eerste (op zichzelf geslaagde) DDL-statement van de kapotte migratie is volledig teruggedraaid —
     // de tabel bestaat niet, want hij hoorde bij dezelfde transactie als de daaropvolgende foutieve statement.
