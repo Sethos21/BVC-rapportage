@@ -1,18 +1,26 @@
 import type { DatabaseSync } from "node:sqlite";
 import {
   berekenBegroteBeheersvergoeding,
+  berekenBegroteGeplandOnderhoud,
   berekenBegroteHuuropbrengsten,
   berekenBegroteManagementvergoeding,
   type BgBeheerComplexConfig,
   type BgBeheerResultaat,
   type BgContractFeiten,
   type BgContractOverride,
+  type BgGeplandOnderhoudAanleidingType,
+  type BgGeplandOnderhoudActiviteitInvoer,
+  type BgGeplandOnderhoudActiviteitUitkomst,
+  type BgGeplandOnderhoudResultaat,
+  type BgGeplandOnderhoudStatus,
   type BgHuurAannames,
   type BgHuurResultaat,
   type BgManagementInvoer,
   type BgManagementResultaat,
 } from "@bvc/reporting";
 import { leesBegrotingsversie, type Begrotingsversie } from "./begrotingsversies.js";
+import { leesGeplandOnderhoudActiviteiten, type GeplandOnderhoudActiviteit } from "./geplandOnderhoudActiviteiten.js";
+import { leesGeplandOnderhoudBeoordeeld } from "./geplandOnderhoudBeoordeeld.js";
 import { leesModule1Aannames } from "./module1Aannames.js";
 import { leesModule1Overrides } from "./module1Overrides.js";
 import { leesModule1Snapshot } from "./module1Snapshot.js";
@@ -47,12 +55,49 @@ import { leesModule3Invoer } from "./module3Invoer.js";
  * GEEN functionele afhankelijkheid van Module 1/2 (in tegenstelling tot
  * Module 2, die Module 1's netto huur als grondslag gebruikt) — er wordt
  * hier dan ook bewust geen koppeling geïntroduceerd die niet bestaat.
+ *
+ * GEPLAND ONDERHOUD (GO-P2, businessbeslissing 2026-09-04): `geplandOnderhoud`
+ * is, ANDERS dan Module 3, bewust NIET `| null`. Module 3's `null` bestaat
+ * omdat "nog geen van de drie invoerwijzen gekozen" een echte, aparte
+ * betekenisvolle toestand is die niet in een berekening past. Gepland
+ * Onderhoud kent dat probleem niet: "0 activiteiten + `beoordeeld=false`" is
+ * door `berekenBegroteGeplandOnderhoud` al volledig, zinvol berekenbaar (zie
+ * `begroteGeplandOnderhoud.ts` se eigen testsuite) — er ontbreekt dus nooit
+ * "invoer om te berekenen", hooguit activiteiten. Elke herberekende CONCEPT-
+ * versie bevat daarom altijd een `geplandOnderhoud`-resultaat, ook al is er
+ * nog nooit een activiteit of een `beoordeeld`-waarde opgeslagen.
+ *
+ * `GeplandOnderhoudActiviteitUitkomstMetId`/`HerberekendGeplandOnderhoudResultaat`
+ * zijn bewust begroting-data-eigen wrappertypes om het `@bvc/reporting`-
+ * type `BgGeplandOnderhoudResultaat` heen — de pure module blijft ZELF
+ * ongewijzigd (die kent geen persistentie-ID's, uitsluitend een positionele
+ * `index`/`activiteitIndex` als tijdelijke correlatiesleutel binnen één
+ * aanroep, zie `begroteGeplandOnderhoud.ts`'s moduledoc). Alleen
+ * `activiteiten` wordt vervangen door een ID-geannoteerde variant; élk ander
+ * veld (`kwartaalTotalen`/`totaalJaar`/`perComplex`/`totaalZonderGeldigComplex`/
+ * `reviewStatus`/`beoordeeld`/`controleVereist`) komt ONGEWIJZIGD van de pure
+ * calculator — begroting-data berekent hier zelf niets opnieuw. `controleVereist`
+ * behoudt bewust zijn positionele `activiteitIndex` (nog GEEN vertaling naar
+ * een persistentie-ID) — die vertaling hoort, indien nodig, bij een latere
+ * fase (frozen output), niet bij deze pure lees-en-bereken-stap.
  */
 export interface HerberekendeBegroting {
   versie: Begrotingsversie;
   module1: BgHuurResultaat;
   module2: BgBeheerResultaat;
   module3: BgManagementResultaat | null;
+  geplandOnderhoud: HerberekendGeplandOnderhoudResultaat;
+}
+
+/** Koppelt een berekende activiteit-uitkomst terug aan haar persistente `id` — uitsluitend positioneel bepaald, nooit herzocht op inhoud (zie moduledoc). */
+export interface GeplandOnderhoudActiviteitUitkomstMetId {
+  persistentieId: number;
+  activiteit: BgGeplandOnderhoudActiviteitUitkomst;
+}
+
+/** `BgGeplandOnderhoudResultaat` met uitsluitend `activiteiten` vervangen door de ID-geannoteerde variant — alle overige velden ongewijzigd, rechtstreeks van de pure calculator. */
+export interface HerberekendGeplandOnderhoudResultaat extends Omit<BgGeplandOnderhoudResultaat, "activiteiten"> {
+  activiteiten: readonly GeplandOnderhoudActiviteitUitkomstMetId[];
 }
 
 /** Kleine, herbruikbare read-transactie-helper — zelfde BEGIN/COMMIT/ROLLBACK-idioom als elders in dit package (bewust hier gedupliceerd, zie 1D.5-rapport). */
@@ -83,6 +128,10 @@ export interface HerberekenInvoer {
   overrides: readonly BgContractOverride[];
   configs: readonly BgBeheerComplexConfig[];
   module3Invoer: BgManagementInvoer | null;
+  /** Rauwe GO-P1-persistence — GEEN pure-module-vorm; de mapping naar `BgGeplandOnderhoudActiviteitInvoer` gebeurt pas in `berekenBegrotingUitInvoer`. */
+  geplandOnderhoudActiviteiten: readonly GeplandOnderhoudActiviteit[];
+  /** `leesGeplandOnderhoudBeoordeeld`'s "geen rij → false"-semantiek, ongewijzigd doorgegeven. */
+  geplandOnderhoudBeoordeeld: boolean;
 }
 
 /**
@@ -119,26 +168,112 @@ export function leesHerberekenInvoerZonderTransactie(db: DatabaseSync, versieId:
     overrides: leesModule1Overrides(db, versieId),
     configs: leesModule2Config(db, versieId),
     module3Invoer: leesModule3Invoer(db, versieId),
+    geplandOnderhoudActiviteiten: leesGeplandOnderhoudActiviteiten(db, versieId),
+    geplandOnderhoudBeoordeeld: leesGeplandOnderhoudBeoordeeld(db, versieId),
   };
 }
 
 /**
- * Voert de pure Module-1-, Module-2- en (indien aanwezig) Module-3-
- * berekening uit op reeds-gelezen invoer — GEEN eigen transactie, raakt de
- * database niet. Rekenfouten uit de pure lagen worden nooit verborgen —
- * uitsluitend aangevuld met `versieId`/module-context in de foutmelding (de
- * oorspronkelijke boodschap blijft letterlijk aanwezig, plus `cause`).
+ * Type-boundary, GEEN businessvalidatie: GO-P1-persistence staat bewust élke
+ * string (of NULL, voor `aanleidingType`) toe, zodat een functioneel
+ * onvolledig CONCEPT opslaanbaar blijft (zie `geplandOnderhoudActiviteiten.ts`).
+ * De pure calculator (`berekenBegroteGeplandOnderhoud`) valideert zelf, op
+ * runtime, of de waarde één van de geldige enumwaarden is en produceert een
+ * KRITIEK-control zo niet — deze cast dupliceert die validatie NIET, hij
+ * laat een ontbrekende/ongeldige waarde uitsluitend ongewijzigd de pure
+ * calculator bereiken zodat die zijn eigen, al bewezen validatie uitvoert.
+ * `null` (nog geen aanleiding gekozen) wordt hier naar `""` genormaliseerd —
+ * de pure calculator herkent een lege string net zo min als geldig als een
+ * onbekende waarde (zie `begroteGeplandOnderhoud.ts`'s `GELDIGE_AANLEIDING_TYPES`).
+ */
+function alsPureAanleidingType(waarde: string | null): BgGeplandOnderhoudAanleidingType {
+  return (waarde ?? "") as BgGeplandOnderhoudAanleidingType;
+}
+
+/** Zelfde type-boundary-principe als `alsPureAanleidingType` — `status` is in GO-P1 al NOT NULL, dus geen `??`-normalisatie nodig. */
+function alsPureStatus(waarde: string): BgGeplandOnderhoudStatus {
+  return waarde as BgGeplandOnderhoudStatus;
+}
+
+/** Letterlijke veldkopie, GEEN transformatie/validatie — zie `alsPureAanleidingType`/`alsPureStatus` voor de enige twee velden die een type-boundary nodig hebben. */
+function naarPureGeplandOnderhoudInvoer(activiteit: GeplandOnderhoudActiviteit): BgGeplandOnderhoudActiviteitInvoer {
+  return {
+    complexnummer: activiteit.complexnummer,
+    omschrijving: activiteit.omschrijving,
+    aanleidingType: alsPureAanleidingType(activiteit.aanleidingType),
+    aanleidingToelichting: activiteit.aanleidingToelichting,
+    q1: activiteit.q1,
+    q2: activiteit.q2,
+    q3: activiteit.q3,
+    q4: activiteit.q4,
+    status: alsPureStatus(activiteit.status),
+    leverancier: activiteit.leverancier,
+    offertebedrag: activiteit.offertebedrag,
+    notitie: activiteit.notitie,
+  };
+}
+
+/**
+ * Roept de pure Gepland-Onderhoud-calculator aan en koppelt uitsluitend
+ * persistentie-ID's terug aan de resulterende activiteit-uitkomsten —
+ * positioneel (`invoer[i] ↔ resultaat.activiteiten[i]`), NOOIT herzocht op
+ * omschrijving/complexnummer/bedragen. De defensieve lengte-controle bewaakt
+ * uitsluitend die correlatie-aanname (een interne inconsistentie, geen
+ * businessregel) — `berekenBegroteGeplandOnderhoud` zelf garandeert al een
+ * 1-op-1 output-array (zie de pure module se eigen testsuite), dus dit pad is
+ * in de praktijk onbereikbaar.
+ */
+function berekenGeplandOnderhoudUitInvoer(
+  versieId: string,
+  begrotingsjaar: number,
+  activiteiten: readonly GeplandOnderhoudActiviteit[],
+  beoordeeld: boolean,
+): HerberekendGeplandOnderhoudResultaat {
+  let resultaat: BgGeplandOnderhoudResultaat;
+  try {
+    resultaat = berekenBegroteGeplandOnderhoud(activiteiten.map(naarPureGeplandOnderhoudInvoer), { begrotingsjaar, beoordeeld });
+  } catch (error) {
+    throw new Error(
+      `Berekening van begrotingsversie ${versieId} is mislukt tijdens Gepland Onderhoud: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
+
+  if (resultaat.activiteiten.length !== activiteiten.length) {
+    throw new Error(
+      `Interne fout: begrotingsversie ${versieId}: Gepland-Onderhoud-calculator gaf ${resultaat.activiteiten.length} activiteit-uitkomsten terug voor ${activiteiten.length} ingevoerde activiteiten — positionele id-correlatie geschonden.`,
+    );
+  }
+
+  const activiteitenMetId: GeplandOnderhoudActiviteitUitkomstMetId[] = resultaat.activiteiten.map((activiteitUitkomst, index) => ({
+    persistentieId: activiteiten[index]!.id,
+    activiteit: activiteitUitkomst,
+  }));
+
+  return { ...resultaat, activiteiten: activiteitenMetId };
+}
+
+/**
+ * Voert de pure Module-1-, Module-2-, (indien aanwezig) Module-3- en
+ * Gepland-Onderhoud-berekening uit op reeds-gelezen invoer — GEEN eigen
+ * transactie, raakt de database niet. Rekenfouten uit de pure lagen worden
+ * nooit verborgen — uitsluitend aangevuld met `versieId`/module-context in de
+ * foutmelding (de oorspronkelijke boodschap blijft letterlijk aanwezig, plus
+ * `cause`).
  *
  * Module 3: bij `invoer.module3Invoer === null` wordt `berekenBegroteManagement
  * vergoeding` NIET aangeroepen — het resultaat is `module3: null` (geen
  * default-invoer, geen `Decimal(0)`-injectie, zie `HerberekendeBegroting`'s
  * moduledoc). Bij geldige invoer wordt uitsluitend de bestaande, ongewijzigde
  * pure functie aangeroepen — geen tweede/parallelle rekenroute.
+ *
+ * Gepland Onderhoud wordt, ANDERS dan Module 3, ALTIJD berekend — ook met nul
+ * activiteiten en `beoordeeld=false` (zie `HerberekendeBegroting`'s moduledoc).
  */
 export function berekenBegrotingUitInvoer(
   versieId: string,
   invoer: HerberekenInvoer,
-): { module1: BgHuurResultaat; module2: BgBeheerResultaat; module3: BgManagementResultaat | null } {
+): { module1: BgHuurResultaat; module2: BgBeheerResultaat; module3: BgManagementResultaat | null; geplandOnderhoud: HerberekendGeplandOnderhoudResultaat } {
   let module1: BgHuurResultaat;
   try {
     module1 = berekenBegroteHuuropbrengsten(invoer.contracten, invoer.overrides, invoer.aannames, invoer.versie.bronPeildatum);
@@ -171,12 +306,19 @@ export function berekenBegrotingUitInvoer(
     }
   }
 
-  return { module1, module2, module3 };
+  const geplandOnderhoud = berekenGeplandOnderhoudUitInvoer(
+    versieId,
+    invoer.versie.begrotingsjaar,
+    invoer.geplandOnderhoudActiviteiten,
+    invoer.geplandOnderhoudBeoordeeld,
+  );
+
+  return { module1, module2, module3, geplandOnderhoud };
 }
 
 /**
- * Herberekent Module 1 + Module 2 voor `versieId`, uitsluitend gebaseerd op
- * wat al in SQLite staat.
+ * Herberekent Module 1 + Module 2 (+ Module 3 indien aanwezig) + Gepland
+ * Onderhoud voor `versieId`, uitsluitend gebaseerd op wat al in SQLite staat.
  *
  * Consistentie van de invoer: alle reads gebeuren bínnen ÉÉN
  * `BEGIN`…`COMMIT`-leestransactie (`leesHerberekenInvoerZonderTransactie`
@@ -196,6 +338,6 @@ export function berekenBegrotingUitInvoer(
  */
 export function herberekenBegroting(db: DatabaseSync, versieId: string): HerberekendeBegroting {
   const invoer = withReadTransaction(db, () => leesHerberekenInvoerZonderTransactie(db, versieId));
-  const { module1, module2, module3 } = berekenBegrotingUitInvoer(versieId, invoer);
-  return { versie: invoer.versie, module1, module2, module3 };
+  const { module1, module2, module3, geplandOnderhoud } = berekenBegrotingUitInvoer(versieId, invoer);
+  return { versie: invoer.versie, module1, module2, module3, geplandOnderhoud };
 }

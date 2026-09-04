@@ -4,9 +4,19 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { BgBeheerComplexConfig, BgContractFeiten, BgContractOverride, BgHuurAannames, BgManagementInvoer } from "@bvc/reporting";
+import {
+  berekenBegroteGeplandOnderhoud,
+  type BgBeheerComplexConfig,
+  type BgContractFeiten,
+  type BgContractOverride,
+  type BgGeplandOnderhoudActiviteitInvoer,
+  type BgHuurAannames,
+  type BgManagementInvoer,
+} from "@bvc/reporting";
 import { maakBegrotingsversie, markeerVastgesteld, type NieuweBegrotingsversieInput } from "./begrotingsversies.js";
 import { openOrCreateDatabase } from "./database.js";
+import { schrijfGeplandOnderhoudActiviteiten, type GeplandOnderhoudActiviteitInvoer } from "./geplandOnderhoudActiviteiten.js";
+import { schrijfGeplandOnderhoudBeoordeeld } from "./geplandOnderhoudBeoordeeld.js";
 import { herberekenBegroting } from "./herberekenen.js";
 import { schrijfModule1Aannames } from "./module1Aannames.js";
 import { schrijfModule1Overrides } from "./module1Overrides.js";
@@ -558,5 +568,267 @@ describe("herberekenBegroting — Module 3 (Managementvergoeding, fase 2C.3)", (
     expect(normaliseer(resultaatZonder.module2)).toBe(normaliseer(resultaatMet.module2));
     expect(resultaatZonder.module3).toBeNull();
     expect(resultaatMet.module3).not.toBeNull();
+  });
+});
+
+describe("herberekenBegroting — Gepland Onderhoud (GO-P2)", () => {
+  function activiteitInvoer(overrides: Partial<GeplandOnderhoudActiviteitInvoer> = {}): GeplandOnderhoudActiviteitInvoer {
+    return {
+      id: null,
+      complexnummer: "003",
+      omschrijving: "Vervangen dakbedekking",
+      aanleidingType: "MJOP",
+      aanleidingToelichting: "MJOP 2027 regel 14",
+      q1: new Decimal(25000),
+      q2: new Decimal(0),
+      q3: new Decimal(0),
+      q4: new Decimal(0),
+      status: "GEPLAND",
+      leverancier: null,
+      offertebedrag: null,
+      notitie: null,
+      ...overrides,
+    };
+  }
+
+  /** Zelfde type-boundary-conversie als de productiecode (`naarPureGeplandOnderhoudInvoer` in `herberekenen.ts`) — bewust GEEN `id` in de pure vorm. */
+  function alsPureInvoer(a: GeplandOnderhoudActiviteitInvoer): BgGeplandOnderhoudActiviteitInvoer {
+    return {
+      complexnummer: a.complexnummer,
+      omschrijving: a.omschrijving,
+      aanleidingType: (a.aanleidingType ?? "") as BgGeplandOnderhoudActiviteitInvoer["aanleidingType"],
+      aanleidingToelichting: a.aanleidingToelichting,
+      q1: a.q1,
+      q2: a.q2,
+      q3: a.q3,
+      q4: a.q4,
+      status: a.status as BgGeplandOnderhoudActiviteitInvoer["status"],
+      leverancier: a.leverancier,
+      offertebedrag: a.offertebedrag,
+      notitie: a.notitie,
+    };
+  }
+
+  it("1. nul activiteiten + geen beoordeeld-rij: resultaat aanwezig, beoordeeld=false, NOT_REVIEWED, totalen 0", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    const resultaat = herberekenBegroting(db, versie.id);
+
+    expect(resultaat.geplandOnderhoud).toBeDefined();
+    expect(resultaat.geplandOnderhoud.beoordeeld).toBe(false);
+    expect(resultaat.geplandOnderhoud.reviewStatus).toBe("NOT_REVIEWED");
+    expect(resultaat.geplandOnderhoud.totaalJaar.toString()).toBe("0");
+    expect(resultaat.geplandOnderhoud.activiteiten).toEqual([]);
+  });
+
+  it("2. nul activiteiten + beoordeeld=true: REVIEWED_ZERO_ACTIVITIES", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    expect(resultaat.geplandOnderhoud.reviewStatus).toBe("REVIEWED_ZERO_ACTIVITIES");
+  });
+
+  it("3. één geldige activiteit: exact gelijk aan directe pure-calculator-uitkomst", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    const invoer = activiteitInvoer();
+    schrijfGeplandOnderhoudActiviteiten(db, versie.id, [invoer]);
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    const direct = berekenBegroteGeplandOnderhoud([alsPureInvoer(invoer)], { begrotingsjaar: 2027, beoordeeld: false });
+
+    expect(resultaat.geplandOnderhoud.totaalJaar.toString()).toBe(direct.totaalJaar.toString());
+    expect(resultaat.geplandOnderhoud.kwartaalTotalen).toEqual(direct.kwartaalTotalen);
+    expect(resultaat.geplandOnderhoud.activiteiten[0]?.activiteit).toEqual(direct.activiteiten[0]);
+  });
+
+  it("4. meerdere activiteiten: module-/kwartaal-/complex-totalen exact gelijk aan pure calculator", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    const invoerA = activiteitInvoer({ complexnummer: "001", q1: new Decimal(1000) });
+    const invoerB = activiteitInvoer({ complexnummer: "001", q2: new Decimal(500) });
+    const invoerC = activiteitInvoer({ complexnummer: "004", q3: new Decimal(750) });
+    schrijfGeplandOnderhoudActiviteiten(db, versie.id, [invoerA, invoerB, invoerC]);
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    const direct = berekenBegroteGeplandOnderhoud([invoerA, invoerB, invoerC].map(alsPureInvoer), { begrotingsjaar: 2027, beoordeeld: false });
+
+    expect(resultaat.geplandOnderhoud.totaalJaar.toString()).toBe(direct.totaalJaar.toString());
+    expect(resultaat.geplandOnderhoud.kwartaalTotalen).toEqual(direct.kwartaalTotalen);
+    expect(resultaat.geplandOnderhoud.perComplex).toEqual(direct.perComplex);
+    expect(resultaat.geplandOnderhoud.totaalZonderGeldigComplex.toString()).toBe(direct.totaalZonderGeldigComplex.toString());
+  });
+
+  it("5. persistentie-id wordt correct teruggekoppeld per activiteit", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    const [a, b] = schrijfGeplandOnderhoudActiviteiten(db, versie.id, [
+      activiteitInvoer({ omschrijving: "Eerste" }),
+      activiteitInvoer({ omschrijving: "Tweede" }),
+    ]);
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    expect(resultaat.geplandOnderhoud.activiteiten[0]?.persistentieId).toBe(a!.id);
+    expect(resultaat.geplandOnderhoud.activiteiten[1]?.persistentieId).toBe(b!.id);
+  });
+
+  it("6. twee inhoudelijk identieke activiteiten met verschillende ids blijven correct onderscheiden (geen inhoudelijke zoekkoppeling)", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    const [a, b] = schrijfGeplandOnderhoudActiviteiten(db, versie.id, [activiteitInvoer(), activiteitInvoer()]);
+    expect(a!.id).not.toBe(b!.id);
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    const ids = resultaat.geplandOnderhoud.activiteiten.map((x) => x.persistentieId);
+    expect(ids).toEqual([a!.id, b!.id]);
+    expect(new Set(ids).size).toBe(2);
+  });
+
+  it("7. Decimalwaarden blijven exact (meer precisie dan 2 decimalen, negatief bedrag)", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfGeplandOnderhoudActiviteiten(db, versie.id, [activiteitInvoer({ q1: new Decimal("12345.6789"), q2: new Decimal("-500.5") })]);
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    const activiteit = resultaat.geplandOnderhoud.activiteiten[0]!.activiteit;
+    expect(activiteit.q1.toString()).toBe("12345.6789");
+    expect(activiteit.q2.toString()).toBe("-500.5");
+  });
+
+  it("8. optionele velden null blijven null", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfGeplandOnderhoudActiviteiten(db, versie.id, [activiteitInvoer({ leverancier: null, offertebedrag: null, notitie: null })]);
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    const invoer = resultaat.geplandOnderhoud.activiteiten[0]!.activiteit.invoer;
+    expect(invoer.leverancier).toBeNull();
+    expect(invoer.offertebedrag).toBeNull();
+    expect(invoer.notitie).toBeNull();
+  });
+
+  it("9. optionele velden gevuld blijven exact behouden", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfGeplandOnderhoudActiviteiten(db, versie.id, [
+      activiteitInvoer({ leverancier: "Weerts van de Zanden", offertebedrag: new Decimal("24500.00"), notitie: "offerte ontvangen" }),
+    ]);
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    const invoer = resultaat.geplandOnderhoud.activiteiten[0]!.activiteit.invoer;
+    expect(invoer.leverancier).toBe("Weerts van de Zanden");
+    expect(invoer.offertebedrag?.toString()).toBe("24500");
+    expect(invoer.notitie).toBe("offerte ontvangen");
+  });
+
+  it("10. lege omschrijving: KRITIEK, financieel bedrag blijft meetellen", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfGeplandOnderhoudActiviteiten(db, versie.id, [activiteitInvoer({ omschrijving: "", q1: new Decimal(10000) })]);
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    expect(resultaat.geplandOnderhoud.activiteiten[0]?.activiteit.jaartotaal.toString()).toBe("10000");
+    expect(resultaat.geplandOnderhoud.totaalJaar.toString()).toBe("10000");
+    expect(resultaat.geplandOnderhoud.controleVereist.some((c) => c.ernst === "KRITIEK" && c.bericht.includes("omschrijving"))).toBe(true);
+  });
+
+  it("11. ontbrekend/ongeldig aanleidingType: KRITIEK, berekening blijft werken", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfGeplandOnderhoudActiviteiten(db, versie.id, [activiteitInvoer({ aanleidingType: null, q1: new Decimal(10000) })]);
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    expect(resultaat.geplandOnderhoud.totaalJaar.toString()).toBe("10000");
+    expect(resultaat.geplandOnderhoud.controleVereist.some((c) => c.ernst === "KRITIEK" && c.bericht.includes("aanleidingType"))).toBe(true);
+  });
+
+  it("12. ongeldige status: KRITIEK, berekening blijft werken", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfGeplandOnderhoudActiviteiten(db, versie.id, [activiteitInvoer({ status: "NIET_BESTAAND", q1: new Decimal(10000) })]);
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    expect(resultaat.geplandOnderhoud.totaalJaar.toString()).toBe("10000");
+    expect(resultaat.geplandOnderhoud.controleVereist.some((c) => c.ernst === "KRITIEK" && c.bericht.includes("status"))).toBe(true);
+  });
+
+  it("13. leeg complexnummer: modulebreed bedrag aanwezig, niet in perComplex, totaalZonderGeldigComplex correct", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfGeplandOnderhoudActiviteiten(db, versie.id, [activiteitInvoer({ complexnummer: "", q1: new Decimal(10000) })]);
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    expect(resultaat.geplandOnderhoud.totaalJaar.toString()).toBe("10000");
+    expect(resultaat.geplandOnderhoud.perComplex).toEqual([]);
+    expect(resultaat.geplandOnderhoud.totaalZonderGeldigComplex.toString()).toBe("10000");
+    expect(resultaat.geplandOnderhoud.controleVereist.some((c) => c.ernst === "KRITIEK" && c.bericht.includes("complexnummer"))).toBe(true);
+  });
+
+  it("14. negatief kwartaal: WAARSCHUWING, negatief bedrag blijft meetellen", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfGeplandOnderhoudActiviteiten(db, versie.id, [activiteitInvoer({ q1: new Decimal(-500), q2: new Decimal(1000) })]);
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    expect(resultaat.geplandOnderhoud.activiteiten[0]?.activiteit.q1.toString()).toBe("-500");
+    expect(resultaat.geplandOnderhoud.activiteiten[0]?.activiteit.jaartotaal.toString()).toBe("500");
+    expect(resultaat.geplandOnderhoud.controleVereist.some((c) => c.ernst === "WAARSCHUWING")).toBe(true);
+  });
+
+  it("15. beoordeeld=false met activiteiten: rekent volledig door, NOT_REVIEWED", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfGeplandOnderhoudActiviteiten(db, versie.id, [activiteitInvoer({ q1: new Decimal(1000) })]);
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    expect(resultaat.geplandOnderhoud.reviewStatus).toBe("NOT_REVIEWED");
+    expect(resultaat.geplandOnderhoud.totaalJaar.toString()).toBe("1000");
+  });
+
+  it("16. beoordeeld=true met activiteiten: REVIEWED_WITH_ACTIVITIES", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfGeplandOnderhoudActiviteiten(db, versie.id, [activiteitInvoer()]);
+    schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    expect(resultaat.geplandOnderhoud.reviewStatus).toBe("REVIEWED_WITH_ACTIVITIES");
+  });
+
+  it("17. herberekening schrijft niets naar de Gepland-Onderhoud-concepttabellen", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfGeplandOnderhoudActiviteiten(db, versie.id, [activiteitInvoer()]);
+    schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
+
+    const dump = () => ({
+      activiteiten: db.prepare(`SELECT * FROM begroting_gepland_onderhoud_activiteit`).all(),
+      module: db.prepare(`SELECT * FROM begroting_gepland_onderhoud_module`).all(),
+    });
+
+    const voor = dump();
+    herberekenBegroting(db, versie.id);
+    const na = dump();
+
+    expect(na).toEqual(voor);
+  });
+
+  it("18. twee opeenvolgende herberekeningen zonder writes geven inhoudelijk identiek resultaat", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfGeplandOnderhoudActiviteiten(db, versie.id, [
+      activiteitInvoer({ complexnummer: "001", q1: new Decimal(1000) }),
+      activiteitInvoer({ complexnummer: "004", q4: new Decimal(2000) }),
+    ]);
+    schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
+
+    const eersteKeer = herberekenBegroting(db, versie.id);
+    const tweedeKeer = herberekenBegroting(db, versie.id);
+    const normaliseer = (waarde: unknown) => JSON.stringify(waarde, (_key, v) => (v instanceof Decimal ? v.toString() : v));
+
+    expect(normaliseer(eersteKeer.geplandOnderhoud)).toBe(normaliseer(tweedeKeer.geplandOnderhoud));
+  });
+
+  it("20 (regressie). bestaande Module 1/2/3-uitkomst blijft byte-identiek naast een aanwezige Gepland-Onderhoud-activiteit", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    schrijfModule1Snapshot(db, versie.id, [maakContract("0000000028", { complexnummer: "001" })]);
+    schrijfModule1Aannames(db, versie.id, STANDAARD_AANNAMES);
+    schrijfModule2Config(db, versie.id, [
+      { complexnummer: "001", vastBedragJaar: new Decimal(1000), vastIndexatiePercentage: null, vastIndexatiedatum: null, variabelPercentage: new Decimal(6) },
+    ]);
+
+    const zonderGeplandOnderhoud = herberekenBegroting(db, versie.id);
+    schrijfGeplandOnderhoudActiviteiten(db, versie.id, [activiteitInvoer()]);
+    const metGeplandOnderhoud = herberekenBegroting(db, versie.id);
+
+    const normaliseer = (waarde: unknown) => JSON.stringify(waarde, (_key, v) => (v instanceof Decimal ? v.toString() : v));
+    expect(normaliseer(zonderGeplandOnderhoud.module1)).toBe(normaliseer(metGeplandOnderhoud.module1));
+    expect(normaliseer(zonderGeplandOnderhoud.module2)).toBe(normaliseer(metGeplandOnderhoud.module2));
+    expect(zonderGeplandOnderhoud.module3).toBeNull();
+    expect(metGeplandOnderhoud.module3).toBeNull();
   });
 });

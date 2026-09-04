@@ -21,6 +21,8 @@ import { schrijfModule1Overrides } from "./module1Overrides.js";
 import { leesModule1Snapshot, schrijfModule1Snapshot } from "./module1Snapshot.js";
 import { schrijfModule2Config } from "./module2Config.js";
 import { leesModule3Invoer, schrijfModule3Invoer } from "./module3Invoer.js";
+import { schrijfGeplandOnderhoudActiviteiten, type GeplandOnderhoudActiviteitInvoer } from "./geplandOnderhoudActiviteiten.js";
+import { schrijfGeplandOnderhoudBeoordeeld } from "./geplandOnderhoudBeoordeeld.js";
 import { stelBegrotingVast } from "./vaststellen.js";
 
 let dir: string;
@@ -621,5 +623,86 @@ describe("stelBegrotingVast — Fase 2C.5: Module 3 verplicht bij vaststellen", 
 
     const frozenModule3Na = leesFrozenModule3Resultaat(db, versie.id)!;
     expect(normaliseer(frozenModule3Na)).toEqual(normaliseer(eersteResultaat.module3));
+  });
+});
+
+describe("stelBegrotingVast — Gepland Onderhoud wordt herberekend maar blokkeert nog niet (GO-P2-regressie)", () => {
+  // GO-P2 breidde `leesHerberekenInvoerZonderTransactie`/`berekenBegrotingUitInvoer` uit met Gepland
+  // Onderhoud — `stelBegrotingVast` gebruikt die gedeelde functies dus indirect ook, en leest/berekent
+  // Gepland Onderhoud sindsdien mee. Dat is toegestaan (zie herberekenen.ts). Deze tests bewijzen
+  // uitsluitend dat dat NOG GEEN nieuwe vaststel-blokkade introduceert — lifecycle-afdwinging voor
+  // Gepland Onderhoud (beoordeeld/KRITIEK-controls) is expliciet GO-P3-scope, hier nog niet gebouwd.
+  // `vaststellen.ts` zelf is in GO-P2 niet gewijzigd: geen productiecode hier aangeraakt.
+
+  function activiteitInvoer(overrides: Partial<GeplandOnderhoudActiviteitInvoer> = {}): GeplandOnderhoudActiviteitInvoer {
+    return {
+      id: null,
+      complexnummer: "003",
+      omschrijving: "Vervangen dakbedekking",
+      aanleidingType: "MJOP",
+      aanleidingToelichting: "MJOP 2027 regel 14",
+      q1: new Decimal(25000),
+      q2: new Decimal(0),
+      q3: new Decimal(0),
+      q4: new Decimal(0),
+      status: "GEPLAND",
+      leverancier: null,
+      offertebedrag: null,
+      notitie: null,
+      ...overrides,
+    };
+  }
+
+  it("1. beoordeeld=false bij Gepland Onderhoud blokkeert stelBegrotingVast nog niet", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    schrijfModule1Snapshot(db, versie.id, []);
+    schrijfModule1Aannames(db, versie.id, { begrotingsjaar: 2027, indexatiePercentage: new Decimal(3) });
+    schrijfModule3Invoer(db, versie.id, MODULE3_STANDAARD);
+    schrijfGeplandOnderhoudActiviteiten(db, versie.id, [activiteitInvoer()]); // beoordeeld NOOIT geschreven -> false
+
+    expect(() => stelBegrotingVast(db, versie.id)).not.toThrow();
+    expect(leesBegrotingsversie(db, versie.id)!.status).toBe("VASTGESTELD");
+  });
+
+  it("2. een Gepland-Onderhoud-resultaat met een KRITIEKE control blokkeert stelBegrotingVast nog niet", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    schrijfModule1Snapshot(db, versie.id, []);
+    schrijfModule1Aannames(db, versie.id, { begrotingsjaar: 2027, indexatiePercentage: new Decimal(3) });
+    schrijfModule3Invoer(db, versie.id, MODULE3_STANDAARD);
+    // Leeg complexnummer + ontbrekend aanleidingType -> de pure calculator produceert hiervoor KRITIEKE controls.
+    schrijfGeplandOnderhoudActiviteiten(db, versie.id, [activiteitInvoer({ complexnummer: "", aanleidingType: null })]);
+    schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
+
+    expect(() => stelBegrotingVast(db, versie.id)).not.toThrow();
+    expect(leesBegrotingsversie(db, versie.id)!.status).toBe("VASTGESTELD");
+  });
+
+  it("3. een negatief Gepland-Onderhoud-kwartaalbedrag (WAARSCHUWING) blokkeert stelBegrotingVast evenmin", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    schrijfModule1Snapshot(db, versie.id, []);
+    schrijfModule1Aannames(db, versie.id, { begrotingsjaar: 2027, indexatiePercentage: new Decimal(3) });
+    schrijfModule3Invoer(db, versie.id, MODULE3_STANDAARD);
+    schrijfGeplandOnderhoudActiviteiten(db, versie.id, [activiteitInvoer({ q1: new Decimal(-500) })]);
+
+    expect(() => stelBegrotingVast(db, versie.id)).not.toThrow();
+    expect(leesBegrotingsversie(db, versie.id)!.status).toBe("VASTGESTELD");
+  });
+
+  it("4. Module 1/2/3-vaststellingsresultaat blijft exact ongewijzigd, ongeacht aanwezige Gepland-Onderhoud-data", () => {
+    const versieZonder = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    zet070InputNeer(versieZonder.id);
+    schrijfModule3Invoer(db, versieZonder.id, MODULE3_STANDAARD);
+    const resultaatZonder = stelBegrotingVast(db, versieZonder.id);
+
+    const versieMet = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    zet070InputNeer(versieMet.id);
+    schrijfModule3Invoer(db, versieMet.id, MODULE3_STANDAARD);
+    schrijfGeplandOnderhoudActiviteiten(db, versieMet.id, [activiteitInvoer({ complexnummer: "", aanleidingType: null, q1: new Decimal(-500) })]);
+    schrijfGeplandOnderhoudBeoordeeld(db, versieMet.id, false);
+    const resultaatMet = stelBegrotingVast(db, versieMet.id);
+
+    expect(normaliseer(resultaatZonder.module1)).toEqual(normaliseer(resultaatMet.module1));
+    expect(normaliseer(resultaatZonder.module2)).toEqual(normaliseer(resultaatMet.module2));
+    expect(normaliseer(resultaatZonder.module3)).toEqual(normaliseer(resultaatMet.module3));
   });
 });

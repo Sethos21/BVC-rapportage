@@ -46,8 +46,17 @@ export { schrijfModule3Invoer, leesModule3Invoer } from "./module3Invoer.js";
 
 // Orchestratie (uitsluitend lezen + pure berekening, GEEN schrijfeffecten) —
 // bundelt de al bestaande `Begrotingsversie`/`BgHuurResultaat`/`BgBeheerResultaat`,
-// geen shadow-rekenresultaattype.
-export { herberekenBegroting, type HerberekendeBegroting } from "./herberekenen.js";
+// geen shadow-rekenresultaattype. `HerberekendGeplandOnderhoudResultaat`/
+// `GeplandOnderhoudActiviteitUitkomstMetId` (GO-P2) zijn de enige uitzondering:
+// begroting-data-eigen wrappers om `BgGeplandOnderhoudResultaat` heen, uitsluitend
+// om een persistentie-ID aan elke activiteit-uitkomst te koppelen — zie
+// herberekenen.js's moduledoc.
+export {
+  herberekenBegroting,
+  type HerberekendeBegroting,
+  type HerberekendGeplandOnderhoudResultaat,
+  type GeplandOnderhoudActiviteitUitkomstMetId,
+} from "./herberekenen.js";
 
 // Bevroren Module-1/Module-2-output (1D.6a) — uitsluitend serialisatie/
 // deserialisatie van de bestaande `BgHuurResultaat`/`BgBeheerResultaat`,
