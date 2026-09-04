@@ -12,6 +12,8 @@ import { genereerVastgoedKerncijfers } from "./genereerVastgoedKerncijfers.js";
 import { genereerRentrollDiagnose } from "./genereerRentrollDiagnose.js";
 import { genereerServicekostenBronKolommenDiagnose } from "./genereerServicekostenBronKolommenDiagnose.js";
 import { genereerContractenBronKolommenDiagnose } from "./genereerContractenBronKolommenDiagnose.js";
+import { genereerBoekingenBronKolommenDiagnose } from "./genereerBoekingenBronKolommenDiagnose.js";
+import { genereerOnderhoudBoekingenDiagnose } from "./genereerOnderhoudBoekingenDiagnose.js";
 import { genereerContractHuurderDiagnose } from "./genereerContractHuurderDiagnose.js";
 import { genereerServicekostenAfrekeningDiagnose } from "./genereerServicekostenAfrekeningDiagnose.js";
 import { genereerServicekostenGrootboekReconciliatieDiagnose } from "./genereerServicekostenGrootboekReconciliatieDiagnose.js";
@@ -56,6 +58,10 @@ function printGebruik(): never {
       "      (TIJDELIJK, alleen-lezen: leest het RUWE servicekosten-bronbestand rechtstreeks (niet de cache, niet het geparste schema) en toont ELKE kolomnaam die erin voorkomt — inclusief kolommen die nog niet in ServicekostenregelBronSchema staan — met aantal niet-lege waarden en max. 5 voorbeeldwaarden per kolom. Bouwstap om te bepalen of de bron een apart grootboekrekening/rekeningnummer-veld bevat vóórdat daar iets structureels mee gebouwd wordt. Geen KPI, geen classificatie, alleen JSON op stdout)",
       "  contracten-bronkolommen <administratieId>",
       "      (TIJDELIJK, alleen-lezen: leest het RUWE contracten_huidig-bronbestand rechtstreeks (niet de cache, niet het geparste schema, dat 12 van de 170 bronkolommen dekt) en toont ELKE kolomnaam die erin voorkomt, met aantal niet-lege waarden en max. 5 voorbeeldwaarden per kolom. Bouwstap om een huurdernaam-achtig veld (bv. Naam_1) te bevestigen vóórdat dat structureel aan het schema/de cache wordt toegevoegd. Geen KPI, geen classificatie, alleen JSON op stdout)",
+      "  boekingen-bronkolommen <administratieId>",
+      "      (TIJDELIJK, alleen-lezen: leest het RUWE boekingen-bronbestand rechtstreeks (niet de cache, niet het geparste schema, dat 20 van de 168 bronkolommen dekt) en toont ELKE kolomnaam die erin voorkomt, met aantal niet-lege waarden en max. 5 voorbeeldwaarden per kolom. Bouwstap om vast te stellen of de bron een exploitatiekostensoort-/kostenplaats-/complex-achtig veld bevat dat nog niet in BoekingsregelBronSchema staat, vóórdat daar iets structureels mee gebouwd wordt. Geen KPI, geen classificatie, alleen JSON op stdout)",
+      "  boekingen-onderhoud-diagnose <administratieId> --boekjaar N --periodeTotEnMet P [--periodeVan P] --rekeningen <lijst>",
+      "      (TIJDELIJK, alleen-lezen: gerichte vervolgdiagnose op boekingen-bronkolommen — leest het RUWE boekingen-bronbestand, filtert op bedrijfsnr + boekjaar/periode + de opgegeven grootboekrekeningen (kommagescheiden, bv. 4300,4330,4340), en toont per regel o.a. Boeking_OGB_Kostensoort/_Omschr, Boeking_Complexnr en factuur-/relatievelden — nog GEEN onderdeel van BoekingsregelBronSchema. Levert ook aggregaties: vullingsgraad OGB-kostensoort per grootboekrekening, een matrix grootboekrekening x OGB-kostensoort (aantal+bedrag), en per-complex totalen met een controle of het complexnummer werkelijk in de units-cache (authoritative complexbron) voorkomt. Bouwt GEEN gepland-versus-dagelijks-classificatie — dat vraagt menselijke interpretatie van de echte codes/omschrijvingen. Geen KPI, geen mapping, geen begrotingscode, alleen JSON op stdout)",
       "  contract-huurder-diagnose <administratieId> [--boekjaar N --periodeTotEnMet P [--periodeVan P]]",
       "      (TIJDELIJK, alleen-lezen, bouwstap voor een toekomstig Huurdersoverzicht: toont per contract naast elkaar — gecachte contracten/rentroll (alle regels)/ouderdomsanalyse (alle periodes op huurdernummer), een aantal nog NIET gemodelleerde raw contracten-kolommen (Waarborgsom/Waarborg_niet_geprolongeerd/Waarborgbeheer/Complexomschrijving/Datum+Jaar+Periode_laatst_geprolongreerd/Verhoging_datum+Jaar_vlgd+Periode_vlgd+percentage+methode/Omschrijving_indextabel, rechtstreeks uit het ruwe bronbestand — GEKOPPELD OP bedrijfsnr+contractnummer, want contracten_huidig.xlsx is gedeeld over alle administraties en Contract is niet globaal uniek; ruweContractvelden.alleRuweRijenMetDitContractnummer toont ALLE ruwe rijen met hetzelfde contractnummer, ongeacht bedrijfsnr, als botsingscontrole), en — alleen als --boekjaar/--periodeTotEnMet zijn opgegeven — de geboekte servicekostenvoorschotten uit servicekosten-positie's actuele positie. GEEN keuze van een authoritative einddatum, GEEN aanname dat rentroll.service_voorschot_jaar en geboekte servicekosten-voorschotten dezelfde grootheid zijn, GEEN classificatie — puur naast elkaar zetten. Geen KPI, geen schema/cache-wijziging, alleen JSON op stdout)",
       "  servicekosten-afrekening-diagnose <administratieId>",
@@ -278,6 +284,30 @@ async function main() {
     const [administratieId] = rest;
     if (!administratieId) printGebruik();
     const resultaat = genereerContractenBronKolommenDiagnose(root, administratieId);
+    console.log(JSON.stringify(resultaat, null, 2));
+    return;
+  }
+
+  if (command === "boekingen-bronkolommen") {
+    const [administratieId] = rest;
+    if (!administratieId) printGebruik();
+    const resultaat = genereerBoekingenBronKolommenDiagnose(root, administratieId);
+    console.log(JSON.stringify(resultaat, null, 2));
+    return;
+  }
+
+  if (command === "boekingen-onderhoud-diagnose") {
+    const [administratieId] = rest;
+    const boekjaarStr = parseFlag(rest, "boekjaar");
+    const boekperiodeTotEnMet = parseFlag(rest, "periodeTotEnMet");
+    const rekeningenStr = parseFlag(rest, "rekeningen");
+    if (!administratieId || !boekjaarStr || !boekperiodeTotEnMet || !rekeningenStr) printGebruik();
+    const resultaat = genereerOnderhoudBoekingenDiagnose(root, administratieId, {
+      boekjaar: Number(boekjaarStr),
+      boekperiodeVan: parseFlag(rest, "periodeVan"),
+      boekperiodeTotEnMet,
+      grootboekrekeningen: rekeningenStr.split(",").map((r) => r.trim()).filter((r) => r.length > 0),
+    });
     console.log(JSON.stringify(resultaat, null, 2));
     return;
   }
