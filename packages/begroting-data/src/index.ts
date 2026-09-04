@@ -71,3 +71,15 @@ export { schrijfFrozenModule3Resultaat, leesFrozenModule3Resultaat } from "./fro
 // CONCEPT-versie definitief VASTGESTELD te maken. Bundelt uitsluitend de
 // bestaande `Begrotingsversie`/`BgHuurResultaat`/`BgBeheerResultaat`.
 export { stelBegrotingVast, type VastgesteldeBegroting } from "./vaststellen.js";
+
+// Gepland Onderhoud — fase GO-P1, UITSLUITEND concept-persistence (geen
+// pure-calculator-integratie, geen herberekening, geen frozen output; die
+// volgen in GO-P2/GO-P3). Bewust GEEN `@bvc/reporting`-enum-types hier
+// hergebruikt — zie `geplandOnderhoudActiviteiten.ts`'s moduledoc.
+export {
+  schrijfGeplandOnderhoudActiviteiten,
+  leesGeplandOnderhoudActiviteiten,
+  type GeplandOnderhoudActiviteit,
+  type GeplandOnderhoudActiviteitInvoer,
+} from "./geplandOnderhoudActiviteiten.js";
+export { schrijfGeplandOnderhoudBeoordeeld, leesGeplandOnderhoudBeoordeeld } from "./geplandOnderhoudBeoordeeld.js";

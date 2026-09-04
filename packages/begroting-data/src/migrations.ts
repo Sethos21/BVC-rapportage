@@ -1086,6 +1086,127 @@ export const MIGRATIONS: readonly Migration[] = [
        END`,
     ],
   },
+  /**
+   * Migratie 8 — Gepland Onderhoud, CONCEPT-PERSISTENCE ALLEEN (fase GO-P1,
+   * businessbesluiten GO-001 t/m GO-006, pure rekenlaag `@bvc/reporting`'s
+   * `begroteGeplandOnderhoud.ts` op HEAD). UITSLUITEND opslag van de door de
+   * gebruiker ingevoerde activiteiten + de module-brede `beoordeeld`-vlag —
+   * GEEN pure-calculator-integratie, GEEN concept-herberekening, GEEN frozen
+   * output, GEEN wijziging aan `herberekenen.ts`/`vaststellen.ts` (die volgen
+   * in latere, apart te reviewen migraties, GO-P2/GO-P3).
+   *
+   * `begroting_gepland_onderhoud_activiteit`: `id INTEGER PRIMARY KEY`
+   * (SQLite-rowid) als technische, businessloze sleutel — zelfde precedent
+   * als `begroting_contract_override`/`begroting_complex_config` (migratie
+   * 4): een geplande onderhoudsactiviteit heeft, anders dan een contract,
+   * geen natuurlijke unieke businesssleutel (`complexnummer` is bewust NIET
+   * uniek — meerdere activiteiten per complex zijn toegestaan). Index op
+   * `begroting_versie_id` voor de veelgebruikte per-versie-lookup.
+   *
+   * BEWUST GEEN CHECK op `status`/`aanleiding_type`-waarden (in tegenstelling
+   * tot elke eerdere migratie se enum-kolommen, bv. migratie 6/7's `wijze`):
+   * de pure module (`begroteGeplandOnderhoud.ts`) behandelt een ontbrekende/
+   * ongeldige `status`/`aanleidingType` bewust NIET als een rekenfout — het
+   * financiële concepttotaal blijft intact, alleen een KRITIEK-control
+   * ontstaat (die pas ná GO-P2/GO-P3 vaststellen blokkeert). Een DB-CHECK die
+   * alleen de vijf/zes geldige waarden toestaat zou het onmogelijk maken om
+   * een functioneel onvolledig CONCEPT (bv. nog geen status gekozen) ooit op
+   * te slaan — precies het scenario dat deze architectuur bewust toestaat.
+   * `aanleiding_type` is bovendien expliciet NULLABLE (in tegenstelling tot
+   * `status`, dat als lege string kan worden opgeslagen maar nooit NULL) —
+   * dat asymmetrische onderscheid is een bewuste keuze van deze migratie,
+   * geen inconsistentie: beide vormen van "nog niet ingevuld" (NULL resp.
+   * lege string) worden door de pure module identiek als ongeldig herkend.
+   *
+   * `begroting_gepland_onderhoud_module`: 1-op-1 met de versie (PK = FK =
+   * `begroting_versie_id`), zelfde vorm als `begroting_aannames`/
+   * `begroting_management_invoer`. BEWUST ANDERS dan Module 3's
+   * "geen rij = null/onbekend": hier betekent "geen rij" exact hetzelfde als
+   * "rij met `beoordeeld = 0`" — er is geen derde toestand te onderscheiden
+   * (NOT_REVIEWED ⇔ `beoordeeld = false`, punt, geen aparte "nog nooit
+   * aangeraakt"-status nodig zoals Module 3's "nog geen enkele wijze
+   * gekozen"). `leesGeplandOnderhoudBeoordeeld` geeft daarom altijd een
+   * boolean terug, nooit `null`.
+   *
+   * Geen kolom voor `jaartotaal`: dat is een AFGELEIDE waarde van de pure
+   * module (Q1+Q2+Q3+Q4), nooit authoritative invoer — wordt hier dus niet
+   * opgeslagen (consistent met hoe elders in dit package nooit een
+   * herleidbare waarde dubbel wordt bewaard).
+   *
+   * Immutability: dezelfde drie triggers per tabel (INSERT/UPDATE/DELETE
+   * geweigerd zodra `begrotingsversies.status = 'VASTGESTELD'`) als elke
+   * eerdere migratie — zes triggers totaal voor deze twee tabellen, geen
+   * generiek triggerframework.
+   */
+  {
+    version: 8,
+    description: "Gepland Onderhoud: concept-input (activiteiten + module-brede beoordeeld-vlag)",
+    ddl: [
+      `CREATE TABLE begroting_gepland_onderhoud_activiteit (
+        id INTEGER PRIMARY KEY,
+        begroting_versie_id TEXT NOT NULL REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        complexnummer TEXT NOT NULL,
+        omschrijving TEXT NOT NULL,
+        aanleiding_type TEXT NULL,
+        aanleiding_toelichting TEXT NOT NULL,
+        q1 TEXT NOT NULL,
+        q2 TEXT NOT NULL,
+        q3 TEXT NOT NULL,
+        q4 TEXT NOT NULL,
+        status TEXT NOT NULL,
+        leverancier TEXT NULL,
+        offertebedrag TEXT NULL,
+        notitie TEXT NULL
+      )`,
+      `CREATE INDEX idx_begroting_gepland_onderhoud_activiteit_versie ON begroting_gepland_onderhoud_activiteit(begroting_versie_id)`,
+      `CREATE TABLE begroting_gepland_onderhoud_module (
+        begroting_versie_id TEXT PRIMARY KEY REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        beoordeeld INTEGER NOT NULL CHECK (beoordeeld IN (0, 1))
+      )`,
+      `CREATE TRIGGER trg_begroting_gepland_onderhoud_activiteit_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_gepland_onderhoud_activiteit
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_gepland_onderhoud_activiteit: begrotingsversie is VASTGESTELD, activiteiten zijn immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_gepland_onderhoud_activiteit_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_gepland_onderhoud_activiteit
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_gepland_onderhoud_activiteit: begrotingsversie is VASTGESTELD, activiteiten zijn immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_gepland_onderhoud_activiteit_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_gepland_onderhoud_activiteit
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_gepland_onderhoud_activiteit: begrotingsversie is VASTGESTELD, activiteiten zijn immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_gepland_onderhoud_module_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_gepland_onderhoud_module
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_gepland_onderhoud_module: begrotingsversie is VASTGESTELD, beoordeeld-vlag is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_gepland_onderhoud_module_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_gepland_onderhoud_module
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_gepland_onderhoud_module: begrotingsversie is VASTGESTELD, beoordeeld-vlag is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_gepland_onderhoud_module_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_gepland_onderhoud_module
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_gepland_onderhoud_module: begrotingsversie is VASTGESTELD, beoordeeld-vlag is immutable');
+       END`,
+    ],
+  },
 ];
 
 function schemaMetaTableExists(db: DatabaseSync): boolean {
