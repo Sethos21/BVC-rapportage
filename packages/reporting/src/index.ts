@@ -40,4 +40,5 @@ export * from "./begroting/begroteHuuropbrengsten.js";
 export * from "./begroting/begroteBeheersvergoeding.js";
 export * from "./begroting/begroteManagementvergoeding.js";
 export * from "./onderhoudBoekingenDiagnose.js";
+export * from "./begroting/begroteGeplandOnderhoud.js";
 export { HUISSTIJL_CSS, escapeHtml, formatBedragHtml, renderRapportDocument } from "./huisstijl.js";
