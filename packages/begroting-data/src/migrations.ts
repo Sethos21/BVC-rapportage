@@ -1547,6 +1547,175 @@ export const MIGRATIONS: readonly Migration[] = [
        END`,
     ],
   },
+  /**
+   * Migratie 11 — bevroren Correctief/Dagelijks-Onderhoud-OUTPUT (fase
+   * CD-P3, OB-028), exact zoals `packages/reporting/src/begroting/
+   * begroteCorrectiefDagelijksOnderhoud.ts`/`HerberekendCorrectiefDagelijksResultaat`
+   * op HEAD kennen. Uitsluitend serialisatie/deserialisatie van een reeds
+   * berekend, puur resultaat — geen formules, geen totalen opnieuw
+   * afgeleid. Migratie 10 (input) en migratie 11 (output) zijn bewust
+   * strikt gescheiden verantwoordelijkheden, zelfde precedent als migratie
+   * 8/9 voor Gepland Onderhoud: de tabellen hier verwijzen NIET naar
+   * `begroting_correctief_dagelijks_onderhoud_regel`/`_module` en zijn
+   * zelfstandig, volledig terugleesbaar.
+   *
+   * DRIE TABELLEN, GEEN COMPLEX-TABEL (in tegenstelling tot migratie 9's
+   * vier tabellen voor Gepland Onderhoud): Correctief/Dagelijks Onderhoud
+   * kent bewust geen `perComplex`/`totaalZonderGeldigComplex` (zie
+   * `begroteCorrectiefDagelijksOnderhoud.ts`'s moduledoc — complex is hier
+   * optioneel/NTB, geen groepeerbare dimensie) — er is dus geen
+   * derde child-tabel nodig naast header + regels + controls.
+   *
+   * `begroting_frozen_correctief_dagelijks_onderhoud_regel`: PK =
+   * `(begroting_versie_id, regel_id)` — GEEN apart `volgnr` nodig, exact
+   * dezelfde onderbouwing als migratie 9's `begroting_frozen_gepland_
+   * onderhoud_activiteit`: `regel_id` is zelf al een stabiele, unieke,
+   * monotoon oplopende technische sleutel (CD-P1's SQLite-rowid) die de
+   * feitelijke schrijf-/leesvolgorde al ondubbelzinnig vastlegt.
+   *
+   * `begroting_frozen_correctief_dagelijks_onderhoud_control`: zelfde
+   * `volgnr`-patroon als elke eerdere control-tabel (geen natuurlijke
+   * sleutel). `regel_id` is NULLABLE (een module-brede control heeft geen
+   * regel) en bevat, waar van toepassing, het STABIELE persistentie-`id`
+   * — NOOIT de tijdelijke pure-calculator-`regelIndex` (die correlatie is
+   * uitsluitend geldig binnen één functie-aanroep, zie
+   * `begroteCorrectiefDagelijksOnderhoud.ts`'s moduledoc). De vertaling
+   * `regelIndex → persistentieId` gebeurt in
+   * `frozenCorrectiefDagelijksOnderhoudResultaat.ts`'s schrijffunctie, met
+   * een defensieve bounds-check (fail-fast, geen stille NULL) — zie dat
+   * bestand.
+   *
+   * `jaarbedrag TEXT NOT NULL` op de frozen regeltabel (in tegenstelling
+   * tot migratie 10's `jaarbedrag TEXT NULL`): een succesvol bevroren
+   * regel is per definitie al door `stelBegrotingVast`'s
+   * Correctief/Dagelijks-lifecycle-check heen (geen KRITIEK, dus geen
+   * `null`/NaN-jaarbedrag meer mogelijk) — zie migratie 9's identieke
+   * redenering voor Gepland Onderhoud se q1-q4-kolommen. GEEN aparte
+   * `invoer_jaarbedrag`-kolom naast de berekende waarde: bij een
+   * succesvolle bevriezing zijn ingevoerd en berekend bedrag altijd al aan
+   * elkaar gelijk (zelfde precedent als migratie 9's moduledoc).
+   *
+   * FROZEN-STATE INVARIANTEN OP DE HEADER, GEEN VERVANGING VAN DE
+   * LIFECYCLE-VALIDATIE (zelfde precedent als migratie 9): deze
+   * headertabel bestaat per definitie uitsluitend voor een SUCCESVOL
+   * VASTGESTELD Correctief/Dagelijks-resultaat. De header krijgt daarom
+   * `CHECK (beoordeeld = 1)` en `CHECK (review_status IN
+   * ('REVIEWED_ZERO_RULES', 'REVIEWED_WITH_RULES'))` (nooit
+   * `NOT_REVIEWED`) — een structurele bevestiging van een toestand die de
+   * applicatielaag (`vaststellen.ts`) al garandeert, geen nieuwe
+   * businessregel.
+   *
+   * DE CONTROL-TABEL krijgt BEWUST UITSLUITEND een volledige structurele
+   * domein-CHECK op `ernst` (`IN ('KRITIEK', 'WAARSCHUWING',
+   * 'INFORMATIEF')`) — GEEN `CHECK (ernst <> 'KRITIEK')`, exact dezelfde
+   * (al eerder teruggedraaide) overweging als migratie 9: die tweede CHECK
+   * zou de lifecycle-regel "KRITIEK blokkeert vaststellen" op
+   * databaseniveau DUPLICEREN in plaats van uitsluitend het
+   * controle-domein te structureren — `stelBegrotingVast` blijft de ENIGE,
+   * authoritative plek die bepaalt of vaststellen mag doorgaan.
+   *
+   * Cascade-keten: begrotingsversies --CASCADE--> *_resultaat (header)
+   * --CASCADE--> *_regel/*_control (beide rechtstreeks aan de header, geen
+   * tussenlaag).
+   *
+   * Immutability: dezelfde drie triggers per tabel (INSERT/UPDATE/DELETE
+   * geweigerd zodra `begrotingsversies.status = 'VASTGESTELD'`) als elke
+   * eerdere migratie — negen triggers totaal voor deze drie tabellen, geen
+   * generiek triggerframework.
+   */
+  {
+    version: 11,
+    description: "Bevroren Correctief/Dagelijks-Onderhoud-output (frozen resultaat)",
+    ddl: [
+      `CREATE TABLE begroting_frozen_correctief_dagelijks_onderhoud_resultaat (
+        begroting_versie_id TEXT PRIMARY KEY REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        totaal_jaar TEXT NOT NULL,
+        beoordeeld INTEGER NOT NULL CHECK (beoordeeld = 1),
+        review_status TEXT NOT NULL CHECK (review_status IN ('REVIEWED_ZERO_RULES', 'REVIEWED_WITH_RULES'))
+      )`,
+      `CREATE TABLE begroting_frozen_correctief_dagelijks_onderhoud_regel (
+        begroting_versie_id TEXT NOT NULL,
+        regel_id INTEGER NOT NULL,
+        omschrijving TEXT NOT NULL,
+        complexnummer TEXT NULL,
+        jaarbedrag TEXT NOT NULL,
+        PRIMARY KEY (begroting_versie_id, regel_id),
+        FOREIGN KEY (begroting_versie_id) REFERENCES begroting_frozen_correctief_dagelijks_onderhoud_resultaat(begroting_versie_id) ON DELETE CASCADE
+      )`,
+      `CREATE TABLE begroting_frozen_correctief_dagelijks_onderhoud_control (
+        begroting_versie_id TEXT NOT NULL,
+        volgnr INTEGER NOT NULL,
+        regel_id INTEGER NULL,
+        ernst TEXT NOT NULL CHECK (ernst IN ('KRITIEK', 'WAARSCHUWING', 'INFORMATIEF')),
+        bericht TEXT NOT NULL,
+        PRIMARY KEY (begroting_versie_id, volgnr),
+        FOREIGN KEY (begroting_versie_id) REFERENCES begroting_frozen_correctief_dagelijks_onderhoud_resultaat(begroting_versie_id) ON DELETE CASCADE
+      )`,
+      `CREATE TRIGGER trg_begroting_frozen_correctief_dagelijks_onderhoud_resultaat_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_frozen_correctief_dagelijks_onderhoud_resultaat
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_correctief_dagelijks_onderhoud_resultaat: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_correctief_dagelijks_onderhoud_resultaat_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_frozen_correctief_dagelijks_onderhoud_resultaat
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_correctief_dagelijks_onderhoud_resultaat: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_correctief_dagelijks_onderhoud_resultaat_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_frozen_correctief_dagelijks_onderhoud_resultaat
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_correctief_dagelijks_onderhoud_resultaat: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_correctief_dagelijks_onderhoud_regel_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_frozen_correctief_dagelijks_onderhoud_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_correctief_dagelijks_onderhoud_regel: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_correctief_dagelijks_onderhoud_regel_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_frozen_correctief_dagelijks_onderhoud_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_correctief_dagelijks_onderhoud_regel: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_correctief_dagelijks_onderhoud_regel_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_frozen_correctief_dagelijks_onderhoud_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_correctief_dagelijks_onderhoud_regel: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_correctief_dagelijks_onderhoud_control_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_frozen_correctief_dagelijks_onderhoud_control
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_correctief_dagelijks_onderhoud_control: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_correctief_dagelijks_onderhoud_control_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_frozen_correctief_dagelijks_onderhoud_control
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_correctief_dagelijks_onderhoud_control: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_correctief_dagelijks_onderhoud_control_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_frozen_correctief_dagelijks_onderhoud_control
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_correctief_dagelijks_onderhoud_control: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+    ],
+  },
 ];
 
 function schemaMetaTableExists(db: DatabaseSync): boolean {

@@ -89,10 +89,25 @@ export { schrijfFrozenModule3Resultaat, leesFrozenModule3Resultaat } from "./fro
 // `schrijfFrozenGeplandOnderhoudResultaat`.
 export { schrijfFrozenGeplandOnderhoudResultaat, leesFrozenGeplandOnderhoudResultaat } from "./frozenGeplandOnderhoudResultaat.js";
 
+// Bevroren Correctief/Dagelijks-Onderhoud-output (fase CD-P3) — uitsluitend
+// serialisatie/deserialisatie van de bestaande
+// `HerberekendCorrectiefDagelijksResultaat`, geen shadow-resultaattype.
+// Strikt gescheiden van `correctiefDagelijksOnderhoudRegels.js`/
+// `correctiefDagelijksOnderhoudBeoordeeld.js` (de persistente CONCEPT-
+// input): deze laag leest die tabellen nooit terug om een resultaat te
+// reconstrueren. `schrijfFrozenCorrectiefDagelijksOnderhoudResultaat
+// ZonderTransactie` blijft bewust intern (zelfde grens als de GO-variant)
+// — de publieke schrijf-ingang is en blijft
+// `schrijfFrozenCorrectiefDagelijksOnderhoudResultaat`.
+export {
+  schrijfFrozenCorrectiefDagelijksOnderhoudResultaat,
+  leesFrozenCorrectiefDagelijksOnderhoudResultaat,
+} from "./frozenCorrectiefDagelijksOnderhoudResultaat.js";
+
 // De atomaire VASTSTELLEN-operatie (1D.6b) — de enige publieke weg om een
 // CONCEPT-versie definitief VASTGESTELD te maken. Bundelt uitsluitend de
 // bestaande `Begrotingsversie`/`BgHuurResultaat`/`BgBeheerResultaat`/
-// `HerberekendGeplandOnderhoudResultaat`.
+// `HerberekendGeplandOnderhoudResultaat`/`HerberekendCorrectiefDagelijksResultaat`.
 export { stelBegrotingVast, type VastgesteldeBegroting } from "./vaststellen.js";
 
 // Gepland Onderhoud — fase GO-P1, UITSLUITEND concept-persistence (geen

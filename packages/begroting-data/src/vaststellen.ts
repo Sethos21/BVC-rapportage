@@ -1,27 +1,35 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { BgBeheerResultaat, BgHuurResultaat, BgManagementResultaat } from "@bvc/reporting";
 import { leesBegrotingsversie, markeerVastgesteld, type Begrotingsversie } from "./begrotingsversies.js";
+import { schrijfFrozenCorrectiefDagelijksOnderhoudResultaatZonderTransactie } from "./frozenCorrectiefDagelijksOnderhoudResultaat.js";
 import { schrijfFrozenGeplandOnderhoudResultaatZonderTransactie } from "./frozenGeplandOnderhoudResultaat.js";
 import { schrijfFrozenModule3ResultaatZonderTransactie } from "./frozenModule3Resultaat.js";
 import { schrijfFrozenBegrotingsresultaatZonderTransactie } from "./frozenResultaat.js";
-import { berekenBegrotingUitInvoer, leesHerberekenInvoerZonderTransactie, type HerberekendGeplandOnderhoudResultaat } from "./herberekenen.js";
+import {
+  berekenBegrotingUitInvoer,
+  leesHerberekenInvoerZonderTransactie,
+  type HerberekendCorrectiefDagelijksResultaat,
+  type HerberekendGeplandOnderhoudResultaat,
+} from "./herberekenen.js";
 
 /**
  * De atomaire VASTSTELLEN-operatie (Fase 1D.6b, uitgebreid met Module 3 in
- * Fase 2C.5 en met Gepland Onderhoud in fase GO-P3) — de enige plek waar een
- * CONCEPT-begrotingsversie definitief VASTGESTELD wordt. Eén complete
- * SQLite-schrijftransactie: dezelfde persistente input lezen als
- * `herberekenBegroting`, exact dezelfde pure Module-1/2/3- en
- * Gepland-Onderhoud-berekening uitvoeren, dat resultaat als frozen output
- * opslaan (`schrijfFrozenBegrotingsresultaatZonderTransactie` voor Module
- * 1/2, `schrijfFrozenModule3ResultaatZonderTransactie` voor Module 3,
+ * Fase 2C.5, met Gepland Onderhoud in fase GO-P3 en met Correctief/Dagelijks
+ * Onderhoud in fase CD-P3) — de enige plek waar een CONCEPT-begrotingsversie
+ * definitief VASTGESTELD wordt. Eén complete SQLite-schrijftransactie:
+ * dezelfde persistente input lezen als `herberekenBegroting`, exact dezelfde
+ * pure Module-1/2/3-, Gepland-Onderhoud- en Correctief/Dagelijks-Onderhoud-
+ * berekening uitvoeren, dat resultaat als frozen output opslaan
+ * (`schrijfFrozenBegrotingsresultaatZonderTransactie` voor Module 1/2,
+ * `schrijfFrozenModule3ResultaatZonderTransactie` voor Module 3,
  * `schrijfFrozenGeplandOnderhoudResultaatZonderTransactie` voor Gepland
- * Onderhoud — alle drie bestaande mappings, ongewijzigd, geen tweede
- * mapping), en pas als allerlaatste schrijfactie de status omzetten
- * (`markeerVastgesteld`, het bestaande 1D.2-bouwblok). Faalt één van deze
- * stappen, dan rolt de VOLLEDIGE transactie terug: geen gedeeltelijke frozen
- * output (voor geen van de modules), geen gedeeltelijke statuswijziging, de
- * versie blijft exact zoals vóór de poging.
+ * Onderhoud, `schrijfFrozenCorrectiefDagelijksOnderhoudResultaatZonderTransactie`
+ * voor Correctief/Dagelijks Onderhoud — alle vier bestaande mappings,
+ * ongewijzigd, geen tweede mapping), en pas als allerlaatste schrijfactie de
+ * status omzetten (`markeerVastgesteld`, het bestaande 1D.2-bouwblok). Faalt
+ * één van deze stappen, dan rolt de VOLLEDIGE transactie terug: geen
+ * gedeeltelijke frozen output (voor geen van de modules), geen gedeeltelijke
+ * statuswijziging, de versie blijft exact zoals vóór de poging.
  *
  * BUSINESSBESLISSING (2026-09-03/04, fase 2C.1/2C.5-review): Module-3-invoer
  * is bij CONCEPT-herberekening optioneel (`HerberekendeBegroting.module3:
@@ -53,9 +61,26 @@ import { berekenBegrotingUitInvoer, leesHerberekenInvoerZonderTransactie, type H
  * bedragen blijven uitsluitend de verantwoordelijkheid van de pure
  * calculator, zie `begroteGeplandOnderhoud.ts`).
  *
+ * CORRECTIEF/DAGELIJKS ONDERHOUD (fase CD-P3, businessbeslissing 2026-09-07):
+ * volgt EXACT hetzelfde lokale-blokkade-patroon als Gepland Onderhoud
+ * hierboven — geen generieke "alle KRITIEK uit alle modules blokkeren"-
+ * refactor, Module 1/2/3 en Gepland Onderhoud behouden hun bestaande,
+ * ongewijzigde semantiek. Vaststellen wordt geblokkeerd als:
+ * (a) `correctiefDagelijksOnderhoud.beoordeeld !== true`; of
+ * (b) `correctiefDagelijksOnderhoud.controleVereist` bevat één of meer
+ * `KRITIEK`-items. WAARSCHUWING/INFORMATIEF blokkeren niet. Deze twee checks
+ * lezen uitsluitend het al door `berekenBegrotingUitInvoer` berekende
+ * `correctiefDagelijksOnderhoud`-resultaat — er wordt niets herberekend of
+ * dubbel gevalideerd (omschrijving/complexnummer/jaarbedrag blijven
+ * uitsluitend de verantwoordelijkheid van de pure calculator, zie
+ * `begroteCorrectiefDagelijksOnderhoud.ts`). Dit is de tweede, en tot nu toe
+ * laatste, lokale uitzondering op de Module-1/2/3-regel dat `controleVereist`
+ * nooit blokkeert.
+ *
  * Bundelt uitsluitend de al bestaande `Begrotingsversie`/`BgHuurResultaat`/
- * `BgBeheerResultaat`/`BgManagementResultaat`/`HerberekendGeplandOnderhoudResultaat`
- * — bewust geen shadow-rekenresultaattype.
+ * `BgBeheerResultaat`/`BgManagementResultaat`/`HerberekendGeplandOnderhoudResultaat`/
+ * `HerberekendCorrectiefDagelijksResultaat` — bewust geen shadow-
+ * rekenresultaattype.
  */
 export interface VastgesteldeBegroting {
   versie: Begrotingsversie;
@@ -63,6 +88,7 @@ export interface VastgesteldeBegroting {
   module2: BgBeheerResultaat;
   module3: BgManagementResultaat;
   geplandOnderhoud: HerberekendGeplandOnderhoudResultaat;
+  correctiefDagelijksOnderhoud: HerberekendCorrectiefDagelijksResultaat;
 }
 
 /**
@@ -120,10 +146,11 @@ function withWriteTransaction<T>(db: DatabaseSync, fn: () => T): T {
  * conventie als Module 1/2 — geen nieuwe, strengere regel specifiek voor
  * Module 3 geïntroduceerd. De enige nieuwe blokkade vóór GO-P3 was de
  * expliciete afwezigheid van Module-3-invoer zelf, niet de inhoud van een
- * eenmaal aanwezige invoer. Gepland Onderhoud (GO-P3, zie moduledoc hierboven)
- * is de EERSTE en ENIGE plek waar een `KRITIEK`-`controleVereist`-item
- * daadwerkelijk vaststellen blokkeert — een bewuste, lokale uitzondering op
- * deze verder ongewijzigde regel, nooit veralgemeniseerd naar Module 1/2/3.
+ * eenmaal aanwezige invoer. Gepland Onderhoud (GO-P3) en, sinds CD-P3,
+ * Correctief/Dagelijks Onderhoud (zie moduledoc hierboven) zijn de ENIGE
+ * twee plekken waar een `KRITIEK`-`controleVereist`-item daadwerkelijk
+ * vaststellen blokkeert — elk een bewuste, lokale uitzondering op deze
+ * verder ongewijzigde regel, nooit veralgemeniseerd naar Module 1/2/3.
  */
 export function stelBegrotingVast(db: DatabaseSync, versieId: string, vastgesteldAt: Date = new Date()): VastgesteldeBegroting {
   return withWriteTransaction(db, () => {
@@ -134,7 +161,7 @@ export function stelBegrotingVast(db: DatabaseSync, versieId: string, vastgestel
       );
     }
 
-    const { module1, module2, module3, geplandOnderhoud } = berekenBegrotingUitInvoer(versieId, invoer);
+    const { module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud } = berekenBegrotingUitInvoer(versieId, invoer);
     // Lokale, expliciete narrowing: `module3` is hier altijd niet-null, want `invoer.module3Invoer !== null`
     // is hierboven al gecontroleerd en `berekenBegrotingUitInvoer` berekent Module 3 uitsluitend (en dan
     // altijd naar een niet-null resultaat) wanneer `module3Invoer` niet-null is. Deze check is dus puur
@@ -158,9 +185,24 @@ export function stelBegrotingVast(db: DatabaseSync, versieId: string, vastgestel
       );
     }
 
+    // Correctief/Dagelijks-Onderhoud-lifecycle-validatie (CD-P3, zie moduledoc) — UITSLUITEND lokaal voor
+    // Correctief/Dagelijks Onderhoud, wijzigt niets aan hoe Module 1/2/3's/Gepland Onderhoud's eigen
+    // controleVereist wordt behandeld hierboven.
+    if (!correctiefDagelijksOnderhoud.beoordeeld) {
+      throw new Error(
+        `Begrotingsversie ${versieId}: Correctief/Dagelijks Onderhoud is niet beoordeeld (beoordeeld !== true) — vaststellen is niet mogelijk zonder expliciete beoordeling.`,
+      );
+    }
+    if (correctiefDagelijksOnderhoud.controleVereist.some((c) => c.ernst === "KRITIEK")) {
+      throw new Error(
+        `Begrotingsversie ${versieId}: Correctief/Dagelijks Onderhoud bevat één of meer KRITIEKE controls — vaststellen is niet mogelijk vóórdat deze zijn opgelost.`,
+      );
+    }
+
     schrijfFrozenBegrotingsresultaatZonderTransactie(db, versieId, { module1, module2 });
     schrijfFrozenModule3ResultaatZonderTransactie(db, versieId, module3);
     schrijfFrozenGeplandOnderhoudResultaatZonderTransactie(db, versieId, geplandOnderhoud);
+    schrijfFrozenCorrectiefDagelijksOnderhoudResultaatZonderTransactie(db, versieId, correctiefDagelijksOnderhoud);
     markeerVastgesteld(db, versieId, vastgesteldAt); // allerlaatste schrijfactie vóór commit
 
     const versie = leesBegrotingsversie(db, versieId);
@@ -168,6 +210,6 @@ export function stelBegrotingVast(db: DatabaseSync, versieId: string, vastgestel
       throw new Error(`Interne fout: begrotingsversie ${versieId} kon direct na vaststellen niet worden teruggelezen.`);
     }
 
-    return { versie, module1, module2, module3, geplandOnderhoud };
+    return { versie, module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud };
   });
 }

@@ -13,6 +13,7 @@ import {
   type NieuweBegrotingsversieInput,
 } from "./begrotingsversies.js";
 import { openOrCreateDatabase } from "./database.js";
+import { leesFrozenCorrectiefDagelijksOnderhoudResultaat } from "./frozenCorrectiefDagelijksOnderhoudResultaat.js";
 import { leesFrozenGeplandOnderhoudResultaat } from "./frozenGeplandOnderhoudResultaat.js";
 import { leesFrozenModule3Resultaat, schrijfFrozenModule3Resultaat } from "./frozenModule3Resultaat.js";
 import { leesFrozenBegrotingsresultaat, schrijfFrozenBegrotingsresultaat } from "./frozenResultaat.js";
@@ -120,6 +121,7 @@ describe("stelBegrotingVast — status- en invoersemantiek", () => {
     schrijfModule1Aannames(db, versie.id, { begrotingsjaar: 2027, indexatiePercentage: new Decimal(3) });
     schrijfModule3Invoer(db, versie.id, MODULE3_STANDAARD);
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     stelBegrotingVast(db, versie.id, new Date());
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow(/CONCEPT/);
@@ -138,6 +140,7 @@ describe("stelBegrotingVast — status- en invoersemantiek", () => {
     schrijfModule1Aannames(db, versie.id, { begrotingsjaar: 2027, indexatiePercentage: new Decimal(3) });
     schrijfModule3Invoer(db, versie.id, MODULE3_STANDAARD);
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.module1.contracten).toEqual([]);
   });
@@ -148,6 +151,7 @@ describe("stelBegrotingVast — status- en invoersemantiek", () => {
     schrijfModule1Aannames(db, versie.id, { begrotingsjaar: 2027, indexatiePercentage: new Decimal(3) });
     schrijfModule3Invoer(db, versie.id, MODULE3_STANDAARD);
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     expect(() => stelBegrotingVast(db, versie.id)).not.toThrow();
   });
 
@@ -157,6 +161,7 @@ describe("stelBegrotingVast — status- en invoersemantiek", () => {
     schrijfModule1Aannames(db, versie.id, { begrotingsjaar: 2027, indexatiePercentage: new Decimal(3) });
     schrijfModule3Invoer(db, versie.id, MODULE3_STANDAARD);
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.module2.complexen).toEqual([]);
   });
@@ -169,6 +174,7 @@ describe("stelBegrotingVast — recomputatie tegen huidige input, niet tegen oud
     schrijfModule1Aannames(db, versie.id, { begrotingsjaar: 2027, indexatiePercentage: new Decimal(3) });
     schrijfModule3Invoer(db, versie.id, MODULE3_STANDAARD);
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
 
     // Bewust afwijkende, tijdelijke frozen output neerzetten (een eerdere, inmiddels-stale CONCEPT-poging).
     const stale = herberekenBegroting(db, versie.id);
@@ -201,6 +207,7 @@ describe("stelBegrotingVast — controls blokkeren niet", () => {
     ]);
     schrijfModule3Invoer(db, versie.id, MODULE3_STANDAARD);
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
 
     const resultaat = stelBegrotingVast(db, versie.id); // mag NIET gooien ondanks de controls
     expect(resultaat.module1.controleVereist.length).toBeGreaterThan(0);
@@ -216,6 +223,7 @@ describe("stelBegrotingVast — succesvolle vaststelling, timestamp, read-back",
     schrijfModule1Aannames(db, versie.id, { begrotingsjaar: 2027, indexatiePercentage: new Decimal(3) });
     schrijfModule3Invoer(db, versie.id, MODULE3_STANDAARD);
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
 
     const timestamp = new Date("2026-12-20T10:15:30.123Z");
     const resultaat = stelBegrotingVast(db, versie.id, timestamp);
@@ -235,6 +243,7 @@ describe("stelBegrotingVast — succesvolle vaststelling, timestamp, read-back",
     zet070InputNeer(versie.id);
     schrijfModule3Invoer(db, versie.id, MODULE3_STANDAARD);
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
 
     const resultaat = stelBegrotingVast(db, versie.id, new Date("2026-12-20T10:15:30.123Z"));
     const gelezen = leesFrozenBegrotingsresultaat(db, versie.id)!;
@@ -250,6 +259,7 @@ describe("stelBegrotingVast — succesvolle vaststelling, timestamp, read-back",
     zet070InputNeer(versie.id);
     schrijfModule3Invoer(db, versie.id, MODULE3_STANDAARD);
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
 
     const dump = () => ({
       snapshot: db.prepare(`SELECT * FROM begroting_contract_snapshot`).all(),
@@ -275,6 +285,7 @@ describe("stelBegrotingVast — immutability na vaststellen (alle publieke write
     zet070InputNeer(versie.id);
     schrijfModule3Invoer(db, versie.id, MODULE3_STANDAARD);
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     const resultaat = stelBegrotingVast(db, versie.id);
 
     expect(() => wijzigConceptNaamNotitie(db, versie.id, { naam: "mag niet" })).toThrow();
@@ -297,6 +308,7 @@ describe("stelBegrotingVast — atomiciteit / rollback", () => {
     schrijfModule1Aannames(db, versie.id, { begrotingsjaar: 2027, indexatiePercentage: new Decimal(3) });
     schrijfModule3Invoer(db, versie.id, MODULE3_STANDAARD);
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
 
     // Al een geldige, tijdelijke frozen output vóór de poging.
     const vorigeFrozen = herberekenBegroting(db, versie.id);
@@ -331,6 +343,7 @@ describe("stelBegrotingVast — atomiciteit / rollback", () => {
     zet070InputNeer(versie.id);
     schrijfModule3Invoer(db, versie.id, MODULE3_STANDAARD);
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
 
     // Al een geldige, tijdelijke frozen output vóór de poging.
     const vorigeFrozen = herberekenBegroting(db, versie.id);
@@ -366,6 +379,7 @@ describe("stelBegrotingVast — atomiciteit / rollback", () => {
     zet070InputNeer(versie.id);
     schrijfModule3Invoer(db, versie.id, MODULE3_STANDAARD);
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
 
     const vorigeFrozen = herberekenBegroting(db, versie.id);
     schrijfFrozenBegrotingsresultaat(db, versie.id, vorigeFrozen);
@@ -427,6 +441,7 @@ describe("stelBegrotingVast — 070 end-to-end", () => {
     zet070InputNeer(versie.id);
     schrijfModule3Invoer(db, versie.id, MODULE3_STANDAARD);
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
 
     const timestamp = new Date("2026-12-20T10:15:30.123Z");
     const resultaat = stelBegrotingVast(db, versie.id, timestamp);
@@ -485,6 +500,7 @@ describe("stelBegrotingVast — Fase 2C.5: Module 3 verplicht bij vaststellen", 
     };
     schrijfModule3Invoer(db, versie.id, invoer);
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
 
     const resultaat = stelBegrotingVast(db, versie.id);
 
@@ -510,6 +526,7 @@ describe("stelBegrotingVast — Fase 2C.5: Module 3 verplicht bij vaststellen", 
     };
     schrijfModule3Invoer(db, versie.id, invoer);
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
 
     const resultaat = stelBegrotingVast(db, versie.id);
 
@@ -530,6 +547,7 @@ describe("stelBegrotingVast — Fase 2C.5: Module 3 verplicht bij vaststellen", 
     };
     schrijfModule3Invoer(db, versie.id, invoer);
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
 
     const resultaat = stelBegrotingVast(db, versie.id);
 
@@ -545,6 +563,7 @@ describe("stelBegrotingVast — Fase 2C.5: Module 3 verplicht bij vaststellen", 
     const invoer: BgManagementInvoer = { wijze: "NIEUWE_VERGOEDING", bedrag: new Decimal(0), eenheid: "MAAND", ingangsdatum: null };
     schrijfModule3Invoer(db, versie.id, invoer);
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
 
     const resultaat = stelBegrotingVast(db, versie.id);
 
@@ -568,6 +587,7 @@ describe("stelBegrotingVast — Fase 2C.5: Module 3 verplicht bij vaststellen", 
     zet070InputNeer(versie.id);
     schrijfModule3Invoer(db, versie.id, MODULE3_STANDAARD);
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
 
     // Al een geldige, tijdelijke frozen output vóór de poging (Module 1/2 én Module 3).
     const vorigeFrozen = herberekenBegroting(db, versie.id);
@@ -608,6 +628,7 @@ describe("stelBegrotingVast — Fase 2C.5: Module 3 verplicht bij vaststellen", 
     zet070InputNeer(versie.id);
     schrijfModule3Invoer(db, versie.id, MODULE3_STANDAARD);
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
 
     const vorigeFrozen = herberekenBegroting(db, versie.id);
     schrijfFrozenBegrotingsresultaat(db, versie.id, vorigeFrozen);
@@ -644,6 +665,7 @@ describe("stelBegrotingVast — Fase 2C.5: Module 3 verplicht bij vaststellen", 
     zet070InputNeer(versie.id);
     schrijfModule3Invoer(db, versie.id, MODULE3_STANDAARD);
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     const eersteResultaat = stelBegrotingVast(db, versie.id);
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow();
@@ -700,6 +722,7 @@ describe("stelBegrotingVast — Gepland Onderhoud lifecycle-blokkade (GO-P3)", (
     zetMinimaleBasisNeer(versie.id);
     schrijfGeplandOnderhoudActiviteiten(db, versie.id, [activiteitInvoer({ complexnummer: "" })]);
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow(/KRITIEKE controls/);
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
@@ -711,6 +734,7 @@ describe("stelBegrotingVast — Gepland Onderhoud lifecycle-blokkade (GO-P3)", (
     zetMinimaleBasisNeer(versie.id);
     schrijfGeplandOnderhoudActiviteiten(db, versie.id, [activiteitInvoer({ q1: new Decimal(-500) })]);
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
 
     expect(() => stelBegrotingVast(db, versie.id)).not.toThrow();
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("VASTGESTELD");
@@ -721,6 +745,7 @@ describe("stelBegrotingVast — Gepland Onderhoud lifecycle-blokkade (GO-P3)", (
     zetMinimaleBasisNeer(versie.id);
     schrijfGeplandOnderhoudActiviteiten(db, versie.id, [activiteitInvoer()]);
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
 
     expect(() => stelBegrotingVast(db, versie.id)).not.toThrow();
   });
@@ -729,6 +754,7 @@ describe("stelBegrotingVast — Gepland Onderhoud lifecycle-blokkade (GO-P3)", (
     const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
     zetMinimaleBasisNeer(versie.id);
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true); // 0 activiteiten
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true); // 0 regels
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.geplandOnderhoud.reviewStatus).toBe("REVIEWED_ZERO_ACTIVITIES");
@@ -747,6 +773,7 @@ describe("stelBegrotingVast — Gepland Onderhoud lifecycle-blokkade (GO-P3)", (
     zetMinimaleBasisNeer(versie.id);
     schrijfGeplandOnderhoudActiviteiten(db, versie.id, [activiteitInvoer({ omschrijving: "", q1: new Decimal(10000) })]);
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow(/KRITIEKE controls/);
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
@@ -757,6 +784,7 @@ describe("stelBegrotingVast — Gepland Onderhoud lifecycle-blokkade (GO-P3)", (
     zetMinimaleBasisNeer(versie.id);
     schrijfGeplandOnderhoudActiviteiten(db, versie.id, [activiteitInvoer({ aanleidingType: null, q1: new Decimal(10000) })]);
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow(/KRITIEKE controls/);
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
@@ -767,6 +795,7 @@ describe("stelBegrotingVast — Gepland Onderhoud lifecycle-blokkade (GO-P3)", (
     zetMinimaleBasisNeer(versie.id);
     schrijfGeplandOnderhoudActiviteiten(db, versie.id, [activiteitInvoer({ status: "NIET_BESTAAND", q1: new Decimal(10000) })]);
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow(/KRITIEKE controls/);
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
@@ -777,6 +806,7 @@ describe("stelBegrotingVast — Gepland Onderhoud lifecycle-blokkade (GO-P3)", (
     zetMinimaleBasisNeer(versie.id);
     schrijfGeplandOnderhoudActiviteiten(db, versie.id, [activiteitInvoer({ q1: new Decimal(-500), q2: new Decimal(1000) })]);
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.geplandOnderhoud.activiteiten[0]?.activiteit.q1.toString()).toBe("-500");
@@ -799,6 +829,7 @@ describe("stelBegrotingVast — Gepland Onderhoud lifecycle-blokkade (GO-P3)", (
     ]);
     schrijfModule3Invoer(db, versie.id, MODULE3_STANDAARD);
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true); // 0 activiteiten, geen KRITIEK
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true); // 0 regels, geen KRITIEK
 
     const resultaat = stelBegrotingVast(db, versie.id); // mag NIET gooien ondanks de Module-1-controls
     expect(resultaat.module1.controleVereist.length).toBeGreaterThan(0);
@@ -810,6 +841,7 @@ describe("stelBegrotingVast — Gepland Onderhoud lifecycle-blokkade (GO-P3)", (
     zet070InputNeer(versieZonder.id);
     schrijfModule3Invoer(db, versieZonder.id, MODULE3_STANDAARD);
     schrijfGeplandOnderhoudBeoordeeld(db, versieZonder.id, true);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versieZonder.id, true);
     const resultaatZonder = stelBegrotingVast(db, versieZonder.id);
 
     const versieMet = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
@@ -817,6 +849,7 @@ describe("stelBegrotingVast — Gepland Onderhoud lifecycle-blokkade (GO-P3)", (
     schrijfModule3Invoer(db, versieMet.id, MODULE3_STANDAARD);
     schrijfGeplandOnderhoudActiviteiten(db, versieMet.id, [activiteitInvoer({ q1: new Decimal(-500) })]); // WAARSCHUWING, niet-blokkerend
     schrijfGeplandOnderhoudBeoordeeld(db, versieMet.id, true);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versieMet.id, true);
     const resultaatMet = stelBegrotingVast(db, versieMet.id);
 
     expect(normaliseer(resultaatZonder.module1)).toEqual(normaliseer(resultaatMet.module1));
@@ -855,6 +888,7 @@ describe("stelBegrotingVast — Gepland Onderhoud: volledige pipeline en frozen 
       activiteitInvoer({ complexnummer: "004", q3: new Decimal(750), leverancier: "Test BV", offertebedrag: new Decimal(500), notitie: "n" }),
     ]);
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("VASTGESTELD");
@@ -877,6 +911,7 @@ describe("stelBegrotingVast — Gepland Onderhoud: volledige pipeline en frozen 
     schrijfModule3Invoer(db, versie.id, MODULE3_STANDAARD);
     schrijfGeplandOnderhoudActiviteiten(db, versie.id, [activiteitInvoer()]);
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
 
     const dump = () => ({
       activiteiten: db.prepare(`SELECT * FROM begroting_gepland_onderhoud_activiteit`).all(),
@@ -924,6 +959,7 @@ describe("stelBegrotingVast — Gepland Onderhoud atomiciteit (GO-P3)", () => {
     schrijfModule3Invoer(db, versie.id, MODULE3_STANDAARD);
     schrijfGeplandOnderhoudActiviteiten(db, versie.id, [activiteitInvoer()]);
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
 
     // Test-only trigger: blokkeert ELKE INSERT op de GO-activiteit-frozen-tabel — die wordt, volgens de
     // schrijfvolgorde in vaststellen.ts, bereikt NADAT Module 1/2 EN Module 3 al succesvol binnen DEZE
@@ -954,6 +990,7 @@ describe("stelBegrotingVast — Gepland Onderhoud atomiciteit (GO-P3)", () => {
     schrijfModule3Invoer(db, versie.id, MODULE3_STANDAARD);
     schrijfGeplandOnderhoudActiviteiten(db, versie.id, [activiteitInvoer()]);
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
 
     // Test-only trigger: blokkeert specifiek de CONCEPT→VASTGESTELD-overgang zelf. Op het moment dat deze
     // vuurt, zijn Module 1, Module 2, Module 3 ÉN Gepland Onderhoud binnen DEZE mislukte poging al
@@ -980,14 +1017,11 @@ describe("stelBegrotingVast — Gepland Onderhoud atomiciteit (GO-P3)", () => {
   });
 });
 
-describe("stelBegrotingVast — Correctief/Dagelijks Onderhoud: NOG GEEN lifecycle-blokkade (CD-P1/CD-P2, tussenfase)", () => {
-  // CD-P1/CD-P2 bouwen bewust NOG GEEN vaststel-blokkade voor Correctief/Dagelijks Onderhoud
-  // (in tegenstelling tot Gepland Onderhoud, GO-P3, hierboven) — `vaststellen.ts` blijft in deze
-  // implementatieronde ONGEWIJZIGD. Deze tests bewijzen die tijdelijke grens expliciet: noch
-  // `beoordeeld=false`, noch een KRITIEK-control in `correctiefDagelijksOnderhoud` blokkeert
-  // `stelBegrotingVast` op dit moment. Dat is GEEN businessbeslissing dat Correctief/Dagelijks nooit
-  // zou moeten blokkeren — die lifecycle-koppeling is bewust uitgesteld naar een latere, apart te
-  // reviewen fase (CD-P3), zie `herberekenen.ts`'s moduledoc.
+describe("stelBegrotingVast — Correctief/Dagelijks Onderhoud lifecycle-blokkade (CD-P3)", () => {
+  // CD-P3: Correctief/Dagelijks Onderhoud krijgt, exact zoals Gepland Onderhoud (GO-P3) hierboven, een
+  // lokale vaststel-blokkade (beoordeeld !== true, of een KRITIEK-control) — Module 1/2/3 en Gepland
+  // Onderhoud behouden hun bestaande, ongewijzigde semantiek (zie vaststellen.ts's moduledoc en test 8
+  // hieronder). Dit vervangt de eerdere CD-P1/CD-P2-tussenfase (waar deze blokkade nog niet bestond).
 
   function regelInvoer(overrides: Partial<CorrectiefDagelijksOnderhoudRegelInvoer> = {}): CorrectiefDagelijksOnderhoudRegelInvoer {
     return {
@@ -1004,7 +1038,7 @@ describe("stelBegrotingVast — Correctief/Dagelijks Onderhoud: NOG GEEN lifecyc
    * Correctief/Dagelijks-gedrag. Gepland Onderhoud wordt hier bewust op `beoordeeld=true` + 0
    * activiteiten gezet — dat is Gepland Onderhoud's EIGEN, bestaande GO-P3-blokkade (zie hierboven)
    * ongewijzigd geneutraliseerd, zodat deze tests niet per ongeluk GO's blokkade bewijzen in plaats
-   * van CD's afwezigheid van een blokkade.
+   * van CD's eigen blokkade.
    */
   function zetMinimaleBasisNeer(versieId: string): void {
     schrijfModule1Snapshot(db, versieId, []);
@@ -1013,42 +1047,310 @@ describe("stelBegrotingVast — Correctief/Dagelijks Onderhoud: NOG GEEN lifecyc
     schrijfGeplandOnderhoudBeoordeeld(db, versieId, true);
   }
 
-  it("1. beoordeeld=false + geldige regel blokkeert vaststellen NIET", () => {
+  it("1. beoordeeld=false blokkeert vaststellen, ondanks een verder volledig geldige regel", () => {
     const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
     zetMinimaleBasisNeer(versie.id);
     schrijfCorrectiefDagelijksOnderhoudRegels(db, versie.id, [regelInvoer()]); // beoordeeld NOOIT geschreven -> false
 
-    expect(() => stelBegrotingVast(db, versie.id)).not.toThrow();
-    expect(leesBegrotingsversie(db, versie.id)!.status).toBe("VASTGESTELD");
+    expect(() => stelBegrotingVast(db, versie.id)).toThrow(/niet beoordeeld/);
+    expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
+    expect(leesFrozenCorrectiefDagelijksOnderhoudResultaat(db, versie.id)).toBeNull();
+    expect(leesFrozenBegrotingsresultaat(db, versie.id)).toBeNull(); // geen enkele frozen output, ook niet Module 1/2
   });
 
-  it("2. beoordeeld=true + KRITIEK (lege omschrijving) blokkeert vaststellen NIET", () => {
+  it("2. beoordeeld=true + KRITIEK (lege omschrijving) blokkeert vaststellen", () => {
     const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
     zetMinimaleBasisNeer(versie.id);
     schrijfCorrectiefDagelijksOnderhoudRegels(db, versie.id, [regelInvoer({ omschrijving: "" })]);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
 
-    expect(() => stelBegrotingVast(db, versie.id)).not.toThrow();
-    expect(leesBegrotingsversie(db, versie.id)!.status).toBe("VASTGESTELD");
+    expect(() => stelBegrotingVast(db, versie.id)).toThrow(/KRITIEKE controls/);
+    expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
+    expect(leesFrozenCorrectiefDagelijksOnderhoudResultaat(db, versie.id)).toBeNull();
   });
 
-  it("3. beoordeeld=true + KRITIEK (jaarbedrag=null) blokkeert vaststellen NIET", () => {
+  it("3. beoordeeld=true + KRITIEK (jaarbedrag=null) blokkeert vaststellen", () => {
     const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
     zetMinimaleBasisNeer(versie.id);
     schrijfCorrectiefDagelijksOnderhoudRegels(db, versie.id, [regelInvoer({ jaarbedrag: null })]);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
 
+    expect(() => stelBegrotingVast(db, versie.id)).toThrow(/KRITIEKE controls/);
+    expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
+    expect(leesFrozenCorrectiefDagelijksOnderhoudResultaat(db, versie.id)).toBeNull();
+  });
+
+  it("4. beoordeeld=true + KRITIEK (jaarbedrag=NaN, via de concept-persistence heen) blokkeert vaststellen", () => {
+    // `Decimal(NaN).toString()` levert de string "NaN" op, die de concept-persistence (jaarbedrag TEXT
+    // NULL, geen CHECK op inhoud) ongewijzigd opslaat/teruggeeft als `Decimal("NaN")` — dus praktisch
+    // bereikbaar via het bestaande persistence-pad, geen kunstmatige nieuwe businessvalidatie nodig.
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    zetMinimaleBasisNeer(versie.id);
+    schrijfCorrectiefDagelijksOnderhoudRegels(db, versie.id, [regelInvoer({ jaarbedrag: new Decimal(NaN) })]);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
+
+    expect(() => stelBegrotingVast(db, versie.id)).toThrow(/KRITIEKE controls/);
+    expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
+  });
+
+  it("5. beoordeeld=true + WAARSCHUWING (negatief bedrag) mag vaststellen", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    zetMinimaleBasisNeer(versie.id);
+    schrijfCorrectiefDagelijksOnderhoudRegels(db, versie.id, [regelInvoer({ jaarbedrag: new Decimal(-500) })]);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
+
     expect(() => stelBegrotingVast(db, versie.id)).not.toThrow();
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("VASTGESTELD");
   });
 
-  it("4. het bestaande vastgestelde resultaat bevat geen enkele verwijzing naar correctiefDagelijksOnderhoud (VastgesteldeBegroting ongewijzigd)", () => {
+  it("6. beoordeeld=true + geen controls mag vaststellen", () => {
     const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
     zetMinimaleBasisNeer(versie.id);
-    schrijfCorrectiefDagelijksOnderhoudRegels(db, versie.id, [regelInvoer({ omschrijving: "" })]);
+    schrijfCorrectiefDagelijksOnderhoudRegels(db, versie.id, [regelInvoer()]);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
+
+    expect(() => stelBegrotingVast(db, versie.id)).not.toThrow();
+  });
+
+  it("7. beoordeeld=true + 0 regels mag vaststellen -> frozen REVIEWED_ZERO_RULES, totaalJaar 0, geen regelrijen", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    zetMinimaleBasisNeer(versie.id);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true); // 0 regels
+
+    const resultaat = stelBegrotingVast(db, versie.id);
+    expect(resultaat.correctiefDagelijksOnderhoud.reviewStatus).toBe("REVIEWED_ZERO_RULES");
+
+    const frozen = leesFrozenCorrectiefDagelijksOnderhoudResultaat(db, versie.id)!;
+    expect(frozen.reviewStatus).toBe("REVIEWED_ZERO_RULES");
+    expect(frozen.beoordeeld).toBe(true);
+    expect(frozen.totaalJaar.toString()).toBe("0");
+    expect(frozen.regels).toEqual([]);
+  });
+
+  it("8. negatief bedrag: WAARSCHUWING -> vaststellen toegestaan -> exact negatief frozen, totaalJaar inclusief negatief bedrag", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    zetMinimaleBasisNeer(versie.id);
+    schrijfCorrectiefDagelijksOnderhoudRegels(db, versie.id, [
+      regelInvoer({ jaarbedrag: new Decimal(-300) }),
+      regelInvoer({ jaarbedrag: new Decimal(1000) }),
+    ]);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
 
     const resultaat = stelBegrotingVast(db, versie.id);
-    expect(resultaat).not.toHaveProperty("correctiefDagelijksOnderhoud");
+    expect(resultaat.correctiefDagelijksOnderhoud.totaalJaar.toString()).toBe("700");
+
+    const ruweRijen = db
+      .prepare(`SELECT jaarbedrag FROM begroting_frozen_correctief_dagelijks_onderhoud_regel WHERE begroting_versie_id = ? ORDER BY regel_id`)
+      .all(versie.id) as { jaarbedrag: string }[];
+    expect(ruweRijen.map((r) => r.jaarbedrag)).toEqual(["-300", "1000"]);
+
+    const frozen = leesFrozenCorrectiefDagelijksOnderhoudResultaat(db, versie.id)!;
+    expect(frozen.totaalJaar.toString()).toBe("700");
+  });
+
+  it("9. Module-1-controls (dubbele override) blokkeren vaststellen nog steeds niet, naast een geldige Correctief/Dagelijks-toestand", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    schrijfModule1Snapshot(db, versie.id, [maakContract("0000000028", { complexnummer: "001" })]);
+    schrijfModule1Aannames(db, versie.id, { begrotingsjaar: 2027, indexatiePercentage: new Decimal(3) });
+    schrijfModule1Overrides(db, versie.id, [
+      { contractnummer: "0000000028", indexatiePercentage: new Decimal(3), scope: "VERSIE" },
+      { contractnummer: "0000000028", indexatiePercentage: new Decimal(5), scope: "VERSIE" },
+    ]);
+    schrijfModule3Invoer(db, versie.id, MODULE3_STANDAARD);
+    schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true); // 0 regels, geen KRITIEK
+
+    const resultaat = stelBegrotingVast(db, versie.id);
+    expect(resultaat.module1.controleVereist.some((c) => c.contractnummer === "0000000028" && c.bericht.includes("meerdere indexatiepercentage-overrides"))).toBe(true);
+    expect(leesBegrotingsversie(db, versie.id)!.status).toBe("VASTGESTELD");
+  });
+
+  it("10. het vastgestelde resultaat bevat correctiefDagelijksOnderhoud (VastgesteldeBegroting uitgebreid, CD-P3)", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    zetMinimaleBasisNeer(versie.id);
+    schrijfCorrectiefDagelijksOnderhoudRegels(db, versie.id, [regelInvoer()]);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
+
+    const resultaat = stelBegrotingVast(db, versie.id);
+    expect(resultaat.correctiefDagelijksOnderhoud).toBeDefined();
+    expect(resultaat.correctiefDagelijksOnderhoud.totaalJaar.toString()).toBe("1200");
+  });
+});
+
+describe("stelBegrotingVast — Correctief/Dagelijks Onderhoud atomiciteit (CD-P3)", () => {
+  function regelInvoer(overrides: Partial<CorrectiefDagelijksOnderhoudRegelInvoer> = {}): CorrectiefDagelijksOnderhoudRegelInvoer {
+    return {
+      id: null,
+      omschrijving: "Reparatie CV-installatie",
+      complexnummer: "003",
+      jaarbedrag: new Decimal(1200),
+      ...overrides,
+    };
+  }
+
+  function zetGeldigeBasisNeer(versieId: string): void {
+    schrijfModule1Snapshot(db, versieId, []);
+    schrijfModule1Aannames(db, versieId, { begrotingsjaar: 2027, indexatiePercentage: new Decimal(3) });
+    schrijfModule3Invoer(db, versieId, MODULE3_STANDAARD);
+    schrijfGeplandOnderhoudBeoordeeld(db, versieId, true);
+    schrijfCorrectiefDagelijksOnderhoudRegels(db, versieId, [regelInvoer()]);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versieId, true);
+  }
+
+  it("11. geforceerde fout tijdens schrijven frozen Correctief/Dagelijks Onderhoud laat volledige rollback zien — status blijft CONCEPT, geen enkele frozen output (Module 1/2/3/GO/CD)", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    zetGeldigeBasisNeer(versie.id);
+
+    db.exec(
+      `CREATE TRIGGER test_blokkeer_frozen_cd_insert
+       BEFORE INSERT ON begroting_frozen_correctief_dagelijks_onderhoud_resultaat
+       FOR EACH ROW
+       BEGIN
+         SELECT RAISE(ABORT, 'geforceerde schrijffout tijdens Correctief-Dagelijks-frozen-write');
+       END;`,
+    );
+
+    expect(() => stelBegrotingVast(db, versie.id)).toThrow(/geforceerde schrijffout tijdens Correctief-Dagelijks-frozen-write/);
+
+    const naMislukking = leesBegrotingsversie(db, versie.id)!;
+    expect(naMislukking.status).toBe("CONCEPT");
+    expect(naMislukking.vastgesteldAt).toBeNull();
+    expect(leesFrozenCorrectiefDagelijksOnderhoudResultaat(db, versie.id)).toBeNull();
+    expect(leesFrozenGeplandOnderhoudResultaat(db, versie.id)).toBeNull();
+    expect(leesFrozenModule3Resultaat(db, versie.id)).toBeNull();
+    expect(leesFrozenBegrotingsresultaat(db, versie.id)).toBeNull();
+  });
+
+  it("12. geforceerde fout NA geslaagde CD-frozen-writes maar vóór de statuswijziging laat volledige rollback zien (hardste bewijs)", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    zetGeldigeBasisNeer(versie.id);
+
+    // De trigger vuurt uitsluitend op de UPDATE die de status naar VASTGESTELD zet — op het moment dat
+    // hij vuurt, zijn Module 1, Module 2, Module 3, Gepland Onderhoud ÉN Correctief/Dagelijks Onderhoud
+    // binnen DEZE mislukte poging al succesvol (her)geschreven — het hardste bewijs dat de volledige
+    // transactie, inclusief Correctief/Dagelijks Onderhoud, atomair is.
+    db.exec(`
+      CREATE TRIGGER test_blokkeer_statusflip_cd
+      BEFORE UPDATE ON begrotingsversies
+      FOR EACH ROW
+      WHEN NEW.status = 'VASTGESTELD' AND OLD.status = 'CONCEPT'
+      BEGIN
+        SELECT RAISE(ABORT, 'test: geforceerde statusflip-fout (correctief dagelijks)');
+      END;
+    `);
+
+    expect(() => stelBegrotingVast(db, versie.id)).toThrow(/geforceerde statusflip-fout \(correctief dagelijks\)/);
+
+    const naMislukking = leesBegrotingsversie(db, versie.id)!;
+    expect(naMislukking.status).toBe("CONCEPT");
+    expect(naMislukking.vastgesteldAt).toBeNull();
+    expect(leesFrozenCorrectiefDagelijksOnderhoudResultaat(db, versie.id)).toBeNull();
+    expect(leesFrozenGeplandOnderhoudResultaat(db, versie.id)).toBeNull();
+    expect(leesFrozenBegrotingsresultaat(db, versie.id)).toBeNull();
+    expect(leesFrozenModule3Resultaat(db, versie.id)).toBeNull();
+  });
+});
+
+describe("stelBegrotingVast — Correctief/Dagelijks Onderhoud immutability (CD-P3)", () => {
+  function regelInvoer(overrides: Partial<CorrectiefDagelijksOnderhoudRegelInvoer> = {}): CorrectiefDagelijksOnderhoudRegelInvoer {
+    return {
+      id: null,
+      omschrijving: "Reparatie CV-installatie",
+      complexnummer: "003",
+      jaarbedrag: new Decimal(1200),
+      ...overrides,
+    };
+  }
+
+  it("13. na vaststellen zijn INSERT/UPDATE/DELETE op alle drie frozen Correctief/Dagelijks-tabellen geblokkeerd", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    schrijfModule1Snapshot(db, versie.id, []);
+    schrijfModule1Aannames(db, versie.id, { begrotingsjaar: 2027, indexatiePercentage: new Decimal(3) });
+    schrijfModule3Invoer(db, versie.id, MODULE3_STANDAARD);
+    schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfCorrectiefDagelijksOnderhoudRegels(db, versie.id, [regelInvoer()]);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
+    stelBegrotingVast(db, versie.id);
+
+    expect(() =>
+      db
+        .prepare(
+          `INSERT INTO begroting_frozen_correctief_dagelijks_onderhoud_resultaat
+             (begroting_versie_id, totaal_jaar, beoordeeld, review_status)
+           VALUES (?, '0', 1, 'REVIEWED_ZERO_RULES')`,
+        )
+        .run("een-andere-versie-id"),
+    ).toThrow(/immutable|FOREIGN KEY/);
+    expect(() =>
+      db.prepare(`UPDATE begroting_frozen_correctief_dagelijks_onderhoud_resultaat SET totaal_jaar = '999' WHERE begroting_versie_id = ?`).run(versie.id),
+    ).toThrow(/immutable/);
+    expect(() =>
+      db.prepare(`DELETE FROM begroting_frozen_correctief_dagelijks_onderhoud_resultaat WHERE begroting_versie_id = ?`).run(versie.id),
+    ).toThrow(/immutable/);
+
+    expect(() =>
+      db.prepare(`UPDATE begroting_frozen_correctief_dagelijks_onderhoud_regel SET omschrijving = 'x' WHERE begroting_versie_id = ?`).run(versie.id),
+    ).toThrow(/immutable/);
+    expect(() =>
+      db.prepare(`DELETE FROM begroting_frozen_correctief_dagelijks_onderhoud_regel WHERE begroting_versie_id = ?`).run(versie.id),
+    ).toThrow(/immutable/);
+
+    expect(() =>
+      db
+        .prepare(`INSERT INTO begroting_frozen_correctief_dagelijks_onderhoud_control (begroting_versie_id, volgnr, ernst, bericht) VALUES (?, 99, 'INFORMATIEF', 'x')`)
+        .run(versie.id),
+    ).toThrow(/immutable/);
+  });
+
+  it("14. concept-input-immutability uit migratie 10 blijft ongewijzigd geblokkeerd na vaststellen", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    schrijfModule1Snapshot(db, versie.id, []);
+    schrijfModule1Aannames(db, versie.id, { begrotingsjaar: 2027, indexatiePercentage: new Decimal(3) });
+    schrijfModule3Invoer(db, versie.id, MODULE3_STANDAARD);
+    schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
+    const [regel] = schrijfCorrectiefDagelijksOnderhoudRegels(db, versie.id, [regelInvoer()]);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
+    stelBegrotingVast(db, versie.id);
+
+    expect(() =>
+      db.prepare(`UPDATE begroting_correctief_dagelijks_onderhoud_regel SET omschrijving = 'x' WHERE id = ?`).run(regel!.id),
+    ).toThrow(/immutable/);
+    expect(() => db.prepare(`DELETE FROM begroting_correctief_dagelijks_onderhoud_regel WHERE id = ?`).run(regel!.id)).toThrow(/immutable/);
+  });
+});
+
+describe("stelBegrotingVast — Correctief/Dagelijks Onderhoud frozen-onafhankelijkheid (CD-P3)", () => {
+  function regelInvoer(overrides: Partial<CorrectiefDagelijksOnderhoudRegelInvoer> = {}): CorrectiefDagelijksOnderhoudRegelInvoer {
+    return {
+      id: null,
+      omschrijving: "Reparatie CV-installatie",
+      complexnummer: "003",
+      jaarbedrag: new Decimal(1200),
+      ...overrides,
+    };
+  }
+
+  it("15. leesFrozenCorrectiefDagelijksOnderhoudResultaat blijft na vaststellen stabiel, ook al zou concept-data ná afloop wijzigen", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    schrijfModule1Snapshot(db, versie.id, []);
+    schrijfModule1Aannames(db, versie.id, { begrotingsjaar: 2027, indexatiePercentage: new Decimal(3) });
+    schrijfModule3Invoer(db, versie.id, MODULE3_STANDAARD);
+    schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfCorrectiefDagelijksOnderhoudRegels(db, versie.id, [regelInvoer({ jaarbedrag: new Decimal(1200) })]);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
+    stelBegrotingVast(db, versie.id);
+
+    const vóórDirecteMutatie = leesFrozenCorrectiefDagelijksOnderhoudResultaat(db, versie.id)!;
+    expect(vóórDirecteMutatie.totaalJaar.toString()).toBe("1200");
+
+    // Rechtstreekse, buiten-de-API-om SQL-mutatie van de CONCEPT-regeltabel — uitsluitend om aan te tonen
+    // dat de frozen read deze tabel structureel niet meer raadpleegt (de trigger zou een schrijf via de
+    // normale write-API sowieso al blokkeren; deze directe SQL omzeilt uitsluitend de test-opzet, niet de
+    // productielogica van de frozen read zelf).
+    db.exec(`DROP TRIGGER trg_begroting_correctief_dagelijks_onderhoud_regel_vastgesteld_no_update`);
+    db.prepare(`UPDATE begroting_correctief_dagelijks_onderhoud_regel SET jaarbedrag = '999999' WHERE begroting_versie_id = ?`).run(versie.id);
+
+    const náDirecteMutatie = leesFrozenCorrectiefDagelijksOnderhoudResultaat(db, versie.id)!;
+    expect(náDirecteMutatie.totaalJaar.toString()).toBe("1200"); // ongewijzigd — frozen read leest nooit de concept-tabel
   });
 });
