@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import {
   berekenBegroteBeheersvergoeding,
+  berekenBegroteCorrectiefDagelijksOnderhoud,
   berekenBegroteGeplandOnderhoud,
   berekenBegroteHuuropbrengsten,
   berekenBegroteManagementvergoeding,
@@ -8,6 +9,9 @@ import {
   type BgBeheerResultaat,
   type BgContractFeiten,
   type BgContractOverride,
+  type BgCorrectiefDagelijksRegelInvoer,
+  type BgCorrectiefDagelijksRegelUitkomst,
+  type BgCorrectiefDagelijksResultaat,
   type BgGeplandOnderhoudAanleidingType,
   type BgGeplandOnderhoudActiviteitInvoer,
   type BgGeplandOnderhoudActiviteitUitkomst,
@@ -19,6 +23,13 @@ import {
   type BgManagementResultaat,
 } from "@bvc/reporting";
 import { leesBegrotingsversie, type Begrotingsversie } from "./begrotingsversies.js";
+import {
+  leesCorrectiefDagelijksOnderhoudBeoordeeld,
+} from "./correctiefDagelijksOnderhoudBeoordeeld.js";
+import {
+  leesCorrectiefDagelijksOnderhoudRegels,
+  type CorrectiefDagelijksOnderhoudRegel,
+} from "./correctiefDagelijksOnderhoudRegels.js";
 import { leesGeplandOnderhoudActiviteiten, type GeplandOnderhoudActiviteit } from "./geplandOnderhoudActiviteiten.js";
 import { leesGeplandOnderhoudBeoordeeld } from "./geplandOnderhoudBeoordeeld.js";
 import { leesModule1Aannames } from "./module1Aannames.js";
@@ -80,6 +91,28 @@ import { leesModule3Invoer } from "./module3Invoer.js";
  * behoudt bewust zijn positionele `activiteitIndex` (nog GEEN vertaling naar
  * een persistentie-ID) — die vertaling hoort, indien nodig, bij een latere
  * fase (frozen output), niet bij deze pure lees-en-bereken-stap.
+ *
+ * CORRECTIEF/DAGELIJKS ONDERHOUD (CD-P2, OB-028, businessbeslissing
+ * 2026-09-04): `correctiefDagelijksOnderhoud` volgt EXACT hetzelfde
+ * niet-nullable patroon als `geplandOnderhoud`, met dezelfde onderbouwing —
+ * "0 regels + `beoordeeld=false`" is door
+ * `berekenBegroteCorrectiefDagelijksOnderhoud` al volledig, zinvol
+ * berekenbaar (zie die module se eigen testsuite). Bewust GEEN
+ * type-boundary-castfunctie nodig zoals `alsPureAanleidingType`/
+ * `alsPureStatus` hierboven: Correctief/Dagelijks' enige bijzondere veld
+ * (`jaarbedrag: Decimal | null`) mapt eerlijk 1-op-1 tussen persistentie en
+ * pure-calculator-invoer, zonder enumcast-omweg — zie
+ * `correctiefDagelijksOnderhoudRegels.ts`'s moduledoc.
+ *
+ * BELANGRIJKE TIJDELIJKE GRENS (CD-P1/CD-P2, expliciet zo afgesproken):
+ * `vaststellen.ts` raakt in deze fase NIET aan
+ * `correctiefDagelijksOnderhoud` — een KRITIEK-control of `beoordeeld=false`
+ * in dit resultaat blokkeert `stelBegrotingVast` (nog) NIET, in tegenstelling
+ * tot Gepland Onderhoud (zie `vaststellen.test.ts`'s regressietest). Dat is
+ * een bewuste, tijdelijke scope-grens van deze implementatieronde, GEEN
+ * businessbeslissing dat Correctief/Dagelijks nooit zou moeten blokkeren —
+ * die lifecycle-koppeling volgt pas in een latere, apart te reviewen fase
+ * (CD-P3).
  */
 export interface HerberekendeBegroting {
   versie: Begrotingsversie;
@@ -87,6 +120,7 @@ export interface HerberekendeBegroting {
   module2: BgBeheerResultaat;
   module3: BgManagementResultaat | null;
   geplandOnderhoud: HerberekendGeplandOnderhoudResultaat;
+  correctiefDagelijksOnderhoud: HerberekendCorrectiefDagelijksResultaat;
 }
 
 /** Koppelt een berekende activiteit-uitkomst terug aan haar persistente `id` — uitsluitend positioneel bepaald, nooit herzocht op inhoud (zie moduledoc). */
@@ -98,6 +132,17 @@ export interface GeplandOnderhoudActiviteitUitkomstMetId {
 /** `BgGeplandOnderhoudResultaat` met uitsluitend `activiteiten` vervangen door de ID-geannoteerde variant — alle overige velden ongewijzigd, rechtstreeks van de pure calculator. */
 export interface HerberekendGeplandOnderhoudResultaat extends Omit<BgGeplandOnderhoudResultaat, "activiteiten"> {
   activiteiten: readonly GeplandOnderhoudActiviteitUitkomstMetId[];
+}
+
+/** Koppelt een berekende regel-uitkomst terug aan haar persistente `id` — uitsluitend positioneel bepaald, zelfde principe als `GeplandOnderhoudActiviteitUitkomstMetId`. */
+export interface CorrectiefDagelijksRegelUitkomstMetId {
+  persistentieId: number;
+  regel: BgCorrectiefDagelijksRegelUitkomst;
+}
+
+/** `BgCorrectiefDagelijksResultaat` met uitsluitend `regels` vervangen door de ID-geannoteerde variant — alle overige velden ongewijzigd, rechtstreeks van de pure calculator. */
+export interface HerberekendCorrectiefDagelijksResultaat extends Omit<BgCorrectiefDagelijksResultaat, "regels"> {
+  regels: readonly CorrectiefDagelijksRegelUitkomstMetId[];
 }
 
 /** Kleine, herbruikbare read-transactie-helper — zelfde BEGIN/COMMIT/ROLLBACK-idioom als elders in dit package (bewust hier gedupliceerd, zie 1D.5-rapport). */
@@ -132,6 +177,10 @@ export interface HerberekenInvoer {
   geplandOnderhoudActiviteiten: readonly GeplandOnderhoudActiviteit[];
   /** `leesGeplandOnderhoudBeoordeeld`'s "geen rij → false"-semantiek, ongewijzigd doorgegeven. */
   geplandOnderhoudBeoordeeld: boolean;
+  /** Rauwe CD-P1-persistence — GEEN pure-module-vorm; de mapping naar `BgCorrectiefDagelijksRegelInvoer` gebeurt pas in `berekenBegrotingUitInvoer`. */
+  correctiefDagelijksRegels: readonly CorrectiefDagelijksOnderhoudRegel[];
+  /** `leesCorrectiefDagelijksOnderhoudBeoordeeld`'s "geen rij → false"-semantiek, ongewijzigd doorgegeven. */
+  correctiefDagelijksBeoordeeld: boolean;
 }
 
 /**
@@ -170,6 +219,8 @@ export function leesHerberekenInvoerZonderTransactie(db: DatabaseSync, versieId:
     module3Invoer: leesModule3Invoer(db, versieId),
     geplandOnderhoudActiviteiten: leesGeplandOnderhoudActiviteiten(db, versieId),
     geplandOnderhoudBeoordeeld: leesGeplandOnderhoudBeoordeeld(db, versieId),
+    correctiefDagelijksRegels: leesCorrectiefDagelijksOnderhoudRegels(db, versieId),
+    correctiefDagelijksBeoordeeld: leesCorrectiefDagelijksOnderhoudBeoordeeld(db, versieId),
   };
 }
 
@@ -253,6 +304,51 @@ function berekenGeplandOnderhoudUitInvoer(
   return { ...resultaat, activiteiten: activiteitenMetId };
 }
 
+/** Letterlijke veldkopie, GEEN transformatie/validatie — GEEN type-boundary-cast nodig (in tegenstelling tot Gepland Onderhoud), zie `HerberekendeBegroting`'s moduledoc. */
+function naarPureCorrectiefDagelijksInvoer(regel: CorrectiefDagelijksOnderhoudRegel): BgCorrectiefDagelijksRegelInvoer {
+  return {
+    omschrijving: regel.omschrijving,
+    complexnummer: regel.complexnummer,
+    jaarbedrag: regel.jaarbedrag,
+  };
+}
+
+/**
+ * Roept de pure Correctief/Dagelijks-Onderhoud-calculator aan en koppelt
+ * uitsluitend persistentie-ID's terug aan de resulterende regel-uitkomsten —
+ * positioneel (`invoer[i] ↔ resultaat.regels[i]`), zelfde principe en
+ * defensieve lengte-controle als `berekenGeplandOnderhoudUitInvoer`.
+ */
+function berekenCorrectiefDagelijksUitInvoer(
+  versieId: string,
+  begrotingsjaar: number,
+  regels: readonly CorrectiefDagelijksOnderhoudRegel[],
+  beoordeeld: boolean,
+): HerberekendCorrectiefDagelijksResultaat {
+  let resultaat: BgCorrectiefDagelijksResultaat;
+  try {
+    resultaat = berekenBegroteCorrectiefDagelijksOnderhoud(regels.map(naarPureCorrectiefDagelijksInvoer), { begrotingsjaar, beoordeeld });
+  } catch (error) {
+    throw new Error(
+      `Berekening van begrotingsversie ${versieId} is mislukt tijdens Correctief/Dagelijks Onderhoud: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
+
+  if (resultaat.regels.length !== regels.length) {
+    throw new Error(
+      `Interne fout: begrotingsversie ${versieId}: Correctief/Dagelijks-Onderhoud-calculator gaf ${resultaat.regels.length} regel-uitkomsten terug voor ${regels.length} ingevoerde regels — positionele id-correlatie geschonden.`,
+    );
+  }
+
+  const regelsMetId: CorrectiefDagelijksRegelUitkomstMetId[] = resultaat.regels.map((regelUitkomst, index) => ({
+    persistentieId: regels[index]!.id,
+    regel: regelUitkomst,
+  }));
+
+  return { ...resultaat, regels: regelsMetId };
+}
+
 /**
  * Voert de pure Module-1-, Module-2-, (indien aanwezig) Module-3- en
  * Gepland-Onderhoud-berekening uit op reeds-gelezen invoer — GEEN eigen
@@ -269,11 +365,18 @@ function berekenGeplandOnderhoudUitInvoer(
  *
  * Gepland Onderhoud wordt, ANDERS dan Module 3, ALTIJD berekend — ook met nul
  * activiteiten en `beoordeeld=false` (zie `HerberekendeBegroting`'s moduledoc).
+ * Correctief/Dagelijks Onderhoud volgt hetzelfde ALTIJD-berekend-patroon.
  */
 export function berekenBegrotingUitInvoer(
   versieId: string,
   invoer: HerberekenInvoer,
-): { module1: BgHuurResultaat; module2: BgBeheerResultaat; module3: BgManagementResultaat | null; geplandOnderhoud: HerberekendGeplandOnderhoudResultaat } {
+): {
+  module1: BgHuurResultaat;
+  module2: BgBeheerResultaat;
+  module3: BgManagementResultaat | null;
+  geplandOnderhoud: HerberekendGeplandOnderhoudResultaat;
+  correctiefDagelijksOnderhoud: HerberekendCorrectiefDagelijksResultaat;
+} {
   let module1: BgHuurResultaat;
   try {
     module1 = berekenBegroteHuuropbrengsten(invoer.contracten, invoer.overrides, invoer.aannames, invoer.versie.bronPeildatum);
@@ -313,12 +416,20 @@ export function berekenBegrotingUitInvoer(
     invoer.geplandOnderhoudBeoordeeld,
   );
 
-  return { module1, module2, module3, geplandOnderhoud };
+  const correctiefDagelijksOnderhoud = berekenCorrectiefDagelijksUitInvoer(
+    versieId,
+    invoer.versie.begrotingsjaar,
+    invoer.correctiefDagelijksRegels,
+    invoer.correctiefDagelijksBeoordeeld,
+  );
+
+  return { module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud };
 }
 
 /**
  * Herberekent Module 1 + Module 2 (+ Module 3 indien aanwezig) + Gepland
- * Onderhoud voor `versieId`, uitsluitend gebaseerd op wat al in SQLite staat.
+ * Onderhoud + Correctief/Dagelijks Onderhoud voor `versieId`, uitsluitend
+ * gebaseerd op wat al in SQLite staat.
  *
  * Consistentie van de invoer: alle reads gebeuren bínnen ÉÉN
  * `BEGIN`…`COMMIT`-leestransactie (`leesHerberekenInvoerZonderTransactie`
@@ -338,6 +449,6 @@ export function berekenBegrotingUitInvoer(
  */
 export function herberekenBegroting(db: DatabaseSync, versieId: string): HerberekendeBegroting {
   const invoer = withReadTransaction(db, () => leesHerberekenInvoerZonderTransactie(db, versieId));
-  const { module1, module2, module3, geplandOnderhoud } = berekenBegrotingUitInvoer(versieId, invoer);
-  return { versie: invoer.versie, module1, module2, module3, geplandOnderhoud };
+  const { module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud } = berekenBegrotingUitInvoer(versieId, invoer);
+  return { versie: invoer.versie, module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud };
 }

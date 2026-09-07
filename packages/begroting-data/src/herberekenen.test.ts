@@ -5,15 +5,22 @@ import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  berekenBegroteCorrectiefDagelijksOnderhoud,
   berekenBegroteGeplandOnderhoud,
   type BgBeheerComplexConfig,
   type BgContractFeiten,
   type BgContractOverride,
+  type BgCorrectiefDagelijksRegelInvoer,
   type BgGeplandOnderhoudActiviteitInvoer,
   type BgHuurAannames,
   type BgManagementInvoer,
 } from "@bvc/reporting";
 import { maakBegrotingsversie, markeerVastgesteld, type NieuweBegrotingsversieInput } from "./begrotingsversies.js";
+import { schrijfCorrectiefDagelijksOnderhoudBeoordeeld } from "./correctiefDagelijksOnderhoudBeoordeeld.js";
+import {
+  schrijfCorrectiefDagelijksOnderhoudRegels,
+  type CorrectiefDagelijksOnderhoudRegelInvoer,
+} from "./correctiefDagelijksOnderhoudRegels.js";
 import { openOrCreateDatabase } from "./database.js";
 import { schrijfGeplandOnderhoudActiviteiten, type GeplandOnderhoudActiviteitInvoer } from "./geplandOnderhoudActiviteiten.js";
 import { schrijfGeplandOnderhoudBeoordeeld } from "./geplandOnderhoudBeoordeeld.js";
@@ -830,5 +837,227 @@ describe("herberekenBegroting — Gepland Onderhoud (GO-P2)", () => {
     expect(normaliseer(zonderGeplandOnderhoud.module2)).toBe(normaliseer(metGeplandOnderhoud.module2));
     expect(zonderGeplandOnderhoud.module3).toBeNull();
     expect(metGeplandOnderhoud.module3).toBeNull();
+  });
+});
+
+describe("herberekenBegroting — Correctief/Dagelijks Onderhoud (CD-P2)", () => {
+  function regelInvoer(overrides: Partial<CorrectiefDagelijksOnderhoudRegelInvoer> = {}): CorrectiefDagelijksOnderhoudRegelInvoer {
+    return {
+      id: null,
+      omschrijving: "Reparatie CV-installatie",
+      complexnummer: "003",
+      jaarbedrag: new Decimal(1200),
+      ...overrides,
+    };
+  }
+
+  /** Zelfde type-boundary-conversie als de productiecode (`naarPureCorrectiefDagelijksInvoer` in `herberekenen.ts`) — bewust GEEN `id` in de pure vorm. */
+  function alsPureInvoer(r: CorrectiefDagelijksOnderhoudRegelInvoer): BgCorrectiefDagelijksRegelInvoer {
+    return { omschrijving: r.omschrijving, complexnummer: r.complexnummer, jaarbedrag: r.jaarbedrag };
+  }
+
+  it("1. nul regels + geen beoordeeld-rij: resultaat aanwezig, beoordeeld=false, NOT_REVIEWED, totaal 0", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    const resultaat = herberekenBegroting(db, versie.id);
+
+    expect(resultaat.correctiefDagelijksOnderhoud).toBeDefined();
+    expect(resultaat.correctiefDagelijksOnderhoud.beoordeeld).toBe(false);
+    expect(resultaat.correctiefDagelijksOnderhoud.reviewStatus).toBe("NOT_REVIEWED");
+    expect(resultaat.correctiefDagelijksOnderhoud.totaalJaar.toString()).toBe("0");
+    expect(resultaat.correctiefDagelijksOnderhoud.regels).toEqual([]);
+  });
+
+  it("2. nul regels + beoordeeld=true: REVIEWED_ZERO_RULES", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    expect(resultaat.correctiefDagelijksOnderhoud.reviewStatus).toBe("REVIEWED_ZERO_RULES");
+  });
+
+  it("3. één geldige regel: exact gelijk aan directe pure-calculator-uitkomst", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    const invoer = regelInvoer();
+    schrijfCorrectiefDagelijksOnderhoudRegels(db, versie.id, [invoer]);
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    const direct = berekenBegroteCorrectiefDagelijksOnderhoud([alsPureInvoer(invoer)], { begrotingsjaar: 2027, beoordeeld: false });
+
+    expect(resultaat.correctiefDagelijksOnderhoud.totaalJaar.toString()).toBe(direct.totaalJaar.toString());
+    expect(resultaat.correctiefDagelijksOnderhoud.regels[0]?.regel).toEqual(direct.regels[0]);
+  });
+
+  it("4. meerdere regels: totaal exact gelijk aan pure calculator", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    const invoerA = regelInvoer({ omschrijving: "A", jaarbedrag: new Decimal(1000) });
+    const invoerB = regelInvoer({ omschrijving: "B", jaarbedrag: new Decimal(2500) });
+    schrijfCorrectiefDagelijksOnderhoudRegels(db, versie.id, [invoerA, invoerB]);
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    const direct = berekenBegroteCorrectiefDagelijksOnderhoud([invoerA, invoerB].map(alsPureInvoer), { begrotingsjaar: 2027, beoordeeld: false });
+
+    expect(resultaat.correctiefDagelijksOnderhoud.totaalJaar.toString()).toBe(direct.totaalJaar.toString());
+    expect(resultaat.correctiefDagelijksOnderhoud.totaalJaar.toString()).toBe("3500");
+  });
+
+  it("5. persistentie-id wordt correct teruggekoppeld per regel", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    const [a, b] = schrijfCorrectiefDagelijksOnderhoudRegels(db, versie.id, [
+      regelInvoer({ omschrijving: "Eerste" }),
+      regelInvoer({ omschrijving: "Tweede" }),
+    ]);
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    expect(resultaat.correctiefDagelijksOnderhoud.regels[0]?.persistentieId).toBe(a!.id);
+    expect(resultaat.correctiefDagelijksOnderhoud.regels[1]?.persistentieId).toBe(b!.id);
+  });
+
+  it("6. twee inhoudelijk identieke regels met verschillende ids blijven correct onderscheiden (geen inhoudelijke zoekkoppeling)", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    const [a, b] = schrijfCorrectiefDagelijksOnderhoudRegels(db, versie.id, [regelInvoer(), regelInvoer()]);
+    expect(a!.id).not.toBe(b!.id);
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    const ids = resultaat.correctiefDagelijksOnderhoud.regels.map((x) => x.persistentieId);
+    expect(ids).toEqual([a!.id, b!.id]);
+    expect(new Set(ids).size).toBe(2);
+  });
+
+  it("7. Decimalwaarden blijven exact (meer precisie dan 2 decimalen)", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfCorrectiefDagelijksOnderhoudRegels(db, versie.id, [regelInvoer({ jaarbedrag: new Decimal("1234.5678") })]);
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    expect(resultaat.correctiefDagelijksOnderhoud.regels[0]!.regel.jaarbedrag.toString()).toBe("1234.5678");
+  });
+
+  it("8. jaarbedrag=null blijft KRITIEK en krijgt een veilige 0-bijdrage", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfCorrectiefDagelijksOnderhoudRegels(db, versie.id, [regelInvoer({ jaarbedrag: null })]);
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    expect(resultaat.correctiefDagelijksOnderhoud.regels[0]!.regel.jaarbedrag.toString()).toBe("0");
+    expect(resultaat.correctiefDagelijksOnderhoud.regels[0]!.regel.invoer.jaarbedrag).toBeNull();
+    expect(resultaat.correctiefDagelijksOnderhoud.controleVereist.some((c) => c.ernst === "KRITIEK" && c.bericht.includes("jaarbedrag"))).toBe(
+      true,
+    );
+  });
+
+  it("9. lege omschrijving: KRITIEK, financieel bedrag blijft zichtbaar/meetellen", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfCorrectiefDagelijksOnderhoudRegels(db, versie.id, [regelInvoer({ omschrijving: "", jaarbedrag: new Decimal(10000) })]);
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    expect(resultaat.correctiefDagelijksOnderhoud.regels[0]?.regel.jaarbedrag.toString()).toBe("10000");
+    expect(resultaat.correctiefDagelijksOnderhoud.totaalJaar.toString()).toBe("10000");
+    expect(
+      resultaat.correctiefDagelijksOnderhoud.controleVereist.some((c) => c.ernst === "KRITIEK" && c.bericht.includes("omschrijving")),
+    ).toBe(true);
+  });
+
+  it("10. complexnummer=null (NTB): geen control, bedrag telt gewoon mee", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfCorrectiefDagelijksOnderhoudRegels(db, versie.id, [regelInvoer({ complexnummer: null, jaarbedrag: new Decimal(500) })]);
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    expect(resultaat.correctiefDagelijksOnderhoud.totaalJaar.toString()).toBe("500");
+    expect(resultaat.correctiefDagelijksOnderhoud.controleVereist).toHaveLength(0);
+  });
+
+  it("11. negatief jaarbedrag: WAARSCHUWING, negatief bedrag blijft meetellen", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfCorrectiefDagelijksOnderhoudRegels(db, versie.id, [regelInvoer({ jaarbedrag: new Decimal(-300) })]);
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    expect(resultaat.correctiefDagelijksOnderhoud.regels[0]?.regel.jaarbedrag.toString()).toBe("-300");
+    expect(resultaat.correctiefDagelijksOnderhoud.totaalJaar.toString()).toBe("-300");
+    expect(resultaat.correctiefDagelijksOnderhoud.controleVereist.some((c) => c.ernst === "WAARSCHUWING")).toBe(true);
+  });
+
+  it("12. beoordeeld=false met regels: rekent volledig door, NOT_REVIEWED", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfCorrectiefDagelijksOnderhoudRegels(db, versie.id, [regelInvoer({ jaarbedrag: new Decimal(1000) })]);
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    expect(resultaat.correctiefDagelijksOnderhoud.reviewStatus).toBe("NOT_REVIEWED");
+    expect(resultaat.correctiefDagelijksOnderhoud.totaalJaar.toString()).toBe("1000");
+  });
+
+  it("13. beoordeeld=true met regels: REVIEWED_WITH_RULES", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfCorrectiefDagelijksOnderhoudRegels(db, versie.id, [regelInvoer()]);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    expect(resultaat.correctiefDagelijksOnderhoud.reviewStatus).toBe("REVIEWED_WITH_RULES");
+  });
+
+  it("14. herberekening schrijft niets naar de Correctief/Dagelijks-concepttabellen", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfCorrectiefDagelijksOnderhoudRegels(db, versie.id, [regelInvoer()]);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
+
+    const dump = () => ({
+      regels: db.prepare(`SELECT * FROM begroting_correctief_dagelijks_onderhoud_regel`).all(),
+      module: db.prepare(`SELECT * FROM begroting_correctief_dagelijks_onderhoud_module`).all(),
+    });
+
+    const voor = dump();
+    herberekenBegroting(db, versie.id);
+    const na = dump();
+
+    expect(na).toEqual(voor);
+  });
+
+  it("15. twee opeenvolgende herberekeningen zonder writes geven inhoudelijk identiek resultaat", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfCorrectiefDagelijksOnderhoudRegels(db, versie.id, [
+      regelInvoer({ complexnummer: "001", jaarbedrag: new Decimal(1000) }),
+      regelInvoer({ complexnummer: "004", jaarbedrag: new Decimal(2000) }),
+    ]);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
+
+    const eersteKeer = herberekenBegroting(db, versie.id);
+    const tweedeKeer = herberekenBegroting(db, versie.id);
+    const normaliseer = (waarde: unknown) => JSON.stringify(waarde, (_key, v) => (v instanceof Decimal ? v.toString() : v));
+
+    expect(normaliseer(eersteKeer.correctiefDagelijksOnderhoud)).toBe(normaliseer(tweedeKeer.correctiefDagelijksOnderhoud));
+  });
+
+  it("16 (regressie). bestaande Module 1/2/3 + Gepland-Onderhoud-uitkomst blijft byte-identiek naast een aanwezige Correctief/Dagelijks-regel", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    schrijfModule1Snapshot(db, versie.id, [maakContract("0000000028", { complexnummer: "001" })]);
+    schrijfModule1Aannames(db, versie.id, STANDAARD_AANNAMES);
+    schrijfModule2Config(db, versie.id, [
+      { complexnummer: "001", vastBedragJaar: new Decimal(1000), vastIndexatiePercentage: null, vastIndexatiedatum: null, variabelPercentage: new Decimal(6) },
+    ]);
+    schrijfGeplandOnderhoudActiviteiten(db, versie.id, [
+      {
+        id: null,
+        complexnummer: "003",
+        omschrijving: "Vervangen dakbedekking",
+        aanleidingType: "MJOP",
+        aanleidingToelichting: "MJOP 2027 regel 14",
+        q1: new Decimal(25000),
+        q2: new Decimal(0),
+        q3: new Decimal(0),
+        q4: new Decimal(0),
+        status: "GEPLAND",
+        leverancier: null,
+        offertebedrag: null,
+        notitie: null,
+      },
+    ]);
+
+    const zonderCorrectiefDagelijks = herberekenBegroting(db, versie.id);
+    schrijfCorrectiefDagelijksOnderhoudRegels(db, versie.id, [regelInvoer()]);
+    const metCorrectiefDagelijks = herberekenBegroting(db, versie.id);
+
+    const normaliseer = (waarde: unknown) => JSON.stringify(waarde, (_key, v) => (v instanceof Decimal ? v.toString() : v));
+    expect(normaliseer(zonderCorrectiefDagelijks.module1)).toBe(normaliseer(metCorrectiefDagelijks.module1));
+    expect(normaliseer(zonderCorrectiefDagelijks.module2)).toBe(normaliseer(metCorrectiefDagelijks.module2));
+    expect(normaliseer(zonderCorrectiefDagelijks.geplandOnderhoud)).toBe(normaliseer(metCorrectiefDagelijks.geplandOnderhoud));
+    expect(zonderCorrectiefDagelijks.module3).toBeNull();
+    expect(metCorrectiefDagelijks.module3).toBeNull();
   });
 });

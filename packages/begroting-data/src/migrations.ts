@@ -1455,6 +1455,98 @@ export const MIGRATIONS: readonly Migration[] = [
        END`,
     ],
   },
+  /**
+   * Migratie 10 — Correctief/Dagelijks Onderhoud: concept-input (regels +
+   * module-brede beoordeeld-vlag), fase CD-P1 (OB-028). Exact hetzelfde
+   * structurele patroon als migratie 8 (Gepland Onderhoud concept-input):
+   * één child-tabel (regels) + één headertabel (beoordeeld-vlag), zes
+   * immutability-triggers (INSERT/UPDATE/DELETE geweigerd zodra
+   * `begrotingsversies.status = 'VASTGESTELD'`).
+   *
+   * KLEINER REGELMODEL DAN GEPLAND ONDERHOUD (bewust, zie
+   * `begroteCorrectiefDagelijksOnderhoud.ts`'s moduledoc): geen Q1-Q4 (één
+   * `jaarbedrag`), geen `status`/`aanleiding_*`/`leverancier`/
+   * `offertebedrag`/`notitie` — die velden horen niet bij dit
+   * businessconcept en worden dan ook niet meegenomen.
+   *
+   * `jaarbedrag TEXT NULL` (in tegenstelling tot migratie 8's `q1..q4 TEXT
+   * NOT NULL`): kernontwerpbeslissing OB028-004 — `null` is hier een
+   * eersteklas, veelvoorkomende concept-toestand ("nog niet ingevuld"),
+   * expliciet onderscheiden van bewust `'0'` (welbewust €0) en van een
+   * NaN-Decimal (defensief/corrupt). Geen `DEFAULT '0'` — een ontbrekend
+   * jaarbedrag mag nooit stilzwijgend als €0 worden opgeslagen.
+   *
+   * `complexnummer TEXT NULL` (zelfde nullability als migratie 8's
+   * `complexnummer TEXT NOT NULL` in vorm, tegenovergesteld in betekenis):
+   * bij Gepland Onderhoud is een ontbrekend complexnummer een KRITIEK-
+   * gevalideerde invoerfout; bij Correctief/Dagelijks is `NULL` = NTB
+   * (nader te bepalen), een STRUCTUREEL GELDIGE toestand (OB028-003) — er
+   * is dan ook geen CHECK op dit veld.
+   *
+   * Geen enum-CHECK nodig op deze tabellen: in tegenstelling tot migratie
+   * 8 (dat `status`/`aanleiding_type` bevat, hier niet aanwezig) kent dit
+   * regelmodel geen enumvelden.
+   */
+  {
+    version: 10,
+    description: "Correctief/Dagelijks Onderhoud: concept-input (regels + module-brede beoordeeld-vlag)",
+    ddl: [
+      `CREATE TABLE begroting_correctief_dagelijks_onderhoud_regel (
+        id INTEGER PRIMARY KEY,
+        begroting_versie_id TEXT NOT NULL REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        omschrijving TEXT NOT NULL,
+        complexnummer TEXT NULL,
+        jaarbedrag TEXT NULL
+      )`,
+      `CREATE INDEX idx_begroting_correctief_dagelijks_onderhoud_regel_versie ON begroting_correctief_dagelijks_onderhoud_regel(begroting_versie_id)`,
+      `CREATE TABLE begroting_correctief_dagelijks_onderhoud_module (
+        begroting_versie_id TEXT PRIMARY KEY REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        beoordeeld INTEGER NOT NULL CHECK (beoordeeld IN (0, 1))
+      )`,
+      `CREATE TRIGGER trg_begroting_correctief_dagelijks_onderhoud_regel_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_correctief_dagelijks_onderhoud_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_correctief_dagelijks_onderhoud_regel: begrotingsversie is VASTGESTELD, regels zijn immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_correctief_dagelijks_onderhoud_regel_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_correctief_dagelijks_onderhoud_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_correctief_dagelijks_onderhoud_regel: begrotingsversie is VASTGESTELD, regels zijn immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_correctief_dagelijks_onderhoud_regel_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_correctief_dagelijks_onderhoud_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_correctief_dagelijks_onderhoud_regel: begrotingsversie is VASTGESTELD, regels zijn immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_correctief_dagelijks_onderhoud_module_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_correctief_dagelijks_onderhoud_module
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_correctief_dagelijks_onderhoud_module: begrotingsversie is VASTGESTELD, beoordeeld-vlag is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_correctief_dagelijks_onderhoud_module_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_correctief_dagelijks_onderhoud_module
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_correctief_dagelijks_onderhoud_module: begrotingsversie is VASTGESTELD, beoordeeld-vlag is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_correctief_dagelijks_onderhoud_module_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_correctief_dagelijks_onderhoud_module
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_correctief_dagelijks_onderhoud_module: begrotingsversie is VASTGESTELD, beoordeeld-vlag is immutable');
+       END`,
+    ],
+  },
 ];
 
 function schemaMetaTableExists(db: DatabaseSync): boolean {

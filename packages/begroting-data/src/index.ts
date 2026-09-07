@@ -56,6 +56,8 @@ export {
   type HerberekendeBegroting,
   type HerberekendGeplandOnderhoudResultaat,
   type GeplandOnderhoudActiviteitUitkomstMetId,
+  type HerberekendCorrectiefDagelijksResultaat,
+  type CorrectiefDagelijksRegelUitkomstMetId,
 } from "./herberekenen.js";
 
 // Bevroren Module-1/Module-2-output (1D.6a) — uitsluitend serialisatie/
@@ -105,3 +107,21 @@ export {
   type GeplandOnderhoudActiviteitInvoer,
 } from "./geplandOnderhoudActiviteiten.js";
 export { schrijfGeplandOnderhoudBeoordeeld, leesGeplandOnderhoudBeoordeeld } from "./geplandOnderhoudBeoordeeld.js";
+
+// Correctief/Dagelijks Onderhoud (OB-028) — fase CD-P1, UITSLUITEND concept-
+// persistence (geen pure-calculator-integratie in dit bestand zelf;
+// herberekening zit in herberekenen.js hierboven — CD-P3/frozen output volgt
+// pas in een latere, apart te reviewen fase). Bewust GEEN
+// `@bvc/reporting`-types hier hergebruikt voor dezelfde reden als
+// `geplandOnderhoudActiviteiten.ts` — zie `correctiefDagelijksOnderhoudRegels.ts`'s
+// moduledoc.
+export {
+  schrijfCorrectiefDagelijksOnderhoudRegels,
+  leesCorrectiefDagelijksOnderhoudRegels,
+  type CorrectiefDagelijksOnderhoudRegel,
+  type CorrectiefDagelijksOnderhoudRegelInvoer,
+} from "./correctiefDagelijksOnderhoudRegels.js";
+export {
+  schrijfCorrectiefDagelijksOnderhoudBeoordeeld,
+  leesCorrectiefDagelijksOnderhoudBeoordeeld,
+} from "./correctiefDagelijksOnderhoudBeoordeeld.js";

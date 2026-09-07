@@ -22,6 +22,11 @@ import { schrijfModule1Overrides } from "./module1Overrides.js";
 import { leesModule1Snapshot, schrijfModule1Snapshot } from "./module1Snapshot.js";
 import { schrijfModule2Config } from "./module2Config.js";
 import { leesModule3Invoer, schrijfModule3Invoer } from "./module3Invoer.js";
+import { schrijfCorrectiefDagelijksOnderhoudBeoordeeld } from "./correctiefDagelijksOnderhoudBeoordeeld.js";
+import {
+  schrijfCorrectiefDagelijksOnderhoudRegels,
+  type CorrectiefDagelijksOnderhoudRegelInvoer,
+} from "./correctiefDagelijksOnderhoudRegels.js";
 import { schrijfGeplandOnderhoudActiviteiten, type GeplandOnderhoudActiviteitInvoer } from "./geplandOnderhoudActiviteiten.js";
 import { schrijfGeplandOnderhoudBeoordeeld } from "./geplandOnderhoudBeoordeeld.js";
 import { stelBegrotingVast } from "./vaststellen.js";
@@ -972,5 +977,78 @@ describe("stelBegrotingVast — Gepland Onderhoud atomiciteit (GO-P3)", () => {
     expect(leesFrozenGeplandOnderhoudResultaat(db, versie.id)).toBeNull();
     expect(leesFrozenBegrotingsresultaat(db, versie.id)).toBeNull();
     expect(leesFrozenModule3Resultaat(db, versie.id)).toBeNull();
+  });
+});
+
+describe("stelBegrotingVast — Correctief/Dagelijks Onderhoud: NOG GEEN lifecycle-blokkade (CD-P1/CD-P2, tussenfase)", () => {
+  // CD-P1/CD-P2 bouwen bewust NOG GEEN vaststel-blokkade voor Correctief/Dagelijks Onderhoud
+  // (in tegenstelling tot Gepland Onderhoud, GO-P3, hierboven) — `vaststellen.ts` blijft in deze
+  // implementatieronde ONGEWIJZIGD. Deze tests bewijzen die tijdelijke grens expliciet: noch
+  // `beoordeeld=false`, noch een KRITIEK-control in `correctiefDagelijksOnderhoud` blokkeert
+  // `stelBegrotingVast` op dit moment. Dat is GEEN businessbeslissing dat Correctief/Dagelijks nooit
+  // zou moeten blokkeren — die lifecycle-koppeling is bewust uitgesteld naar een latere, apart te
+  // reviewen fase (CD-P3), zie `herberekenen.ts`'s moduledoc.
+
+  function regelInvoer(overrides: Partial<CorrectiefDagelijksOnderhoudRegelInvoer> = {}): CorrectiefDagelijksOnderhoudRegelInvoer {
+    return {
+      id: null,
+      omschrijving: "Reparatie CV-installatie",
+      complexnummer: "003",
+      jaarbedrag: new Decimal(1200),
+      ...overrides,
+    };
+  }
+
+  /**
+   * Minimale, geldige Module-1/2/3-basis (lege snapshot) — deze tests bewijzen uitsluitend
+   * Correctief/Dagelijks-gedrag. Gepland Onderhoud wordt hier bewust op `beoordeeld=true` + 0
+   * activiteiten gezet — dat is Gepland Onderhoud's EIGEN, bestaande GO-P3-blokkade (zie hierboven)
+   * ongewijzigd geneutraliseerd, zodat deze tests niet per ongeluk GO's blokkade bewijzen in plaats
+   * van CD's afwezigheid van een blokkade.
+   */
+  function zetMinimaleBasisNeer(versieId: string): void {
+    schrijfModule1Snapshot(db, versieId, []);
+    schrijfModule1Aannames(db, versieId, { begrotingsjaar: 2027, indexatiePercentage: new Decimal(3) });
+    schrijfModule3Invoer(db, versieId, MODULE3_STANDAARD);
+    schrijfGeplandOnderhoudBeoordeeld(db, versieId, true);
+  }
+
+  it("1. beoordeeld=false + geldige regel blokkeert vaststellen NIET", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    zetMinimaleBasisNeer(versie.id);
+    schrijfCorrectiefDagelijksOnderhoudRegels(db, versie.id, [regelInvoer()]); // beoordeeld NOOIT geschreven -> false
+
+    expect(() => stelBegrotingVast(db, versie.id)).not.toThrow();
+    expect(leesBegrotingsversie(db, versie.id)!.status).toBe("VASTGESTELD");
+  });
+
+  it("2. beoordeeld=true + KRITIEK (lege omschrijving) blokkeert vaststellen NIET", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    zetMinimaleBasisNeer(versie.id);
+    schrijfCorrectiefDagelijksOnderhoudRegels(db, versie.id, [regelInvoer({ omschrijving: "" })]);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
+
+    expect(() => stelBegrotingVast(db, versie.id)).not.toThrow();
+    expect(leesBegrotingsversie(db, versie.id)!.status).toBe("VASTGESTELD");
+  });
+
+  it("3. beoordeeld=true + KRITIEK (jaarbedrag=null) blokkeert vaststellen NIET", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    zetMinimaleBasisNeer(versie.id);
+    schrijfCorrectiefDagelijksOnderhoudRegels(db, versie.id, [regelInvoer({ jaarbedrag: null })]);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
+
+    expect(() => stelBegrotingVast(db, versie.id)).not.toThrow();
+    expect(leesBegrotingsversie(db, versie.id)!.status).toBe("VASTGESTELD");
+  });
+
+  it("4. het bestaande vastgestelde resultaat bevat geen enkele verwijzing naar correctiefDagelijksOnderhoud (VastgesteldeBegroting ongewijzigd)", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    zetMinimaleBasisNeer(versie.id);
+    schrijfCorrectiefDagelijksOnderhoudRegels(db, versie.id, [regelInvoer({ omschrijving: "" })]);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
+
+    const resultaat = stelBegrotingVast(db, versie.id);
+    expect(resultaat).not.toHaveProperty("correctiefDagelijksOnderhoud");
   });
 });
