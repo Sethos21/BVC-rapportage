@@ -71,23 +71,38 @@ import type { BgControleErnst } from "./begroteHuuropbrengsten.js";
  * verwachte afwijking (veroorzaakt door de ontbrekende complextoewijzing
  * zelf, niet door afronding), geen technisch defect.
  *
- * TOTALE WERKELIJKE WOZ = 0 IS EEN REKENKRITISCHE SITUATIE (OB033-010/017):
- * delen door nul wordt nooit uitgevoerd. Zowel "geen enkel WOZ-object" als
- * "alle WOZ-objecten hebben een ongeldig/ontbrekend werkelijkeWoz" leiden
- * tot `totaleWerkelijkeWoz = 0`, en dus tot een module-brede KRITIEK plus
- * een veilige `Decimal(0)` voor `historischLastenPercentage`/
- * `automatischBegrotingsPercentage`. Dit is een APARTE control, los van de
- * WAARSCHUWING voor "0 WOZ-objecten" (OB033-016) — beide kunnen tegelijk
- * optreden zonder tegenstrijdig te zijn: de WAARSCHUWING signaleert "nog
- * niets ingevoerd", de KRITIEK signaleert "het percentage kan wiskundig
- * niet worden bepaald".
+ * TOTALE WERKELIJKE WOZ = 0 — TWEE EXPLICIET VERSCHILLENDE TOESTANDEN
+ * (OB033-010/016/017, gecorrigeerd 2026-09-08): delen door nul wordt nooit
+ * uitgevoerd, maar "geen enkel WOZ-object" en "objecten aanwezig maar samen
+ * op nul uitkomend" zijn GEEN gelijk geval:
+ * - GEEN WOZ-OBJECTEN (`wozObjecten.length === 0`): er is per definitie geen
+ *   rekenketen die een historisch lastenpercentage/begrotingspercentage
+ *   hoeft te produceren. `totaleWerkelijkeWoz` is triviaal `0`, maar dit
+ *   geeft GEEN module-brede KRITIEK — ook niet als `wozStijgingPercentage`/
+ *   `werkelijkeGemeentelijkeLasten`/`lastenPercentageStijging` ontbreken
+ *   (die aannames zijn dan simpelweg niet nodig om een begroting van €0 te
+ *   bepalen). `beoordeeld=true` geeft dan uitsluitend de bestaande
+ *   WAARSCHUWING (OB033-016) — deze toestand ("afgerond, niets ingevoerd")
+ *   is een BEWUST toegestane, vaststelbare afronding, geen fout. Alle
+ *   financiële uitkomsten zijn veilig `Decimal(0)`.
+ * - ÉÉN OF MEER WOZ-OBJECTEN, MAAR `totaleWerkelijkeWoz` KOMT UIT OP NUL
+ *   (bv. één object met `werkelijkeWoz = 0`, ongeldige/ontbrekende
+ *   `werkelijkeWoz`-waarden, of meerdere objecten die elkaar optellend
+ *   opheffen): dit IS een rekenkritische situatie — het percentage kan
+ *   wiskundig niet worden bepaald. Dit geeft WEL een module-brede KRITIEK
+ *   plus een veilige `Decimal(0)` voor `historischLastenPercentage`/
+ *   `automatischBegrotingsPercentage`, en blokkeert vaststellen zolang de
+ *   KRITIEK bestaat (buiten scope van deze fase, zie P3).
+ * De module-aannames `wozStijgingPercentage`/`werkelijkeGemeentelijkeLasten`/
+ * `lastenPercentageStijging` geven dus uitsluitend een eigen KRITIEK
+ * wanneer er WEL WOZ-objecten zijn — bij 0 objecten worden ze overgeslagen.
  *
  * REVIEW/BEOORDEELD (OB033-015/016): zelfde onafhankelijke-dimensie-
  * principe als de eerdere begrotingsmodules — `beoordeeld` is pure
  * doorgegeven invoer, nooit afgeleid uit `wozObjecten.length` of uit de
  * aanwezigheid van KRITIEKE controls. `beoordeeld=true` met 0 objecten
- * geeft `REVIEWED_ZERO_OBJECTS` MET een WAARSCHUWING (nooit een KRITIEK
- * uitsluitend vanwege het aantal objecten zelf).
+ * geeft `REVIEWED_ZERO_OBJECTS` MET uitsluitend de WAARSCHUWING hierboven,
+ * NOOIT een KRITIEK uitsluitend vanwege het aantal objecten zelf.
  *
  * BUITEN SCOPE (deze fase, expliciet niet gebouwd — geen aanname): GL-
  * koppeling/realisatie-integratie, Estimated, P&L-rendering, UI, formeel
@@ -240,8 +255,16 @@ export function berekenBegroteGemeentelijkeLasten(
   const meldModulebreed = (bericht: string, ernst: BgGemeentelijkeLastenControleErnst = "KRITIEK") =>
     controleVereist.push({ objectIndex: null, ernst, bericht });
 
+  // OB033-016-correctie (2026-09-08): "geen enkel WOZ-object" en "objecten aanwezig maar
+  // totale WOZ = 0" zijn twee expliciet verschillende toestanden — zie moduledoc. Bij 0
+  // objecten is er per definitie geen rekenketen die een historisch lastenpercentage/
+  // begrotingspercentage hoeft te produceren, dus mogen de daarvoor benodigde module-
+  // aannames (wozStijgingPercentage/werkelijkeGemeentelijkeLasten/lastenPercentageStijging)
+  // ontbreken zonder een KRITIEK die REVIEWED_ZERO_OBJECTS feitelijk onbereikbaar maakt.
+  const heeftObjecten = wozObjectenInvoer.length > 0;
+
   const wozStijgingGeldig = isGeldigDecimal(aannames.wozStijgingPercentage);
-  if (!wozStijgingGeldig && wozObjectenInvoer.length > 0) {
+  if (!wozStijgingGeldig && heeftObjecten) {
     meldModulebreed("wozStijgingPercentage ontbreekt of is ongeldig — berekening per WOZ-object niet mogelijk, veilige bijdrage 0 toegepast.");
   } else if (wozStijgingGeldig && (aannames.wozStijgingPercentage as Decimal).isNegative()) {
     meldModulebreed(`wozStijgingPercentage is negatief (${(aannames.wozStijgingPercentage as Decimal).toString()}) — toegestaan, rekenkundig verwerkt.`, "WAARSCHUWING");
@@ -267,14 +290,20 @@ export function berekenBegroteGemeentelijkeLasten(
   const totaleEffectiefVerwachteWoz = som(wozObjecten.map((o) => o.effectiefVerwachteWoz));
 
   const werkelijkeGemeentelijkeLastenGeldig = isGeldigDecimal(aannames.werkelijkeGemeentelijkeLasten);
-  if (aannames.werkelijkeGemeentelijkeLasten === null) {
-    meldModulebreed("werkelijkeGemeentelijkeLasten ontbreekt — historisch lastenpercentage kan niet worden bepaald, veilige waarde 0 toegepast.");
-  } else if (aannames.werkelijkeGemeentelijkeLasten.isNaN()) {
-    meldModulebreed("werkelijkeGemeentelijkeLasten is geen geldig getal (NaN) — historisch lastenpercentage kan niet worden bepaald, veilige waarde 0 toegepast.");
+  if (heeftObjecten) {
+    if (aannames.werkelijkeGemeentelijkeLasten === null) {
+      meldModulebreed("werkelijkeGemeentelijkeLasten ontbreekt — historisch lastenpercentage kan niet worden bepaald, veilige waarde 0 toegepast.");
+    } else if (aannames.werkelijkeGemeentelijkeLasten.isNaN()) {
+      meldModulebreed("werkelijkeGemeentelijkeLasten is geen geldig getal (NaN) — historisch lastenpercentage kan niet worden bepaald, veilige waarde 0 toegepast.");
+    }
   }
 
   const totaleWerkelijkeWozIsNul = totaleWerkelijkeWoz.isZero();
-  if (totaleWerkelijkeWozIsNul) {
+  // Alleen KRITIEK wanneer er daadwerkelijk objecten zijn die samen op nul uitkomen
+  // (bv. één object met werkelijkeWoz=0, of objecten die elkaar optellend opheffen) —
+  // bij 0 objecten is totaleWerkelijkeWoz triviaal nul en géén rekenkritische situatie
+  // (zie moduledoc, OB033-016-correctie).
+  if (totaleWerkelijkeWozIsNul && heeftObjecten) {
     meldModulebreed("totale werkelijke WOZ is nul — historisch lastenpercentage kan niet worden bepaald (deling door nul voorkomen), veilige waarde 0 toegepast.");
   }
 
@@ -284,12 +313,15 @@ export function berekenBegroteGemeentelijkeLasten(
     : new Decimal(0);
 
   const lastenPercentageStijgingGeldig = isGeldigDecimal(aannames.lastenPercentageStijging);
-  if (aannames.lastenPercentageStijging === null) {
-    meldModulebreed("lastenPercentageStijging ontbreekt — automatisch begrotingspercentage kan niet worden bepaald, veilige waarde 0 toegepast.");
-  } else if (aannames.lastenPercentageStijging.isNaN()) {
-    meldModulebreed("lastenPercentageStijging is geen geldig getal (NaN) — automatisch begrotingspercentage kan niet worden bepaald, veilige waarde 0 toegepast.");
-  } else if (aannames.lastenPercentageStijging.isNegative()) {
-    meldModulebreed(`lastenPercentageStijging is negatief (${aannames.lastenPercentageStijging.toString()}) — toegestaan, rekenkundig verwerkt.`, "WAARSCHUWING");
+  if (heeftObjecten) {
+    if (aannames.lastenPercentageStijging === null) {
+      meldModulebreed("lastenPercentageStijging ontbreekt — automatisch begrotingspercentage kan niet worden bepaald, veilige waarde 0 toegepast.");
+    } else if (aannames.lastenPercentageStijging.isNaN()) {
+      meldModulebreed("lastenPercentageStijging is geen geldig getal (NaN) — automatisch begrotingspercentage kan niet worden bepaald, veilige waarde 0 toegepast.");
+    }
+  }
+  if (lastenPercentageStijgingGeldig && (aannames.lastenPercentageStijging as Decimal).isNegative()) {
+    meldModulebreed(`lastenPercentageStijging is negatief (${(aannames.lastenPercentageStijging as Decimal).toString()}) — toegestaan, rekenkundig verwerkt.`, "WAARSCHUWING");
   }
 
   const automatischBegrotingsPercentageGeldig = historischLastenPercentageGeldig && lastenPercentageStijgingGeldig;

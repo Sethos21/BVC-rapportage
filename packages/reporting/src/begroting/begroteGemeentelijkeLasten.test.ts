@@ -131,8 +131,24 @@ describe("berekenBegroteGemeentelijkeLasten", () => {
     expect(r.controleVereist.some((c) => c.ernst === "WAARSCHUWING" && c.bericht.includes("werkelijkeWoz"))).toBe(true);
   });
 
-  it("K. totale werkelijke WOZ = 0: geen deling door nul, KRITIEK, geen NaN/Infinity", () => {
+  it("K. één object aanwezig maar totale werkelijke WOZ = 0: geen deling door nul, KRITIEK, geen NaN/Infinity, REVIEWED_WITH_OBJECTS", () => {
     const r = berekenBegroteGemeentelijkeLasten([wozObject({ werkelijkeWoz: new Decimal(0) })], aannames());
+    expect(r.totaleWerkelijkeWoz.toString()).toBe("0");
+    expect(r.historischLastenPercentage.toString()).toBe("0");
+    expect(r.historischLastenPercentage.isFinite()).toBe(true);
+    expect(r.automatischBegrotingsPercentage.isFinite()).toBe(true);
+    expect(r.controleVereist.some((c) => c.ernst === "KRITIEK" && c.bericht.includes("totale werkelijke WOZ is nul"))).toBe(true);
+    expect(r.reviewStatus).toBe("REVIEWED_WITH_OBJECTS"); // aannames() default heeft beoordeeld: true
+  });
+
+  it("K2. meerdere objecten waarvan de werkelijke WOZ optelt tot 0 (elkaar opheffend): geen deling door nul, KRITIEK", () => {
+    const r = berekenBegroteGemeentelijkeLasten(
+      [
+        wozObject({ complexnummer: "001", werkelijkeWoz: new Decimal(100000) }),
+        wozObject({ complexnummer: "002", werkelijkeWoz: new Decimal(-100000) }),
+      ],
+      aannames(),
+    );
     expect(r.totaleWerkelijkeWoz.toString()).toBe("0");
     expect(r.historischLastenPercentage.toString()).toBe("0");
     expect(r.historischLastenPercentage.isFinite()).toBe(true);
@@ -163,10 +179,50 @@ describe("berekenBegroteGemeentelijkeLasten", () => {
     expect(r.reviewStatus).toBe("NOT_REVIEWED");
   });
 
-  it("O. beoordeeld=true + 0 objecten -> REVIEWED_ZERO_OBJECTS + WAARSCHUWING (geen KRITIEK uitsluitend vanwege 0 objecten)", () => {
+  it("O. beoordeeld=true + 0 objecten -> REVIEWED_ZERO_OBJECTS + WAARSCHUWING, geen enkele KRITIEK", () => {
     const r = berekenBegroteGemeentelijkeLasten([], aannames({ beoordeeld: true }));
     expect(r.reviewStatus).toBe("REVIEWED_ZERO_OBJECTS");
     expect(r.controleVereist.some((c) => c.ernst === "WAARSCHUWING" && c.bericht.includes("0 WOZ-objecten"))).toBe(true);
+    expect(kritiekeMeldingen(r.controleVereist)).toHaveLength(0);
+  });
+
+  it("O2 (OB033-016-correctie). beoordeeld=false + 0 objecten + ALLE module-aannames null: NOT_REVIEWED, geen KRITIEK, begrote lasten €0", () => {
+    const r = berekenBegroteGemeentelijkeLasten(
+      [],
+      aannames({
+        beoordeeld: false,
+        werkelijkeGemeentelijkeLasten: null,
+        wozStijgingPercentage: null,
+        lastenPercentageStijging: null,
+        begrotingsPercentageOverride: null,
+      }),
+    );
+    expect(r.reviewStatus).toBe("NOT_REVIEWED");
+    expect(kritiekeMeldingen(r.controleVereist)).toHaveLength(0);
+    expect(r.controleVereist).toEqual([]); // ook geen WAARSCHUWING (beoordeeld=false)
+    expect(r.totaleWerkelijkeWoz.toString()).toBe("0");
+    expect(r.historischLastenPercentage.toString()).toBe("0");
+    expect(r.automatischBegrotingsPercentage.toString()).toBe("0");
+    expect(r.begroteGemeentelijkeLasten.toString()).toBe("0");
+  });
+
+  it("O3 (OB033-016-correctie). beoordeeld=true + 0 objecten + ALLE module-aannames null: REVIEWED_ZERO_OBJECTS, uitsluitend de WAARSCHUWING, GEEN KRITIEK, begrote lasten €0", () => {
+    const r = berekenBegroteGemeentelijkeLasten(
+      [],
+      aannames({
+        beoordeeld: true,
+        werkelijkeGemeentelijkeLasten: null,
+        wozStijgingPercentage: null,
+        lastenPercentageStijging: null,
+        begrotingsPercentageOverride: null,
+      }),
+    );
+    expect(r.reviewStatus).toBe("REVIEWED_ZERO_OBJECTS");
+    expect(kritiekeMeldingen(r.controleVereist)).toHaveLength(0);
+    expect(r.controleVereist).toHaveLength(1);
+    expect(r.controleVereist[0]?.ernst).toBe("WAARSCHUWING");
+    expect(r.controleVereist[0]?.bericht).toContain("0 WOZ-objecten");
+    expect(r.begroteGemeentelijkeLasten.toString()).toBe("0");
   });
 
   it("P. beoordeeld=true + objecten -> REVIEWED_WITH_OBJECTS", () => {

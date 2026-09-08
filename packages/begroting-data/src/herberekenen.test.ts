@@ -1298,7 +1298,7 @@ describe("herberekenBegroting — Gemeentelijke lasten / WOZ (OB-033)", () => {
     };
   }
 
-  it("1. nul objecten + geen module-rij: resultaat aanwezig, beoordeeld=false, NOT_REVIEWED, totalen 0", () => {
+  it("1. nul objecten + geen module-rij (alle aannames null): resultaat aanwezig, beoordeeld=false, NOT_REVIEWED, totalen 0, GEEN KRITIEK (OB033-016-correctie)", () => {
     const versie = maakMinimaalGeldigeConceptVersie();
     const resultaat = herberekenBegroting(db, versie.id);
 
@@ -1308,14 +1308,33 @@ describe("herberekenBegroting — Gemeentelijke lasten / WOZ (OB-033)", () => {
     expect(resultaat.gemeentelijkeLasten.begroteGemeentelijkeLasten.toString()).toBe("0");
     expect(resultaat.gemeentelijkeLasten.wozObjecten).toEqual([]);
     expect(resultaat.gemeentelijkeLasten.perComplex).toEqual([]);
+    expect(resultaat.gemeentelijkeLasten.controleVereist).toEqual([]);
   });
 
-  it("2. nul objecten + beoordeeld=true: REVIEWED_ZERO_OBJECTS", () => {
+  it("2. nul objecten + beoordeeld=true: REVIEWED_ZERO_OBJECTS, uitsluitend de WAARSCHUWING, GEEN KRITIEK (OB033-016-correctie)", () => {
     const versie = maakMinimaalGeldigeConceptVersie();
     schrijfGemeentelijkeLastenModule(db, versie.id, moduleInvoer({ beoordeeld: true }));
 
     const resultaat = herberekenBegroting(db, versie.id);
     expect(resultaat.gemeentelijkeLasten.reviewStatus).toBe("REVIEWED_ZERO_OBJECTS");
+    expect(resultaat.gemeentelijkeLasten.controleVereist.filter((c) => c.ernst === "KRITIEK")).toHaveLength(0);
+    expect(resultaat.gemeentelijkeLasten.controleVereist.some((c) => c.ernst === "WAARSCHUWING" && c.bericht.includes("0 WOZ-objecten"))).toBe(true);
+  });
+
+  it("2b (OB033-016-correctie). nul objecten + beoordeeld=true + module-rij met ALLE aannamevelden expliciet null: REVIEWED_ZERO_OBJECTS, GEEN KRITIEK, begrote lasten €0", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfGemeentelijkeLastenModule(db, versie.id, {
+      werkelijkeGemeentelijkeLasten: null,
+      wozStijgingPercentage: null,
+      lastenPercentageStijging: null,
+      begrotingsPercentageOverride: null,
+      beoordeeld: true,
+    });
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    expect(resultaat.gemeentelijkeLasten.reviewStatus).toBe("REVIEWED_ZERO_OBJECTS");
+    expect(resultaat.gemeentelijkeLasten.controleVereist.filter((c) => c.ernst === "KRITIEK")).toHaveLength(0);
+    expect(resultaat.gemeentelijkeLasten.begroteGemeentelijkeLasten.toString()).toBe("0");
   });
 
   it("3. één bestaand WOZ-object: exact gelijk aan directe pure-calculator-uitkomst", () => {
