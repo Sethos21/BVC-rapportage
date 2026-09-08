@@ -60,6 +60,8 @@ export {
   type CorrectiefDagelijksRegelUitkomstMetId,
   type HerberekendVerzekeringResultaat,
   type VerzekeringRegelUitkomstMetId,
+  type HerberekendGemeentelijkeLastenResultaat,
+  type WozObjectUitkomstMetId,
 } from "./herberekenen.js";
 
 // Bevroren Module-1/Module-2-output (1D.6a) — uitsluitend serialisatie/
@@ -163,3 +165,15 @@ export {
   type VerzekeringRegelInvoer,
 } from "./verzekeringRegels.js";
 export { schrijfVerzekeringBeoordeeld, leesVerzekeringBeoordeeld } from "./verzekeringBeoordeeld.js";
+
+// Gemeentelijke lasten / WOZ (OB-033) — fase P1, UITSLUITEND concept-
+// persistence (geen pure-calculator-integratie in dit bestand zelf;
+// herberekening zit in herberekenen.js). Bewust ÉÉN gecombineerd
+// module-bestand voor aannames + beoordeeld — zie
+// `gemeentelijkeLastenModule.ts`'s moduledoc.
+export {
+  schrijfGemeentelijkeLastenModule,
+  leesGemeentelijkeLastenModule,
+  type GemeentelijkeLastenModuleInvoer,
+} from "./gemeentelijkeLastenModule.js";
+export { schrijfWozObjecten, leesWozObjecten, type WozObject, type WozObjectInvoer } from "./wozObjecten.js";

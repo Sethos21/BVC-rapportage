@@ -1950,6 +1950,105 @@ export const MIGRATIONS: readonly Migration[] = [
        END`,
     ],
   },
+  /**
+   * Migratie 14 — Gemeentelijke lasten / WOZ: concept-input (module-brede
+   * aannames + WOZ-objectregels), OB-033, fase P1.
+   *
+   * ÉÉN MODULETABEL VOOR AANNAMES + BEOORDEELD SAMEN (bewust anders dan het
+   * GO/CD/Verzekeringen-patroon van twee gescheiden bestanden/tabellen):
+   * OB-033 se module-brede aannames (`werkelijke_gemeentelijke_lasten`/
+   * `woz_stijging_percentage`/`lasten_percentage_stijging`/
+   * `begrotings_percentage_override`) en de `beoordeeld`-vlag horen
+   * functioneel bij elkaar als één samenhangende module-invoerstaat — zelfde
+   * "één complete rij per begrotingsversie"-precedent als Module 3's
+   * `begroting_management_invoer` (migratie 6), niet het aparte-
+   * beoordeeld-bestand-patroon van Gepland Onderhoud/Correctief-Dagelijks
+   * Onderhoud/Verzekeringen (die geen module-brede Decimal-aannames kennen,
+   * uitsluitend een vlag).
+   *
+   * ALLE AANNAMEVELDEN NULLABLE (OB033-019): een functioneel onvolledig
+   * concept moet opslaanbaar blijven — `NULL` betekent hier ALTIJD "nog
+   * niet ingevuld", nooit stilzwijgend `0`. Zie
+   * `begroteGemeentelijkeLasten.ts`'s moduledoc voor de veilige-0-
+   * behandeling die hierop volgt in de pure calculator.
+   *
+   * WOZ-OBJECTREGELS (`begroting_woz_object`): zelfde complete-list-save-
+   * stable-ID-patroon als `begroting_verzekering_regel`/`begroting_
+   * correctief_dagelijks_onderhoud_regel`. `complexnummer`/`woz_object_
+   * adres`/`aanslagjaar`/`waardepeildatum`/`werkelijke_woz` zijn ALLEMAAL
+   * NULL-toegestaan (OB033-004/005/019) — een WOZ-object is GEEN unit/
+   * contract/boekingsregel (OB033-003) en heeft geen enkele koppeling naar
+   * een andere tabel dan de begrotingsversie zelf.
+   *
+   * Geen enum-CHECK nodig: dit model kent geen enumvelden.
+   */
+  {
+    version: 14,
+    description: "Gemeentelijke lasten / WOZ: concept-input (module-brede aannames + WOZ-objectregels)",
+    ddl: [
+      `CREATE TABLE begroting_gemeentelijke_lasten_module (
+        begroting_versie_id TEXT PRIMARY KEY REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        werkelijke_gemeentelijke_lasten TEXT NULL,
+        woz_stijging_percentage TEXT NULL,
+        lasten_percentage_stijging TEXT NULL,
+        begrotings_percentage_override TEXT NULL,
+        beoordeeld INTEGER NOT NULL CHECK (beoordeeld IN (0, 1))
+      )`,
+      `CREATE TABLE begroting_woz_object (
+        id INTEGER PRIMARY KEY,
+        begroting_versie_id TEXT NOT NULL REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        complexnummer TEXT NULL,
+        woz_object_adres TEXT NULL,
+        aanslagjaar INTEGER NULL,
+        waardepeildatum TEXT NULL,
+        werkelijke_woz TEXT NULL,
+        verwachte_woz_override TEXT NULL
+      )`,
+      `CREATE INDEX idx_begroting_woz_object_versie ON begroting_woz_object(begroting_versie_id)`,
+      `CREATE TRIGGER trg_begroting_gemeentelijke_lasten_module_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_gemeentelijke_lasten_module
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_gemeentelijke_lasten_module: begrotingsversie is VASTGESTELD, module-invoer is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_gemeentelijke_lasten_module_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_gemeentelijke_lasten_module
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_gemeentelijke_lasten_module: begrotingsversie is VASTGESTELD, module-invoer is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_gemeentelijke_lasten_module_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_gemeentelijke_lasten_module
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_gemeentelijke_lasten_module: begrotingsversie is VASTGESTELD, module-invoer is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_woz_object_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_woz_object
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_woz_object: begrotingsversie is VASTGESTELD, WOZ-objectregels zijn immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_woz_object_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_woz_object
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_woz_object: begrotingsversie is VASTGESTELD, WOZ-objectregels zijn immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_woz_object_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_woz_object
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_woz_object: begrotingsversie is VASTGESTELD, WOZ-objectregels zijn immutable');
+       END`,
+    ],
+  },
 ];
 
 function schemaMetaTableExists(db: DatabaseSync): boolean {

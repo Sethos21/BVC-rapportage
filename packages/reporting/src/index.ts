@@ -43,4 +43,5 @@ export * from "./onderhoudBoekingenDiagnose.js";
 export * from "./begroting/begroteGeplandOnderhoud.js";
 export * from "./begroting/begroteCorrectiefDagelijksOnderhoud.js";
 export * from "./begroting/begroteVerzekeringen.js";
+export * from "./begroting/begroteGemeentelijkeLasten.js";
 export { HUISSTIJL_CSS, escapeHtml, formatBedragHtml, renderRapportDocument } from "./huisstijl.js";

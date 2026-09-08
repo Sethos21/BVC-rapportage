@@ -2,6 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import {
   berekenBegroteBeheersvergoeding,
   berekenBegroteCorrectiefDagelijksOnderhoud,
+  berekenBegroteGemeentelijkeLasten,
   berekenBegroteGeplandOnderhoud,
   berekenBegroteHuuropbrengsten,
   berekenBegroteManagementvergoeding,
@@ -13,6 +14,7 @@ import {
   type BgCorrectiefDagelijksRegelInvoer,
   type BgCorrectiefDagelijksRegelUitkomst,
   type BgCorrectiefDagelijksResultaat,
+  type BgGemeentelijkeLastenResultaat,
   type BgGeplandOnderhoudAanleidingType,
   type BgGeplandOnderhoudActiviteitInvoer,
   type BgGeplandOnderhoudActiviteitUitkomst,
@@ -25,6 +27,8 @@ import {
   type BgVerzekeringRegelInvoer,
   type BgVerzekeringRegelUitkomst,
   type BgVerzekeringResultaat,
+  type BgWozObjectInvoer,
+  type BgWozObjectUitkomst,
 } from "@bvc/reporting";
 import { leesBegrotingsversie, type Begrotingsversie } from "./begrotingsversies.js";
 import {
@@ -34,6 +38,7 @@ import {
   leesCorrectiefDagelijksOnderhoudRegels,
   type CorrectiefDagelijksOnderhoudRegel,
 } from "./correctiefDagelijksOnderhoudRegels.js";
+import { leesGemeentelijkeLastenModule, type GemeentelijkeLastenModuleInvoer } from "./gemeentelijkeLastenModule.js";
 import { leesGeplandOnderhoudActiviteiten, type GeplandOnderhoudActiviteit } from "./geplandOnderhoudActiviteiten.js";
 import { leesGeplandOnderhoudBeoordeeld } from "./geplandOnderhoudBeoordeeld.js";
 import { leesModule1Aannames } from "./module1Aannames.js";
@@ -43,6 +48,7 @@ import { leesModule2Config } from "./module2Config.js";
 import { leesModule3Invoer } from "./module3Invoer.js";
 import { leesVerzekeringBeoordeeld } from "./verzekeringBeoordeeld.js";
 import { leesVerzekeringRegels, type VerzekeringRegel } from "./verzekeringRegels.js";
+import { leesWozObjecten, type WozObject } from "./wozObjecten.js";
 
 /**
  * Orchestratie: herberekent Module 1 + Module 2 voor één CONCEPT-
@@ -129,6 +135,21 @@ import { leesVerzekeringRegels, type VerzekeringRegel } from "./verzekeringRegel
  * `ingangsdatum`/`looptijdMaanden`/`bedrag`/`indexPercentage`/
  * `handmatigBegrootOverride`) mappen eerlijk 1-op-1 naar
  * `BgVerzekeringRegelInvoer` — zie `verzekeringRegels.ts`'s moduledoc.
+ *
+ * GEMEENTELIJKE LASTEN / WOZ (OB-033, businessbeslissingen OB033-001 t/m
+ * 019): volgt hetzelfde niet-nullable ALTIJD-berekend-patroon als
+ * Verzekeringen — "0 WOZ-objecten + `beoordeeld=false`" is door
+ * `berekenBegroteGemeentelijkeLasten` al volledig, zinvol berekenbaar (zie
+ * `begroteGemeentelijkeLasten.ts`'s eigen testsuite). Bewust GEEN
+ * type-boundary-castfunctie nodig: `WozObject`'s velden
+ * (`complexnummer`/`wozObjectAdres`/`aanslagjaar`/`waardepeildatum`/
+ * `werkelijkeWoz`/`verwachteWozOverride`) mappen eerlijk 1-op-1 naar
+ * `BgWozObjectInvoer` — zie `wozObjecten.ts`'s moduledoc. De module-brede
+ * aannames (`werkelijkeGemeentelijkeLasten`/`wozStijgingPercentage`/
+ * `lastenPercentageStijging`/`begrotingsPercentageOverride`/`beoordeeld`)
+ * komen 1-op-1 van `leesGemeentelijkeLastenModule` — zie
+ * `gemeentelijkeLastenModule.ts`'s moduledoc voor de "geen rij = alle velden
+ * null/false"-semantiek.
  */
 export interface HerberekendeBegroting {
   versie: Begrotingsversie;
@@ -138,6 +159,7 @@ export interface HerberekendeBegroting {
   geplandOnderhoud: HerberekendGeplandOnderhoudResultaat;
   correctiefDagelijksOnderhoud: HerberekendCorrectiefDagelijksResultaat;
   verzekering: HerberekendVerzekeringResultaat;
+  gemeentelijkeLasten: HerberekendGemeentelijkeLastenResultaat;
 }
 
 /** Koppelt een berekende activiteit-uitkomst terug aan haar persistente `id` — uitsluitend positioneel bepaald, nooit herzocht op inhoud (zie moduledoc). */
@@ -171,6 +193,17 @@ export interface VerzekeringRegelUitkomstMetId {
 /** `BgVerzekeringResultaat` met uitsluitend `regels` vervangen door de ID-geannoteerde variant — alle overige velden ongewijzigd, rechtstreeks van de pure calculator. */
 export interface HerberekendVerzekeringResultaat extends Omit<BgVerzekeringResultaat, "regels"> {
   regels: readonly VerzekeringRegelUitkomstMetId[];
+}
+
+/** Koppelt een berekende WOZ-object-uitkomst terug aan haar persistente `id` — uitsluitend positioneel bepaald, zelfde principe als `VerzekeringRegelUitkomstMetId`. */
+export interface WozObjectUitkomstMetId {
+  persistentieId: number;
+  wozObject: BgWozObjectUitkomst;
+}
+
+/** `BgGemeentelijkeLastenResultaat` met uitsluitend `wozObjecten` vervangen door de ID-geannoteerde variant — alle overige velden ongewijzigd, rechtstreeks van de pure calculator. */
+export interface HerberekendGemeentelijkeLastenResultaat extends Omit<BgGemeentelijkeLastenResultaat, "wozObjecten"> {
+  wozObjecten: readonly WozObjectUitkomstMetId[];
 }
 
 /** Kleine, herbruikbare read-transactie-helper — zelfde BEGIN/COMMIT/ROLLBACK-idioom als elders in dit package (bewust hier gedupliceerd, zie 1D.5-rapport). */
@@ -213,6 +246,10 @@ export interface HerberekenInvoer {
   verzekeringRegels: readonly VerzekeringRegel[];
   /** `leesVerzekeringBeoordeeld`'s "geen rij → false"-semantiek, ongewijzigd doorgegeven. */
   verzekeringBeoordeeld: boolean;
+  /** Rauwe WOZ-objectpersistence (OB-033) — GEEN pure-module-vorm; de mapping naar `BgWozObjectInvoer` gebeurt pas in `berekenBegrotingUitInvoer`. */
+  wozObjecten: readonly WozObject[];
+  /** `leesGemeentelijkeLastenModule`'s "geen rij → alle aannamevelden null, beoordeeld false"-semantiek, ongewijzigd doorgegeven. */
+  gemeentelijkeLastenModule: GemeentelijkeLastenModuleInvoer;
 }
 
 /**
@@ -255,6 +292,8 @@ export function leesHerberekenInvoerZonderTransactie(db: DatabaseSync, versieId:
     correctiefDagelijksBeoordeeld: leesCorrectiefDagelijksOnderhoudBeoordeeld(db, versieId),
     verzekeringRegels: leesVerzekeringRegels(db, versieId),
     verzekeringBeoordeeld: leesVerzekeringBeoordeeld(db, versieId),
+    wozObjecten: leesWozObjecten(db, versieId),
+    gemeentelijkeLastenModule: leesGemeentelijkeLastenModule(db, versieId),
   };
 }
 
@@ -432,6 +471,61 @@ function berekenVerzekeringUitInvoer(
   return { ...resultaat, regels: regelsMetId };
 }
 
+/** Letterlijke veldkopie, GEEN transformatie/validatie — GEEN type-boundary-cast nodig (zie `HerberekendeBegroting`'s moduledoc). */
+function naarPureWozObjectInvoer(wozObject: WozObject): BgWozObjectInvoer {
+  return {
+    complexnummer: wozObject.complexnummer,
+    wozObjectAdres: wozObject.wozObjectAdres,
+    aanslagjaar: wozObject.aanslagjaar,
+    waardepeildatum: wozObject.waardepeildatum,
+    werkelijkeWoz: wozObject.werkelijkeWoz,
+    verwachteWozOverride: wozObject.verwachteWozOverride,
+  };
+}
+
+/**
+ * Roept de pure Gemeentelijke-Lasten/WOZ-calculator aan en koppelt
+ * uitsluitend persistentie-ID's terug aan de resulterende WOZ-object-
+ * uitkomsten — positioneel (`invoer[i] ↔ resultaat.wozObjecten[i]`), zelfde
+ * principe en defensieve lengte-controle als `berekenVerzekeringUitInvoer`.
+ */
+function berekenGemeentelijkeLastenUitInvoer(
+  versieId: string,
+  begrotingsjaar: number,
+  wozObjecten: readonly WozObject[],
+  moduleInvoer: GemeentelijkeLastenModuleInvoer,
+): HerberekendGemeentelijkeLastenResultaat {
+  let resultaat: BgGemeentelijkeLastenResultaat;
+  try {
+    resultaat = berekenBegroteGemeentelijkeLasten(wozObjecten.map(naarPureWozObjectInvoer), {
+      begrotingsjaar,
+      werkelijkeGemeentelijkeLasten: moduleInvoer.werkelijkeGemeentelijkeLasten,
+      wozStijgingPercentage: moduleInvoer.wozStijgingPercentage,
+      lastenPercentageStijging: moduleInvoer.lastenPercentageStijging,
+      begrotingsPercentageOverride: moduleInvoer.begrotingsPercentageOverride,
+      beoordeeld: moduleInvoer.beoordeeld,
+    });
+  } catch (error) {
+    throw new Error(
+      `Berekening van begrotingsversie ${versieId} is mislukt tijdens Gemeentelijke Lasten/WOZ: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
+
+  if (resultaat.wozObjecten.length !== wozObjecten.length) {
+    throw new Error(
+      `Interne fout: begrotingsversie ${versieId}: Gemeentelijke-Lasten-calculator gaf ${resultaat.wozObjecten.length} WOZ-object-uitkomsten terug voor ${wozObjecten.length} ingevoerde WOZ-objecten — positionele id-correlatie geschonden.`,
+    );
+  }
+
+  const wozObjectenMetId: WozObjectUitkomstMetId[] = resultaat.wozObjecten.map((wozObjectUitkomst, index) => ({
+    persistentieId: wozObjecten[index]!.id,
+    wozObject: wozObjectUitkomst,
+  }));
+
+  return { ...resultaat, wozObjecten: wozObjectenMetId };
+}
+
 /**
  * Voert de pure Module-1-, Module-2-, (indien aanwezig) Module-3- en
  * Gepland-Onderhoud-berekening uit op reeds-gelezen invoer — GEEN eigen
@@ -461,6 +555,7 @@ export function berekenBegrotingUitInvoer(
   geplandOnderhoud: HerberekendGeplandOnderhoudResultaat;
   correctiefDagelijksOnderhoud: HerberekendCorrectiefDagelijksResultaat;
   verzekering: HerberekendVerzekeringResultaat;
+  gemeentelijkeLasten: HerberekendGemeentelijkeLastenResultaat;
 } {
   let module1: BgHuurResultaat;
   try {
@@ -510,7 +605,14 @@ export function berekenBegrotingUitInvoer(
 
   const verzekering = berekenVerzekeringUitInvoer(versieId, invoer.versie.begrotingsjaar, invoer.verzekeringRegels, invoer.verzekeringBeoordeeld);
 
-  return { module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud, verzekering };
+  const gemeentelijkeLasten = berekenGemeentelijkeLastenUitInvoer(
+    versieId,
+    invoer.versie.begrotingsjaar,
+    invoer.wozObjecten,
+    invoer.gemeentelijkeLastenModule,
+  );
+
+  return { module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud, verzekering, gemeentelijkeLasten };
 }
 
 /**
@@ -536,6 +638,9 @@ export function berekenBegrotingUitInvoer(
  */
 export function herberekenBegroting(db: DatabaseSync, versieId: string): HerberekendeBegroting {
   const invoer = withReadTransaction(db, () => leesHerberekenInvoerZonderTransactie(db, versieId));
-  const { module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud, verzekering } = berekenBegrotingUitInvoer(versieId, invoer);
-  return { versie: invoer.versie, module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud, verzekering };
+  const { module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud, verzekering, gemeentelijkeLasten } = berekenBegrotingUitInvoer(
+    versieId,
+    invoer,
+  );
+  return { versie: invoer.versie, module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud, verzekering, gemeentelijkeLasten };
 }
