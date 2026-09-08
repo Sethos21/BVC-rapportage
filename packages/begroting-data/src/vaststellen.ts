@@ -5,11 +5,13 @@ import { schrijfFrozenCorrectiefDagelijksOnderhoudResultaatZonderTransactie } fr
 import { schrijfFrozenGeplandOnderhoudResultaatZonderTransactie } from "./frozenGeplandOnderhoudResultaat.js";
 import { schrijfFrozenModule3ResultaatZonderTransactie } from "./frozenModule3Resultaat.js";
 import { schrijfFrozenBegrotingsresultaatZonderTransactie } from "./frozenResultaat.js";
+import { schrijfFrozenVerzekeringResultaatZonderTransactie } from "./frozenVerzekeringResultaat.js";
 import {
   berekenBegrotingUitInvoer,
   leesHerberekenInvoerZonderTransactie,
   type HerberekendCorrectiefDagelijksResultaat,
   type HerberekendGeplandOnderhoudResultaat,
+  type HerberekendVerzekeringResultaat,
 } from "./herberekenen.js";
 
 /**
@@ -73,14 +75,26 @@ import {
  * `correctiefDagelijksOnderhoud`-resultaat — er wordt niets herberekend of
  * dubbel gevalideerd (omschrijving/complexnummer/jaarbedrag blijven
  * uitsluitend de verantwoordelijkheid van de pure calculator, zie
- * `begroteCorrectiefDagelijksOnderhoud.ts`). Dit is de tweede, en tot nu toe
- * laatste, lokale uitzondering op de Module-1/2/3-regel dat `controleVereist`
- * nooit blokkeert.
+ * `begroteCorrectiefDagelijksOnderhoud.ts`). Dit was de tweede lokale
+ * uitzondering op de Module-1/2/3-regel dat `controleVereist` nooit
+ * blokkeert.
+ *
+ * VERZEKERINGEN (OB-032, businessbeslissingen OB032-001 t/m 013): volgt
+ * EXACT hetzelfde lokale-blokkade-patroon als Gepland Onderhoud/
+ * Correctief-Dagelijks Onderhoud hierboven — de DERDE en (tot nu toe)
+ * laatste lokale uitzondering. Vaststellen wordt geblokkeerd als:
+ * (a) `verzekering.beoordeeld !== true`; of
+ * (b) `verzekering.controleVereist` bevat één of meer `KRITIEK`-items
+ * (waaronder een ontbrekend complexnummer/verzekeraar — OB032-002/009 —
+ * en elk van de vier rekenkritische velden). WAARSCHUWING/INFORMATIEF
+ * blokkeren niet. Deze twee checks lezen uitsluitend het al door
+ * `berekenBegrotingUitInvoer` berekende `verzekering`-resultaat — er wordt
+ * niets herberekend of dubbel gevalideerd (zie `begroteVerzekeringen.ts`).
  *
  * Bundelt uitsluitend de al bestaande `Begrotingsversie`/`BgHuurResultaat`/
  * `BgBeheerResultaat`/`BgManagementResultaat`/`HerberekendGeplandOnderhoudResultaat`/
- * `HerberekendCorrectiefDagelijksResultaat` — bewust geen shadow-
- * rekenresultaattype.
+ * `HerberekendCorrectiefDagelijksResultaat`/`HerberekendVerzekeringResultaat`
+ * — bewust geen shadow-rekenresultaattype.
  */
 export interface VastgesteldeBegroting {
   versie: Begrotingsversie;
@@ -89,6 +103,7 @@ export interface VastgesteldeBegroting {
   module3: BgManagementResultaat;
   geplandOnderhoud: HerberekendGeplandOnderhoudResultaat;
   correctiefDagelijksOnderhoud: HerberekendCorrectiefDagelijksResultaat;
+  verzekering: HerberekendVerzekeringResultaat;
 }
 
 /**
@@ -146,11 +161,12 @@ function withWriteTransaction<T>(db: DatabaseSync, fn: () => T): T {
  * conventie als Module 1/2 — geen nieuwe, strengere regel specifiek voor
  * Module 3 geïntroduceerd. De enige nieuwe blokkade vóór GO-P3 was de
  * expliciete afwezigheid van Module-3-invoer zelf, niet de inhoud van een
- * eenmaal aanwezige invoer. Gepland Onderhoud (GO-P3) en, sinds CD-P3,
- * Correctief/Dagelijks Onderhoud (zie moduledoc hierboven) zijn de ENIGE
- * twee plekken waar een `KRITIEK`-`controleVereist`-item daadwerkelijk
- * vaststellen blokkeert — elk een bewuste, lokale uitzondering op deze
- * verder ongewijzigde regel, nooit veralgemeniseerd naar Module 1/2/3.
+ * eenmaal aanwezige invoer. Gepland Onderhoud (GO-P3), Correctief/
+ * Dagelijks Onderhoud (CD-P3) en, sinds OB-032, Verzekeringen (zie
+ * moduledoc hierboven) zijn de ENIGE drie plekken waar een
+ * `KRITIEK`-`controleVereist`-item daadwerkelijk vaststellen blokkeert —
+ * elk een bewuste, lokale uitzondering op deze verder ongewijzigde regel,
+ * nooit veralgemeniseerd naar Module 1/2/3.
  */
 export function stelBegrotingVast(db: DatabaseSync, versieId: string, vastgesteldAt: Date = new Date()): VastgesteldeBegroting {
   return withWriteTransaction(db, () => {
@@ -161,7 +177,7 @@ export function stelBegrotingVast(db: DatabaseSync, versieId: string, vastgestel
       );
     }
 
-    const { module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud } = berekenBegrotingUitInvoer(versieId, invoer);
+    const { module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud, verzekering } = berekenBegrotingUitInvoer(versieId, invoer);
     // Lokale, expliciete narrowing: `module3` is hier altijd niet-null, want `invoer.module3Invoer !== null`
     // is hierboven al gecontroleerd en `berekenBegrotingUitInvoer` berekent Module 3 uitsluitend (en dan
     // altijd naar een niet-null resultaat) wanneer `module3Invoer` niet-null is. Deze check is dus puur
@@ -199,10 +215,25 @@ export function stelBegrotingVast(db: DatabaseSync, versieId: string, vastgestel
       );
     }
 
+    // Verzekeringen-lifecycle-validatie (OB-032, zie moduledoc) — UITSLUITEND lokaal voor Verzekeringen,
+    // wijzigt niets aan hoe Module 1/2/3's/Gepland Onderhoud's/Correctief-Dagelijks Onderhoud's eigen
+    // controleVereist wordt behandeld hierboven.
+    if (!verzekering.beoordeeld) {
+      throw new Error(
+        `Begrotingsversie ${versieId}: Verzekeringen is niet beoordeeld (beoordeeld !== true) — vaststellen is niet mogelijk zonder expliciete beoordeling.`,
+      );
+    }
+    if (verzekering.controleVereist.some((c) => c.ernst === "KRITIEK")) {
+      throw new Error(
+        `Begrotingsversie ${versieId}: Verzekeringen bevat één of meer KRITIEKE controls — vaststellen is niet mogelijk vóórdat deze zijn opgelost.`,
+      );
+    }
+
     schrijfFrozenBegrotingsresultaatZonderTransactie(db, versieId, { module1, module2 });
     schrijfFrozenModule3ResultaatZonderTransactie(db, versieId, module3);
     schrijfFrozenGeplandOnderhoudResultaatZonderTransactie(db, versieId, geplandOnderhoud);
     schrijfFrozenCorrectiefDagelijksOnderhoudResultaatZonderTransactie(db, versieId, correctiefDagelijksOnderhoud);
+    schrijfFrozenVerzekeringResultaatZonderTransactie(db, versieId, verzekering);
     markeerVastgesteld(db, versieId, vastgesteldAt); // allerlaatste schrijfactie vóór commit
 
     const versie = leesBegrotingsversie(db, versieId);
@@ -210,6 +241,6 @@ export function stelBegrotingVast(db: DatabaseSync, versieId: string, vastgestel
       throw new Error(`Interne fout: begrotingsversie ${versieId} kon direct na vaststellen niet worden teruggelezen.`);
     }
 
-    return { versie, module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud };
+    return { versie, module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud, verzekering };
   });
 }

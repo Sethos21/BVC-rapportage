@@ -5,6 +5,7 @@ import {
   berekenBegroteGeplandOnderhoud,
   berekenBegroteHuuropbrengsten,
   berekenBegroteManagementvergoeding,
+  berekenBegroteVerzekeringen,
   type BgBeheerComplexConfig,
   type BgBeheerResultaat,
   type BgContractFeiten,
@@ -21,6 +22,9 @@ import {
   type BgHuurResultaat,
   type BgManagementInvoer,
   type BgManagementResultaat,
+  type BgVerzekeringRegelInvoer,
+  type BgVerzekeringRegelUitkomst,
+  type BgVerzekeringResultaat,
 } from "@bvc/reporting";
 import { leesBegrotingsversie, type Begrotingsversie } from "./begrotingsversies.js";
 import {
@@ -37,6 +41,8 @@ import { leesModule1Overrides } from "./module1Overrides.js";
 import { leesModule1Snapshot } from "./module1Snapshot.js";
 import { leesModule2Config } from "./module2Config.js";
 import { leesModule3Invoer } from "./module3Invoer.js";
+import { leesVerzekeringBeoordeeld } from "./verzekeringBeoordeeld.js";
+import { leesVerzekeringRegels, type VerzekeringRegel } from "./verzekeringRegels.js";
 
 /**
  * Orchestratie: herberekent Module 1 + Module 2 voor één CONCEPT-
@@ -112,7 +118,17 @@ import { leesModule3Invoer } from "./module3Invoer.js";
  * een bewuste, tijdelijke scope-grens van deze implementatieronde, GEEN
  * businessbeslissing dat Correctief/Dagelijks nooit zou moeten blokkeren —
  * die lifecycle-koppeling volgt pas in een latere, apart te reviewen fase
- * (CD-P3).
+ * (CD-P3, inmiddels gebouwd — zie `vaststellen.ts`).
+ *
+ * VERZEKERINGEN (OB-032, businessbeslissingen OB032-001 t/m 013): volgt
+ * hetzelfde niet-nullable ALTIJD-berekend-patroon als Gepland Onderhoud/
+ * Correctief-Dagelijks Onderhoud — "0 polisregels + `beoordeeld=false`" is
+ * door `berekenBegroteVerzekeringen` al volledig, zinvol berekenbaar.
+ * Bewust GEEN type-boundary-castfunctie nodig (zoals bij Gepland
+ * Onderhoud): `VerzekeringRegel`'s velden (`complexnummer`/`verzekeraar`/
+ * `ingangsdatum`/`looptijdMaanden`/`bedrag`/`indexPercentage`/
+ * `handmatigBegrootOverride`) mappen eerlijk 1-op-1 naar
+ * `BgVerzekeringRegelInvoer` — zie `verzekeringRegels.ts`'s moduledoc.
  */
 export interface HerberekendeBegroting {
   versie: Begrotingsversie;
@@ -121,6 +137,7 @@ export interface HerberekendeBegroting {
   module3: BgManagementResultaat | null;
   geplandOnderhoud: HerberekendGeplandOnderhoudResultaat;
   correctiefDagelijksOnderhoud: HerberekendCorrectiefDagelijksResultaat;
+  verzekering: HerberekendVerzekeringResultaat;
 }
 
 /** Koppelt een berekende activiteit-uitkomst terug aan haar persistente `id` — uitsluitend positioneel bepaald, nooit herzocht op inhoud (zie moduledoc). */
@@ -143,6 +160,17 @@ export interface CorrectiefDagelijksRegelUitkomstMetId {
 /** `BgCorrectiefDagelijksResultaat` met uitsluitend `regels` vervangen door de ID-geannoteerde variant — alle overige velden ongewijzigd, rechtstreeks van de pure calculator. */
 export interface HerberekendCorrectiefDagelijksResultaat extends Omit<BgCorrectiefDagelijksResultaat, "regels"> {
   regels: readonly CorrectiefDagelijksRegelUitkomstMetId[];
+}
+
+/** Koppelt een berekende Verzekering-regel-uitkomst terug aan haar persistente `id` — uitsluitend positioneel bepaald, zelfde principe als `CorrectiefDagelijksRegelUitkomstMetId`. */
+export interface VerzekeringRegelUitkomstMetId {
+  persistentieId: number;
+  regel: BgVerzekeringRegelUitkomst;
+}
+
+/** `BgVerzekeringResultaat` met uitsluitend `regels` vervangen door de ID-geannoteerde variant — alle overige velden ongewijzigd, rechtstreeks van de pure calculator. */
+export interface HerberekendVerzekeringResultaat extends Omit<BgVerzekeringResultaat, "regels"> {
+  regels: readonly VerzekeringRegelUitkomstMetId[];
 }
 
 /** Kleine, herbruikbare read-transactie-helper — zelfde BEGIN/COMMIT/ROLLBACK-idioom als elders in dit package (bewust hier gedupliceerd, zie 1D.5-rapport). */
@@ -181,6 +209,10 @@ export interface HerberekenInvoer {
   correctiefDagelijksRegels: readonly CorrectiefDagelijksOnderhoudRegel[];
   /** `leesCorrectiefDagelijksOnderhoudBeoordeeld`'s "geen rij → false"-semantiek, ongewijzigd doorgegeven. */
   correctiefDagelijksBeoordeeld: boolean;
+  /** Rauwe Verzekering-persistence (OB-032) — GEEN pure-module-vorm; de mapping naar `BgVerzekeringRegelInvoer` gebeurt pas in `berekenBegrotingUitInvoer`. */
+  verzekeringRegels: readonly VerzekeringRegel[];
+  /** `leesVerzekeringBeoordeeld`'s "geen rij → false"-semantiek, ongewijzigd doorgegeven. */
+  verzekeringBeoordeeld: boolean;
 }
 
 /**
@@ -221,6 +253,8 @@ export function leesHerberekenInvoerZonderTransactie(db: DatabaseSync, versieId:
     geplandOnderhoudBeoordeeld: leesGeplandOnderhoudBeoordeeld(db, versieId),
     correctiefDagelijksRegels: leesCorrectiefDagelijksOnderhoudRegels(db, versieId),
     correctiefDagelijksBeoordeeld: leesCorrectiefDagelijksOnderhoudBeoordeeld(db, versieId),
+    verzekeringRegels: leesVerzekeringRegels(db, versieId),
+    verzekeringBeoordeeld: leesVerzekeringBeoordeeld(db, versieId),
   };
 }
 
@@ -349,6 +383,55 @@ function berekenCorrectiefDagelijksUitInvoer(
   return { ...resultaat, regels: regelsMetId };
 }
 
+/** Letterlijke veldkopie, GEEN transformatie/validatie — GEEN type-boundary-cast nodig (zie `HerberekendeBegroting`'s moduledoc). */
+function naarPureVerzekeringInvoer(regel: VerzekeringRegel): BgVerzekeringRegelInvoer {
+  return {
+    complexnummer: regel.complexnummer,
+    verzekeraar: regel.verzekeraar,
+    ingangsdatum: regel.ingangsdatum,
+    looptijdMaanden: regel.looptijdMaanden,
+    bedrag: regel.bedrag,
+    indexPercentage: regel.indexPercentage,
+    handmatigBegrootOverride: regel.handmatigBegrootOverride,
+  };
+}
+
+/**
+ * Roept de pure Verzekeringen-calculator aan en koppelt uitsluitend
+ * persistentie-ID's terug aan de resulterende regel-uitkomsten —
+ * positioneel (`invoer[i] ↔ resultaat.regels[i]`), zelfde principe en
+ * defensieve lengte-controle als `berekenCorrectiefDagelijksUitInvoer`.
+ */
+function berekenVerzekeringUitInvoer(
+  versieId: string,
+  begrotingsjaar: number,
+  regels: readonly VerzekeringRegel[],
+  beoordeeld: boolean,
+): HerberekendVerzekeringResultaat {
+  let resultaat: BgVerzekeringResultaat;
+  try {
+    resultaat = berekenBegroteVerzekeringen(regels.map(naarPureVerzekeringInvoer), { begrotingsjaar, beoordeeld });
+  } catch (error) {
+    throw new Error(
+      `Berekening van begrotingsversie ${versieId} is mislukt tijdens Verzekeringen: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
+
+  if (resultaat.regels.length !== regels.length) {
+    throw new Error(
+      `Interne fout: begrotingsversie ${versieId}: Verzekeringen-calculator gaf ${resultaat.regels.length} regel-uitkomsten terug voor ${regels.length} ingevoerde regels — positionele id-correlatie geschonden.`,
+    );
+  }
+
+  const regelsMetId: VerzekeringRegelUitkomstMetId[] = resultaat.regels.map((regelUitkomst, index) => ({
+    persistentieId: regels[index]!.id,
+    regel: regelUitkomst,
+  }));
+
+  return { ...resultaat, regels: regelsMetId };
+}
+
 /**
  * Voert de pure Module-1-, Module-2-, (indien aanwezig) Module-3- en
  * Gepland-Onderhoud-berekening uit op reeds-gelezen invoer — GEEN eigen
@@ -365,7 +448,8 @@ function berekenCorrectiefDagelijksUitInvoer(
  *
  * Gepland Onderhoud wordt, ANDERS dan Module 3, ALTIJD berekend — ook met nul
  * activiteiten en `beoordeeld=false` (zie `HerberekendeBegroting`'s moduledoc).
- * Correctief/Dagelijks Onderhoud volgt hetzelfde ALTIJD-berekend-patroon.
+ * Correctief/Dagelijks Onderhoud en Verzekeringen volgen hetzelfde
+ * ALTIJD-berekend-patroon.
  */
 export function berekenBegrotingUitInvoer(
   versieId: string,
@@ -376,6 +460,7 @@ export function berekenBegrotingUitInvoer(
   module3: BgManagementResultaat | null;
   geplandOnderhoud: HerberekendGeplandOnderhoudResultaat;
   correctiefDagelijksOnderhoud: HerberekendCorrectiefDagelijksResultaat;
+  verzekering: HerberekendVerzekeringResultaat;
 } {
   let module1: BgHuurResultaat;
   try {
@@ -423,13 +508,15 @@ export function berekenBegrotingUitInvoer(
     invoer.correctiefDagelijksBeoordeeld,
   );
 
-  return { module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud };
+  const verzekering = berekenVerzekeringUitInvoer(versieId, invoer.versie.begrotingsjaar, invoer.verzekeringRegels, invoer.verzekeringBeoordeeld);
+
+  return { module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud, verzekering };
 }
 
 /**
  * Herberekent Module 1 + Module 2 (+ Module 3 indien aanwezig) + Gepland
- * Onderhoud + Correctief/Dagelijks Onderhoud voor `versieId`, uitsluitend
- * gebaseerd op wat al in SQLite staat.
+ * Onderhoud + Correctief/Dagelijks Onderhoud + Verzekeringen voor
+ * `versieId`, uitsluitend gebaseerd op wat al in SQLite staat.
  *
  * Consistentie van de invoer: alle reads gebeuren bínnen ÉÉN
  * `BEGIN`…`COMMIT`-leestransactie (`leesHerberekenInvoerZonderTransactie`
@@ -449,6 +536,6 @@ export function berekenBegrotingUitInvoer(
  */
 export function herberekenBegroting(db: DatabaseSync, versieId: string): HerberekendeBegroting {
   const invoer = withReadTransaction(db, () => leesHerberekenInvoerZonderTransactie(db, versieId));
-  const { module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud } = berekenBegrotingUitInvoer(versieId, invoer);
-  return { versie: invoer.versie, module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud };
+  const { module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud, verzekering } = berekenBegrotingUitInvoer(versieId, invoer);
+  return { versie: invoer.versie, module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud, verzekering };
 }

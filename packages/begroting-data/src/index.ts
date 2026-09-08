@@ -58,6 +58,8 @@ export {
   type GeplandOnderhoudActiviteitUitkomstMetId,
   type HerberekendCorrectiefDagelijksResultaat,
   type CorrectiefDagelijksRegelUitkomstMetId,
+  type HerberekendVerzekeringResultaat,
+  type VerzekeringRegelUitkomstMetId,
 } from "./herberekenen.js";
 
 // Bevroren Module-1/Module-2-output (1D.6a) — uitsluitend serialisatie/
@@ -104,6 +106,14 @@ export {
   leesFrozenCorrectiefDagelijksOnderhoudResultaat,
 } from "./frozenCorrectiefDagelijksOnderhoudResultaat.js";
 
+// Bevroren Verzekeringen-output (OB-032) — uitsluitend serialisatie/
+// deserialisatie van de bestaande `HerberekendVerzekeringResultaat`, geen
+// shadow-resultaattype. Strikt gescheiden van `verzekeringRegels.js`/
+// `verzekeringBeoordeeld.js` (de persistente CONCEPT-input).
+// `schrijfFrozenVerzekeringResultaatZonderTransactie` blijft bewust intern
+// — de publieke schrijf-ingang is en blijft `schrijfFrozenVerzekeringResultaat`.
+export { schrijfFrozenVerzekeringResultaat, leesFrozenVerzekeringResultaat } from "./frozenVerzekeringResultaat.js";
+
 // De atomaire VASTSTELLEN-operatie (1D.6b) — de enige publieke weg om een
 // CONCEPT-versie definitief VASTGESTELD te maken. Bundelt uitsluitend de
 // bestaande `Begrotingsversie`/`BgHuurResultaat`/`BgBeheerResultaat`/
@@ -140,3 +150,16 @@ export {
   schrijfCorrectiefDagelijksOnderhoudBeoordeeld,
   leesCorrectiefDagelijksOnderhoudBeoordeeld,
 } from "./correctiefDagelijksOnderhoudBeoordeeld.js";
+
+// Verzekeringen (OB-032) — UITSLUITEND concept-persistence (geen
+// pure-calculator-integratie in dit bestand zelf; herberekening/frozen
+// output zitten in herberekenen.js/frozenVerzekeringResultaat.js). Bewust
+// GEEN `@bvc/reporting`-types hier hergebruikt voor dezelfde reden als de
+// andere begrotingsposten — zie `verzekeringRegels.ts`'s moduledoc.
+export {
+  schrijfVerzekeringRegels,
+  leesVerzekeringRegels,
+  type VerzekeringRegel,
+  type VerzekeringRegelInvoer,
+} from "./verzekeringRegels.js";
+export { schrijfVerzekeringBeoordeeld, leesVerzekeringBeoordeeld } from "./verzekeringBeoordeeld.js";

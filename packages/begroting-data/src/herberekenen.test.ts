@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   berekenBegroteCorrectiefDagelijksOnderhoud,
   berekenBegroteGeplandOnderhoud,
+  berekenBegroteVerzekeringen,
   type BgBeheerComplexConfig,
   type BgContractFeiten,
   type BgContractOverride,
@@ -14,6 +15,7 @@ import {
   type BgGeplandOnderhoudActiviteitInvoer,
   type BgHuurAannames,
   type BgManagementInvoer,
+  type BgVerzekeringRegelInvoer,
 } from "@bvc/reporting";
 import { maakBegrotingsversie, markeerVastgesteld, type NieuweBegrotingsversieInput } from "./begrotingsversies.js";
 import { schrijfCorrectiefDagelijksOnderhoudBeoordeeld } from "./correctiefDagelijksOnderhoudBeoordeeld.js";
@@ -30,6 +32,8 @@ import { schrijfModule1Overrides } from "./module1Overrides.js";
 import { schrijfModule1Snapshot } from "./module1Snapshot.js";
 import { schrijfModule2Config } from "./module2Config.js";
 import { schrijfModule3Invoer } from "./module3Invoer.js";
+import { schrijfVerzekeringBeoordeeld } from "./verzekeringBeoordeeld.js";
+import { schrijfVerzekeringRegels, type VerzekeringRegelInvoer } from "./verzekeringRegels.js";
 
 let dir: string;
 let dbPad: string;
@@ -1059,5 +1063,196 @@ describe("herberekenBegroting — Correctief/Dagelijks Onderhoud (CD-P2)", () =>
     expect(normaliseer(zonderCorrectiefDagelijks.geplandOnderhoud)).toBe(normaliseer(metCorrectiefDagelijks.geplandOnderhoud));
     expect(zonderCorrectiefDagelijks.module3).toBeNull();
     expect(metCorrectiefDagelijks.module3).toBeNull();
+  });
+});
+
+describe("herberekenBegroting — Verzekeringen (OB-032)", () => {
+  function regelInvoer(overrides: Partial<VerzekeringRegelInvoer> = {}): VerzekeringRegelInvoer {
+    return {
+      id: null,
+      complexnummer: "001",
+      verzekeraar: "Assuradeuren Gilde B.V.",
+      ingangsdatum: new Date(Date.UTC(2020, 6, 1)),
+      looptijdMaanden: 12,
+      bedrag: new Decimal(12000),
+      indexPercentage: new Decimal(3),
+      handmatigBegrootOverride: null,
+      ...overrides,
+    };
+  }
+
+  /** Zelfde type-boundary-conversie als de productiecode (`naarPureVerzekeringInvoer` in `herberekenen.ts`) — bewust GEEN `id` in de pure vorm. */
+  function alsPureInvoer(r: VerzekeringRegelInvoer): BgVerzekeringRegelInvoer {
+    return {
+      complexnummer: r.complexnummer,
+      verzekeraar: r.verzekeraar,
+      ingangsdatum: r.ingangsdatum,
+      looptijdMaanden: r.looptijdMaanden,
+      bedrag: r.bedrag,
+      indexPercentage: r.indexPercentage,
+      handmatigBegrootOverride: r.handmatigBegrootOverride,
+    };
+  }
+
+  it("1. nul regels + geen beoordeeld-rij: resultaat aanwezig, beoordeeld=false, NOT_REVIEWED, totalen 0", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    const resultaat = herberekenBegroting(db, versie.id);
+
+    expect(resultaat.verzekering).toBeDefined();
+    expect(resultaat.verzekering.beoordeeld).toBe(false);
+    expect(resultaat.verzekering.reviewStatus).toBe("NOT_REVIEWED");
+    expect(resultaat.verzekering.totaalBerekendBegroot.toString()).toBe("0");
+    expect(resultaat.verzekering.totaalEffectiefBegroot.toString()).toBe("0");
+    expect(resultaat.verzekering.regels).toEqual([]);
+  });
+
+  it("2. nul regels + beoordeeld=true: REVIEWED_ZERO_POLICIES", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfVerzekeringBeoordeeld(db, versie.id, true);
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    expect(resultaat.verzekering.reviewStatus).toBe("REVIEWED_ZERO_POLICIES");
+  });
+
+  it("3. één bestaande polis (regime A): exact gelijk aan directe pure-calculator-uitkomst", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    const invoer = regelInvoer();
+    schrijfVerzekeringRegels(db, versie.id, [invoer]);
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    const direct = berekenBegroteVerzekeringen([alsPureInvoer(invoer)], { begrotingsjaar: 2027, beoordeeld: false });
+
+    expect(resultaat.verzekering.totaalBerekendBegroot.toString()).toBe(direct.totaalBerekendBegroot.toString());
+    expect(resultaat.verzekering.regels[0]?.regel).toEqual(direct.regels[0]);
+    expect(resultaat.verzekering.totaalBerekendBegroot.toString()).toBe("12180"); // begrotingsjaar 2027, verlenging 01-07-2027
+  });
+
+  it("4. nieuwe polis binnen het begrotingsjaar (regime B): geen indexatie op de eerste ingang", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfVerzekeringRegels(db, versie.id, [regelInvoer({ ingangsdatum: new Date(Date.UTC(2027, 6, 1)) })]);
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    expect(resultaat.verzekering.regels[0]?.regel.berekendBegroot.toString()).toBe("6000");
+    expect(resultaat.verzekering.regels[0]?.regel.eersteRelevanteVerlengmoment).toBeNull();
+  });
+
+  it("5. toekomstige polis (regime C): berekendBegroot 0, geen KRITIEK uitsluitend vanwege de toekomstige ingangsdatum", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfVerzekeringRegels(db, versie.id, [regelInvoer({ ingangsdatum: new Date(Date.UTC(2029, 0, 1)) })]);
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    expect(resultaat.verzekering.regels[0]?.regel.berekendBegroot.toString()).toBe("0");
+    expect(resultaat.verzekering.controleVereist).toHaveLength(0);
+  });
+
+  it("6. meerdere verlengmomenten binnen hetzelfde jaar: index slechts eenmaal toegepast", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfVerzekeringRegels(db, versie.id, [
+      regelInvoer({ ingangsdatum: new Date(Date.UTC(2026, 0, 1)), looptijdMaanden: 6 }),
+    ]);
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    expect(resultaat.verzekering.regels[0]?.regel.relevanteVerlengmomenten).toHaveLength(2);
+    expect(resultaat.verzekering.regels[0]?.regel.berekendBegroot.toString()).toBe("12360"); // 12000 * 1.03, niet cumulatief
+  });
+
+  it("7. persistentie-id wordt correct teruggekoppeld per regel", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    const [a, b] = schrijfVerzekeringRegels(db, versie.id, [
+      regelInvoer({ complexnummer: "001" }),
+      regelInvoer({ complexnummer: "002" }),
+    ]);
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    expect(resultaat.verzekering.regels[0]?.persistentieId).toBe(a!.id);
+    expect(resultaat.verzekering.regels[1]?.persistentieId).toBe(b!.id);
+  });
+
+  it("8. lege complex/verzekeraar: KRITIEK, financieel bedrag blijft zichtbaar/meetellen", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfVerzekeringRegels(db, versie.id, [regelInvoer({ complexnummer: null, verzekeraar: null })]);
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    expect(resultaat.verzekering.regels[0]?.regel.berekendBegroot.toString()).toBe("12180");
+    expect(resultaat.verzekering.controleVereist.filter((c) => c.ernst === "KRITIEK")).toHaveLength(2);
+  });
+
+  it("9. ontbrekend bedrag: KRITIEK, veilige 0-bijdrage", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfVerzekeringRegels(db, versie.id, [regelInvoer({ bedrag: null })]);
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    expect(resultaat.verzekering.regels[0]?.regel.berekendBegroot.toString()).toBe("0");
+    expect(resultaat.verzekering.regels[0]?.regel.invoer.bedrag).toBeNull();
+    expect(resultaat.verzekering.controleVereist.some((c) => c.ernst === "KRITIEK" && c.bericht.includes("bedrag"))).toBe(true);
+  });
+
+  it("10. override: berekendBegroot en effectiefBegroot blijven beide traceerbaar", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfVerzekeringRegels(db, versie.id, [regelInvoer({ handmatigBegrootOverride: new Decimal(0) })]);
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    expect(resultaat.verzekering.regels[0]?.regel.berekendBegroot.toString()).toBe("12180");
+    expect(resultaat.verzekering.regels[0]?.regel.effectiefBegroot.toString()).toBe("0");
+    expect(resultaat.verzekering.totaalEffectiefBegroot.toString()).toBe("0");
+  });
+
+  it("11. beoordeeld=true met regels: REVIEWED_WITH_POLICIES", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfVerzekeringRegels(db, versie.id, [regelInvoer()]);
+    schrijfVerzekeringBeoordeeld(db, versie.id, true);
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    expect(resultaat.verzekering.reviewStatus).toBe("REVIEWED_WITH_POLICIES");
+  });
+
+  it("12. herberekening schrijft niets naar de Verzekering-concepttabellen", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfVerzekeringRegels(db, versie.id, [regelInvoer()]);
+    schrijfVerzekeringBeoordeeld(db, versie.id, true);
+
+    const dump = () => ({
+      regels: db.prepare(`SELECT * FROM begroting_verzekering_regel`).all(),
+      module: db.prepare(`SELECT * FROM begroting_verzekering_module`).all(),
+    });
+
+    const voor = dump();
+    herberekenBegroting(db, versie.id);
+    const na = dump();
+
+    expect(na).toEqual(voor);
+  });
+
+  it("13. twee opeenvolgende herberekeningen zonder writes geven inhoudelijk identiek resultaat", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfVerzekeringRegels(db, versie.id, [regelInvoer({ complexnummer: "001" }), regelInvoer({ complexnummer: "002" })]);
+    schrijfVerzekeringBeoordeeld(db, versie.id, true);
+
+    const eersteKeer = herberekenBegroting(db, versie.id);
+    const tweedeKeer = herberekenBegroting(db, versie.id);
+    const normaliseer = (waarde: unknown) => JSON.stringify(waarde, (_key, v) => (v instanceof Decimal ? v.toString() : v));
+
+    expect(normaliseer(eersteKeer.verzekering)).toBe(normaliseer(tweedeKeer.verzekering));
+  });
+
+  it("14 (regressie). bestaande Module 1/2/3/GO/CD-uitkomst blijft byte-identiek naast een aanwezige Verzekering-regel", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    schrijfModule1Snapshot(db, versie.id, [maakContract("0000000028", { complexnummer: "001" })]);
+    schrijfModule1Aannames(db, versie.id, STANDAARD_AANNAMES);
+    schrijfModule2Config(db, versie.id, [
+      { complexnummer: "001", vastBedragJaar: new Decimal(1000), vastIndexatiePercentage: null, vastIndexatiedatum: null, variabelPercentage: new Decimal(6) },
+    ]);
+
+    const zonderVerzekering = herberekenBegroting(db, versie.id);
+    schrijfVerzekeringRegels(db, versie.id, [regelInvoer()]);
+    const metVerzekering = herberekenBegroting(db, versie.id);
+
+    const normaliseer = (waarde: unknown) => JSON.stringify(waarde, (_key, v) => (v instanceof Decimal ? v.toString() : v));
+    expect(normaliseer(zonderVerzekering.module1)).toBe(normaliseer(metVerzekering.module1));
+    expect(normaliseer(zonderVerzekering.module2)).toBe(normaliseer(metVerzekering.module2));
+    expect(normaliseer(zonderVerzekering.geplandOnderhoud)).toBe(normaliseer(metVerzekering.geplandOnderhoud));
+    expect(normaliseer(zonderVerzekering.correctiefDagelijksOnderhoud)).toBe(normaliseer(metVerzekering.correctiefDagelijksOnderhoud));
+    expect(zonderVerzekering.module3).toBeNull();
+    expect(metVerzekering.module3).toBeNull();
   });
 });

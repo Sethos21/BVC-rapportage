@@ -1716,6 +1716,240 @@ export const MIGRATIONS: readonly Migration[] = [
        END`,
     ],
   },
+  /**
+   * Migratie 12 — Verzekeringen: concept-input (regels + module-brede
+   * beoordeeld-vlag), OB-032. Zelfde structurele patroon als migratie 10
+   * (Correctief/Dagelijks Onderhoud concept-input): één child-tabel
+   * (regels) + één headertabel (beoordeeld-vlag), zes immutability-
+   * triggers.
+   *
+   * ACHT VELDEN, ALLEMAAL NULLABLE BEHALVE `id`/`begroting_versie_id`
+   * (OB032-002/009/011): `complexnummer`/`verzekeraar` zijn functioneel
+   * VERPLICHT (de pure calculator geeft een KRITIEK-control als ze
+   * ontbreken), maar mogen hier tijdelijk NULL zijn — een functioneel
+   * onvolledig concept moet opslaanbaar blijven, de lifecycle-blokkade
+   * hoort uitsluitend in `vaststellen.ts`, niet als CHECK-constraint hier
+   * (zelfde precedent als migratie 8/10's afwezige NOT-NULL-constraints op
+   * vergelijkbare velden). `ingangsdatum`/`looptijd_maanden`/`bedrag`/
+   * `index_percentage` zijn de vier rekenkritische velden — ook deze
+   * bewust NULL-toegestaan, met dezelfde motivatie.
+   *
+   * Geen enum-CHECK nodig: dit regelmodel kent geen enumvelden (in
+   * tegenstelling tot migratie 8's `status`/`aanleiding_type`).
+   */
+  {
+    version: 12,
+    description: "Verzekeringen: concept-input (regels + module-brede beoordeeld-vlag)",
+    ddl: [
+      `CREATE TABLE begroting_verzekering_regel (
+        id INTEGER PRIMARY KEY,
+        begroting_versie_id TEXT NOT NULL REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        complexnummer TEXT NULL,
+        verzekeraar TEXT NULL,
+        ingangsdatum TEXT NULL,
+        looptijd_maanden INTEGER NULL,
+        bedrag TEXT NULL,
+        index_percentage TEXT NULL,
+        handmatig_begroot_override TEXT NULL
+      )`,
+      `CREATE INDEX idx_begroting_verzekering_regel_versie ON begroting_verzekering_regel(begroting_versie_id)`,
+      `CREATE TABLE begroting_verzekering_module (
+        begroting_versie_id TEXT PRIMARY KEY REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        beoordeeld INTEGER NOT NULL CHECK (beoordeeld IN (0, 1))
+      )`,
+      `CREATE TRIGGER trg_begroting_verzekering_regel_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_verzekering_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_verzekering_regel: begrotingsversie is VASTGESTELD, regels zijn immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_verzekering_regel_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_verzekering_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_verzekering_regel: begrotingsversie is VASTGESTELD, regels zijn immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_verzekering_regel_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_verzekering_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_verzekering_regel: begrotingsversie is VASTGESTELD, regels zijn immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_verzekering_module_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_verzekering_module
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_verzekering_module: begrotingsversie is VASTGESTELD, beoordeeld-vlag is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_verzekering_module_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_verzekering_module
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_verzekering_module: begrotingsversie is VASTGESTELD, beoordeeld-vlag is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_verzekering_module_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_verzekering_module
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_verzekering_module: begrotingsversie is VASTGESTELD, beoordeeld-vlag is immutable');
+       END`,
+    ],
+  },
+  /**
+   * Migratie 13 — bevroren Verzekeringen-OUTPUT (OB-032), exact zoals
+   * `packages/reporting/src/begroting/begroteVerzekeringen.ts`/
+   * `HerberekendVerzekeringResultaat` op HEAD kennen. Uitsluitend
+   * serialisatie/deserialisatie van een reeds berekend, puur resultaat.
+   *
+   * DRIE TABELLEN (bewust niet vier): header + regel + control. GEEN
+   * aparte child-tabel voor de volledige `relevanteVerlengmomenten`-lijst
+   * — alleen het EERSTE relevante verlengmoment is financieel bepalend
+   * (OB032-004/005); de volledige lijst is pure-calculator-output die in
+   * deze versie niet persistent reproduceerbaar hoeft te zijn (OB032-
+   * correctie: "geen aparte child-tabel met alle verlengmomenten bouwen").
+   * Op de frozen regel volstaan daarom `eerste_relevante_verlengmoment`
+   * (NULL als er geen verlengmoment in dat begrotingsjaar viel) en
+   * `aantal_relevante_verlengmomenten` (informatief).
+   *
+   * `begroting_frozen_verzekering_regel`: PK = `(begroting_versie_id,
+   * regel_id)` — GEEN apart `volgnr` nodig, exact dezelfde onderbouwing als
+   * migratie 9/11: `regel_id` is zelf al een stabiele, unieke, monotoon
+   * oplopende technische sleutel (CONCEPT-SQLite-rowid).
+   *
+   * ALLE INVOERVELDEN OP DE FROZEN REGEL ZIJN NOT NULL (in tegenstelling
+   * tot migratie 12's volledig nullable concept-kolommen): een succesvol
+   * bevroren regel is per definitie al door de KRITIEK-blokkade in
+   * `vaststellen.ts` heen — `complexnummer`/`verzekeraar`/`ingangsdatum`/
+   * `looptijd_maanden`/`bedrag`/`index_percentage` kunnen op dat moment
+   * niet meer ontbreken. `handmatig_begroot_override` blijft NULLABLE
+   * (een override is en blijft optioneel, ook bij een geldige, vastgestelde
+   * regel).
+   *
+   * `begroting_frozen_verzekering_control`: zelfde `volgnr`-patroon als
+   * elke eerdere control-tabel, `regel_id` NULLABLE, domein-CHECK op
+   * `ernst` zonder `ernst <> 'KRITIEK'`-duplicatie (zelfde, herhaaldelijk
+   * bevestigde overweging als migratie 9/11).
+   *
+   * FROZEN-STATE INVARIANTEN OP DE HEADER: `CHECK (beoordeeld = 1)` en
+   * `CHECK (review_status IN ('REVIEWED_ZERO_POLICIES',
+   * 'REVIEWED_WITH_POLICIES'))` (nooit `NOT_REVIEWED`) — structurele
+   * bevestiging van een toestand die `vaststellen.ts` al garandeert, geen
+   * nieuwe businessregel.
+   *
+   * Cascade-keten: begrotingsversies --CASCADE--> *_resultaat (header)
+   * --CASCADE--> *_regel/*_control.
+   *
+   * Immutability: dezelfde drie triggers per tabel — negen triggers totaal
+   * voor deze drie tabellen.
+   */
+  {
+    version: 13,
+    description: "Bevroren Verzekeringen-output (frozen resultaat)",
+    ddl: [
+      `CREATE TABLE begroting_frozen_verzekering_resultaat (
+        begroting_versie_id TEXT PRIMARY KEY REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        totaal_berekend_begroot TEXT NOT NULL,
+        totaal_effectief_begroot TEXT NOT NULL,
+        beoordeeld INTEGER NOT NULL CHECK (beoordeeld = 1),
+        review_status TEXT NOT NULL CHECK (review_status IN ('REVIEWED_ZERO_POLICIES', 'REVIEWED_WITH_POLICIES'))
+      )`,
+      `CREATE TABLE begroting_frozen_verzekering_regel (
+        begroting_versie_id TEXT NOT NULL,
+        regel_id INTEGER NOT NULL,
+        complexnummer TEXT NOT NULL,
+        verzekeraar TEXT NOT NULL,
+        ingangsdatum TEXT NOT NULL,
+        looptijd_maanden INTEGER NOT NULL,
+        bedrag TEXT NOT NULL,
+        index_percentage TEXT NOT NULL,
+        handmatig_begroot_override TEXT NULL,
+        berekend_begroot TEXT NOT NULL,
+        effectief_begroot TEXT NOT NULL,
+        eerste_relevante_verlengmoment TEXT NULL,
+        aantal_relevante_verlengmomenten INTEGER NOT NULL,
+        PRIMARY KEY (begroting_versie_id, regel_id),
+        FOREIGN KEY (begroting_versie_id) REFERENCES begroting_frozen_verzekering_resultaat(begroting_versie_id) ON DELETE CASCADE
+      )`,
+      `CREATE TABLE begroting_frozen_verzekering_control (
+        begroting_versie_id TEXT NOT NULL,
+        volgnr INTEGER NOT NULL,
+        regel_id INTEGER NULL,
+        ernst TEXT NOT NULL CHECK (ernst IN ('KRITIEK', 'WAARSCHUWING', 'INFORMATIEF')),
+        bericht TEXT NOT NULL,
+        PRIMARY KEY (begroting_versie_id, volgnr),
+        FOREIGN KEY (begroting_versie_id) REFERENCES begroting_frozen_verzekering_resultaat(begroting_versie_id) ON DELETE CASCADE
+      )`,
+      `CREATE TRIGGER trg_begroting_frozen_verzekering_resultaat_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_frozen_verzekering_resultaat
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_verzekering_resultaat: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_verzekering_resultaat_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_frozen_verzekering_resultaat
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_verzekering_resultaat: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_verzekering_resultaat_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_frozen_verzekering_resultaat
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_verzekering_resultaat: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_verzekering_regel_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_frozen_verzekering_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_verzekering_regel: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_verzekering_regel_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_frozen_verzekering_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_verzekering_regel: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_verzekering_regel_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_frozen_verzekering_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_verzekering_regel: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_verzekering_control_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_frozen_verzekering_control
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_verzekering_control: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_verzekering_control_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_frozen_verzekering_control
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_verzekering_control: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_verzekering_control_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_frozen_verzekering_control
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_verzekering_control: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+    ],
+  },
 ];
 
 function schemaMetaTableExists(db: DatabaseSync): boolean {
