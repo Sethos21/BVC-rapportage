@@ -138,25 +138,69 @@ describe("schrijfFrozenVerzekeringResultaat / leesFrozenVerzekeringResultaat —
     expect(gelezen.regels.find((r) => r.persistentieId === 20)!.regel.effectiefBegroot.toString()).toBe("0");
   });
 
-  it("5. eersteRelevanteVerlengmoment en het aantal (via relevanteVerlengmomenten.length) round-trippen exact", () => {
+  it("5. eersteRelevanteVerlengmoment en het exacte aantalRelevanteVerlengmomenten (1 verlengmoment) round-trippen exact", () => {
     const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
     const resultaat = berekenMetIds([regelInvoer({ ingangsdatum: new Date(Date.UTC(2020, 6, 1)), looptijdMaanden: 12 })], [10]);
     expect(resultaat.regels[0]!.regel.eersteRelevanteVerlengmoment).toEqual(new Date(Date.UTC(2027, 6, 1)));
+    expect(resultaat.regels[0]!.regel.aantalRelevanteVerlengmomenten).toBe(1);
     schrijfFrozenVerzekeringResultaat(db, versie.id, resultaat);
 
     const gelezen = leesFrozenVerzekeringResultaat(db, versie.id)!;
     expect(gelezen.regels[0]!.regel.eersteRelevanteVerlengmoment).toEqual(new Date(Date.UTC(2027, 6, 1)));
     expect(gelezen.regels[0]!.regel.relevanteVerlengmomenten).toEqual([new Date(Date.UTC(2027, 6, 1))]);
+    expect(gelezen.regels[0]!.regel.aantalRelevanteVerlengmomenten).toBe(1);
   });
 
-  it("6. geen verlengmoment dit jaar -> eersteRelevanteVerlengmoment blijft null na round-trip", () => {
+  it("6. geen verlengmoment dit jaar -> eersteRelevanteVerlengmoment blijft null, aantalRelevanteVerlengmomenten blijft exact 0 na round-trip", () => {
     const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
     const resultaat = berekenMetIds([regelInvoer({ ingangsdatum: new Date(Date.UTC(2026, 6, 1)), looptijdMaanden: 24 })], [10]);
+    expect(resultaat.regels[0]!.regel.aantalRelevanteVerlengmomenten).toBe(0);
     schrijfFrozenVerzekeringResultaat(db, versie.id, resultaat);
 
     const gelezen = leesFrozenVerzekeringResultaat(db, versie.id)!;
     expect(gelezen.regels[0]!.regel.eersteRelevanteVerlengmoment).toBeNull();
     expect(gelezen.regels[0]!.regel.relevanteVerlengmomenten).toEqual([]);
+    expect(gelezen.regels[0]!.regel.aantalRelevanteVerlengmomenten).toBe(0);
+  });
+
+  it("6b (code-review-correctie). meerdere verlengmomenten binnen hetzelfde jaar: het EXACTE aantal blijft na frozen round-trip behouden, ook al bevat de teruggelezen datumlijst alleen het eerste moment", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    // looptijd 6 maanden vanaf 01-01-2026 -> twee verlengmomenten binnen begrotingsjaar 2027 (01-01 en 01-07).
+    const resultaat = berekenMetIds([regelInvoer({ ingangsdatum: new Date(Date.UTC(2026, 0, 1)), looptijdMaanden: 6 })], [10]);
+    expect(resultaat.regels[0]!.regel.relevanteVerlengmomenten).toHaveLength(2);
+    expect(resultaat.regels[0]!.regel.aantalRelevanteVerlengmomenten).toBe(2);
+    schrijfFrozenVerzekeringResultaat(db, versie.id, resultaat);
+
+    const ruweRij = db
+      .prepare(`SELECT aantal_relevante_verlengmomenten FROM begroting_frozen_verzekering_regel WHERE begroting_versie_id = ?`)
+      .get(versie.id) as { aantal_relevante_verlengmomenten: number };
+    expect(ruweRij.aantal_relevante_verlengmomenten).toBe(2);
+
+    const gelezen = leesFrozenVerzekeringResultaat(db, versie.id)!;
+    // Bewust NIET gelijk aan de oorspronkelijke lijst-lengte (2) — de teruggelezen datumlijst bevat
+    // hooguit het eerste moment (zie moduledoc, bewuste vereenvoudiging). Het EXACTE aantal blijft
+    // wél apart, correct, behouden via het eigen veld.
+    expect(gelezen.regels[0]!.regel.relevanteVerlengmomenten).toHaveLength(1);
+    expect(gelezen.regels[0]!.regel.aantalRelevanteVerlengmomenten).toBe(2);
+  });
+
+  it("6c (code-review-correctie). frozen read reconstrueert het aantal NOOIT opnieuw via businesslogica — een bewust inconsistent bevroren aantal blijft ongewijzigd teruggelezen", () => {
+    // Bewijst dat leesFrozenVerzekeringResultaat de pure calculator niet opnieuw aanroept: een frozen rij
+    // met een aantal dat NIET overeenkomt met wat een live herberekening van dezelfde ingangsdatum/
+    // looptijd/begrotingsjaar zou opleveren, komt ONGEWIJZIGD terug — zou dit wél herberekend worden, dan
+    // zou hier het correcte aantal (1) terugkomen in plaats van het kunstmatig afwijkende bevroren aantal.
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    const resultaat = berekenMetIds([regelInvoer({ ingangsdatum: new Date(Date.UTC(2020, 6, 1)), looptijdMaanden: 12 })], [10]);
+    expect(resultaat.regels[0]!.regel.aantalRelevanteVerlengmomenten).toBe(1); // werkelijke, correcte waarde
+    schrijfFrozenVerzekeringResultaat(db, versie.id, resultaat);
+
+    // De versie is hier bewust nog CONCEPT (geen `markeerVastgesteld` aangeroepen) — de
+    // immutability-triggers blokkeren pas na VASTGESTELD, dus deze directe SQL-mutatie is hier
+    // toegestaan en dient uitsluitend om een kunstmatig inconsistent bevroren aantal te simuleren.
+    db.prepare(`UPDATE begroting_frozen_verzekering_regel SET aantal_relevante_verlengmomenten = 7 WHERE begroting_versie_id = ?`).run(versie.id);
+
+    const gelezen = leesFrozenVerzekeringResultaat(db, versie.id)!;
+    expect(gelezen.regels[0]!.regel.aantalRelevanteVerlengmomenten).toBe(7); // het kunstmatig gemanipuleerde bevroren aantal, NIET herberekend naar 1
   });
 
   it("7. controls exact behouden, regelIndex correct vertaald naar/van persistentieId", () => {

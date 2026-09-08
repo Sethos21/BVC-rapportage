@@ -155,6 +155,15 @@ export interface BgVerzekeringRegelUitkomst {
   eersteRelevanteVerlengmoment: Date | null;
   /** ALLE verlengmomenten binnen `begrotingsjaar` (kan leeg, één, of meerdere zijn) — uitsluitend het eerste element draagt financieel bij (OB032-004/005). */
   relevanteVerlengmomenten: Date[];
+  /**
+   * `relevanteVerlengmomenten.length` — als EIGEN, expliciet veld (code-review-correctie
+   * 2026-09-08) zodat het werkelijke aantal onafhankelijk van de volledige datumlijst
+   * beschikbaar blijft. Reden: frozen persistence bewaart bewust niet de volledige
+   * `relevanteVerlengmomenten`-lijst (zie `frozenVerzekeringResultaat.ts`'s moduledoc), maar
+   * het exacte aantal moet ook ná een frozen round-trip behouden blijven — dit veld maakt dat
+   * type-safe mogelijk zonder de datumlijst te hoeven reconstrueren.
+   */
+  aantalRelevanteVerlengmomenten: number;
 }
 
 export interface BgVerzekeringResultaat {
@@ -210,10 +219,25 @@ const MAX_ITERATIES = 2000;
 
 /**
  * Bepaalt ALLE contractuele verlengmomenten van een polis die binnen
- * `begrotingsjaar` vallen — gezocht vanaf `ingangsdatum + looptijdMaanden`,
+ * `begrotingsjaar` vallen — gezocht vanaf `ingangsdatum + 1×looptijdMaanden`,
  * `ingangsdatum + 2×looptijdMaanden`, enzovoort. De ingangsdatum ZELF wordt
  * nooit als verlengmoment meegeteld (OB032-004/Correctie 2) — dat is
- * waarom de zoekreeks bij `+1×looptijdMaanden` begint, niet bij `+0`.
+ * waarom de zoekreeks bij `k = 1` begint, niet bij `k = 0`.
+ *
+ * ELKE OCCURRENCE WORDT RECHTSTREEKS VANUIT DE ORIGINELE `ingangsdatum`
+ * BEREKEND (`addMaandenUTC(ingangsdatum, k × looptijdMaanden)`) — NOOIT
+ * vanaf de vorige, mogelijk al geklemde kandidaat (code-review-correctie
+ * 2026-09-08). Een vorige-kandidaat-als-basis zou bij een dag die niet in
+ * elke doelmaand bestaat (bv. ingangsdatum 31 januari, looptijd 1 maand)
+ * een KETTING van steeds verder driftende klemmingen veroorzaken: de eerste
+ * stap klemt 31 januari + 1 maand af op 28 februari, en een volgende stap
+ * VANAF DIE GEKLEMDE 28e zou een contractueel onjuiste 28 maart opleveren
+ * in plaats van de correcte 31 maart (het contract loopt nog steeds af op
+ * de 31e van elke looptijd-maand, de februari-klemming is een eenmalig
+ * kalenderfeit, geen nieuwe contractdag). Door iedere `k` onafhankelijk
+ * vanaf de ongewijzigde `ingangsdatum` te berekenen, is elke klemming
+ * geïsoleerd en herstelt de eerstvolgende occurrence automatisch naar de
+ * oorspronkelijke dag-van-de-maand zodra de doelmaand die dag weer heeft.
  *
  * Regime-onafhankelijk (zie moduledoc): deze functie hoeft niet te weten of
  * `ingangsdatum` vóór, in, of ná `begrotingsjaar` ligt — voor elk van die
@@ -222,16 +246,19 @@ const MAX_ITERATIES = 2000;
  */
 export function bepaalRelevanteVerlengmomenten(ingangsdatum: Date, looptijdMaanden: number, begrotingsjaar: number): Date[] {
   const momenten: Date[] = [];
-  let kandidaat = addMaandenUTC(ingangsdatum, looptijdMaanden);
+  let k = 1;
+  let kandidaat = addMaandenUTC(ingangsdatum, k * looptijdMaanden);
   let iteraties = 0;
 
   while (kandidaat.getUTCFullYear() < begrotingsjaar && iteraties < MAX_ITERATIES) {
-    kandidaat = addMaandenUTC(kandidaat, looptijdMaanden);
+    k += 1;
+    kandidaat = addMaandenUTC(ingangsdatum, k * looptijdMaanden);
     iteraties += 1;
   }
   while (kandidaat.getUTCFullYear() === begrotingsjaar && iteraties < MAX_ITERATIES) {
     momenten.push(kandidaat);
-    kandidaat = addMaandenUTC(kandidaat, looptijdMaanden);
+    k += 1;
+    kandidaat = addMaandenUTC(ingangsdatum, k * looptijdMaanden);
     iteraties += 1;
   }
 
@@ -347,7 +374,15 @@ function berekenRegel(
   const effectiefBegroot = overrideGeldig ? (invoer.handmatigBegrootOverride as Decimal) : berekendBegroot;
 
   return {
-    uitkomst: { index, invoer, berekendBegroot, effectiefBegroot, eersteRelevanteVerlengmoment, relevanteVerlengmomenten },
+    uitkomst: {
+      index,
+      invoer,
+      berekendBegroot,
+      effectiefBegroot,
+      eersteRelevanteVerlengmoment,
+      relevanteVerlengmomenten,
+      aantalRelevanteVerlengmomenten: relevanteVerlengmomenten.length,
+    },
     controleVereist,
   };
 }

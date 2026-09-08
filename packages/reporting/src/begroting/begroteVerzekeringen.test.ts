@@ -61,6 +61,41 @@ describe("bepaalRelevanteVerlengmomenten — geïsoleerde datumlogica", () => {
     expect(momenten).toEqual([new Date(Date.UTC(2027, 0, 1))]);
   });
 
+  it("11 (code-review-correctie A). ingangsdatum 31-01-2027, looptijd 1 maand -> elke maandultimo, geen driftende klemming", () => {
+    const momenten = bepaalRelevanteVerlengmomenten(new Date(Date.UTC(2027, 0, 31)), 1, 2027);
+    expect(momenten).toEqual([
+      new Date(Date.UTC(2027, 1, 28)), // februari (geen schrikkeljaar) — geklemd op 28
+      new Date(Date.UTC(2027, 2, 31)), // maart — HERSTELD naar 31, niet 28 (bewijst geen kettingdrift)
+      new Date(Date.UTC(2027, 3, 30)),
+      new Date(Date.UTC(2027, 4, 31)),
+      new Date(Date.UTC(2027, 5, 30)),
+      new Date(Date.UTC(2027, 6, 31)),
+      new Date(Date.UTC(2027, 7, 31)),
+      new Date(Date.UTC(2027, 8, 30)),
+      new Date(Date.UTC(2027, 9, 31)),
+      new Date(Date.UTC(2027, 10, 30)),
+      new Date(Date.UTC(2027, 11, 31)),
+    ]);
+  });
+
+  it("12 (code-review-correctie B). ingangsdatum 31-01 van een schrikkeljaar -> februari geklemd op 29, maart herstelt naar 31", () => {
+    const momenten = bepaalRelevanteVerlengmomenten(new Date(Date.UTC(2028, 0, 31)), 1, 2028); // 2028 is een schrikkeljaar
+    expect(momenten[0]).toEqual(new Date(Date.UTC(2028, 1, 29))); // februari 2028 heeft 29 dagen
+    expect(momenten[1]).toEqual(new Date(Date.UTC(2028, 2, 31))); // maart herstelt naar 31, niet 29
+  });
+
+  it("13 (code-review-correctie C). een normale datum (15e van de maand) verandert niet door deze correctie", () => {
+    const momenten = bepaalRelevanteVerlengmomenten(new Date(Date.UTC(2026, 11, 15)), 1, 2027);
+    expect(momenten[0]).toEqual(new Date(Date.UTC(2027, 0, 15)));
+    expect(momenten[1]).toEqual(new Date(Date.UTC(2027, 1, 15)));
+    expect(momenten[11]).toEqual(new Date(Date.UTC(2027, 11, 15)));
+  });
+
+  it("14 (code-review-correctie D). bestaand voorbeeld 01-07-2020 + 12 maanden -> 01-07-2027 blijft exact gelijk", () => {
+    const momenten = bepaalRelevanteVerlengmomenten(new Date(Date.UTC(2020, 6, 1)), 12, 2027);
+    expect(momenten).toEqual([new Date(Date.UTC(2027, 6, 1))]);
+  });
+
   it("10. ingangsdatum exact op 31 december van het begrotingsjaar (grensgeval)", () => {
     const momenten = bepaalRelevanteVerlengmomenten(new Date(Date.UTC(2026, 11, 31)), 12, 2027);
     expect(momenten).toEqual([new Date(Date.UTC(2027, 11, 31))]);

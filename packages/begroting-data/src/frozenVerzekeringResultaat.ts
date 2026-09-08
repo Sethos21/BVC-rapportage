@@ -20,14 +20,18 @@ import type { HerberekendVerzekeringResultaat, VerzekeringRegelUitkomstMetId } f
  *
  * VERLENGMOMENTEN, BEWUST VEREENVOUDIGD (OB032-correctie): alleen het
  * EERSTE relevante verlengmoment (`eersteRelevanteVerlengmoment`) en het
- * AANTAL (`relevanteVerlengmomenten.length`) worden bevroren — niet de
- * volledige datumreeks. Reden: uitsluitend het eerste moment is financieel
- * bepalend (`berekendBegroot` is er al mee berekend, dus zelf al volledig
- * gereproduceerd), en geen enkele bronregel bij 070 toont een polis met
- * een sub-jaarlijkse looptijd die tot meerdere momenten zou leiden — een
- * volledige child-tabel voor die lijst zou functionaliteit bouwen die nog
- * niet aantoonbaar nodig is (zelfde principe als "geen perComplex zonder
- * bewezen noodzaak").
+ * AANTAL (het EXPLICIETE `aantalRelevanteVerlengmomenten`-veld, code-review-
+ * correctie 2026-09-08 — NOOIT `relevanteVerlengmomenten.length` gebruiken,
+ * want de teruggelezen datumlijst bevat hooguit één element) worden
+ * bevroren — niet de volledige datumreeks. Reden: uitsluitend het eerste
+ * moment is financieel bepalend (`berekendBegroot` is er al mee berekend,
+ * dus zelf al volledig gereproduceerd), en geen enkele bronregel bij 070
+ * toont een polis met een sub-jaarlijkse looptijd die tot meerdere
+ * momenten zou leiden — een volledige child-tabel voor die lijst zou
+ * functionaliteit bouwen die nog niet aantoonbaar nodig is (zelfde
+ * principe als "geen perComplex zonder bewezen noodzaak"). Het EXACTE
+ * bevroren aantal gaat hierdoor nooit verloren, ook al is de
+ * teruggelezen datumlijst korter dan het werkelijke aantal.
  *
  * CONTROL → PERSISTENTIE-ID-VERTALING: exact hetzelfde principe als
  * `frozenCorrectiefDagelijksOnderhoudResultaat.ts`. De pure calculator se
@@ -171,7 +175,7 @@ export function schrijfFrozenVerzekeringResultaatZonderTransactie(
       regel.berekendBegroot.toString(),
       regel.effectiefBegroot.toString(),
       optioneleBusinessDate(regel.eersteRelevanteVerlengmoment),
-      regel.relevanteVerlengmomenten.length,
+      regel.aantalRelevanteVerlengmomenten,
     );
   }
 
@@ -214,9 +218,11 @@ export function schrijfFrozenVerzekeringResultaat(db: DatabaseSync, versieId: st
  * ÉÉN set volstaat, geen aparte "ingevoerd vs. berekend"-splitsing nodig.
  * `relevanteVerlengmomenten` wordt gereconstrueerd als een array met
  * uitsluitend het bevroren `eersteRelevanteVerlengmoment` erin (lengte 0
- * of 1) — het bevroren `aantal_relevante_verlengmomenten` blijft apart
- * beschikbaar voor wie het werkelijke aantal wil weten (zie moduledoc:
- * bewuste vereenvoudiging, de volledige lijst wordt niet bevroren).
+ * of 1) — het EXACTE bevroren aantal blijft daarnaast apart beschikbaar
+ * via `aantalRelevanteVerlengmomenten` (rechtstreeks uit de kolom
+ * `aantal_relevante_verlengmomenten`, NOOIT via `.length` van de
+ * — mogelijk kortere — teruggelezen lijst; zie moduledoc: bewuste
+ * vereenvoudiging, de volledige lijst wordt niet bevroren).
  */
 export function leesFrozenVerzekeringResultaat(db: DatabaseSync, versieId: string): HerberekendVerzekeringResultaat | null {
   const header = db.prepare(`SELECT * FROM begroting_frozen_verzekering_resultaat WHERE begroting_versie_id = ?`).get(versieId) as unknown as
@@ -257,7 +263,13 @@ export function leesFrozenVerzekeringResultaat(db: DatabaseSync, versieId: strin
       berekendBegroot: new Decimal(rij.berekend_begroot),
       effectiefBegroot: new Decimal(rij.effectief_begroot),
       eersteRelevanteVerlengmoment,
+      // Bewuste vereenvoudiging (zie moduledoc): de datumlijst bevat hooguit het eerste moment, NOOIT de
+      // volledige bevroren reeks — maar `aantalRelevanteVerlengmomenten` hieronder komt rechtstreeks uit de
+      // bevroren kolom `aantal_relevante_verlengmomenten`, dus dat exacte aantal gaat nooit verloren, ook al
+      // is de lijst zelf korter (code-review-correctie 2026-09-08: NOOIT `.length` van deze lijst gebruiken
+      // als "het aantal" — dat zou hier altijd 0 of 1 zijn, nooit het werkelijke bevroren aantal).
       relevanteVerlengmomenten: eersteRelevanteVerlengmoment !== null ? [eersteRelevanteVerlengmoment] : [],
+      aantalRelevanteVerlengmomenten: rij.aantal_relevante_verlengmomenten,
     };
     return { persistentieId: rij.regel_id, regel: regelUitkomst };
   });
