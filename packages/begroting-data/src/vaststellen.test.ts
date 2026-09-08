@@ -14,10 +14,12 @@ import {
 } from "./begrotingsversies.js";
 import { openOrCreateDatabase } from "./database.js";
 import { leesFrozenCorrectiefDagelijksOnderhoudResultaat } from "./frozenCorrectiefDagelijksOnderhoudResultaat.js";
+import { leesFrozenGemeentelijkeLastenResultaat } from "./frozenGemeentelijkeLastenResultaat.js";
 import { leesFrozenGeplandOnderhoudResultaat } from "./frozenGeplandOnderhoudResultaat.js";
 import { leesFrozenModule3Resultaat, schrijfFrozenModule3Resultaat } from "./frozenModule3Resultaat.js";
 import { leesFrozenBegrotingsresultaat, schrijfFrozenBegrotingsresultaat } from "./frozenResultaat.js";
 import { leesFrozenVerzekeringResultaat } from "./frozenVerzekeringResultaat.js";
+import { schrijfGemeentelijkeLastenModule, type GemeentelijkeLastenModuleInvoer } from "./gemeentelijkeLastenModule.js";
 import { herberekenBegroting } from "./herberekenen.js";
 import { leesModule1Aannames, schrijfModule1Aannames } from "./module1Aannames.js";
 import { schrijfModule1Overrides } from "./module1Overrides.js";
@@ -34,6 +36,7 @@ import { schrijfGeplandOnderhoudBeoordeeld } from "./geplandOnderhoudBeoordeeld.
 import { schrijfVerzekeringBeoordeeld } from "./verzekeringBeoordeeld.js";
 import { schrijfVerzekeringRegels, type VerzekeringRegelInvoer } from "./verzekeringRegels.js";
 import { stelBegrotingVast } from "./vaststellen.js";
+import { schrijfWozObjecten, type WozObjectInvoer } from "./wozObjecten.js";
 
 let dir: string;
 let dbPad: string;
@@ -92,6 +95,24 @@ const MODULE3_STANDAARD: BgManagementInvoer = {
   ingangsdatum: null,
 };
 
+/**
+ * Minimale, geldige Gemeentelijke-Lasten/WOZ-module-invoer (OB-033, fase P3)
+ * — uitsluitend gebruikt om aan de nieuwe vaststel-verplichting te voldoen
+ * in tests die zelf niets specifieks over Gemeentelijke Lasten beweren.
+ * `beoordeeld=true` met 0 WOZ-objecten en alle vier aannames `null` is,
+ * sinds de OB033-016-correctie, een geldige, KRITIEK-vrije toestand
+ * (REVIEWED_ZERO_OBJECTS) — zie `begroteGemeentelijkeLasten.ts`'s
+ * moduledoc. Tests die Gemeentelijke Lasten zelf inhoudelijk toetsen
+ * gebruiken hun eigen, expliciete invoer.
+ */
+const GEMEENTELIJKE_LASTEN_ZERO_OBJECTS: GemeentelijkeLastenModuleInvoer = {
+  werkelijkeGemeentelijkeLasten: null,
+  wozStijgingPercentage: null,
+  lastenPercentageStijging: null,
+  begrotingsPercentageOverride: null,
+  beoordeeld: true,
+};
+
 /** Zet de echte 070-contract-049-keten neer (identiek aan 1D.5/1D.6a) via uitsluitend publieke schrijf-API's. */
 function zet070InputNeer(versieId: string): void {
   schrijfModule1Snapshot(db, versieId, [
@@ -126,6 +147,7 @@ describe("stelBegrotingVast — status- en invoersemantiek", () => {
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
     stelBegrotingVast(db, versie.id, new Date());
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow(/CONCEPT/);
@@ -146,6 +168,7 @@ describe("stelBegrotingVast — status- en invoersemantiek", () => {
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.module1.contracten).toEqual([]);
   });
@@ -158,6 +181,7 @@ describe("stelBegrotingVast — status- en invoersemantiek", () => {
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
     expect(() => stelBegrotingVast(db, versie.id)).not.toThrow();
   });
 
@@ -169,6 +193,7 @@ describe("stelBegrotingVast — status- en invoersemantiek", () => {
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.module2.complexen).toEqual([]);
   });
@@ -183,6 +208,7 @@ describe("stelBegrotingVast — recomputatie tegen huidige input, niet tegen oud
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
 
     // Bewust afwijkende, tijdelijke frozen output neerzetten (een eerdere, inmiddels-stale CONCEPT-poging).
     const stale = herberekenBegroting(db, versie.id);
@@ -217,6 +243,7 @@ describe("stelBegrotingVast — controls blokkeren niet", () => {
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
 
     const resultaat = stelBegrotingVast(db, versie.id); // mag NIET gooien ondanks de controls
     expect(resultaat.module1.controleVereist.length).toBeGreaterThan(0);
@@ -234,6 +261,7 @@ describe("stelBegrotingVast — succesvolle vaststelling, timestamp, read-back",
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
 
     const timestamp = new Date("2026-12-20T10:15:30.123Z");
     const resultaat = stelBegrotingVast(db, versie.id, timestamp);
@@ -255,6 +283,7 @@ describe("stelBegrotingVast — succesvolle vaststelling, timestamp, read-back",
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
 
     const resultaat = stelBegrotingVast(db, versie.id, new Date("2026-12-20T10:15:30.123Z"));
     const gelezen = leesFrozenBegrotingsresultaat(db, versie.id)!;
@@ -272,6 +301,7 @@ describe("stelBegrotingVast — succesvolle vaststelling, timestamp, read-back",
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
 
     const dump = () => ({
       snapshot: db.prepare(`SELECT * FROM begroting_contract_snapshot`).all(),
@@ -299,6 +329,7 @@ describe("stelBegrotingVast — immutability na vaststellen (alle publieke write
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
     const resultaat = stelBegrotingVast(db, versie.id);
 
     expect(() => wijzigConceptNaamNotitie(db, versie.id, { naam: "mag niet" })).toThrow();
@@ -323,6 +354,7 @@ describe("stelBegrotingVast — atomiciteit / rollback", () => {
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
 
     // Al een geldige, tijdelijke frozen output vóór de poging.
     const vorigeFrozen = herberekenBegroting(db, versie.id);
@@ -359,6 +391,7 @@ describe("stelBegrotingVast — atomiciteit / rollback", () => {
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
 
     // Al een geldige, tijdelijke frozen output vóór de poging.
     const vorigeFrozen = herberekenBegroting(db, versie.id);
@@ -396,6 +429,7 @@ describe("stelBegrotingVast — atomiciteit / rollback", () => {
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
 
     const vorigeFrozen = herberekenBegroting(db, versie.id);
     schrijfFrozenBegrotingsresultaat(db, versie.id, vorigeFrozen);
@@ -459,6 +493,7 @@ describe("stelBegrotingVast — 070 end-to-end", () => {
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
 
     const timestamp = new Date("2026-12-20T10:15:30.123Z");
     const resultaat = stelBegrotingVast(db, versie.id, timestamp);
@@ -519,6 +554,7 @@ describe("stelBegrotingVast — Fase 2C.5: Module 3 verplicht bij vaststellen", 
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
 
     const resultaat = stelBegrotingVast(db, versie.id);
 
@@ -546,6 +582,7 @@ describe("stelBegrotingVast — Fase 2C.5: Module 3 verplicht bij vaststellen", 
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
 
     const resultaat = stelBegrotingVast(db, versie.id);
 
@@ -568,6 +605,7 @@ describe("stelBegrotingVast — Fase 2C.5: Module 3 verplicht bij vaststellen", 
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
 
     const resultaat = stelBegrotingVast(db, versie.id);
 
@@ -585,6 +623,7 @@ describe("stelBegrotingVast — Fase 2C.5: Module 3 verplicht bij vaststellen", 
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
 
     const resultaat = stelBegrotingVast(db, versie.id);
 
@@ -610,6 +649,7 @@ describe("stelBegrotingVast — Fase 2C.5: Module 3 verplicht bij vaststellen", 
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
 
     // Al een geldige, tijdelijke frozen output vóór de poging (Module 1/2 én Module 3).
     const vorigeFrozen = herberekenBegroting(db, versie.id);
@@ -652,6 +692,7 @@ describe("stelBegrotingVast — Fase 2C.5: Module 3 verplicht bij vaststellen", 
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
 
     const vorigeFrozen = herberekenBegroting(db, versie.id);
     schrijfFrozenBegrotingsresultaat(db, versie.id, vorigeFrozen);
@@ -690,6 +731,7 @@ describe("stelBegrotingVast — Fase 2C.5: Module 3 verplicht bij vaststellen", 
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
     const eersteResultaat = stelBegrotingVast(db, versie.id);
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow();
@@ -748,6 +790,7 @@ describe("stelBegrotingVast — Gepland Onderhoud lifecycle-blokkade (GO-P3)", (
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow(/KRITIEKE controls/);
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
@@ -761,6 +804,7 @@ describe("stelBegrotingVast — Gepland Onderhoud lifecycle-blokkade (GO-P3)", (
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
 
     expect(() => stelBegrotingVast(db, versie.id)).not.toThrow();
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("VASTGESTELD");
@@ -773,6 +817,7 @@ describe("stelBegrotingVast — Gepland Onderhoud lifecycle-blokkade (GO-P3)", (
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
 
     expect(() => stelBegrotingVast(db, versie.id)).not.toThrow();
   });
@@ -782,7 +827,8 @@ describe("stelBegrotingVast — Gepland Onderhoud lifecycle-blokkade (GO-P3)", (
     zetMinimaleBasisNeer(versie.id);
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true); // 0 activiteiten
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true); // 0 regels
-    schrijfVerzekeringBeoordeeld(db, versie.id, true); // 0 polisregels
+    schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS); // 0 polisregels
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.geplandOnderhoud.reviewStatus).toBe("REVIEWED_ZERO_ACTIVITIES");
@@ -803,6 +849,7 @@ describe("stelBegrotingVast — Gepland Onderhoud lifecycle-blokkade (GO-P3)", (
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow(/KRITIEKE controls/);
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
@@ -815,6 +862,7 @@ describe("stelBegrotingVast — Gepland Onderhoud lifecycle-blokkade (GO-P3)", (
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow(/KRITIEKE controls/);
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
@@ -827,6 +875,7 @@ describe("stelBegrotingVast — Gepland Onderhoud lifecycle-blokkade (GO-P3)", (
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow(/KRITIEKE controls/);
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
@@ -839,6 +888,7 @@ describe("stelBegrotingVast — Gepland Onderhoud lifecycle-blokkade (GO-P3)", (
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.geplandOnderhoud.activiteiten[0]?.activiteit.q1.toString()).toBe("-500");
@@ -862,7 +912,8 @@ describe("stelBegrotingVast — Gepland Onderhoud lifecycle-blokkade (GO-P3)", (
     schrijfModule3Invoer(db, versie.id, MODULE3_STANDAARD);
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true); // 0 activiteiten, geen KRITIEK
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true); // 0 regels, geen KRITIEK
-    schrijfVerzekeringBeoordeeld(db, versie.id, true); // 0 polisregels, geen KRITIEK
+    schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS); // 0 polisregels, geen KRITIEK
 
     const resultaat = stelBegrotingVast(db, versie.id); // mag NIET gooien ondanks de Module-1-controls
     expect(resultaat.module1.controleVereist.length).toBeGreaterThan(0);
@@ -876,6 +927,7 @@ describe("stelBegrotingVast — Gepland Onderhoud lifecycle-blokkade (GO-P3)", (
     schrijfGeplandOnderhoudBeoordeeld(db, versieZonder.id, true);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versieZonder.id, true);
     schrijfVerzekeringBeoordeeld(db, versieZonder.id, true);
+    schrijfGemeentelijkeLastenModule(db, versieZonder.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
     const resultaatZonder = stelBegrotingVast(db, versieZonder.id);
 
     const versieMet = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
@@ -885,6 +937,7 @@ describe("stelBegrotingVast — Gepland Onderhoud lifecycle-blokkade (GO-P3)", (
     schrijfGeplandOnderhoudBeoordeeld(db, versieMet.id, true);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versieMet.id, true);
     schrijfVerzekeringBeoordeeld(db, versieMet.id, true);
+    schrijfGemeentelijkeLastenModule(db, versieMet.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
     const resultaatMet = stelBegrotingVast(db, versieMet.id);
 
     expect(normaliseer(resultaatZonder.module1)).toEqual(normaliseer(resultaatMet.module1));
@@ -925,6 +978,7 @@ describe("stelBegrotingVast — Gepland Onderhoud: volledige pipeline en frozen 
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("VASTGESTELD");
@@ -949,6 +1003,7 @@ describe("stelBegrotingVast — Gepland Onderhoud: volledige pipeline en frozen 
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
 
     const dump = () => ({
       activiteiten: db.prepare(`SELECT * FROM begroting_gepland_onderhoud_activiteit`).all(),
@@ -998,6 +1053,7 @@ describe("stelBegrotingVast — Gepland Onderhoud atomiciteit (GO-P3)", () => {
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
 
     // Test-only trigger: blokkeert ELKE INSERT op de GO-activiteit-frozen-tabel — die wordt, volgens de
     // schrijfvolgorde in vaststellen.ts, bereikt NADAT Module 1/2 EN Module 3 al succesvol binnen DEZE
@@ -1030,6 +1086,7 @@ describe("stelBegrotingVast — Gepland Onderhoud atomiciteit (GO-P3)", () => {
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
 
     // Test-only trigger: blokkeert specifiek de CONCEPT→VASTGESTELD-overgang zelf. Op het moment dat deze
     // vuurt, zijn Module 1, Module 2, Module 3 ÉN Gepland Onderhoud binnen DEZE mislukte poging al
@@ -1103,6 +1160,7 @@ describe("stelBegrotingVast — Correctief/Dagelijks Onderhoud lifecycle-blokkad
     schrijfCorrectiefDagelijksOnderhoudRegels(db, versie.id, [regelInvoer({ omschrijving: "" })]);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow(/KRITIEKE controls/);
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
@@ -1115,6 +1173,7 @@ describe("stelBegrotingVast — Correctief/Dagelijks Onderhoud lifecycle-blokkad
     schrijfCorrectiefDagelijksOnderhoudRegels(db, versie.id, [regelInvoer({ jaarbedrag: null })]);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow(/KRITIEKE controls/);
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
@@ -1130,6 +1189,7 @@ describe("stelBegrotingVast — Correctief/Dagelijks Onderhoud lifecycle-blokkad
     schrijfCorrectiefDagelijksOnderhoudRegels(db, versie.id, [regelInvoer({ jaarbedrag: new Decimal(NaN) })]);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow(/KRITIEKE controls/);
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
@@ -1141,6 +1201,7 @@ describe("stelBegrotingVast — Correctief/Dagelijks Onderhoud lifecycle-blokkad
     schrijfCorrectiefDagelijksOnderhoudRegels(db, versie.id, [regelInvoer({ jaarbedrag: new Decimal(-500) })]);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
 
     expect(() => stelBegrotingVast(db, versie.id)).not.toThrow();
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("VASTGESTELD");
@@ -1152,6 +1213,7 @@ describe("stelBegrotingVast — Correctief/Dagelijks Onderhoud lifecycle-blokkad
     schrijfCorrectiefDagelijksOnderhoudRegels(db, versie.id, [regelInvoer()]);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
 
     expect(() => stelBegrotingVast(db, versie.id)).not.toThrow();
   });
@@ -1160,7 +1222,8 @@ describe("stelBegrotingVast — Correctief/Dagelijks Onderhoud lifecycle-blokkad
     const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
     zetMinimaleBasisNeer(versie.id);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true); // 0 regels
-    schrijfVerzekeringBeoordeeld(db, versie.id, true); // 0 polisregels
+    schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS); // 0 polisregels
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.correctiefDagelijksOnderhoud.reviewStatus).toBe("REVIEWED_ZERO_RULES");
@@ -1181,6 +1244,7 @@ describe("stelBegrotingVast — Correctief/Dagelijks Onderhoud lifecycle-blokkad
     ]);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.correctiefDagelijksOnderhoud.totaalJaar.toString()).toBe("700");
@@ -1205,7 +1269,8 @@ describe("stelBegrotingVast — Correctief/Dagelijks Onderhoud lifecycle-blokkad
     schrijfModule3Invoer(db, versie.id, MODULE3_STANDAARD);
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true); // 0 regels, geen KRITIEK
-    schrijfVerzekeringBeoordeeld(db, versie.id, true); // 0 polisregels, geen KRITIEK
+    schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS); // 0 polisregels, geen KRITIEK
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.module1.controleVereist.some((c) => c.contractnummer === "0000000028" && c.bericht.includes("meerdere indexatiepercentage-overrides"))).toBe(true);
@@ -1218,6 +1283,7 @@ describe("stelBegrotingVast — Correctief/Dagelijks Onderhoud lifecycle-blokkad
     schrijfCorrectiefDagelijksOnderhoudRegels(db, versie.id, [regelInvoer()]);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.correctiefDagelijksOnderhoud).toBeDefined();
@@ -1244,6 +1310,7 @@ describe("stelBegrotingVast — Correctief/Dagelijks Onderhoud atomiciteit (CD-P
     schrijfCorrectiefDagelijksOnderhoudRegels(db, versieId, [regelInvoer()]);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versieId, true);
     schrijfVerzekeringBeoordeeld(db, versieId, true);
+    schrijfGemeentelijkeLastenModule(db, versieId, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
   }
 
   it("11. geforceerde fout tijdens schrijven frozen Correctief/Dagelijks Onderhoud laat volledige rollback zien — status blijft CONCEPT, geen enkele frozen output (Module 1/2/3/GO/CD)", () => {
@@ -1320,6 +1387,7 @@ describe("stelBegrotingVast — Correctief/Dagelijks Onderhoud immutability (CD-
     schrijfCorrectiefDagelijksOnderhoudRegels(db, versie.id, [regelInvoer()]);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
     stelBegrotingVast(db, versie.id);
 
     expect(() =>
@@ -1361,6 +1429,7 @@ describe("stelBegrotingVast — Correctief/Dagelijks Onderhoud immutability (CD-
     const [regel] = schrijfCorrectiefDagelijksOnderhoudRegels(db, versie.id, [regelInvoer()]);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
     stelBegrotingVast(db, versie.id);
 
     expect(() =>
@@ -1390,6 +1459,7 @@ describe("stelBegrotingVast — Correctief/Dagelijks Onderhoud frozen-onafhankel
     schrijfCorrectiefDagelijksOnderhoudRegels(db, versie.id, [regelInvoer({ jaarbedrag: new Decimal(1200) })]);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
     stelBegrotingVast(db, versie.id);
 
     const vóórDirecteMutatie = leesFrozenCorrectiefDagelijksOnderhoudResultaat(db, versie.id)!;
@@ -1457,6 +1527,7 @@ describe("stelBegrotingVast — Verzekeringen lifecycle-blokkade (OB-032)", () =
     zetMinimaleBasisNeer(versie.id);
     schrijfVerzekeringRegels(db, versie.id, [regelInvoer({ complexnummer: null })]);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow(/KRITIEKE controls/);
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
@@ -1468,6 +1539,7 @@ describe("stelBegrotingVast — Verzekeringen lifecycle-blokkade (OB-032)", () =
     zetMinimaleBasisNeer(versie.id);
     schrijfVerzekeringRegels(db, versie.id, [regelInvoer({ verzekeraar: null })]);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow(/KRITIEKE controls/);
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
@@ -1478,6 +1550,7 @@ describe("stelBegrotingVast — Verzekeringen lifecycle-blokkade (OB-032)", () =
     zetMinimaleBasisNeer(versie.id);
     schrijfVerzekeringRegels(db, versie.id, [regelInvoer({ ingangsdatum: null })]);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow(/KRITIEKE controls/);
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
@@ -1488,6 +1561,7 @@ describe("stelBegrotingVast — Verzekeringen lifecycle-blokkade (OB-032)", () =
     zetMinimaleBasisNeer(versie.id);
     schrijfVerzekeringRegels(db, versie.id, [regelInvoer({ looptijdMaanden: 0 })]);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow(/KRITIEKE controls/);
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
@@ -1498,6 +1572,7 @@ describe("stelBegrotingVast — Verzekeringen lifecycle-blokkade (OB-032)", () =
     zetMinimaleBasisNeer(versie.id);
     schrijfVerzekeringRegels(db, versie.id, [regelInvoer({ bedrag: new Decimal(-500) })]);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
 
     expect(() => stelBegrotingVast(db, versie.id)).not.toThrow();
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("VASTGESTELD");
@@ -1508,6 +1583,7 @@ describe("stelBegrotingVast — Verzekeringen lifecycle-blokkade (OB-032)", () =
     zetMinimaleBasisNeer(versie.id);
     schrijfVerzekeringRegels(db, versie.id, [regelInvoer()]);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.verzekering.totaalBerekendBegroot.toString()).toBe("12180");
@@ -1516,7 +1592,8 @@ describe("stelBegrotingVast — Verzekeringen lifecycle-blokkade (OB-032)", () =
   it("8. beoordeeld=true + 0 regels mag vaststellen -> frozen REVIEWED_ZERO_POLICIES, totalen 0, geen regelrijen", () => {
     const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
     zetMinimaleBasisNeer(versie.id);
-    schrijfVerzekeringBeoordeeld(db, versie.id, true); // 0 regels
+    schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS); // 0 regels
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.verzekering.reviewStatus).toBe("REVIEWED_ZERO_POLICIES");
@@ -1534,6 +1611,7 @@ describe("stelBegrotingVast — Verzekeringen lifecycle-blokkade (OB-032)", () =
     zetMinimaleBasisNeer(versie.id);
     schrijfVerzekeringRegels(db, versie.id, [regelInvoer({ ingangsdatum: new Date(Date.UTC(2027, 6, 1)) })]);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.verzekering.totaalBerekendBegroot.toString()).toBe("6000");
@@ -1548,6 +1626,7 @@ describe("stelBegrotingVast — Verzekeringen lifecycle-blokkade (OB-032)", () =
     zetMinimaleBasisNeer(versie.id);
     schrijfVerzekeringRegels(db, versie.id, [regelInvoer({ ingangsdatum: new Date(Date.UTC(2029, 0, 1)) })]);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.verzekering.totaalBerekendBegroot.toString()).toBe("0");
@@ -1559,6 +1638,7 @@ describe("stelBegrotingVast — Verzekeringen lifecycle-blokkade (OB-032)", () =
     zetMinimaleBasisNeer(versie.id);
     schrijfVerzekeringRegels(db, versie.id, [regelInvoer({ ingangsdatum: new Date(Date.UTC(2026, 0, 1)), looptijdMaanden: 6 })]);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.verzekering.totaalBerekendBegroot.toString()).toBe("12360");
@@ -1572,6 +1652,7 @@ describe("stelBegrotingVast — Verzekeringen lifecycle-blokkade (OB-032)", () =
     zetMinimaleBasisNeer(versie.id);
     schrijfVerzekeringRegels(db, versie.id, [regelInvoer({ handmatigBegrootOverride: new Decimal(0) })]);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.verzekering.totaalBerekendBegroot.toString()).toBe("12180");
@@ -1593,7 +1674,8 @@ describe("stelBegrotingVast — Verzekeringen lifecycle-blokkade (OB-032)", () =
     schrijfModule3Invoer(db, versie.id, MODULE3_STANDAARD);
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
-    schrijfVerzekeringBeoordeeld(db, versie.id, true); // 0 polisregels, geen KRITIEK
+    schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS); // 0 polisregels, geen KRITIEK
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(
@@ -1607,6 +1689,7 @@ describe("stelBegrotingVast — Verzekeringen lifecycle-blokkade (OB-032)", () =
     zetMinimaleBasisNeer(versie.id);
     schrijfVerzekeringRegels(db, versie.id, [regelInvoer()]);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.verzekering).toBeDefined();
@@ -1637,6 +1720,7 @@ describe("stelBegrotingVast — Verzekeringen atomiciteit (OB-032)", () => {
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versieId, true);
     schrijfVerzekeringRegels(db, versieId, [regelInvoer()]);
     schrijfVerzekeringBeoordeeld(db, versieId, true);
+    schrijfGemeentelijkeLastenModule(db, versieId, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
   }
 
   it("15. geforceerde fout tijdens schrijven frozen Verzekeringen laat volledige rollback zien — status blijft CONCEPT, geen enkele frozen output", () => {
@@ -1715,6 +1799,7 @@ describe("stelBegrotingVast — Verzekeringen immutability (OB-032)", () => {
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringRegels(db, versie.id, [regelInvoer()]);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
     stelBegrotingVast(db, versie.id);
 
     expect(() =>
@@ -1751,6 +1836,7 @@ describe("stelBegrotingVast — Verzekeringen immutability (OB-032)", () => {
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     const [regel] = schrijfVerzekeringRegels(db, versie.id, [regelInvoer()]);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
     stelBegrotingVast(db, versie.id);
 
     expect(() => db.prepare(`UPDATE begroting_verzekering_regel SET verzekeraar = 'x' WHERE id = ?`).run(regel!.id)).toThrow(/immutable/);
@@ -1782,6 +1868,7 @@ describe("stelBegrotingVast — Verzekeringen frozen-onafhankelijkheid (OB-032)"
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringRegels(db, versie.id, [regelInvoer()]);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
     stelBegrotingVast(db, versie.id);
 
     const vóórDirecteMutatie = leesFrozenVerzekeringResultaat(db, versie.id)!;
@@ -1794,5 +1881,485 @@ describe("stelBegrotingVast — Verzekeringen frozen-onafhankelijkheid (OB-032)"
 
     const náDirecteMutatie = leesFrozenVerzekeringResultaat(db, versie.id)!;
     expect(náDirecteMutatie.totaalBerekendBegroot.toString()).toBe("12180"); // ongewijzigd — frozen read leest nooit de concept-tabel
+  });
+});
+
+describe("stelBegrotingVast — Gemeentelijke Lasten/WOZ lifecycle-blokkade (OB-033, fase P3)", () => {
+  // OB-033 fase P3: Gemeentelijke Lasten/WOZ krijgt, exact zoals Gepland Onderhoud/Correctief-Dagelijks
+  // Onderhoud/Verzekeringen hierboven, een lokale vaststel-blokkade (beoordeeld !== true, of een KRITIEK-
+  // control) — Module 1/2/3 en de eerdere begrotingsposten behouden hun bestaande, ongewijzigde semantiek.
+  // REVIEWED_ZERO_OBJECTS (0 WOZ-objecten, eventueel alle module-aannames null, uitsluitend de zero-object-
+  // WAARSCHUWING — zie de OB033-016-correctie) is expliciet een geldige, vaststelbare toestand.
+
+  function wozObjectInvoer(overrides: Partial<WozObjectInvoer> = {}): WozObjectInvoer {
+    return {
+      id: null,
+      complexnummer: "001",
+      wozObjectAdres: "Prins Willem-Alexander Sportpark 2",
+      aanslagjaar: 2026,
+      waardepeildatum: new Date(Date.UTC(2026, 0, 1)),
+      werkelijkeWoz: new Decimal(1000000),
+      verwachteWozOverride: null,
+      ...overrides,
+    };
+  }
+
+  function moduleInvoer(overrides: Partial<GemeentelijkeLastenModuleInvoer> = {}): GemeentelijkeLastenModuleInvoer {
+    return {
+      werkelijkeGemeentelijkeLasten: new Decimal(9000),
+      wozStijgingPercentage: new Decimal(10),
+      lastenPercentageStijging: new Decimal(5),
+      begrotingsPercentageOverride: null,
+      beoordeeld: true,
+      ...overrides,
+    };
+  }
+
+  /**
+   * Minimale, geldige Module-1/2/3-basis (lege snapshot) — deze tests bewijzen uitsluitend Gemeentelijke-
+   * Lasten/WOZ-gedrag. Gepland Onderhoud, Correctief/Dagelijks Onderhoud en Verzekeringen worden hier bewust
+   * op hun eigen, al bewezen geldige toestand gezet — hun EIGEN, bestaande blokkades ongewijzigd
+   * geneutraliseerd, zodat deze tests niet per ongeluk een ANDERE blokkade bewijzen.
+   */
+  function zetMinimaleBasisNeer(versieId: string): void {
+    schrijfModule1Snapshot(db, versieId, []);
+    schrijfModule1Aannames(db, versieId, { begrotingsjaar: 2027, indexatiePercentage: new Decimal(3) });
+    schrijfModule3Invoer(db, versieId, MODULE3_STANDAARD);
+    schrijfGeplandOnderhoudBeoordeeld(db, versieId, true);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versieId, true);
+    schrijfVerzekeringBeoordeeld(db, versieId, true);
+  }
+
+  it("1. beoordeeld=false blokkeert vaststellen, ondanks een verder volledig geldig WOZ-object", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    zetMinimaleBasisNeer(versie.id);
+    schrijfWozObjecten(db, versie.id, [wozObjectInvoer()]); // beoordeeld NOOIT geschreven -> false
+
+    expect(() => stelBegrotingVast(db, versie.id)).toThrow(/niet beoordeeld/);
+    expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
+    expect(leesFrozenGemeentelijkeLastenResultaat(db, versie.id)).toBeNull();
+    expect(leesFrozenBegrotingsresultaat(db, versie.id)).toBeNull(); // geen enkele frozen output, ook niet Module 1/2
+  });
+
+  it("2. beoordeeld=true + KRITIEK (ontbrekend complexnummer op een WOZ-object) blokkeert vaststellen", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    zetMinimaleBasisNeer(versie.id);
+    schrijfWozObjecten(db, versie.id, [wozObjectInvoer({ complexnummer: null })]);
+    schrijfGemeentelijkeLastenModule(db, versie.id, moduleInvoer());
+
+    expect(() => stelBegrotingVast(db, versie.id)).toThrow(/KRITIEKE controls/);
+    expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
+    expect(leesFrozenGemeentelijkeLastenResultaat(db, versie.id)).toBeNull();
+  });
+
+  it("3 (scenario D). beoordeeld=true + >=1 WOZ-object met totaleWerkelijkeWoz=0 blokkeert vaststellen (KRITIEK)", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    zetMinimaleBasisNeer(versie.id);
+    schrijfWozObjecten(db, versie.id, [wozObjectInvoer({ werkelijkeWoz: new Decimal(0) })]);
+    schrijfGemeentelijkeLastenModule(db, versie.id, moduleInvoer());
+
+    expect(() => stelBegrotingVast(db, versie.id)).toThrow(/KRITIEKE controls/);
+    expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
+  });
+
+  it("4 (scenario Q). beoordeeld=true + uitsluitend WAARSCHUWING (negatieve werkelijkeWoz) mag vaststellen", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    zetMinimaleBasisNeer(versie.id);
+    schrijfWozObjecten(db, versie.id, [wozObjectInvoer({ werkelijkeWoz: new Decimal(-500000) })]);
+    schrijfGemeentelijkeLastenModule(db, versie.id, moduleInvoer());
+
+    expect(() => stelBegrotingVast(db, versie.id)).not.toThrow();
+    expect(leesBegrotingsversie(db, versie.id)!.status).toBe("VASTGESTELD");
+  });
+
+  it("5 (scenario A/M). beoordeeld=true + 0 WOZ-objecten + alle module-aannames null mag vaststellen -> REVIEWED_ZERO_OBJECTS, €0, frozen read correct", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    zetMinimaleBasisNeer(versie.id);
+    schrijfGemeentelijkeLastenModule(db, versie.id, {
+      werkelijkeGemeentelijkeLasten: null,
+      wozStijgingPercentage: null,
+      lastenPercentageStijging: null,
+      begrotingsPercentageOverride: null,
+      beoordeeld: true,
+    }); // 0 WOZ-objecten
+
+    const resultaat = stelBegrotingVast(db, versie.id);
+    expect(resultaat.gemeentelijkeLasten.reviewStatus).toBe("REVIEWED_ZERO_OBJECTS");
+    expect(resultaat.gemeentelijkeLasten.begroteGemeentelijkeLasten.toString()).toBe("0");
+    expect(resultaat.gemeentelijkeLasten.controleVereist.some((c) => c.ernst === "KRITIEK")).toBe(false);
+
+    const frozen = leesFrozenGemeentelijkeLastenResultaat(db, versie.id)!;
+    expect(frozen.reviewStatus).toBe("REVIEWED_ZERO_OBJECTS");
+    expect(frozen.beoordeeld).toBe(true);
+    expect(frozen.werkelijkeGemeentelijkeLasten).toBeNull();
+    expect(frozen.wozStijgingPercentage).toBeNull();
+    expect(frozen.begroteGemeentelijkeLasten.toString()).toBe("0");
+    expect(frozen.wozObjecten).toEqual([]);
+    expect(frozen.perComplex).toEqual([]);
+  });
+
+  it("6 (scenario B, exact rekenvoorbeeld). beoordeeld=true + geen KRITIEK mag vaststellen (2 objecten, 2 complexen)", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    zetMinimaleBasisNeer(versie.id);
+    schrijfWozObjecten(db, versie.id, [
+      wozObjectInvoer({ complexnummer: "001", werkelijkeWoz: new Decimal(1000000) }),
+      wozObjectInvoer({ complexnummer: "002", werkelijkeWoz: new Decimal(2000000) }),
+    ]);
+    schrijfGemeentelijkeLastenModule(db, versie.id, moduleInvoer());
+
+    const resultaat = stelBegrotingVast(db, versie.id);
+    expect(resultaat.gemeentelijkeLasten.reviewStatus).toBe("REVIEWED_WITH_OBJECTS");
+    expect(resultaat.gemeentelijkeLasten.begroteGemeentelijkeLasten.toString()).toBe("10395");
+  });
+
+  it("7 (scenario C/D/K). meerdere WOZ-objecten en meerdere complexen frozen roundtrip, perComplex NIET herberekend", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    zetMinimaleBasisNeer(versie.id);
+    schrijfWozObjecten(db, versie.id, [
+      wozObjectInvoer({ complexnummer: "001", werkelijkeWoz: new Decimal(1000000) }),
+      wozObjectInvoer({ complexnummer: "002", werkelijkeWoz: new Decimal(2000000) }),
+    ]);
+    schrijfGemeentelijkeLastenModule(db, versie.id, moduleInvoer());
+    stelBegrotingVast(db, versie.id);
+
+    const frozen = leesFrozenGemeentelijkeLastenResultaat(db, versie.id)!;
+    expect(frozen.wozObjecten).toHaveLength(2);
+    expect(frozen.perComplex).toHaveLength(2);
+    const som = frozen.perComplex.reduce((t, c) => t.plus(c.begroteGemeentelijkeLasten), new Decimal(0));
+    expect(som.toString()).toBe(frozen.begroteGemeentelijkeLasten.toString());
+  });
+
+  it("8 (scenario E). WOZ-override blijft exact frozen", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    zetMinimaleBasisNeer(versie.id);
+    schrijfWozObjecten(db, versie.id, [wozObjectInvoer({ verwachteWozOverride: new Decimal(500000) })]);
+    schrijfGemeentelijkeLastenModule(db, versie.id, moduleInvoer());
+    stelBegrotingVast(db, versie.id);
+
+    const frozen = leesFrozenGemeentelijkeLastenResultaat(db, versie.id)!;
+    expect(frozen.wozObjecten[0]?.wozObject.invoer.verwachteWozOverride?.toString()).toBe("500000");
+    expect(frozen.wozObjecten[0]?.wozObject.effectiefVerwachteWoz.toString()).toBe("500000");
+  });
+
+  it("9 (scenario F). begrotingsPercentageOverride blijft exact frozen", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    zetMinimaleBasisNeer(versie.id);
+    schrijfWozObjecten(db, versie.id, [wozObjectInvoer()]);
+    schrijfGemeentelijkeLastenModule(db, versie.id, moduleInvoer({ begrotingsPercentageOverride: new Decimal(2) }));
+    stelBegrotingVast(db, versie.id);
+
+    const frozen = leesFrozenGemeentelijkeLastenResultaat(db, versie.id)!;
+    expect(frozen.begrotingsPercentageOverride?.toString()).toBe("2");
+    expect(frozen.effectiefBegrotingsPercentage.toString()).toBe("2");
+  });
+
+  it("10 (scenario G). expliciete Decimal(0)-WOZ-override blijft €0 en wordt niet null", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    zetMinimaleBasisNeer(versie.id);
+    schrijfWozObjecten(db, versie.id, [wozObjectInvoer({ verwachteWozOverride: new Decimal(0) })]);
+    schrijfGemeentelijkeLastenModule(db, versie.id, moduleInvoer());
+    stelBegrotingVast(db, versie.id);
+
+    const frozen = leesFrozenGemeentelijkeLastenResultaat(db, versie.id)!;
+    expect(frozen.wozObjecten[0]?.wozObject.invoer.verwachteWozOverride).not.toBeNull();
+    expect(frozen.wozObjecten[0]?.wozObject.invoer.verwachteWozOverride?.toString()).toBe("0");
+    expect(frozen.wozObjecten[0]?.wozObject.effectiefVerwachteWoz.toString()).toBe("0");
+  });
+
+  it("11 (scenario H). waardepeildatum (business date) exact behouden", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    zetMinimaleBasisNeer(versie.id);
+    schrijfWozObjecten(db, versie.id, [wozObjectInvoer({ waardepeildatum: new Date(Date.UTC(2019, 0, 31)) })]);
+    schrijfGemeentelijkeLastenModule(db, versie.id, moduleInvoer());
+    stelBegrotingVast(db, versie.id);
+
+    const frozen = leesFrozenGemeentelijkeLastenResultaat(db, versie.id)!;
+    expect(frozen.wozObjecten[0]?.wozObject.invoer.waardepeildatum).toEqual(new Date(Date.UTC(2019, 0, 31)));
+  });
+
+  it("12 (scenario I). aanslagjaar exact behouden", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    zetMinimaleBasisNeer(versie.id);
+    schrijfWozObjecten(db, versie.id, [wozObjectInvoer({ aanslagjaar: 2018 })]);
+    schrijfGemeentelijkeLastenModule(db, versie.id, moduleInvoer());
+    stelBegrotingVast(db, versie.id);
+
+    const frozen = leesFrozenGemeentelijkeLastenResultaat(db, versie.id)!;
+    expect(frozen.wozObjecten[0]?.wozObject.invoer.aanslagjaar).toBe(2018);
+  });
+
+  it("13 (scenario J). oorspronkelijke persistentie-ID per WOZ-object behouden", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    zetMinimaleBasisNeer(versie.id);
+    const [a, b] = schrijfWozObjecten(db, versie.id, [
+      wozObjectInvoer({ complexnummer: "001" }),
+      wozObjectInvoer({ complexnummer: "002" }),
+    ]);
+    schrijfGemeentelijkeLastenModule(db, versie.id, moduleInvoer());
+    stelBegrotingVast(db, versie.id);
+
+    const frozen = leesFrozenGemeentelijkeLastenResultaat(db, versie.id)!;
+    expect(frozen.wozObjecten.map((o) => o.persistentieId).sort((x, y) => x - y)).toEqual([a!.id, b!.id].sort((x, y) => x - y));
+  });
+
+  it("14 (scenario L). controls exact frozen", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    zetMinimaleBasisNeer(versie.id);
+    schrijfWozObjecten(db, versie.id, [wozObjectInvoer({ werkelijkeWoz: new Decimal(-500000) })]);
+    schrijfGemeentelijkeLastenModule(db, versie.id, moduleInvoer());
+    const resultaat = stelBegrotingVast(db, versie.id);
+    const live = resultaat.gemeentelijkeLasten.controleVereist.find((c) => c.ernst === "WAARSCHUWING")!;
+
+    const frozen = leesFrozenGemeentelijkeLastenResultaat(db, versie.id)!;
+    const bevroren = frozen.controleVereist.find((c) => c.ernst === "WAARSCHUWING")!;
+    expect(bevroren.bericht).toBe(live.bericht);
+    expect(bevroren.objectIndex).toBe(live.objectIndex);
+  });
+
+  it("15. het vastgestelde resultaat bevat gemeentelijkeLasten (VastgesteldeBegroting uitgebreid, OB-033 P3)", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    zetMinimaleBasisNeer(versie.id);
+    schrijfWozObjecten(db, versie.id, [wozObjectInvoer()]);
+    schrijfGemeentelijkeLastenModule(db, versie.id, moduleInvoer());
+
+    const resultaat = stelBegrotingVast(db, versie.id);
+    expect(resultaat.gemeentelijkeLasten).toBeDefined();
+    expect(resultaat.gemeentelijkeLasten.werkelijkeGemeentelijkeLasten?.toString()).toBe("9000");
+  });
+});
+
+describe("stelBegrotingVast — Gemeentelijke Lasten/WOZ atomiciteit (OB-033, fase P3)", () => {
+  function wozObjectInvoer(overrides: Partial<WozObjectInvoer> = {}): WozObjectInvoer {
+    return {
+      id: null,
+      complexnummer: "001",
+      wozObjectAdres: "Prins Willem-Alexander Sportpark 2",
+      aanslagjaar: 2026,
+      waardepeildatum: new Date(Date.UTC(2026, 0, 1)),
+      werkelijkeWoz: new Decimal(1000000),
+      verwachteWozOverride: null,
+      ...overrides,
+    };
+  }
+
+  function zetGeldigeBasisNeer(versieId: string): void {
+    schrijfModule1Snapshot(db, versieId, []);
+    schrijfModule1Aannames(db, versieId, { begrotingsjaar: 2027, indexatiePercentage: new Decimal(3) });
+    schrijfModule3Invoer(db, versieId, MODULE3_STANDAARD);
+    schrijfGeplandOnderhoudBeoordeeld(db, versieId, true);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versieId, true);
+    schrijfVerzekeringBeoordeeld(db, versieId, true);
+    schrijfWozObjecten(db, versieId, [wozObjectInvoer()]);
+    schrijfGemeentelijkeLastenModule(db, versieId, {
+      werkelijkeGemeentelijkeLasten: new Decimal(9000),
+      wozStijgingPercentage: new Decimal(10),
+      lastenPercentageStijging: new Decimal(5),
+      begrotingsPercentageOverride: null,
+      beoordeeld: true,
+    });
+  }
+
+  it("16 (scenario U). geforceerde fout tijdens schrijven frozen Gemeentelijke-Lasten laat volledige rollback zien — status blijft CONCEPT, geen enkele frozen output (ook niet van eerder geschreven modules)", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    zetGeldigeBasisNeer(versie.id);
+
+    db.exec(
+      `CREATE TRIGGER test_blokkeer_frozen_gemeentelijke_lasten_insert
+       BEFORE INSERT ON begroting_frozen_gemeentelijke_lasten_resultaat
+       FOR EACH ROW
+       BEGIN
+         SELECT RAISE(ABORT, 'geforceerde schrijffout tijdens Gemeentelijke-Lasten-frozen-write');
+       END;`,
+    );
+
+    expect(() => stelBegrotingVast(db, versie.id)).toThrow(/geforceerde schrijffout tijdens Gemeentelijke-Lasten-frozen-write/);
+
+    const naMislukking = leesBegrotingsversie(db, versie.id)!;
+    expect(naMislukking.status).toBe("CONCEPT");
+    expect(naMislukking.vastgesteldAt).toBeNull();
+    expect(leesFrozenGemeentelijkeLastenResultaat(db, versie.id)).toBeNull();
+    expect(leesFrozenVerzekeringResultaat(db, versie.id)).toBeNull();
+    expect(leesFrozenCorrectiefDagelijksOnderhoudResultaat(db, versie.id)).toBeNull();
+    expect(leesFrozenGeplandOnderhoudResultaat(db, versie.id)).toBeNull();
+    expect(leesFrozenModule3Resultaat(db, versie.id)).toBeNull();
+    expect(leesFrozenBegrotingsresultaat(db, versie.id)).toBeNull();
+  });
+
+  it("17 (scenario V). geforceerde fout NA geslaagde Gemeentelijke-Lasten-frozen-writes maar vóór de statuswijziging laat volledige rollback zien (hardste bewijs)", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    zetGeldigeBasisNeer(versie.id);
+
+    db.exec(`
+      CREATE TRIGGER test_blokkeer_statusflip_gemeentelijke_lasten
+      BEFORE UPDATE ON begrotingsversies
+      FOR EACH ROW
+      WHEN NEW.status = 'VASTGESTELD' AND OLD.status = 'CONCEPT'
+      BEGIN
+        SELECT RAISE(ABORT, 'test: geforceerde statusflip-fout (gemeentelijke lasten)');
+      END;
+    `);
+
+    expect(() => stelBegrotingVast(db, versie.id)).toThrow(/geforceerde statusflip-fout \(gemeentelijke lasten\)/);
+
+    const naMislukking = leesBegrotingsversie(db, versie.id)!;
+    expect(naMislukking.status).toBe("CONCEPT");
+    expect(naMislukking.vastgesteldAt).toBeNull();
+    expect(leesFrozenGemeentelijkeLastenResultaat(db, versie.id)).toBeNull();
+    expect(leesFrozenVerzekeringResultaat(db, versie.id)).toBeNull();
+    expect(leesFrozenCorrectiefDagelijksOnderhoudResultaat(db, versie.id)).toBeNull();
+    expect(leesFrozenGeplandOnderhoudResultaat(db, versie.id)).toBeNull();
+    expect(leesFrozenBegrotingsresultaat(db, versie.id)).toBeNull();
+    expect(leesFrozenModule3Resultaat(db, versie.id)).toBeNull();
+  });
+});
+
+describe("stelBegrotingVast — Gemeentelijke Lasten/WOZ immutability (OB-033, fase P3)", () => {
+  function wozObjectInvoer(overrides: Partial<WozObjectInvoer> = {}): WozObjectInvoer {
+    return {
+      id: null,
+      complexnummer: "001",
+      wozObjectAdres: "Prins Willem-Alexander Sportpark 2",
+      aanslagjaar: 2026,
+      waardepeildatum: new Date(Date.UTC(2026, 0, 1)),
+      werkelijkeWoz: new Decimal(1000000),
+      verwachteWozOverride: null,
+      ...overrides,
+    };
+  }
+
+  it("18 (scenario S/T). na vaststellen zijn INSERT/UPDATE/DELETE op alle vier frozen Gemeentelijke-Lasten-tabellen geblokkeerd", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    schrijfModule1Snapshot(db, versie.id, []);
+    schrijfModule1Aannames(db, versie.id, { begrotingsjaar: 2027, indexatiePercentage: new Decimal(3) });
+    schrijfModule3Invoer(db, versie.id, MODULE3_STANDAARD);
+    schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    // Negatieve werkelijkeWoz geeft bewust een WAARSCHUWING-control, zodat de control-tabel niet leeg is —
+    // anders zou de DELETE-trigger daarop nooit een matchende rij vinden (0 rijen = geen trigger-fire).
+    schrijfWozObjecten(db, versie.id, [wozObjectInvoer({ werkelijkeWoz: new Decimal(-500000) })]);
+    schrijfGemeentelijkeLastenModule(db, versie.id, {
+      werkelijkeGemeentelijkeLasten: new Decimal(9000),
+      wozStijgingPercentage: new Decimal(10),
+      lastenPercentageStijging: new Decimal(5),
+      begrotingsPercentageOverride: null,
+      beoordeeld: true,
+    });
+    stelBegrotingVast(db, versie.id);
+
+    expect(() =>
+      db
+        .prepare(
+          `INSERT INTO begroting_frozen_gemeentelijke_lasten_resultaat
+             (begroting_versie_id, beoordeeld, review_status, totale_werkelijke_woz, historisch_lasten_percentage,
+              automatisch_begrotings_percentage, effectief_begrotings_percentage, totale_automatisch_verwachte_woz,
+              totale_effectief_verwachte_woz, begrote_gemeentelijke_lasten)
+           VALUES (?, 1, 'REVIEWED_ZERO_OBJECTS', '0', '0', '0', '0', '0', '0', '0')`,
+        )
+        .run("een-andere-versie-id"),
+    ).toThrow(/immutable|FOREIGN KEY/);
+    expect(() =>
+      db.prepare(`UPDATE begroting_frozen_gemeentelijke_lasten_resultaat SET begrote_gemeentelijke_lasten = '999' WHERE begroting_versie_id = ?`).run(
+        versie.id,
+      ),
+    ).toThrow(/immutable/);
+    expect(() => db.prepare(`DELETE FROM begroting_frozen_gemeentelijke_lasten_resultaat WHERE begroting_versie_id = ?`).run(versie.id)).toThrow(
+      /immutable/,
+    );
+
+    expect(() => db.prepare(`UPDATE begroting_frozen_woz_object SET complexnummer = 'x' WHERE begroting_versie_id = ?`).run(versie.id)).toThrow(
+      /immutable/,
+    );
+    expect(() => db.prepare(`DELETE FROM begroting_frozen_woz_object WHERE begroting_versie_id = ?`).run(versie.id)).toThrow(/immutable/);
+
+    expect(() => db.prepare(`DELETE FROM begroting_frozen_gemeentelijke_lasten_complex WHERE begroting_versie_id = ?`).run(versie.id)).toThrow(
+      /immutable/,
+    );
+
+    expect(() =>
+      db
+        .prepare(`INSERT INTO begroting_frozen_gemeentelijke_lasten_control (begroting_versie_id, volgnr, ernst, bericht) VALUES (?, 99, 'INFORMATIEF', 'x')`)
+        .run(versie.id),
+    ).toThrow(/immutable/);
+    expect(() => db.prepare(`DELETE FROM begroting_frozen_gemeentelijke_lasten_control WHERE begroting_versie_id = ?`).run(versie.id)).toThrow(
+      /immutable/,
+    );
+  });
+
+  it("19 (scenario R). concept-input-immutability uit migratie 14 blijft ongewijzigd geblokkeerd na vaststellen", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    schrijfModule1Snapshot(db, versie.id, []);
+    schrijfModule1Aannames(db, versie.id, { begrotingsjaar: 2027, indexatiePercentage: new Decimal(3) });
+    schrijfModule3Invoer(db, versie.id, MODULE3_STANDAARD);
+    schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    const [wozObject] = schrijfWozObjecten(db, versie.id, [wozObjectInvoer()]);
+    schrijfGemeentelijkeLastenModule(db, versie.id, {
+      werkelijkeGemeentelijkeLasten: new Decimal(9000),
+      wozStijgingPercentage: new Decimal(10),
+      lastenPercentageStijging: new Decimal(5),
+      begrotingsPercentageOverride: null,
+      beoordeeld: true,
+    });
+    stelBegrotingVast(db, versie.id);
+
+    expect(() => db.prepare(`UPDATE begroting_woz_object SET complexnummer = 'x' WHERE id = ?`).run(wozObject!.id)).toThrow(/immutable/);
+    expect(() => db.prepare(`DELETE FROM begroting_woz_object WHERE id = ?`).run(wozObject!.id)).toThrow(/immutable/);
+    expect(() => db.prepare(`UPDATE begroting_gemeentelijke_lasten_module SET beoordeeld = 0 WHERE begroting_versie_id = ?`).run(versie.id)).toThrow(
+      /immutable/,
+    );
+  });
+});
+
+describe("stelBegrotingVast — Gemeentelijke Lasten/WOZ frozen-onafhankelijkheid (OB-033, fase P3)", () => {
+  function wozObjectInvoer(overrides: Partial<WozObjectInvoer> = {}): WozObjectInvoer {
+    return {
+      id: null,
+      complexnummer: "001",
+      wozObjectAdres: "Prins Willem-Alexander Sportpark 2",
+      aanslagjaar: 2026,
+      waardepeildatum: new Date(Date.UTC(2026, 0, 1)),
+      werkelijkeWoz: new Decimal(1000000),
+      verwachteWozOverride: null,
+      ...overrides,
+    };
+  }
+
+  it("20 (scenario W/X). leesFrozenGemeentelijkeLastenResultaat blijft na vaststellen stabiel, ook al zou concept-data ná afloop wijzigen; bestaande frozen resultaten van andere modules blijven exact ongewijzigd", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    schrijfModule1Snapshot(db, versie.id, []);
+    schrijfModule1Aannames(db, versie.id, { begrotingsjaar: 2027, indexatiePercentage: new Decimal(3) });
+    schrijfModule3Invoer(db, versie.id, MODULE3_STANDAARD);
+    schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfWozObjecten(db, versie.id, [wozObjectInvoer()]);
+    schrijfGemeentelijkeLastenModule(db, versie.id, {
+      werkelijkeGemeentelijkeLasten: new Decimal(9000),
+      wozStijgingPercentage: new Decimal(10),
+      lastenPercentageStijging: new Decimal(5),
+      begrotingsPercentageOverride: null,
+      beoordeeld: true,
+    });
+    stelBegrotingVast(db, versie.id);
+
+    const vóórDirecteMutatie = leesFrozenGemeentelijkeLastenResultaat(db, versie.id)!;
+    expect(vóórDirecteMutatie.begroteGemeentelijkeLasten.toString()).toBe("10395");
+    const module1Vóór = leesFrozenBegrotingsresultaat(db, versie.id)!;
+    const verzekeringVóór = leesFrozenVerzekeringResultaat(db, versie.id)!;
+
+    // Rechtstreekse, buiten-de-API-om SQL-mutatie van de CONCEPT-WOZ-objecttabel — uitsluitend om aan te
+    // tonen dat de frozen read deze tabel structureel niet meer raadpleegt.
+    db.exec(`DROP TRIGGER trg_begroting_woz_object_vastgesteld_no_update`);
+    db.prepare(`UPDATE begroting_woz_object SET werkelijke_woz = '999999999' WHERE begroting_versie_id = ?`).run(versie.id);
+
+    const náDirecteMutatie = leesFrozenGemeentelijkeLastenResultaat(db, versie.id)!;
+    expect(náDirecteMutatie.begroteGemeentelijkeLasten.toString()).toBe("10395"); // ongewijzigd — frozen read leest nooit de concept-tabel
+
+    // Bestaande frozen resultaten van andere modules blijven byte-voor-byte ongewijzigd naast OB-033's frozen output.
+    const normaliseer = (waarde: unknown) => JSON.stringify(waarde, (_key, v) => (v instanceof Decimal ? v.toString() : v));
+    expect(normaliseer(leesFrozenBegrotingsresultaat(db, versie.id))).toBe(normaliseer(module1Vóór));
+    expect(normaliseer(leesFrozenVerzekeringResultaat(db, versie.id))).toBe(normaliseer(verzekeringVóór));
   });
 });

@@ -116,6 +116,23 @@ export {
 // — de publieke schrijf-ingang is en blijft `schrijfFrozenVerzekeringResultaat`.
 export { schrijfFrozenVerzekeringResultaat, leesFrozenVerzekeringResultaat } from "./frozenVerzekeringResultaat.js";
 
+// Bevroren Gemeentelijke-Lasten/WOZ-output (OB-033, fase P3) — uitsluitend
+// serialisatie/deserialisatie van de bestaande `HerberekendGemeentelijkeLastenResultaat`,
+// aangevuld met de apart bevroren `werkelijkeGemeentelijkeLasten` (geen
+// onderdeel van de pure calculator se returntype, zie
+// `frozenGemeentelijkeLastenResultaat.ts`'s moduledoc) — geen shadow-
+// resultaattype voor de rest. Strikt gescheiden van
+// `gemeentelijkeLastenModule.ts`/`wozObjecten.ts` (de persistente CONCEPT-
+// input): deze laag leest die tabellen nooit terug om een resultaat te
+// reconstrueren. `schrijfFrozenGemeentelijkeLastenResultaatZonderTransactie`
+// blijft bewust intern — de publieke schrijf-ingang is en blijft
+// `schrijfFrozenGemeentelijkeLastenResultaat`.
+export {
+  schrijfFrozenGemeentelijkeLastenResultaat,
+  leesFrozenGemeentelijkeLastenResultaat,
+  type FrozenGemeentelijkeLastenResultaat,
+} from "./frozenGemeentelijkeLastenResultaat.js";
+
 // De atomaire VASTSTELLEN-operatie (1D.6b) — de enige publieke weg om een
 // CONCEPT-versie definitief VASTGESTELD te maken. Bundelt uitsluitend de
 // bestaande `Begrotingsversie`/`BgHuurResultaat`/`BgBeheerResultaat`/

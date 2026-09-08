@@ -2,6 +2,10 @@ import type { DatabaseSync } from "node:sqlite";
 import type { BgBeheerResultaat, BgHuurResultaat, BgManagementResultaat } from "@bvc/reporting";
 import { leesBegrotingsversie, markeerVastgesteld, type Begrotingsversie } from "./begrotingsversies.js";
 import { schrijfFrozenCorrectiefDagelijksOnderhoudResultaatZonderTransactie } from "./frozenCorrectiefDagelijksOnderhoudResultaat.js";
+import {
+  schrijfFrozenGemeentelijkeLastenResultaatZonderTransactie,
+  type FrozenGemeentelijkeLastenResultaat,
+} from "./frozenGemeentelijkeLastenResultaat.js";
 import { schrijfFrozenGeplandOnderhoudResultaatZonderTransactie } from "./frozenGeplandOnderhoudResultaat.js";
 import { schrijfFrozenModule3ResultaatZonderTransactie } from "./frozenModule3Resultaat.js";
 import { schrijfFrozenBegrotingsresultaatZonderTransactie } from "./frozenResultaat.js";
@@ -81,8 +85,8 @@ import {
  *
  * VERZEKERINGEN (OB-032, businessbeslissingen OB032-001 t/m 013): volgt
  * EXACT hetzelfde lokale-blokkade-patroon als Gepland Onderhoud/
- * Correctief-Dagelijks Onderhoud hierboven — de DERDE en (tot nu toe)
- * laatste lokale uitzondering. Vaststellen wordt geblokkeerd als:
+ * Correctief-Dagelijks Onderhoud hierboven — de DERDE lokale uitzondering.
+ * Vaststellen wordt geblokkeerd als:
  * (a) `verzekering.beoordeeld !== true`; of
  * (b) `verzekering.controleVereist` bevat één of meer `KRITIEK`-items
  * (waaronder een ontbrekend complexnummer/verzekeraar — OB032-002/009 —
@@ -91,10 +95,31 @@ import {
  * `berekenBegrotingUitInvoer` berekende `verzekering`-resultaat — er wordt
  * niets herberekend of dubbel gevalideerd (zie `begroteVerzekeringen.ts`).
  *
+ * GEMEENTELIJKE LASTEN / WOZ (OB-033, fase P3): volgt EXACT hetzelfde
+ * lokale-blokkade-patroon — de VIERDE en (tot nu toe) laatste lokale
+ * uitzondering. Vaststellen wordt geblokkeerd als:
+ * (a) `gemeentelijkeLasten.beoordeeld !== true`; of
+ * (b) `gemeentelijkeLasten.controleVereist` bevat één of meer `KRITIEK`-
+ * items. WAARSCHUWING/INFORMATIEF blokkeren niet. Dit maakt
+ * `REVIEWED_ZERO_OBJECTS` (`beoordeeld=true`, 0 WOZ-objecten, eventueel
+ * alle module-aannames `null`, uitsluitend de zero-object-WAARSCHUWING —
+ * zie de OB033-016-correctie in `begroteGemeentelijkeLasten.ts`) een
+ * bewust geldige, vaststelbare toestand: er is dan geen KRITIEK, dus geen
+ * blokkade. `>=1 WOZ-object met totaleWerkelijkeWoz = 0` blijft wél
+ * blokkeren — dat IS een KRITIEK (dezelfde generieke regel (b), geen
+ * aparte derde check). Deze twee checks lezen uitsluitend het al door
+ * `berekenBegrotingUitInvoer` berekende `gemeentelijkeLasten`-resultaat —
+ * er wordt niets herberekend of dubbel gevalideerd (zie
+ * `begroteGemeentelijkeLasten.ts`). Frozen output bevat, naast het
+ * berekende resultaat, ook de apart doorgegeven
+ * `invoer.gemeentelijkeLastenModule.werkelijkeGemeentelijkeLasten` (zie
+ * `frozenGemeentelijkeLastenResultaat.ts`'s moduledoc — die aanname wordt
+ * door de pure calculator zelf niet teruggegeven).
+ *
  * Bundelt uitsluitend de al bestaande `Begrotingsversie`/`BgHuurResultaat`/
  * `BgBeheerResultaat`/`BgManagementResultaat`/`HerberekendGeplandOnderhoudResultaat`/
- * `HerberekendCorrectiefDagelijksResultaat`/`HerberekendVerzekeringResultaat`
- * — bewust geen shadow-rekenresultaattype.
+ * `HerberekendCorrectiefDagelijksResultaat`/`HerberekendVerzekeringResultaat`/
+ * `FrozenGemeentelijkeLastenResultaat` — bewust geen shadow-rekenresultaattype.
  */
 export interface VastgesteldeBegroting {
   versie: Begrotingsversie;
@@ -104,6 +129,7 @@ export interface VastgesteldeBegroting {
   geplandOnderhoud: HerberekendGeplandOnderhoudResultaat;
   correctiefDagelijksOnderhoud: HerberekendCorrectiefDagelijksResultaat;
   verzekering: HerberekendVerzekeringResultaat;
+  gemeentelijkeLasten: FrozenGemeentelijkeLastenResultaat;
 }
 
 /**
@@ -177,7 +203,10 @@ export function stelBegrotingVast(db: DatabaseSync, versieId: string, vastgestel
       );
     }
 
-    const { module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud, verzekering } = berekenBegrotingUitInvoer(versieId, invoer);
+    const { module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud, verzekering, gemeentelijkeLasten } = berekenBegrotingUitInvoer(
+      versieId,
+      invoer,
+    );
     // Lokale, expliciete narrowing: `module3` is hier altijd niet-null, want `invoer.module3Invoer !== null`
     // is hierboven al gecontroleerd en `berekenBegrotingUitInvoer` berekent Module 3 uitsluitend (en dan
     // altijd naar een niet-null resultaat) wanneer `module3Invoer` niet-null is. Deze check is dus puur
@@ -229,11 +258,27 @@ export function stelBegrotingVast(db: DatabaseSync, versieId: string, vastgestel
       );
     }
 
+    // Gemeentelijke-Lasten/WOZ-lifecycle-validatie (OB-033, fase P3, zie moduledoc) — UITSLUITEND lokaal voor
+    // Gemeentelijke Lasten/WOZ, wijzigt niets aan hoe de eerdere modules' eigen controleVereist wordt
+    // behandeld hierboven. REVIEWED_ZERO_OBJECTS blijft expliciet vaststelbaar: bij 0 WOZ-objecten bevat
+    // controleVereist (sinds de OB033-016-correctie) geen KRITIEK, uitsluitend de zero-object-WAARSCHUWING.
+    if (!gemeentelijkeLasten.beoordeeld) {
+      throw new Error(
+        `Begrotingsversie ${versieId}: Gemeentelijke Lasten/WOZ is niet beoordeeld (beoordeeld !== true) — vaststellen is niet mogelijk zonder expliciete beoordeling.`,
+      );
+    }
+    if (gemeentelijkeLasten.controleVereist.some((c) => c.ernst === "KRITIEK")) {
+      throw new Error(
+        `Begrotingsversie ${versieId}: Gemeentelijke Lasten/WOZ bevat één of meer KRITIEKE controls — vaststellen is niet mogelijk vóórdat deze zijn opgelost.`,
+      );
+    }
+
     schrijfFrozenBegrotingsresultaatZonderTransactie(db, versieId, { module1, module2 });
     schrijfFrozenModule3ResultaatZonderTransactie(db, versieId, module3);
     schrijfFrozenGeplandOnderhoudResultaatZonderTransactie(db, versieId, geplandOnderhoud);
     schrijfFrozenCorrectiefDagelijksOnderhoudResultaatZonderTransactie(db, versieId, correctiefDagelijksOnderhoud);
     schrijfFrozenVerzekeringResultaatZonderTransactie(db, versieId, verzekering);
+    schrijfFrozenGemeentelijkeLastenResultaatZonderTransactie(db, versieId, gemeentelijkeLasten, invoer.gemeentelijkeLastenModule.werkelijkeGemeentelijkeLasten);
     markeerVastgesteld(db, versieId, vastgesteldAt); // allerlaatste schrijfactie vóór commit
 
     const versie = leesBegrotingsversie(db, versieId);
@@ -241,6 +286,11 @@ export function stelBegrotingVast(db: DatabaseSync, versieId: string, vastgestel
       throw new Error(`Interne fout: begrotingsversie ${versieId} kon direct na vaststellen niet worden teruggelezen.`);
     }
 
-    return { versie, module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud, verzekering };
+    const frozenGemeentelijkeLasten: FrozenGemeentelijkeLastenResultaat = {
+      ...gemeentelijkeLasten,
+      werkelijkeGemeentelijkeLasten: invoer.gemeentelijkeLastenModule.werkelijkeGemeentelijkeLasten,
+    };
+
+    return { versie, module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud, verzekering, gemeentelijkeLasten: frozenGemeentelijkeLasten };
   });
 }
