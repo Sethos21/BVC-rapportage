@@ -2260,6 +2260,333 @@ export const MIGRATIONS: readonly Migration[] = [
        END`,
     ],
   },
+  /**
+   * Migratie 16 — Algemene kosten: concept-input (OB-035 Accountant + OB-036
+   * Algemene/Juridische/Makelaars-/Bankkosten), fase P0/P1.
+   *
+   * DRIE TABELLEN, TWEE FUNDAMENTEEL VERSCHILLENDE SOORTEN:
+   *
+   * 1. `begroting_algemene_kosten_classificatie` — de LOKALE, uitsluitend
+   *    voor dit algemene-kostenblok (GL 4900–4999) geldende OGB-
+   *    kostensoort→categorie-classificatie (zie
+   *    `begroteAlgemeneKosten.ts`'s moduledoc). Bewust ADMINISTRATIE-BREED
+   *    (sleutel `bedrijfsnr`, GEEN `begroting_versie_id`/FK naar
+   *    `begrotingsversies`, GEEN CONCEPT/VASTGESTELD-immutability-triggers)
+   *    — dit is geen begrotingsjaar-gebonden invoer maar een langzaam
+   *    veranderende, herbruikbare classificatieconfiguratie, functioneel
+   *    vergelijkbaar met (maar technisch losstaand van) `@bvc/config`'s
+   *    grootboekmapping. Vrij muteerbaar, ook na vaststellen van een
+   *    begrotingsversie — een latere wijziging mag een reeds vastgestelde
+   *    begroting nooit raken; dat wordt geborgd door de classificatie bij
+   *    vaststellen volledig te bevriezen (zie migratie 17), niet door deze
+   *    tabel te vergrendelen. `PRIMARY KEY (bedrijfsnr, ogb_kostensoort)`
+   *    (geen surrogaat-`id` — niets anders verwijst ooit naar een
+   *    classificatieregel via een technische sleutel, alleen via de
+   *    natuurlijke sleutel zelf) dwingt af dat één OGB-kostensoort binnen
+   *    dezelfde administratie nooit aan twee categorieën tegelijk hangt
+   *    (voorkomt dubbeltelling bij een latere Werkelijk-integratie) — de
+   *    enige harde validatieregel hier.
+   *
+   * 2. `begroting_algemene_kosten_categorie_state` — PER begrotingsversie,
+   *    PER categorie: `beoordeeld` + de optionele Accountant/Bankkosten-
+   *    rekenhulp (`vorig_jaar_bedrag`/`verwachte_verhoging_percentage`).
+   *    PK `(begroting_versie_id, categorie)` — precies 5 mogelijke rijen per
+   *    versie (één per vaste categorie), CHECK op `categorie` sluit een
+   *    zesde/onbekende waarde uit. Zelfde "geen aparte derde toestand"-
+   *    principe als eerdere module-brede aannametabellen: ontbreekt een rij
+   *    voor een categorie, dan is dat functioneel gelijk aan
+   *    `beoordeeld=false` + beide rekenhulpvelden `null` (zie
+   *    `algemeneKostenCategorieState.ts`'s moduledoc).
+   *
+   * 3. `begroting_algemene_kosten_regel` — de eigenlijke begrotingsregels,
+   *    `id INTEGER PRIMARY KEY` (SQLite-rowid) als stabiele sleutel, exact
+   *    het complete-list-save-patroon van eerdere modules (Verzekeringen/
+   *    WOZ-objecten). `categorie` NOT NULL + CHECK (een regel hoort altijd
+   *    bij precies één van de vijf categorieën), `ogb_kostensoort_code`
+   *    NULLABLE (OB-035/036: een regel zonder OGB-koppeling is geldig, o.a.
+   *    voor Accountant/Juridische kosten zonder bewezen mapping — zie
+   *    `begroteAlgemeneKosten.ts`'s moduledoc). `omschrijving` bewust NOT
+   *    NULL (lege string = "nog niet ingevuld", zelfde principe als
+   *    Correctief/Dagelijks Onderhoud — geen apart null-concept nodig voor
+   *    een tekstveld). `complexnummer`/`jaarbedrag` NULLABLE, zelfde
+   *    null-betekenis als in alle eerdere begrotingsposten.
+   *
+   * Immutability: `begroting_algemene_kosten_categorie_state` en
+   * `begroting_algemene_kosten_regel` krijgen elk de gebruikelijke drie
+   * triggers (INSERT/UPDATE/DELETE geblokkeerd zodra de bijbehorende
+   * begrotingsversie VASTGESTELD is) — zes triggers totaal.
+   * `begroting_algemene_kosten_classificatie` krijgt BEWUST GEEN triggers
+   * (geen `begroting_versie_id`, dus geen enkele versie om aan te toetsen —
+   * zie boven).
+   */
+  {
+    version: 16,
+    description: "Algemene kosten: concept-input (lokale OGB-classificatie + categorie-state + regels)",
+    ddl: [
+      `CREATE TABLE begroting_algemene_kosten_classificatie (
+        bedrijfsnr TEXT NOT NULL,
+        ogb_kostensoort TEXT NOT NULL,
+        ogb_kostensoort_omschrijving TEXT NOT NULL,
+        categorie TEXT NOT NULL CHECK (categorie IN ('ACCOUNTANT', 'ALGEMENE_KOSTEN', 'JURIDISCHE_KOSTEN', 'MAKELAARSKOSTEN', 'BANKKOSTEN')),
+        PRIMARY KEY (bedrijfsnr, ogb_kostensoort)
+      )`,
+      `CREATE INDEX idx_begroting_algemene_kosten_classificatie_bedrijfsnr ON begroting_algemene_kosten_classificatie(bedrijfsnr)`,
+      `CREATE TABLE begroting_algemene_kosten_categorie_state (
+        begroting_versie_id TEXT NOT NULL REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        categorie TEXT NOT NULL CHECK (categorie IN ('ACCOUNTANT', 'ALGEMENE_KOSTEN', 'JURIDISCHE_KOSTEN', 'MAKELAARSKOSTEN', 'BANKKOSTEN')),
+        beoordeeld INTEGER NOT NULL CHECK (beoordeeld IN (0, 1)),
+        vorig_jaar_bedrag TEXT NULL,
+        verwachte_verhoging_percentage TEXT NULL,
+        PRIMARY KEY (begroting_versie_id, categorie)
+      )`,
+      `CREATE TABLE begroting_algemene_kosten_regel (
+        id INTEGER PRIMARY KEY,
+        begroting_versie_id TEXT NOT NULL REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        categorie TEXT NOT NULL CHECK (categorie IN ('ACCOUNTANT', 'ALGEMENE_KOSTEN', 'JURIDISCHE_KOSTEN', 'MAKELAARSKOSTEN', 'BANKKOSTEN')),
+        ogb_kostensoort_code TEXT NULL,
+        omschrijving TEXT NOT NULL,
+        complexnummer TEXT NULL,
+        jaarbedrag TEXT NULL
+      )`,
+      `CREATE INDEX idx_begroting_algemene_kosten_regel_versie ON begroting_algemene_kosten_regel(begroting_versie_id)`,
+      `CREATE TRIGGER trg_begroting_algemene_kosten_categorie_state_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_algemene_kosten_categorie_state
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_algemene_kosten_categorie_state: begrotingsversie is VASTGESTELD, categorie-state is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_algemene_kosten_categorie_state_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_algemene_kosten_categorie_state
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_algemene_kosten_categorie_state: begrotingsversie is VASTGESTELD, categorie-state is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_algemene_kosten_categorie_state_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_algemene_kosten_categorie_state
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_algemene_kosten_categorie_state: begrotingsversie is VASTGESTELD, categorie-state is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_algemene_kosten_regel_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_algemene_kosten_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_algemene_kosten_regel: begrotingsversie is VASTGESTELD, regels zijn immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_algemene_kosten_regel_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_algemene_kosten_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_algemene_kosten_regel: begrotingsversie is VASTGESTELD, regels zijn immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_algemene_kosten_regel_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_algemene_kosten_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_algemene_kosten_regel: begrotingsversie is VASTGESTELD, regels zijn immutable');
+       END`,
+    ],
+  },
+  /**
+   * Migratie 17 — bevroren Algemene-Kosten-OUTPUT (OB-035/036, fase P3),
+   * exact zoals `packages/reporting/src/begroting/begroteAlgemeneKosten.ts`/
+   * `HerberekendAlgemeneKostenResultaat` op HEAD kennen. Uitsluitend
+   * serialisatie/deserialisatie van een reeds berekend, puur resultaat.
+   *
+   * VIER TABELLEN:
+   *
+   * 1. `begroting_frozen_algemene_kosten_classificatie` — de VOLLEDIGE,
+   *    resolved lokale classificatie zoals die gold op het moment van
+   *    vaststellen (ALLE regels van `begroting_algemene_kosten_
+   *    classificatie` voor deze administratie op dat moment, ook OGB-codes
+   *    die in geen enkele begrotingsregel zijn gebruikt) — zodat een latere
+   *    wijziging van de actuele classificatie een reeds vastgestelde
+   *    begroting nooit kan beïnvloeden en later precies auditbaar blijft
+   *    welke classificatie gold. Geen FK naar de levende
+   *    `begroting_algemene_kosten_classificatie`-tabel (bewust een volledige
+   *    kopie, geen verwijzing).
+   *
+   * 2. `begroting_frozen_algemene_kosten_categorie` — per categorie:
+   *    `beoordeeld`/`review_status`/`categorie_totaal`/rekenhulp-
+   *    velden/`berekend_voorstel`. PK `(begroting_versie_id, categorie)`,
+   *    exact 5 rijen per versie. `module_totaal` staat BEWUST gedenormaliseerd
+   *    op elk van de vijf rijen (identieke waarde) — er is geen los
+   *    "header"-record voor deze module (zie de cascade-toelichting
+   *    hieronder), en zonder deze kolom zou frozen read het moduletotaal
+   *    moeten herberekenen door de vijf `categorie_totaal`-waarden zelf op
+   *    te tellen, wat sectie 14 van de OB-035/036-opdracht expliciet
+   *    uitsluit ("GEEN opnieuw berekenen moduleTotaal").
+   *
+   * 3. `begroting_frozen_algemene_kosten_regel` — PK
+   *    `(begroting_versie_id, regel_id)`, `regel_id` = de oorspronkelijke
+   *    CONCEPT-`id` uit `begroting_algemene_kosten_regel` (stabiele sleutel,
+   *    zelfde onderbouwing als migratie 9/11/13/15). `omschrijving` blijft
+   *    NOT NULL (net als in CONCEPT); `ogb_kostensoort_code`/
+   *    `complexnummer`/`jaarbedrag` blijven NULLABLE (een succesvol bevroren
+   *    regel kan nog steeds een ontbrekende OGB-koppeling of complexnummer
+   *    hebben — dat blokkeert vaststellen niet vanzelf, alleen KRITIEK doet
+   *    dat, zie `vaststellen.ts`). `financiele_bijdrage` bevat de reeds door
+   *    de pure calculator berekende veilige bijdrage (nooit opnieuw af te
+   *    leiden bij frozen read).
+   *
+   * 4. `begroting_frozen_algemene_kosten_control` — zelfde `volgnr`-patroon
+   *    als elke eerdere control-tabel, met zowel `categorie` (NOT NULL —
+   *    elke control in deze module hoort bij precies één categorie) als
+   *    `regel_id` (NULLABLE — een categoriebrede control, zoals de
+   *    rekenhulp-controls, heeft geen regelkoppeling).
+   *
+   * FROZEN-STATE INVARIANTEN OP DE CATEGORIE-TABEL: `CHECK (beoordeeld = 1)`
+   * en `CHECK (review_status IN ('REVIEWED_ZERO_RULES',
+   * 'REVIEWED_WITH_RULES'))` (nooit `NOT_REVIEWED`) — structurele
+   * bevestiging van een toestand die `vaststellen.ts` al garandeert.
+   *
+   * Cascade-keten: begrotingsversies --CASCADE--> *_categorie/*_regel/
+   * *_control/*_classificatie (alle vier rechtstreeks op
+   * `begroting_versie_id`, geen onderlinge FK-keten nodig — anders dan bij
+   * eerdere modules is hier geen los "header"-record waarvan de andere
+   * tabellen afhangen, want de classificatie-freeze en de categorie-freeze
+   * zijn onafhankelijke top-level records per versie).
+   *
+   * Immutability: dezelfde drie triggers per tabel — twaalf triggers totaal
+   * voor deze vier tabellen.
+   */
+  {
+    version: 17,
+    description: "Bevroren Algemene-Kosten-output (frozen classificatie + resultaat)",
+    ddl: [
+      `CREATE TABLE begroting_frozen_algemene_kosten_classificatie (
+        begroting_versie_id TEXT NOT NULL REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        volgnr INTEGER NOT NULL,
+        ogb_kostensoort TEXT NOT NULL,
+        ogb_kostensoort_omschrijving TEXT NOT NULL,
+        categorie TEXT NOT NULL CHECK (categorie IN ('ACCOUNTANT', 'ALGEMENE_KOSTEN', 'JURIDISCHE_KOSTEN', 'MAKELAARSKOSTEN', 'BANKKOSTEN')),
+        PRIMARY KEY (begroting_versie_id, volgnr)
+      )`,
+      `CREATE TABLE begroting_frozen_algemene_kosten_categorie (
+        begroting_versie_id TEXT NOT NULL REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        categorie TEXT NOT NULL CHECK (categorie IN ('ACCOUNTANT', 'ALGEMENE_KOSTEN', 'JURIDISCHE_KOSTEN', 'MAKELAARSKOSTEN', 'BANKKOSTEN')),
+        beoordeeld INTEGER NOT NULL CHECK (beoordeeld = 1),
+        review_status TEXT NOT NULL CHECK (review_status IN ('REVIEWED_ZERO_RULES', 'REVIEWED_WITH_RULES')),
+        categorie_totaal TEXT NOT NULL,
+        vorig_jaar_bedrag TEXT NULL,
+        verwachte_verhoging_percentage TEXT NULL,
+        berekend_voorstel TEXT NULL,
+        module_totaal TEXT NOT NULL,
+        PRIMARY KEY (begroting_versie_id, categorie)
+      )`,
+      `CREATE TABLE begroting_frozen_algemene_kosten_regel (
+        begroting_versie_id TEXT NOT NULL REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        regel_id INTEGER NOT NULL,
+        categorie TEXT NOT NULL CHECK (categorie IN ('ACCOUNTANT', 'ALGEMENE_KOSTEN', 'JURIDISCHE_KOSTEN', 'MAKELAARSKOSTEN', 'BANKKOSTEN')),
+        ogb_kostensoort_code TEXT NULL,
+        ogb_kostensoort_omschrijving TEXT NULL,
+        omschrijving TEXT NOT NULL,
+        complexnummer TEXT NULL,
+        jaarbedrag TEXT NULL,
+        financiele_bijdrage TEXT NOT NULL,
+        PRIMARY KEY (begroting_versie_id, regel_id)
+      )`,
+      `CREATE TABLE begroting_frozen_algemene_kosten_control (
+        begroting_versie_id TEXT NOT NULL REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        volgnr INTEGER NOT NULL,
+        categorie TEXT NOT NULL CHECK (categorie IN ('ACCOUNTANT', 'ALGEMENE_KOSTEN', 'JURIDISCHE_KOSTEN', 'MAKELAARSKOSTEN', 'BANKKOSTEN')),
+        regel_id INTEGER NULL,
+        ernst TEXT NOT NULL CHECK (ernst IN ('KRITIEK', 'WAARSCHUWING', 'INFORMATIEF')),
+        bericht TEXT NOT NULL,
+        PRIMARY KEY (begroting_versie_id, volgnr)
+      )`,
+      `CREATE TRIGGER trg_begroting_frozen_algemene_kosten_classificatie_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_frozen_algemene_kosten_classificatie
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_algemene_kosten_classificatie: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_algemene_kosten_classificatie_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_frozen_algemene_kosten_classificatie
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_algemene_kosten_classificatie: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_algemene_kosten_classificatie_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_frozen_algemene_kosten_classificatie
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_algemene_kosten_classificatie: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_algemene_kosten_categorie_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_frozen_algemene_kosten_categorie
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_algemene_kosten_categorie: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_algemene_kosten_categorie_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_frozen_algemene_kosten_categorie
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_algemene_kosten_categorie: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_algemene_kosten_categorie_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_frozen_algemene_kosten_categorie
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_algemene_kosten_categorie: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_algemene_kosten_regel_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_frozen_algemene_kosten_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_algemene_kosten_regel: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_algemene_kosten_regel_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_frozen_algemene_kosten_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_algemene_kosten_regel: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_algemene_kosten_regel_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_frozen_algemene_kosten_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_algemene_kosten_regel: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_algemene_kosten_control_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_frozen_algemene_kosten_control
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_algemene_kosten_control: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_algemene_kosten_control_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_frozen_algemene_kosten_control
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_algemene_kosten_control: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_algemene_kosten_control_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_frozen_algemene_kosten_control
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_algemene_kosten_control: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+    ],
+  },
 ];
 
 function schemaMetaTableExists(db: DatabaseSync): boolean {

@@ -1,5 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import {
+  ALGEMENE_KOSTEN_CATEGORIEEN,
+  berekenBegroteAlgemeneKosten,
   berekenBegroteBeheersvergoeding,
   berekenBegroteCorrectiefDagelijksOnderhoud,
   berekenBegroteGemeentelijkeLasten,
@@ -7,6 +9,13 @@ import {
   berekenBegroteHuuropbrengsten,
   berekenBegroteManagementvergoeding,
   berekenBegroteVerzekeringen,
+  type BgAlgemeneKostenCategorie,
+  type BgAlgemeneKostenCategorieAannames,
+  type BgAlgemeneKostenCategorieResultaat,
+  type BgAlgemeneKostenClassificatieRegel,
+  type BgAlgemeneKostenRegelInvoer,
+  type BgAlgemeneKostenRegelUitkomst,
+  type BgAlgemeneKostenResultaat,
   type BgBeheerComplexConfig,
   type BgBeheerResultaat,
   type BgContractFeiten,
@@ -30,6 +39,12 @@ import {
   type BgWozObjectInvoer,
   type BgWozObjectUitkomst,
 } from "@bvc/reporting";
+import {
+  leesAlgemeneKostenCategorieState,
+  type AlgemeneKostenCategorieStateInvoer,
+} from "./algemeneKostenCategorieState.js";
+import { leesAlgemeneKostenClassificatie } from "./algemeneKostenClassificatie.js";
+import { leesAlgemeneKostenRegels, type AlgemeneKostenRegel } from "./algemeneKostenRegels.js";
 import { leesBegrotingsversie, type Begrotingsversie } from "./begrotingsversies.js";
 import {
   leesCorrectiefDagelijksOnderhoudBeoordeeld,
@@ -150,6 +165,22 @@ import { leesWozObjecten, type WozObject } from "./wozObjecten.js";
  * komen 1-op-1 van `leesGemeentelijkeLastenModule` — zie
  * `gemeentelijkeLastenModule.ts`'s moduledoc voor de "geen rij = alle velden
  * null/false"-semantiek.
+ *
+ * ALGEMENE KOSTEN (OB-035/036, Accountant/Algemene/Juridische/Makelaars-/
+ * Bankkosten): volgt hetzelfde niet-nullable ALTIJD-berekend-patroon als
+ * Verzekeringen/WOZ — "0 regels + `beoordeeld=false` per categorie" is door
+ * `berekenBegroteAlgemeneKosten` al volledig, zinvol berekenbaar (zie
+ * `begroteAlgemeneKosten.ts`'s eigen testsuite). ANDERS dan de eerdere
+ * modules kent deze module een TWEEDE lees-ingang naast de begrotingsversie:
+ * de lokale OGB-classificatie (`algemeneKostenClassificatie.ts`) is
+ * administratie-breed (sleutel `bedrijfsnr`, uit `invoer.versie.bedrijfsnr`),
+ * GEEN begrotingsversie-gebonden data — zie dat bestand se moduledoc.
+ * Positionele persistentie-ID-correlatie gebeurt hier PER CATEGORIE (niet
+ * over de volledige regellijst heen): `AlgemeneKostenRegel[]` wordt eerst
+ * per categorie gefilterd (stabiele volgorde, exact zoals de pure
+ * calculator dat zelf ook doet), waarna `resultaat.perCategorie[i].
+ * regels[j]` correspondeert met de j-de regel van diezelfde categorie in de
+ * oorspronkelijke, ongefilterde lijst — zie `berekenAlgemeneKostenUitInvoer`.
  */
 export interface HerberekendeBegroting {
   versie: Begrotingsversie;
@@ -160,6 +191,7 @@ export interface HerberekendeBegroting {
   correctiefDagelijksOnderhoud: HerberekendCorrectiefDagelijksResultaat;
   verzekering: HerberekendVerzekeringResultaat;
   gemeentelijkeLasten: HerberekendGemeentelijkeLastenResultaat;
+  algemeneKosten: HerberekendAlgemeneKostenResultaat;
 }
 
 /** Koppelt een berekende activiteit-uitkomst terug aan haar persistente `id` — uitsluitend positioneel bepaald, nooit herzocht op inhoud (zie moduledoc). */
@@ -206,6 +238,22 @@ export interface HerberekendGemeentelijkeLastenResultaat extends Omit<BgGemeente
   wozObjecten: readonly WozObjectUitkomstMetId[];
 }
 
+/** Koppelt een berekende Algemene-Kosten-regel-uitkomst terug aan haar persistente `id` — uitsluitend positioneel bepaald BINNEN de regels van diezelfde categorie, zelfde principe als `WozObjectUitkomstMetId`. */
+export interface AlgemeneKostenRegelUitkomstMetId {
+  persistentieId: number;
+  regel: BgAlgemeneKostenRegelUitkomst;
+}
+
+/** `BgAlgemeneKostenCategorieResultaat` met uitsluitend `regels` vervangen door de ID-geannoteerde variant — alle overige velden ongewijzigd, rechtstreeks van de pure calculator. */
+export interface HerberekendAlgemeneKostenCategorieResultaat extends Omit<BgAlgemeneKostenCategorieResultaat, "regels"> {
+  regels: readonly AlgemeneKostenRegelUitkomstMetId[];
+}
+
+/** `BgAlgemeneKostenResultaat` met uitsluitend `perCategorie` vervangen door de ID-geannoteerde variant — alle overige velden (incl. de vijf met naam benoemde categorietotalen en `moduleTotaal`) ongewijzigd, rechtstreeks van de pure calculator. */
+export interface HerberekendAlgemeneKostenResultaat extends Omit<BgAlgemeneKostenResultaat, "perCategorie"> {
+  perCategorie: readonly HerberekendAlgemeneKostenCategorieResultaat[];
+}
+
 /** Kleine, herbruikbare read-transactie-helper — zelfde BEGIN/COMMIT/ROLLBACK-idioom als elders in dit package (bewust hier gedupliceerd, zie 1D.5-rapport). */
 function withReadTransaction<T>(db: DatabaseSync, fn: () => T): T {
   db.exec("BEGIN");
@@ -250,6 +298,12 @@ export interface HerberekenInvoer {
   wozObjecten: readonly WozObject[];
   /** `leesGemeentelijkeLastenModule`'s "geen rij → alle aannamevelden null, beoordeeld false"-semantiek, ongewijzigd doorgegeven. */
   gemeentelijkeLastenModule: GemeentelijkeLastenModuleInvoer;
+  /** De lokale algemene-kostenclassificatie (OB-035/036) van de administratie van deze begrotingsversie (`versie.bedrijfsnr`) — GEEN begrotingsversie-gebonden data, zie `algemeneKostenClassificatie.ts`'s moduledoc. */
+  algemeneKostenClassificatie: readonly BgAlgemeneKostenClassificatieRegel[];
+  /** Rauwe Algemene-Kosten-regelpersistence (OB-035/036) — GEEN pure-module-vorm; de mapping naar `BgAlgemeneKostenRegelInvoer` gebeurt pas in `berekenBegrotingUitInvoer`. */
+  algemeneKostenRegels: readonly AlgemeneKostenRegel[];
+  /** `leesAlgemeneKostenCategorieState`'s "geen rij → beoordeeld false, rekenhulp null"-semantiek, ongewijzigd doorgegeven. */
+  algemeneKostenCategorieState: Record<BgAlgemeneKostenCategorie, AlgemeneKostenCategorieStateInvoer>;
 }
 
 /**
@@ -294,6 +348,9 @@ export function leesHerberekenInvoerZonderTransactie(db: DatabaseSync, versieId:
     verzekeringBeoordeeld: leesVerzekeringBeoordeeld(db, versieId),
     wozObjecten: leesWozObjecten(db, versieId),
     gemeentelijkeLastenModule: leesGemeentelijkeLastenModule(db, versieId),
+    algemeneKostenClassificatie: leesAlgemeneKostenClassificatie(db, versie.bedrijfsnr),
+    algemeneKostenRegels: leesAlgemeneKostenRegels(db, versieId),
+    algemeneKostenCategorieState: leesAlgemeneKostenCategorieState(db, versieId),
   };
 }
 
@@ -526,6 +583,73 @@ function berekenGemeentelijkeLastenUitInvoer(
   return { ...resultaat, wozObjecten: wozObjectenMetId };
 }
 
+/** Letterlijke veldkopie, GEEN transformatie/validatie — GEEN type-boundary-cast nodig (zie `HerberekendeBegroting`'s moduledoc). */
+function naarPureAlgemeneKostenRegelInvoer(regel: AlgemeneKostenRegel): BgAlgemeneKostenRegelInvoer {
+  return {
+    categorie: regel.categorie,
+    ogbKostensoortCode: regel.ogbKostensoortCode,
+    omschrijving: regel.omschrijving,
+    complexnummer: regel.complexnummer,
+    jaarbedrag: regel.jaarbedrag,
+  };
+}
+
+/**
+ * Roept de pure Algemene-Kosten-calculator aan en koppelt uitsluitend
+ * persistentie-ID's terug aan de resulterende regel-uitkomsten — PER
+ * CATEGORIE positioneel (`regelsVoorCategorie[j] ↔
+ * resultaat.perCategorie[i].regels[j]`), zelfde principe en defensieve
+ * lengte-controle als `berekenGemeentelijkeLastenUitInvoer`, maar toegepast
+ * per categorie in plaats van over de volledige lijst — de pure calculator
+ * filtert `regelsInvoer` zelf ook per categorie (stabiele volgorde, zie
+ * `begroteAlgemeneKosten.ts`), dus hetzelfde filter hier op de
+ * ID-dragende regels reproduceert exact dezelfde j-de-positie-correlatie.
+ */
+function berekenAlgemeneKostenUitInvoer(
+  versieId: string,
+  begrotingsjaar: number,
+  regels: readonly AlgemeneKostenRegel[],
+  categorieState: Record<BgAlgemeneKostenCategorie, AlgemeneKostenCategorieStateInvoer>,
+  classificatie: readonly BgAlgemeneKostenClassificatieRegel[],
+): HerberekendAlgemeneKostenResultaat {
+  const categorieAannames = Object.fromEntries(
+    ALGEMENE_KOSTEN_CATEGORIEEN.map((categorie): [BgAlgemeneKostenCategorie, BgAlgemeneKostenCategorieAannames] => [
+      categorie,
+      {
+        beoordeeld: categorieState[categorie].beoordeeld,
+        vorigJaarBedrag: categorieState[categorie].vorigJaarBedrag,
+        verwachteVerhogingPercentage: categorieState[categorie].verwachteVerhogingPercentage,
+      },
+    ]),
+  ) as Record<BgAlgemeneKostenCategorie, BgAlgemeneKostenCategorieAannames>;
+
+  let resultaat: BgAlgemeneKostenResultaat;
+  try {
+    resultaat = berekenBegroteAlgemeneKosten(regels.map(naarPureAlgemeneKostenRegelInvoer), categorieAannames, classificatie, { begrotingsjaar });
+  } catch (error) {
+    throw new Error(
+      `Berekening van begrotingsversie ${versieId} is mislukt tijdens Algemene Kosten: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
+
+  const perCategorieMetId: HerberekendAlgemeneKostenCategorieResultaat[] = resultaat.perCategorie.map((categorieResultaat) => {
+    const regelsVoorCategorie = regels.filter((r) => r.categorie === categorieResultaat.categorie);
+    if (categorieResultaat.regels.length !== regelsVoorCategorie.length) {
+      throw new Error(
+        `Interne fout: begrotingsversie ${versieId}: Algemene-Kosten-calculator gaf ${categorieResultaat.regels.length} regel-uitkomsten terug voor categorie ${categorieResultaat.categorie} met ${regelsVoorCategorie.length} ingevoerde regels — positionele id-correlatie geschonden.`,
+      );
+    }
+    const regelsMetId: AlgemeneKostenRegelUitkomstMetId[] = categorieResultaat.regels.map((regelUitkomst, index) => ({
+      persistentieId: regelsVoorCategorie[index]!.id,
+      regel: regelUitkomst,
+    }));
+    return { ...categorieResultaat, regels: regelsMetId };
+  });
+
+  return { ...resultaat, perCategorie: perCategorieMetId };
+}
+
 /**
  * Voert de pure Module-1-, Module-2-, (indien aanwezig) Module-3- en
  * Gepland-Onderhoud-berekening uit op reeds-gelezen invoer — GEEN eigen
@@ -556,6 +680,7 @@ export function berekenBegrotingUitInvoer(
   correctiefDagelijksOnderhoud: HerberekendCorrectiefDagelijksResultaat;
   verzekering: HerberekendVerzekeringResultaat;
   gemeentelijkeLasten: HerberekendGemeentelijkeLastenResultaat;
+  algemeneKosten: HerberekendAlgemeneKostenResultaat;
 } {
   let module1: BgHuurResultaat;
   try {
@@ -612,7 +737,15 @@ export function berekenBegrotingUitInvoer(
     invoer.gemeentelijkeLastenModule,
   );
 
-  return { module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud, verzekering, gemeentelijkeLasten };
+  const algemeneKosten = berekenAlgemeneKostenUitInvoer(
+    versieId,
+    invoer.versie.begrotingsjaar,
+    invoer.algemeneKostenRegels,
+    invoer.algemeneKostenCategorieState,
+    invoer.algemeneKostenClassificatie,
+  );
+
+  return { module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud, verzekering, gemeentelijkeLasten, algemeneKosten };
 }
 
 /**
@@ -638,9 +771,17 @@ export function berekenBegrotingUitInvoer(
  */
 export function herberekenBegroting(db: DatabaseSync, versieId: string): HerberekendeBegroting {
   const invoer = withReadTransaction(db, () => leesHerberekenInvoerZonderTransactie(db, versieId));
-  const { module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud, verzekering, gemeentelijkeLasten } = berekenBegrotingUitInvoer(
-    versieId,
-    invoer,
-  );
-  return { versie: invoer.versie, module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud, verzekering, gemeentelijkeLasten };
+  const { module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud, verzekering, gemeentelijkeLasten, algemeneKosten } =
+    berekenBegrotingUitInvoer(versieId, invoer);
+  return {
+    versie: invoer.versie,
+    module1,
+    module2,
+    module3,
+    geplandOnderhoud,
+    correctiefDagelijksOnderhoud,
+    verzekering,
+    gemeentelijkeLasten,
+    algemeneKosten,
+  };
 }

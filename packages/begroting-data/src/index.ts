@@ -62,6 +62,9 @@ export {
   type VerzekeringRegelUitkomstMetId,
   type HerberekendGemeentelijkeLastenResultaat,
   type WozObjectUitkomstMetId,
+  type HerberekendAlgemeneKostenResultaat,
+  type HerberekendAlgemeneKostenCategorieResultaat,
+  type AlgemeneKostenRegelUitkomstMetId,
 } from "./herberekenen.js";
 
 // Bevroren Module-1/Module-2-output (1D.6a) — uitsluitend serialisatie/
@@ -133,6 +136,23 @@ export {
   type FrozenGemeentelijkeLastenResultaat,
 } from "./frozenGemeentelijkeLastenResultaat.js";
 
+// Bevroren Algemene-Kosten-output (OB-035/036, fase P3) — uitsluitend
+// serialisatie/deserialisatie van de bestaande `HerberekendAlgemeneKostenResultaat`,
+// aangevuld met de volledige resolved lokale classificatie zoals die gold op
+// het moment van vaststellen (zie `frozenAlgemeneKostenResultaat.ts`'s
+// moduledoc). Strikt gescheiden van `algemeneKostenClassificatie.ts`/
+// `algemeneKostenCategorieState.ts`/`algemeneKostenRegels.ts` (de levende
+// classificatieconfiguratie resp. de persistente CONCEPT-input): deze laag
+// leest die tabellen nooit terug om een resultaat te reconstrueren.
+// `schrijfFrozenAlgemeneKostenResultaatZonderTransactie` blijft bewust
+// intern — de publieke schrijf-ingang is en blijft
+// `schrijfFrozenAlgemeneKostenResultaat`.
+export {
+  schrijfFrozenAlgemeneKostenResultaat,
+  leesFrozenAlgemeneKostenResultaat,
+  type FrozenAlgemeneKostenResultaat,
+} from "./frozenAlgemeneKostenResultaat.js";
+
 // De atomaire VASTSTELLEN-operatie (1D.6b) — de enige publieke weg om een
 // CONCEPT-versie definitief VASTGESTELD te maken. Bundelt uitsluitend de
 // bestaande `Begrotingsversie`/`BgHuurResultaat`/`BgBeheerResultaat`/
@@ -194,3 +214,26 @@ export {
   type GemeentelijkeLastenModuleInvoer,
 } from "./gemeentelijkeLastenModule.js";
 export { schrijfWozObjecten, leesWozObjecten, type WozObject, type WozObjectInvoer } from "./wozObjecten.js";
+
+// Algemene kosten (OB-035/036) — fase P1, UITSLUITEND concept-persistence
+// (geen pure-calculator-integratie in dit bestand zelf; herberekening/frozen
+// output zitten in herberekenen.js/frozenAlgemeneKostenResultaat.js). De
+// lokale OGB-classificatie (`algemeneKostenClassificatie.ts`) is bewust
+// ADMINISTRATIE-BREED (sleutel `bedrijfsnr`), niet begrotingsversie-
+// gebonden — zie dat bestand se moduledoc.
+export {
+  schrijfAlgemeneKostenClassificatie,
+  leesAlgemeneKostenClassificatie,
+  type AlgemeneKostenClassificatieRegel,
+} from "./algemeneKostenClassificatie.js";
+export {
+  schrijfAlgemeneKostenCategorieState,
+  leesAlgemeneKostenCategorieState,
+  type AlgemeneKostenCategorieStateInvoer,
+} from "./algemeneKostenCategorieState.js";
+export {
+  schrijfAlgemeneKostenRegels,
+  leesAlgemeneKostenRegels,
+  type AlgemeneKostenRegel,
+  type AlgemeneKostenRegelInvoer,
+} from "./algemeneKostenRegels.js";

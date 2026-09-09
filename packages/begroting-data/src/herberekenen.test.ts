@@ -5,10 +5,12 @@ import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  ALGEMENE_KOSTEN_CATEGORIEEN,
   berekenBegroteCorrectiefDagelijksOnderhoud,
   berekenBegroteGemeentelijkeLasten,
   berekenBegroteGeplandOnderhoud,
   berekenBegroteVerzekeringen,
+  type BgAlgemeneKostenCategorie,
   type BgBeheerComplexConfig,
   type BgContractFeiten,
   type BgContractOverride,
@@ -19,6 +21,12 @@ import {
   type BgVerzekeringRegelInvoer,
   type BgWozObjectInvoer,
 } from "@bvc/reporting";
+import {
+  schrijfAlgemeneKostenCategorieState,
+  type AlgemeneKostenCategorieStateInvoer,
+} from "./algemeneKostenCategorieState.js";
+import { schrijfAlgemeneKostenClassificatie, type AlgemeneKostenClassificatieRegel } from "./algemeneKostenClassificatie.js";
+import { schrijfAlgemeneKostenRegels, type AlgemeneKostenRegelInvoer } from "./algemeneKostenRegels.js";
 import { maakBegrotingsversie, markeerVastgesteld, type NieuweBegrotingsversieInput } from "./begrotingsversies.js";
 import { schrijfCorrectiefDagelijksOnderhoudBeoordeeld } from "./correctiefDagelijksOnderhoudBeoordeeld.js";
 import {
@@ -1493,5 +1501,181 @@ describe("herberekenBegroting — Gemeentelijke lasten / WOZ (OB-033)", () => {
     expect(normaliseer(zonderWoz.verzekering)).toBe(normaliseer(metWoz.verzekering));
     expect(zonderWoz.module3).toBeNull();
     expect(metWoz.module3).toBeNull();
+  });
+});
+
+describe("herberekenBegroting — Algemene Kosten (OB-035/036)", () => {
+  const KLASSIFICATIE_070: AlgemeneKostenClassificatieRegel[] = [
+    { ogbKostensoort: "4990", ogbKostensoortOmschrijving: "Diverse alg kosten", categorie: "ALGEMENE_KOSTEN" },
+    { ogbKostensoort: "4992", ogbKostensoortOmschrijving: "makelaarskosten", categorie: "MAKELAARSKOSTEN" },
+    { ogbKostensoort: "4995", ogbKostensoortOmschrijving: "Bankkosten", categorie: "BANKKOSTEN" },
+  ];
+
+  function regelInvoer(overrides: Partial<AlgemeneKostenRegelInvoer> = {}): AlgemeneKostenRegelInvoer {
+    return {
+      id: null,
+      categorie: "JURIDISCHE_KOSTEN",
+      ogbKostensoortCode: null,
+      omschrijving: "Huurgeschil",
+      complexnummer: null,
+      jaarbedrag: new Decimal(5000),
+      ...overrides,
+    };
+  }
+
+  function alleStates(
+    overrides: Partial<Record<BgAlgemeneKostenCategorie, Partial<AlgemeneKostenCategorieStateInvoer>>> = {},
+  ): Record<BgAlgemeneKostenCategorie, AlgemeneKostenCategorieStateInvoer> {
+    return Object.fromEntries(
+      ALGEMENE_KOSTEN_CATEGORIEEN.map((categorie) => [
+        categorie,
+        { beoordeeld: true, vorigJaarBedrag: null, verwachteVerhogingPercentage: null, ...overrides[categorie] },
+      ]),
+    ) as Record<BgAlgemeneKostenCategorie, AlgemeneKostenCategorieStateInvoer>;
+  }
+
+  it("1. geen regels + geen categorie-state: resultaat altijd aanwezig, alle vijf REVIEWED_ZERO_RULES na expliciete beoordeling", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    const resultaat = herberekenBegroting(db, versie.id);
+
+    expect(resultaat.algemeneKosten).toBeDefined();
+    expect(resultaat.algemeneKosten.perCategorie).toHaveLength(5);
+    for (const c of resultaat.algemeneKosten.perCategorie) {
+      expect(c.beoordeeld).toBe(false);
+      expect(c.reviewStatus).toBe("NOT_REVIEWED");
+    }
+    expect(resultaat.algemeneKosten.moduleTotaal.toString()).toBe("0");
+  });
+
+  it("2. review onafhankelijk per categorie: Accountant beoordeeld, Juridisch niet", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfAlgemeneKostenCategorieState(db, versie.id, alleStates({ ACCOUNTANT: { beoordeeld: true }, JURIDISCHE_KOSTEN: { beoordeeld: false } }));
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    expect(resultaat.algemeneKosten.perCategorie.find((c) => c.categorie === "ACCOUNTANT")!.reviewStatus).toBe("REVIEWED_ZERO_RULES");
+    expect(resultaat.algemeneKosten.perCategorie.find((c) => c.categorie === "JURIDISCHE_KOSTEN")!.reviewStatus).toBe("NOT_REVIEWED");
+  });
+
+  it("3. geldige OGB-koppeling resolved via de administratie-classificatie (070)", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfAlgemeneKostenClassificatie(db, "070", KLASSIFICATIE_070);
+    schrijfAlgemeneKostenRegels(db, versie.id, [
+      regelInvoer({ categorie: "MAKELAARSKOSTEN", ogbKostensoortCode: "4992", jaarbedrag: new Decimal(6000) }),
+    ]);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, alleStates());
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    const makelaar = resultaat.algemeneKosten.perCategorie.find((c) => c.categorie === "MAKELAARSKOSTEN")!;
+    expect(makelaar.regels[0]?.regel.ogbKostensoortOmschrijving).toBe("makelaarskosten");
+    expect(resultaat.algemeneKosten.makelaarskosten.toString()).toBe("6000");
+    expect(resultaat.algemeneKosten.controleVereist).toHaveLength(0);
+  });
+
+  it("4. onbekende OGB-code: KRITIEK, bedrag blijft financieel meetellen", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfAlgemeneKostenClassificatie(db, "070", KLASSIFICATIE_070);
+    schrijfAlgemeneKostenRegels(db, versie.id, [regelInvoer({ categorie: "MAKELAARSKOSTEN", ogbKostensoortCode: "9999", jaarbedrag: new Decimal(1234) })]);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, alleStates());
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    expect(resultaat.algemeneKosten.controleVereist.some((c) => c.ernst === "KRITIEK")).toBe(true);
+    expect(resultaat.algemeneKosten.makelaarskosten.toString()).toBe("1234");
+  });
+
+  it("5. OGB-code van andere administratie is voor deze versie 'onbekend' — geen kruisbesmetting tussen administraties", () => {
+    const versie = maakMinimaalGeldigeConceptVersie(); // bedrijfsnr 070
+    schrijfAlgemeneKostenClassificatie(db, "019", [{ ogbKostensoort: "04900", ogbKostensoortOmschrijving: "Accountantskosten", categorie: "ACCOUNTANT" }]);
+    schrijfAlgemeneKostenRegels(db, versie.id, [regelInvoer({ categorie: "ACCOUNTANT", ogbKostensoortCode: "04900" })]);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, alleStates());
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    expect(resultaat.algemeneKosten.controleVereist.some((c) => c.ernst === "KRITIEK")).toBe(true);
+  });
+
+  it("6. persistentie-ID wordt correct per categorie teruggekoppeld (meerdere categorieën, meerdere regels)", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    const [j1, j2, m1] = schrijfAlgemeneKostenRegels(db, versie.id, [
+      regelInvoer({ categorie: "JURIDISCHE_KOSTEN", omschrijving: "Huurgeschil" }),
+      regelInvoer({ categorie: "JURIDISCHE_KOSTEN", omschrijving: "Contractadvies" }),
+      regelInvoer({ categorie: "MAKELAARSKOSTEN", omschrijving: "Taxatie" }),
+    ]);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, alleStates());
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    const juridisch = resultaat.algemeneKosten.perCategorie.find((c) => c.categorie === "JURIDISCHE_KOSTEN")!;
+    const makelaar = resultaat.algemeneKosten.perCategorie.find((c) => c.categorie === "MAKELAARSKOSTEN")!;
+    expect(juridisch.regels.map((r) => r.persistentieId)).toEqual([j1!.id, j2!.id]);
+    expect(makelaar.regels.map((r) => r.persistentieId)).toEqual([m1!.id]);
+  });
+
+  it("7. Accountant-rekenhulp: geldig voorstel, wijzigt de begroting niet", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfAlgemeneKostenRegels(db, versie.id, [regelInvoer({ categorie: "ACCOUNTANT", jaarbedrag: new Decimal(5000) })]);
+    schrijfAlgemeneKostenCategorieState(
+      db,
+      versie.id,
+      alleStates({ ACCOUNTANT: { vorigJaarBedrag: new Decimal(7550), verwachteVerhogingPercentage: new Decimal(5) } }),
+    );
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    const accountant = resultaat.algemeneKosten.perCategorie.find((c) => c.categorie === "ACCOUNTANT")!;
+    expect(accountant.berekendVoorstel?.toString()).toBe("7927.5");
+    expect(resultaat.algemeneKosten.accountantskosten.toString()).toBe("5000");
+  });
+
+  it("8. herberekening schrijft niets naar de Algemene-Kosten-concepttabellen", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfAlgemeneKostenClassificatie(db, "070", KLASSIFICATIE_070);
+    schrijfAlgemeneKostenRegels(db, versie.id, [regelInvoer()]);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, alleStates());
+
+    const dump = () => ({
+      classificatie: db.prepare(`SELECT * FROM begroting_algemene_kosten_classificatie`).all(),
+      state: db.prepare(`SELECT * FROM begroting_algemene_kosten_categorie_state`).all(),
+      regels: db.prepare(`SELECT * FROM begroting_algemene_kosten_regel`).all(),
+    });
+
+    const voor = dump();
+    herberekenBegroting(db, versie.id);
+    const na = dump();
+
+    expect(na).toEqual(voor);
+  });
+
+  it("9. twee opeenvolgende herberekeningen zonder writes geven inhoudelijk identiek resultaat", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfAlgemeneKostenClassificatie(db, "070", KLASSIFICATIE_070);
+    schrijfAlgemeneKostenRegels(db, versie.id, [regelInvoer({ categorie: "BANKKOSTEN", ogbKostensoortCode: "4995" })]);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, alleStates());
+
+    const eersteKeer = herberekenBegroting(db, versie.id);
+    const tweedeKeer = herberekenBegroting(db, versie.id);
+    const normaliseer = (waarde: unknown) => JSON.stringify(waarde, (_key, v) => (v instanceof Decimal ? v.toString() : v));
+
+    expect(normaliseer(eersteKeer.algemeneKosten)).toBe(normaliseer(tweedeKeer.algemeneKosten));
+  });
+
+  it("10 (regressie). bestaande Module 1/2/3/GO/CD/Verzekering/WOZ-uitkomst blijft byte-identiek naast aanwezige Algemene-Kosten-regels", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    schrijfModule1Snapshot(db, versie.id, [maakContract("0000000028", { complexnummer: "001" })]);
+    schrijfModule1Aannames(db, versie.id, STANDAARD_AANNAMES);
+    schrijfModule2Config(db, versie.id, [
+      { complexnummer: "001", vastBedragJaar: new Decimal(1000), vastIndexatiePercentage: null, vastIndexatiedatum: null, variabelPercentage: new Decimal(6) },
+    ]);
+
+    const zonderAlgemeneKosten = herberekenBegroting(db, versie.id);
+    schrijfAlgemeneKostenRegels(db, versie.id, [regelInvoer()]);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, alleStates());
+    const metAlgemeneKosten = herberekenBegroting(db, versie.id);
+
+    const normaliseer = (waarde: unknown) => JSON.stringify(waarde, (_key, v) => (v instanceof Decimal ? v.toString() : v));
+    expect(normaliseer(zonderAlgemeneKosten.module1)).toBe(normaliseer(metAlgemeneKosten.module1));
+    expect(normaliseer(zonderAlgemeneKosten.module2)).toBe(normaliseer(metAlgemeneKosten.module2));
+    expect(normaliseer(zonderAlgemeneKosten.geplandOnderhoud)).toBe(normaliseer(metAlgemeneKosten.geplandOnderhoud));
+    expect(normaliseer(zonderAlgemeneKosten.correctiefDagelijksOnderhoud)).toBe(normaliseer(metAlgemeneKosten.correctiefDagelijksOnderhoud));
+    expect(normaliseer(zonderAlgemeneKosten.verzekering)).toBe(normaliseer(metAlgemeneKosten.verzekering));
+    expect(normaliseer(zonderAlgemeneKosten.gemeentelijkeLasten)).toBe(normaliseer(metAlgemeneKosten.gemeentelijkeLasten));
+    expect(zonderAlgemeneKosten.module3).toBeNull();
+    expect(metAlgemeneKosten.module3).toBeNull();
   });
 });

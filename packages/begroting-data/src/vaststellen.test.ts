@@ -4,7 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { BgContractFeiten, BgManagementInvoer } from "@bvc/reporting";
+import { ALGEMENE_KOSTEN_CATEGORIEEN, type BgAlgemeneKostenCategorie, type BgContractFeiten, type BgManagementInvoer } from "@bvc/reporting";
+import {
+  schrijfAlgemeneKostenCategorieState,
+  type AlgemeneKostenCategorieStateInvoer,
+} from "./algemeneKostenCategorieState.js";
+import { schrijfAlgemeneKostenClassificatie, type AlgemeneKostenClassificatieRegel } from "./algemeneKostenClassificatie.js";
+import { schrijfAlgemeneKostenRegels, type AlgemeneKostenRegelInvoer } from "./algemeneKostenRegels.js";
 import {
   leesBegrotingsversie,
   maakBegrotingsversie,
@@ -13,6 +19,7 @@ import {
   type NieuweBegrotingsversieInput,
 } from "./begrotingsversies.js";
 import { openOrCreateDatabase } from "./database.js";
+import { leesFrozenAlgemeneKostenResultaat } from "./frozenAlgemeneKostenResultaat.js";
 import { leesFrozenCorrectiefDagelijksOnderhoudResultaat } from "./frozenCorrectiefDagelijksOnderhoudResultaat.js";
 import { leesFrozenGemeentelijkeLastenResultaat } from "./frozenGemeentelijkeLastenResultaat.js";
 import { leesFrozenGeplandOnderhoudResultaat } from "./frozenGeplandOnderhoudResultaat.js";
@@ -113,6 +120,19 @@ const GEMEENTELIJKE_LASTEN_ZERO_OBJECTS: GemeentelijkeLastenModuleInvoer = {
   beoordeeld: true,
 };
 
+/**
+ * Minimale, geldige Algemene-Kosten-categorie-state (OB-035/036, fase P3)
+ * — uitsluitend gebruikt om aan de nieuwe vaststel-verplichting te voldoen
+ * in tests die zelf niets specifieks over Algemene Kosten beweren. ALLE
+ * VIJF categorieën `beoordeeld=true` met 0 regels is een geldige,
+ * KRITIEK-vrije toestand (`REVIEWED_ZERO_RULES` per categorie) — zie
+ * `begroteAlgemeneKosten.ts`'s moduledoc. Tests die Algemene Kosten zelf
+ * inhoudelijk toetsen gebruiken hun eigen, expliciete invoer.
+ */
+const ALGEMENE_KOSTEN_ZERO_REGELS: Record<BgAlgemeneKostenCategorie, AlgemeneKostenCategorieStateInvoer> = Object.fromEntries(
+  ALGEMENE_KOSTEN_CATEGORIEEN.map((categorie) => [categorie, { beoordeeld: true, vorigJaarBedrag: null, verwachteVerhogingPercentage: null }]),
+) as Record<BgAlgemeneKostenCategorie, AlgemeneKostenCategorieStateInvoer>;
+
 /** Zet de echte 070-contract-049-keten neer (identiek aan 1D.5/1D.6a) via uitsluitend publieke schrijf-API's. */
 function zet070InputNeer(versieId: string): void {
   schrijfModule1Snapshot(db, versieId, [
@@ -148,6 +168,7 @@ describe("stelBegrotingVast — status- en invoersemantiek", () => {
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
     stelBegrotingVast(db, versie.id, new Date());
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow(/CONCEPT/);
@@ -169,6 +190,7 @@ describe("stelBegrotingVast — status- en invoersemantiek", () => {
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.module1.contracten).toEqual([]);
   });
@@ -182,6 +204,7 @@ describe("stelBegrotingVast — status- en invoersemantiek", () => {
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
     expect(() => stelBegrotingVast(db, versie.id)).not.toThrow();
   });
 
@@ -194,6 +217,7 @@ describe("stelBegrotingVast — status- en invoersemantiek", () => {
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.module2.complexen).toEqual([]);
   });
@@ -209,6 +233,7 @@ describe("stelBegrotingVast — recomputatie tegen huidige input, niet tegen oud
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
 
     // Bewust afwijkende, tijdelijke frozen output neerzetten (een eerdere, inmiddels-stale CONCEPT-poging).
     const stale = herberekenBegroting(db, versie.id);
@@ -244,6 +269,7 @@ describe("stelBegrotingVast — controls blokkeren niet", () => {
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
 
     const resultaat = stelBegrotingVast(db, versie.id); // mag NIET gooien ondanks de controls
     expect(resultaat.module1.controleVereist.length).toBeGreaterThan(0);
@@ -262,6 +288,7 @@ describe("stelBegrotingVast — succesvolle vaststelling, timestamp, read-back",
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
 
     const timestamp = new Date("2026-12-20T10:15:30.123Z");
     const resultaat = stelBegrotingVast(db, versie.id, timestamp);
@@ -284,6 +311,7 @@ describe("stelBegrotingVast — succesvolle vaststelling, timestamp, read-back",
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
 
     const resultaat = stelBegrotingVast(db, versie.id, new Date("2026-12-20T10:15:30.123Z"));
     const gelezen = leesFrozenBegrotingsresultaat(db, versie.id)!;
@@ -302,6 +330,7 @@ describe("stelBegrotingVast — succesvolle vaststelling, timestamp, read-back",
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
 
     const dump = () => ({
       snapshot: db.prepare(`SELECT * FROM begroting_contract_snapshot`).all(),
@@ -330,6 +359,7 @@ describe("stelBegrotingVast — immutability na vaststellen (alle publieke write
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
     const resultaat = stelBegrotingVast(db, versie.id);
 
     expect(() => wijzigConceptNaamNotitie(db, versie.id, { naam: "mag niet" })).toThrow();
@@ -355,6 +385,7 @@ describe("stelBegrotingVast — atomiciteit / rollback", () => {
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
 
     // Al een geldige, tijdelijke frozen output vóór de poging.
     const vorigeFrozen = herberekenBegroting(db, versie.id);
@@ -392,6 +423,7 @@ describe("stelBegrotingVast — atomiciteit / rollback", () => {
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
 
     // Al een geldige, tijdelijke frozen output vóór de poging.
     const vorigeFrozen = herberekenBegroting(db, versie.id);
@@ -430,6 +462,7 @@ describe("stelBegrotingVast — atomiciteit / rollback", () => {
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
 
     const vorigeFrozen = herberekenBegroting(db, versie.id);
     schrijfFrozenBegrotingsresultaat(db, versie.id, vorigeFrozen);
@@ -494,6 +527,7 @@ describe("stelBegrotingVast — 070 end-to-end", () => {
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
 
     const timestamp = new Date("2026-12-20T10:15:30.123Z");
     const resultaat = stelBegrotingVast(db, versie.id, timestamp);
@@ -555,6 +589,7 @@ describe("stelBegrotingVast — Fase 2C.5: Module 3 verplicht bij vaststellen", 
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
 
     const resultaat = stelBegrotingVast(db, versie.id);
 
@@ -583,6 +618,7 @@ describe("stelBegrotingVast — Fase 2C.5: Module 3 verplicht bij vaststellen", 
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
 
     const resultaat = stelBegrotingVast(db, versie.id);
 
@@ -606,6 +642,7 @@ describe("stelBegrotingVast — Fase 2C.5: Module 3 verplicht bij vaststellen", 
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
 
     const resultaat = stelBegrotingVast(db, versie.id);
 
@@ -624,6 +661,7 @@ describe("stelBegrotingVast — Fase 2C.5: Module 3 verplicht bij vaststellen", 
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
 
     const resultaat = stelBegrotingVast(db, versie.id);
 
@@ -650,6 +688,7 @@ describe("stelBegrotingVast — Fase 2C.5: Module 3 verplicht bij vaststellen", 
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
 
     // Al een geldige, tijdelijke frozen output vóór de poging (Module 1/2 én Module 3).
     const vorigeFrozen = herberekenBegroting(db, versie.id);
@@ -693,6 +732,7 @@ describe("stelBegrotingVast — Fase 2C.5: Module 3 verplicht bij vaststellen", 
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
 
     const vorigeFrozen = herberekenBegroting(db, versie.id);
     schrijfFrozenBegrotingsresultaat(db, versie.id, vorigeFrozen);
@@ -732,6 +772,7 @@ describe("stelBegrotingVast — Fase 2C.5: Module 3 verplicht bij vaststellen", 
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
     const eersteResultaat = stelBegrotingVast(db, versie.id);
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow();
@@ -791,6 +832,7 @@ describe("stelBegrotingVast — Gepland Onderhoud lifecycle-blokkade (GO-P3)", (
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow(/KRITIEKE controls/);
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
@@ -805,6 +847,7 @@ describe("stelBegrotingVast — Gepland Onderhoud lifecycle-blokkade (GO-P3)", (
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
 
     expect(() => stelBegrotingVast(db, versie.id)).not.toThrow();
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("VASTGESTELD");
@@ -818,6 +861,7 @@ describe("stelBegrotingVast — Gepland Onderhoud lifecycle-blokkade (GO-P3)", (
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
 
     expect(() => stelBegrotingVast(db, versie.id)).not.toThrow();
   });
@@ -829,6 +873,7 @@ describe("stelBegrotingVast — Gepland Onderhoud lifecycle-blokkade (GO-P3)", (
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true); // 0 regels
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS); // 0 polisregels
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.geplandOnderhoud.reviewStatus).toBe("REVIEWED_ZERO_ACTIVITIES");
@@ -850,6 +895,7 @@ describe("stelBegrotingVast — Gepland Onderhoud lifecycle-blokkade (GO-P3)", (
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow(/KRITIEKE controls/);
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
@@ -863,6 +909,7 @@ describe("stelBegrotingVast — Gepland Onderhoud lifecycle-blokkade (GO-P3)", (
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow(/KRITIEKE controls/);
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
@@ -876,6 +923,7 @@ describe("stelBegrotingVast — Gepland Onderhoud lifecycle-blokkade (GO-P3)", (
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow(/KRITIEKE controls/);
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
@@ -889,6 +937,7 @@ describe("stelBegrotingVast — Gepland Onderhoud lifecycle-blokkade (GO-P3)", (
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.geplandOnderhoud.activiteiten[0]?.activiteit.q1.toString()).toBe("-500");
@@ -914,6 +963,7 @@ describe("stelBegrotingVast — Gepland Onderhoud lifecycle-blokkade (GO-P3)", (
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true); // 0 regels, geen KRITIEK
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS); // 0 polisregels, geen KRITIEK
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
 
     const resultaat = stelBegrotingVast(db, versie.id); // mag NIET gooien ondanks de Module-1-controls
     expect(resultaat.module1.controleVereist.length).toBeGreaterThan(0);
@@ -928,6 +978,7 @@ describe("stelBegrotingVast — Gepland Onderhoud lifecycle-blokkade (GO-P3)", (
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versieZonder.id, true);
     schrijfVerzekeringBeoordeeld(db, versieZonder.id, true);
     schrijfGemeentelijkeLastenModule(db, versieZonder.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versieZonder.id, ALGEMENE_KOSTEN_ZERO_REGELS);
     const resultaatZonder = stelBegrotingVast(db, versieZonder.id);
 
     const versieMet = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
@@ -938,6 +989,7 @@ describe("stelBegrotingVast — Gepland Onderhoud lifecycle-blokkade (GO-P3)", (
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versieMet.id, true);
     schrijfVerzekeringBeoordeeld(db, versieMet.id, true);
     schrijfGemeentelijkeLastenModule(db, versieMet.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versieMet.id, ALGEMENE_KOSTEN_ZERO_REGELS);
     const resultaatMet = stelBegrotingVast(db, versieMet.id);
 
     expect(normaliseer(resultaatZonder.module1)).toEqual(normaliseer(resultaatMet.module1));
@@ -979,6 +1031,7 @@ describe("stelBegrotingVast — Gepland Onderhoud: volledige pipeline en frozen 
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("VASTGESTELD");
@@ -1004,6 +1057,7 @@ describe("stelBegrotingVast — Gepland Onderhoud: volledige pipeline en frozen 
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
 
     const dump = () => ({
       activiteiten: db.prepare(`SELECT * FROM begroting_gepland_onderhoud_activiteit`).all(),
@@ -1054,6 +1108,7 @@ describe("stelBegrotingVast — Gepland Onderhoud atomiciteit (GO-P3)", () => {
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
 
     // Test-only trigger: blokkeert ELKE INSERT op de GO-activiteit-frozen-tabel — die wordt, volgens de
     // schrijfvolgorde in vaststellen.ts, bereikt NADAT Module 1/2 EN Module 3 al succesvol binnen DEZE
@@ -1087,6 +1142,7 @@ describe("stelBegrotingVast — Gepland Onderhoud atomiciteit (GO-P3)", () => {
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
 
     // Test-only trigger: blokkeert specifiek de CONCEPT→VASTGESTELD-overgang zelf. Op het moment dat deze
     // vuurt, zijn Module 1, Module 2, Module 3 ÉN Gepland Onderhoud binnen DEZE mislukte poging al
@@ -1161,6 +1217,7 @@ describe("stelBegrotingVast — Correctief/Dagelijks Onderhoud lifecycle-blokkad
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow(/KRITIEKE controls/);
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
@@ -1174,6 +1231,7 @@ describe("stelBegrotingVast — Correctief/Dagelijks Onderhoud lifecycle-blokkad
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow(/KRITIEKE controls/);
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
@@ -1190,6 +1248,7 @@ describe("stelBegrotingVast — Correctief/Dagelijks Onderhoud lifecycle-blokkad
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow(/KRITIEKE controls/);
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
@@ -1202,6 +1261,7 @@ describe("stelBegrotingVast — Correctief/Dagelijks Onderhoud lifecycle-blokkad
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
 
     expect(() => stelBegrotingVast(db, versie.id)).not.toThrow();
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("VASTGESTELD");
@@ -1214,6 +1274,7 @@ describe("stelBegrotingVast — Correctief/Dagelijks Onderhoud lifecycle-blokkad
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
 
     expect(() => stelBegrotingVast(db, versie.id)).not.toThrow();
   });
@@ -1224,6 +1285,7 @@ describe("stelBegrotingVast — Correctief/Dagelijks Onderhoud lifecycle-blokkad
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true); // 0 regels
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS); // 0 polisregels
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.correctiefDagelijksOnderhoud.reviewStatus).toBe("REVIEWED_ZERO_RULES");
@@ -1245,6 +1307,7 @@ describe("stelBegrotingVast — Correctief/Dagelijks Onderhoud lifecycle-blokkad
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.correctiefDagelijksOnderhoud.totaalJaar.toString()).toBe("700");
@@ -1271,6 +1334,7 @@ describe("stelBegrotingVast — Correctief/Dagelijks Onderhoud lifecycle-blokkad
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true); // 0 regels, geen KRITIEK
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS); // 0 polisregels, geen KRITIEK
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.module1.controleVereist.some((c) => c.contractnummer === "0000000028" && c.bericht.includes("meerdere indexatiepercentage-overrides"))).toBe(true);
@@ -1284,6 +1348,7 @@ describe("stelBegrotingVast — Correctief/Dagelijks Onderhoud lifecycle-blokkad
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.correctiefDagelijksOnderhoud).toBeDefined();
@@ -1311,6 +1376,7 @@ describe("stelBegrotingVast — Correctief/Dagelijks Onderhoud atomiciteit (CD-P
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versieId, true);
     schrijfVerzekeringBeoordeeld(db, versieId, true);
     schrijfGemeentelijkeLastenModule(db, versieId, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versieId, ALGEMENE_KOSTEN_ZERO_REGELS);
   }
 
   it("11. geforceerde fout tijdens schrijven frozen Correctief/Dagelijks Onderhoud laat volledige rollback zien — status blijft CONCEPT, geen enkele frozen output (Module 1/2/3/GO/CD)", () => {
@@ -1388,6 +1454,7 @@ describe("stelBegrotingVast — Correctief/Dagelijks Onderhoud immutability (CD-
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
     stelBegrotingVast(db, versie.id);
 
     expect(() =>
@@ -1430,6 +1497,7 @@ describe("stelBegrotingVast — Correctief/Dagelijks Onderhoud immutability (CD-
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
     stelBegrotingVast(db, versie.id);
 
     expect(() =>
@@ -1460,6 +1528,7 @@ describe("stelBegrotingVast — Correctief/Dagelijks Onderhoud frozen-onafhankel
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
     stelBegrotingVast(db, versie.id);
 
     const vóórDirecteMutatie = leesFrozenCorrectiefDagelijksOnderhoudResultaat(db, versie.id)!;
@@ -1528,6 +1597,7 @@ describe("stelBegrotingVast — Verzekeringen lifecycle-blokkade (OB-032)", () =
     schrijfVerzekeringRegels(db, versie.id, [regelInvoer({ complexnummer: null })]);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow(/KRITIEKE controls/);
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
@@ -1540,6 +1610,7 @@ describe("stelBegrotingVast — Verzekeringen lifecycle-blokkade (OB-032)", () =
     schrijfVerzekeringRegels(db, versie.id, [regelInvoer({ verzekeraar: null })]);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow(/KRITIEKE controls/);
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
@@ -1551,6 +1622,7 @@ describe("stelBegrotingVast — Verzekeringen lifecycle-blokkade (OB-032)", () =
     schrijfVerzekeringRegels(db, versie.id, [regelInvoer({ ingangsdatum: null })]);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow(/KRITIEKE controls/);
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
@@ -1562,6 +1634,7 @@ describe("stelBegrotingVast — Verzekeringen lifecycle-blokkade (OB-032)", () =
     schrijfVerzekeringRegels(db, versie.id, [regelInvoer({ looptijdMaanden: 0 })]);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow(/KRITIEKE controls/);
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
@@ -1573,6 +1646,7 @@ describe("stelBegrotingVast — Verzekeringen lifecycle-blokkade (OB-032)", () =
     schrijfVerzekeringRegels(db, versie.id, [regelInvoer({ bedrag: new Decimal(-500) })]);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
 
     expect(() => stelBegrotingVast(db, versie.id)).not.toThrow();
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("VASTGESTELD");
@@ -1584,6 +1658,7 @@ describe("stelBegrotingVast — Verzekeringen lifecycle-blokkade (OB-032)", () =
     schrijfVerzekeringRegels(db, versie.id, [regelInvoer()]);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.verzekering.totaalBerekendBegroot.toString()).toBe("12180");
@@ -1594,6 +1669,7 @@ describe("stelBegrotingVast — Verzekeringen lifecycle-blokkade (OB-032)", () =
     zetMinimaleBasisNeer(versie.id);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS); // 0 regels
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.verzekering.reviewStatus).toBe("REVIEWED_ZERO_POLICIES");
@@ -1612,6 +1688,7 @@ describe("stelBegrotingVast — Verzekeringen lifecycle-blokkade (OB-032)", () =
     schrijfVerzekeringRegels(db, versie.id, [regelInvoer({ ingangsdatum: new Date(Date.UTC(2027, 6, 1)) })]);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.verzekering.totaalBerekendBegroot.toString()).toBe("6000");
@@ -1627,6 +1704,7 @@ describe("stelBegrotingVast — Verzekeringen lifecycle-blokkade (OB-032)", () =
     schrijfVerzekeringRegels(db, versie.id, [regelInvoer({ ingangsdatum: new Date(Date.UTC(2029, 0, 1)) })]);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.verzekering.totaalBerekendBegroot.toString()).toBe("0");
@@ -1639,6 +1717,7 @@ describe("stelBegrotingVast — Verzekeringen lifecycle-blokkade (OB-032)", () =
     schrijfVerzekeringRegels(db, versie.id, [regelInvoer({ ingangsdatum: new Date(Date.UTC(2026, 0, 1)), looptijdMaanden: 6 })]);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.verzekering.totaalBerekendBegroot.toString()).toBe("12360");
@@ -1653,6 +1732,7 @@ describe("stelBegrotingVast — Verzekeringen lifecycle-blokkade (OB-032)", () =
     schrijfVerzekeringRegels(db, versie.id, [regelInvoer({ handmatigBegrootOverride: new Decimal(0) })]);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.verzekering.totaalBerekendBegroot.toString()).toBe("12180");
@@ -1676,6 +1756,7 @@ describe("stelBegrotingVast — Verzekeringen lifecycle-blokkade (OB-032)", () =
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS); // 0 polisregels, geen KRITIEK
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(
@@ -1690,6 +1771,7 @@ describe("stelBegrotingVast — Verzekeringen lifecycle-blokkade (OB-032)", () =
     schrijfVerzekeringRegels(db, versie.id, [regelInvoer()]);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.verzekering).toBeDefined();
@@ -1721,6 +1803,7 @@ describe("stelBegrotingVast — Verzekeringen atomiciteit (OB-032)", () => {
     schrijfVerzekeringRegels(db, versieId, [regelInvoer()]);
     schrijfVerzekeringBeoordeeld(db, versieId, true);
     schrijfGemeentelijkeLastenModule(db, versieId, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versieId, ALGEMENE_KOSTEN_ZERO_REGELS);
   }
 
   it("15. geforceerde fout tijdens schrijven frozen Verzekeringen laat volledige rollback zien — status blijft CONCEPT, geen enkele frozen output", () => {
@@ -1800,6 +1883,7 @@ describe("stelBegrotingVast — Verzekeringen immutability (OB-032)", () => {
     schrijfVerzekeringRegels(db, versie.id, [regelInvoer()]);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
     stelBegrotingVast(db, versie.id);
 
     expect(() =>
@@ -1837,6 +1921,7 @@ describe("stelBegrotingVast — Verzekeringen immutability (OB-032)", () => {
     const [regel] = schrijfVerzekeringRegels(db, versie.id, [regelInvoer()]);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
     stelBegrotingVast(db, versie.id);
 
     expect(() => db.prepare(`UPDATE begroting_verzekering_regel SET verzekeraar = 'x' WHERE id = ?`).run(regel!.id)).toThrow(/immutable/);
@@ -1869,6 +1954,7 @@ describe("stelBegrotingVast — Verzekeringen frozen-onafhankelijkheid (OB-032)"
     schrijfVerzekeringRegels(db, versie.id, [regelInvoer()]);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
     schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
     stelBegrotingVast(db, versie.id);
 
     const vóórDirecteMutatie = leesFrozenVerzekeringResultaat(db, versie.id)!;
@@ -1928,6 +2014,7 @@ describe("stelBegrotingVast — Gemeentelijke Lasten/WOZ lifecycle-blokkade (OB-
     schrijfGeplandOnderhoudBeoordeeld(db, versieId, true);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versieId, true);
     schrijfVerzekeringBeoordeeld(db, versieId, true);
+    schrijfAlgemeneKostenCategorieState(db, versieId, ALGEMENE_KOSTEN_ZERO_REGELS);
   }
 
   it("1. beoordeeld=false blokkeert vaststellen, ondanks een verder volledig geldig WOZ-object", () => {
@@ -2157,6 +2244,7 @@ describe("stelBegrotingVast — Gemeentelijke Lasten/WOZ atomiciteit (OB-033, fa
       begrotingsPercentageOverride: null,
       beoordeeld: true,
     });
+    schrijfAlgemeneKostenCategorieState(db, versieId, ALGEMENE_KOSTEN_ZERO_REGELS);
   }
 
   it("16 (scenario U). geforceerde fout tijdens schrijven frozen Gemeentelijke-Lasten laat volledige rollback zien — status blijft CONCEPT, geen enkele frozen output (ook niet van eerder geschreven modules)", () => {
@@ -2245,6 +2333,7 @@ describe("stelBegrotingVast — Gemeentelijke Lasten/WOZ immutability (OB-033, f
       begrotingsPercentageOverride: null,
       beoordeeld: true,
     });
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
     stelBegrotingVast(db, versie.id);
 
     expect(() =>
@@ -2302,6 +2391,7 @@ describe("stelBegrotingVast — Gemeentelijke Lasten/WOZ immutability (OB-033, f
       begrotingsPercentageOverride: null,
       beoordeeld: true,
     });
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
     stelBegrotingVast(db, versie.id);
 
     expect(() => db.prepare(`UPDATE begroting_woz_object SET complexnummer = 'x' WHERE id = ?`).run(wozObject!.id)).toThrow(/immutable/);
@@ -2342,6 +2432,7 @@ describe("stelBegrotingVast — Gemeentelijke Lasten/WOZ frozen-onafhankelijkhei
       begrotingsPercentageOverride: null,
       beoordeeld: true,
     });
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
     stelBegrotingVast(db, versie.id);
 
     const vóórDirecteMutatie = leesFrozenGemeentelijkeLastenResultaat(db, versie.id)!;
@@ -2361,5 +2452,352 @@ describe("stelBegrotingVast — Gemeentelijke Lasten/WOZ frozen-onafhankelijkhei
     const normaliseer = (waarde: unknown) => JSON.stringify(waarde, (_key, v) => (v instanceof Decimal ? v.toString() : v));
     expect(normaliseer(leesFrozenBegrotingsresultaat(db, versie.id))).toBe(normaliseer(module1Vóór));
     expect(normaliseer(leesFrozenVerzekeringResultaat(db, versie.id))).toBe(normaliseer(verzekeringVóór));
+  });
+});
+
+describe("stelBegrotingVast — Algemene Kosten lifecycle-blokkade (OB-035/036, fase P3)", () => {
+  // OB-035/036: Algemene Kosten krijgt, exact zoals de eerdere modules, een lokale vaststel-blokkade —
+  // met ÉÉN verschil in vorm: de blokkade geldt PER CATEGORIE (vijf onafhankelijke beoordeeld-checks).
+
+  const KLASSIFICATIE_070: AlgemeneKostenClassificatieRegel[] = [
+    { ogbKostensoort: "4990", ogbKostensoortOmschrijving: "Diverse alg kosten", categorie: "ALGEMENE_KOSTEN" },
+    { ogbKostensoort: "4992", ogbKostensoortOmschrijving: "makelaarskosten", categorie: "MAKELAARSKOSTEN" },
+    { ogbKostensoort: "4995", ogbKostensoortOmschrijving: "Bankkosten", categorie: "BANKKOSTEN" },
+  ];
+
+  function regelInvoer(overrides: Partial<AlgemeneKostenRegelInvoer> = {}): AlgemeneKostenRegelInvoer {
+    return {
+      id: null,
+      categorie: "JURIDISCHE_KOSTEN",
+      ogbKostensoortCode: null,
+      omschrijving: "Huurgeschil",
+      complexnummer: null,
+      jaarbedrag: new Decimal(5000),
+      ...overrides,
+    };
+  }
+
+  function alleStates(
+    overrides: Partial<Record<BgAlgemeneKostenCategorie, Partial<AlgemeneKostenCategorieStateInvoer>>> = {},
+  ): Record<BgAlgemeneKostenCategorie, AlgemeneKostenCategorieStateInvoer> {
+    return Object.fromEntries(
+      ALGEMENE_KOSTEN_CATEGORIEEN.map((categorie) => [
+        categorie,
+        { beoordeeld: true, vorigJaarBedrag: null, verwachteVerhogingPercentage: null, ...overrides[categorie] },
+      ]),
+    ) as Record<BgAlgemeneKostenCategorie, AlgemeneKostenCategorieStateInvoer>;
+  }
+
+  /** Minimale, geldige basis voor de eerdere modules — deze tests bewijzen uitsluitend Algemene-Kosten-gedrag. */
+  function zetMinimaleBasisNeer(versieId: string): void {
+    schrijfModule1Snapshot(db, versieId, []);
+    schrijfModule1Aannames(db, versieId, { begrotingsjaar: 2027, indexatiePercentage: new Decimal(3) });
+    schrijfModule3Invoer(db, versieId, MODULE3_STANDAARD);
+    schrijfGeplandOnderhoudBeoordeeld(db, versieId, true);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versieId, true);
+    schrijfVerzekeringBeoordeeld(db, versieId, true);
+    schrijfGemeentelijkeLastenModule(db, versieId, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+  }
+
+  it("1. één categorie NOT_REVIEWED blokkeert vaststellen, ondanks vier andere volledig beoordeelde categorieën", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    zetMinimaleBasisNeer(versie.id);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, alleStates({ JURIDISCHE_KOSTEN: { beoordeeld: false } }));
+
+    expect(() => stelBegrotingVast(db, versie.id)).toThrow(/JURIDISCHE_KOSTEN is niet beoordeeld/);
+    expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
+    expect(leesFrozenAlgemeneKostenResultaat(db, versie.id)).toBeNull();
+    expect(leesFrozenBegrotingsresultaat(db, versie.id)).toBeNull(); // geen enkele frozen output, ook niet Module 1/2
+  });
+
+  it("2. onbekende OGB-code: KRITIEK, blokkeert vaststellen", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    zetMinimaleBasisNeer(versie.id);
+    schrijfAlgemeneKostenClassificatie(db, "070", KLASSIFICATIE_070);
+    schrijfAlgemeneKostenRegels(db, versie.id, [regelInvoer({ categorie: "MAKELAARSKOSTEN", ogbKostensoortCode: "9999" })]);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, alleStates());
+
+    expect(() => stelBegrotingVast(db, versie.id)).toThrow(/KRITIEKE controls/);
+    expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
+  });
+
+  it("3. OGB-code gekoppeld aan andere categorie: KRITIEK, blokkeert vaststellen", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    zetMinimaleBasisNeer(versie.id);
+    schrijfAlgemeneKostenClassificatie(db, "070", KLASSIFICATIE_070);
+    schrijfAlgemeneKostenRegels(db, versie.id, [regelInvoer({ categorie: "JURIDISCHE_KOSTEN", ogbKostensoortCode: "4992" })]);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, alleStates());
+
+    expect(() => stelBegrotingVast(db, versie.id)).toThrow(/KRITIEKE controls/);
+    expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
+  });
+
+  it("4. negatief jaarbedrag (uitsluitend WAARSCHUWING) mag vaststellen", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    zetMinimaleBasisNeer(versie.id);
+    schrijfAlgemeneKostenRegels(db, versie.id, [regelInvoer({ jaarbedrag: new Decimal(-500) })]);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, alleStates());
+
+    expect(() => stelBegrotingVast(db, versie.id)).not.toThrow();
+    expect(leesBegrotingsversie(db, versie.id)!.status).toBe("VASTGESTELD");
+  });
+
+  it("5. alle vijf categorieën beoordeeld=true + 0 regels mag vaststellen -> REVIEWED_ZERO_RULES per categorie, frozen read correct", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    zetMinimaleBasisNeer(versie.id);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, alleStates());
+
+    const resultaat = stelBegrotingVast(db, versie.id);
+    for (const c of resultaat.algemeneKosten.perCategorie) {
+      expect(c.reviewStatus).toBe("REVIEWED_ZERO_RULES");
+    }
+    expect(resultaat.algemeneKosten.moduleTotaal.toString()).toBe("0");
+
+    const frozen = leesFrozenAlgemeneKostenResultaat(db, versie.id)!;
+    for (const c of frozen.perCategorie) {
+      expect(c.reviewStatus).toBe("REVIEWED_ZERO_RULES");
+      expect(c.regels).toEqual([]);
+    }
+    expect(frozen.moduleTotaal.toString()).toBe("0");
+    expect(frozen.classificatie).toEqual([]);
+  });
+
+  it("6. beoordeeld=true + geen KRITIEK mag vaststellen, alle vijf categorietotalen afzonderlijk beschikbaar", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    zetMinimaleBasisNeer(versie.id);
+    schrijfAlgemeneKostenClassificatie(db, "070", KLASSIFICATIE_070);
+    schrijfAlgemeneKostenRegels(db, versie.id, [
+      regelInvoer({ categorie: "ACCOUNTANT", ogbKostensoortCode: null, jaarbedrag: new Decimal(4000) }),
+      regelInvoer({ categorie: "ALGEMENE_KOSTEN", ogbKostensoortCode: "4990", jaarbedrag: new Decimal(500) }),
+      regelInvoer({ categorie: "JURIDISCHE_KOSTEN", ogbKostensoortCode: null, jaarbedrag: new Decimal(2500) }),
+      regelInvoer({ categorie: "MAKELAARSKOSTEN", ogbKostensoortCode: "4992", jaarbedrag: new Decimal(6000) }),
+      regelInvoer({ categorie: "BANKKOSTEN", ogbKostensoortCode: "4995", jaarbedrag: new Decimal(50) }),
+    ]);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, alleStates());
+
+    const resultaat = stelBegrotingVast(db, versie.id);
+    expect(resultaat.algemeneKosten.accountantskosten.toString()).toBe("4000");
+    expect(resultaat.algemeneKosten.algemeneKosten.toString()).toBe("500");
+    expect(resultaat.algemeneKosten.juridischeKosten.toString()).toBe("2500");
+    expect(resultaat.algemeneKosten.makelaarskosten.toString()).toBe("6000");
+    expect(resultaat.algemeneKosten.bankkosten.toString()).toBe("50");
+    expect(resultaat.algemeneKosten.moduleTotaal.toString()).toBe("13050");
+  });
+
+  it("7. de volledige resolved classificatie wordt bevroren, ook OGB-codes die in geen enkele regel zijn gebruikt", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    zetMinimaleBasisNeer(versie.id);
+    schrijfAlgemeneKostenClassificatie(db, "070", KLASSIFICATIE_070);
+    schrijfAlgemeneKostenRegels(db, versie.id, [regelInvoer({ categorie: "BANKKOSTEN", ogbKostensoortCode: "4995" })]);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, alleStates());
+
+    stelBegrotingVast(db, versie.id);
+    const frozen = leesFrozenAlgemeneKostenResultaat(db, versie.id)!;
+    expect(frozen.classificatie).toEqual(KLASSIFICATIE_070); // incl. 4990/4992, ongebruikt in deze begroting
+  });
+
+  it("8. het vastgestelde resultaat bevat algemeneKosten (VastgesteldeBegroting uitgebreid, OB-035/036 P3)", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    zetMinimaleBasisNeer(versie.id);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, alleStates());
+
+    const resultaat = stelBegrotingVast(db, versie.id);
+    expect(resultaat.algemeneKosten).toBeDefined();
+    expect(resultaat.algemeneKosten.perCategorie).toHaveLength(5);
+  });
+});
+
+describe("stelBegrotingVast — Algemene Kosten atomiciteit (OB-035/036, fase P3)", () => {
+  function zetGeldigeBasisNeer(versieId: string): void {
+    schrijfModule1Snapshot(db, versieId, []);
+    schrijfModule1Aannames(db, versieId, { begrotingsjaar: 2027, indexatiePercentage: new Decimal(3) });
+    schrijfModule3Invoer(db, versieId, MODULE3_STANDAARD);
+    schrijfGeplandOnderhoudBeoordeeld(db, versieId, true);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versieId, true);
+    schrijfVerzekeringBeoordeeld(db, versieId, true);
+    schrijfGemeentelijkeLastenModule(db, versieId, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenRegels(db, versieId, [
+      { id: null, categorie: "BANKKOSTEN", ogbKostensoortCode: null, omschrijving: "Bankkosten", complexnummer: null, jaarbedrag: new Decimal(50) },
+    ]);
+    schrijfAlgemeneKostenCategorieState(
+      db,
+      versieId,
+      Object.fromEntries(
+        ALGEMENE_KOSTEN_CATEGORIEEN.map((categorie) => [categorie, { beoordeeld: true, vorigJaarBedrag: null, verwachteVerhogingPercentage: null }]),
+      ) as Record<BgAlgemeneKostenCategorie, AlgemeneKostenCategorieStateInvoer>,
+    );
+  }
+
+  it("9. geforceerde fout tijdens schrijven frozen Algemene-Kosten laat volledige rollback zien — status blijft CONCEPT, geen enkele frozen output", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    zetGeldigeBasisNeer(versie.id);
+
+    db.exec(
+      `CREATE TRIGGER test_blokkeer_frozen_algemene_kosten_insert
+       BEFORE INSERT ON begroting_frozen_algemene_kosten_categorie
+       FOR EACH ROW
+       BEGIN
+         SELECT RAISE(ABORT, 'geforceerde schrijffout tijdens Algemene-Kosten-frozen-write');
+       END;`,
+    );
+
+    expect(() => stelBegrotingVast(db, versie.id)).toThrow(/geforceerde schrijffout tijdens Algemene-Kosten-frozen-write/);
+
+    const naMislukking = leesBegrotingsversie(db, versie.id)!;
+    expect(naMislukking.status).toBe("CONCEPT");
+    expect(naMislukking.vastgesteldAt).toBeNull();
+    expect(leesFrozenAlgemeneKostenResultaat(db, versie.id)).toBeNull();
+    expect(leesFrozenGemeentelijkeLastenResultaat(db, versie.id)).toBeNull();
+    expect(leesFrozenVerzekeringResultaat(db, versie.id)).toBeNull();
+    expect(leesFrozenBegrotingsresultaat(db, versie.id)).toBeNull();
+  });
+
+  it("10. geforceerde fout NA geslaagde Algemene-Kosten-frozen-writes maar vóór de statuswijziging laat volledige rollback zien (hardste bewijs)", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    zetGeldigeBasisNeer(versie.id);
+
+    db.exec(`
+      CREATE TRIGGER test_blokkeer_statusflip_algemene_kosten
+      BEFORE UPDATE ON begrotingsversies
+      FOR EACH ROW
+      WHEN NEW.status = 'VASTGESTELD' AND OLD.status = 'CONCEPT'
+      BEGIN
+        SELECT RAISE(ABORT, 'test: geforceerde statusflip-fout (algemene kosten)');
+      END;
+    `);
+
+    expect(() => stelBegrotingVast(db, versie.id)).toThrow(/geforceerde statusflip-fout \(algemene kosten\)/);
+
+    const naMislukking = leesBegrotingsversie(db, versie.id)!;
+    expect(naMislukking.status).toBe("CONCEPT");
+    expect(naMislukking.vastgesteldAt).toBeNull();
+    expect(leesFrozenAlgemeneKostenResultaat(db, versie.id)).toBeNull();
+    expect(leesFrozenGemeentelijkeLastenResultaat(db, versie.id)).toBeNull();
+    expect(leesFrozenVerzekeringResultaat(db, versie.id)).toBeNull();
+    expect(leesFrozenBegrotingsresultaat(db, versie.id)).toBeNull();
+  });
+});
+
+describe("stelBegrotingVast — Algemene Kosten immutability (OB-035/036, fase P3)", () => {
+  it("11. na vaststellen zijn INSERT/UPDATE/DELETE op alle vier frozen Algemene-Kosten-tabellen geblokkeerd", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    schrijfModule1Snapshot(db, versie.id, []);
+    schrijfModule1Aannames(db, versie.id, { begrotingsjaar: 2027, indexatiePercentage: new Decimal(3) });
+    schrijfModule3Invoer(db, versie.id, MODULE3_STANDAARD);
+    schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    // Classificatieregel nodig zodat de frozen classificatietabel niet leeg is
+    // (een DELETE op een lege tabel matcht geen rijen, dus een FOR-EACH-ROW-trigger vuurt dan niet).
+    schrijfAlgemeneKostenClassificatie(db, NIEUWE_VERSIE_INPUT.bedrijfsnr, [
+      { ogbKostensoort: "4990", ogbKostensoortOmschrijving: "Bankkosten", categorie: "BANKKOSTEN" },
+    ]);
+    // Negatief bedrag geeft bewust een WAARSCHUWING-control, zodat de control-tabel niet leeg is.
+    schrijfAlgemeneKostenRegels(db, versie.id, [
+      { id: null, categorie: "BANKKOSTEN", ogbKostensoortCode: null, omschrijving: "x", complexnummer: null, jaarbedrag: new Decimal(-500) },
+    ]);
+    schrijfAlgemeneKostenCategorieState(
+      db,
+      versie.id,
+      Object.fromEntries(
+        ALGEMENE_KOSTEN_CATEGORIEEN.map((categorie) => [categorie, { beoordeeld: true, vorigJaarBedrag: null, verwachteVerhogingPercentage: null }]),
+      ) as Record<BgAlgemeneKostenCategorie, AlgemeneKostenCategorieStateInvoer>,
+    );
+    stelBegrotingVast(db, versie.id);
+
+    expect(() =>
+      db
+        .prepare(
+          `INSERT INTO begroting_frozen_algemene_kosten_categorie (begroting_versie_id, categorie, beoordeeld, review_status, categorie_totaal, module_totaal)
+           VALUES ('een-andere-versie-id', 'ACCOUNTANT', 1, 'REVIEWED_ZERO_RULES', '0', '0')`,
+        )
+        .run(),
+    ).toThrow(/immutable|FOREIGN KEY/);
+    expect(() =>
+      db.prepare(`UPDATE begroting_frozen_algemene_kosten_categorie SET categorie_totaal = '999' WHERE begroting_versie_id = ?`).run(versie.id),
+    ).toThrow(/immutable/);
+    expect(() => db.prepare(`DELETE FROM begroting_frozen_algemene_kosten_regel WHERE begroting_versie_id = ?`).run(versie.id)).toThrow(
+      /immutable/,
+    );
+    expect(() => db.prepare(`DELETE FROM begroting_frozen_algemene_kosten_control WHERE begroting_versie_id = ?`).run(versie.id)).toThrow(
+      /immutable/,
+    );
+    expect(() => db.prepare(`DELETE FROM begroting_frozen_algemene_kosten_classificatie WHERE begroting_versie_id = ?`).run(versie.id)).toThrow(
+      /immutable/,
+    );
+  });
+
+  it("12. concept-input-immutability blijft geblokkeerd na vaststellen (categorie-state + regels)", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    schrijfModule1Snapshot(db, versie.id, []);
+    schrijfModule1Aannames(db, versie.id, { begrotingsjaar: 2027, indexatiePercentage: new Decimal(3) });
+    schrijfModule3Invoer(db, versie.id, MODULE3_STANDAARD);
+    schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    const [regel] = schrijfAlgemeneKostenRegels(db, versie.id, [
+      { id: null, categorie: "BANKKOSTEN", ogbKostensoortCode: null, omschrijving: "x", complexnummer: null, jaarbedrag: new Decimal(50) },
+    ]);
+    schrijfAlgemeneKostenCategorieState(
+      db,
+      versie.id,
+      Object.fromEntries(
+        ALGEMENE_KOSTEN_CATEGORIEEN.map((categorie) => [categorie, { beoordeeld: true, vorigJaarBedrag: null, verwachteVerhogingPercentage: null }]),
+      ) as Record<BgAlgemeneKostenCategorie, AlgemeneKostenCategorieStateInvoer>,
+    );
+    stelBegrotingVast(db, versie.id);
+
+    expect(() => db.prepare(`UPDATE begroting_algemene_kosten_regel SET omschrijving = 'x' WHERE id = ?`).run(regel!.id)).toThrow(/immutable/);
+    expect(() => db.prepare(`DELETE FROM begroting_algemene_kosten_regel WHERE id = ?`).run(regel!.id)).toThrow(/immutable/);
+    expect(() =>
+      db.prepare(`UPDATE begroting_algemene_kosten_categorie_state SET beoordeeld = 0 WHERE begroting_versie_id = ?`).run(versie.id),
+    ).toThrow(/immutable/);
+  });
+});
+
+describe("stelBegrotingVast — Algemene Kosten frozen-onafhankelijkheid (OB-035/036, fase P3)", () => {
+  it("13. leesFrozenAlgemeneKostenResultaat blijft na vaststellen stabiel, ook al zou concept-data of de levende classificatie ná afloop wijzigen", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    schrijfModule1Snapshot(db, versie.id, []);
+    schrijfModule1Aannames(db, versie.id, { begrotingsjaar: 2027, indexatiePercentage: new Decimal(3) });
+    schrijfModule3Invoer(db, versie.id, MODULE3_STANDAARD);
+    schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenClassificatie(db, "070", [
+      { ogbKostensoort: "4995", ogbKostensoortOmschrijving: "Bankkosten", categorie: "BANKKOSTEN" },
+    ]);
+    schrijfAlgemeneKostenRegels(db, versie.id, [
+      { id: null, categorie: "BANKKOSTEN", ogbKostensoortCode: "4995", omschrijving: "x", complexnummer: null, jaarbedrag: new Decimal(50) },
+    ]);
+    schrijfAlgemeneKostenCategorieState(
+      db,
+      versie.id,
+      Object.fromEntries(
+        ALGEMENE_KOSTEN_CATEGORIEEN.map((categorie) => [categorie, { beoordeeld: true, vorigJaarBedrag: null, verwachteVerhogingPercentage: null }]),
+      ) as Record<BgAlgemeneKostenCategorie, AlgemeneKostenCategorieStateInvoer>,
+    );
+    stelBegrotingVast(db, versie.id);
+
+    const vóórDirecteMutatie = leesFrozenAlgemeneKostenResultaat(db, versie.id)!;
+    expect(vóórDirecteMutatie.bankkosten.toString()).toBe("50");
+    const module1Vóór = leesFrozenBegrotingsresultaat(db, versie.id)!;
+
+    // Rechtstreekse, buiten-de-API-om SQL-mutatie van de CONCEPT-regeltabel en de levende classificatie —
+    // uitsluitend om aan te tonen dat de frozen read deze structureel niet meer raadpleegt.
+    db.exec(`DROP TRIGGER trg_begroting_algemene_kosten_regel_vastgesteld_no_update`);
+    db.prepare(`UPDATE begroting_algemene_kosten_regel SET jaarbedrag = '999999' WHERE begroting_versie_id = ?`).run(versie.id);
+    db.exec(`DELETE FROM begroting_algemene_kosten_classificatie`);
+
+    const náDirecteMutatie = leesFrozenAlgemeneKostenResultaat(db, versie.id)!;
+    expect(náDirecteMutatie.bankkosten.toString()).toBe("50"); // ongewijzigd — frozen read leest nooit de concept-tabel/levende classificatie
+    expect(náDirecteMutatie.classificatie).toHaveLength(1); // bevroren kopie blijft intact ondanks lege levende classificatie
+
+    // Bestaande frozen resultaten van andere modules blijven byte-voor-byte ongewijzigd naast OB-035/036's frozen output.
+    const normaliseer = (waarde: unknown) => JSON.stringify(waarde, (_key, v) => (v instanceof Decimal ? v.toString() : v));
+    expect(normaliseer(leesFrozenBegrotingsresultaat(db, versie.id))).toBe(normaliseer(module1Vóór));
   });
 });

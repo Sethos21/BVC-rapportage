@@ -1,6 +1,10 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { BgBeheerResultaat, BgHuurResultaat, BgManagementResultaat } from "@bvc/reporting";
 import { leesBegrotingsversie, markeerVastgesteld, type Begrotingsversie } from "./begrotingsversies.js";
+import {
+  schrijfFrozenAlgemeneKostenResultaatZonderTransactie,
+  type FrozenAlgemeneKostenResultaat,
+} from "./frozenAlgemeneKostenResultaat.js";
 import { schrijfFrozenCorrectiefDagelijksOnderhoudResultaatZonderTransactie } from "./frozenCorrectiefDagelijksOnderhoudResultaat.js";
 import {
   schrijfFrozenGemeentelijkeLastenResultaatZonderTransactie,
@@ -116,10 +120,30 @@ import {
  * `frozenGemeentelijkeLastenResultaat.ts`'s moduledoc — die aanname wordt
  * door de pure calculator zelf niet teruggegeven).
  *
+ * ALGEMENE KOSTEN (OB-035/036, fase P3): volgt hetzelfde lokale-blokkade-
+ * patroon — de VIJFDE en (tot nu toe) laatste lokale uitzondering, met ÉÉN
+ * verschil in vorm: de blokkade geldt PER CATEGORIE (vijf onafhankelijke
+ * checks, niet één). Vaststellen wordt geblokkeerd als:
+ * (a) een willekeurige van de vijf categorieën `beoordeeld !== true` heeft
+ * (ALLE vijf moeten expliciet beoordeeld zijn — Accountant bewust op €0
+ * terwijl Juridische kosten nog niet behandeld is, blokkeert dus terecht);
+ * of (b) `algemeneKosten.controleVereist` (over alle categorieën heen) bevat
+ * één of meer `KRITIEK`-items. WAARSCHUWING/INFORMATIEF blokkeren niet. Dit
+ * maakt `REVIEWED_ZERO_RULES` per categorie een bewust geldige, vaststelbare
+ * toestand: 0 regels + `beoordeeld=true` geeft geen enkele KRITIEK. Deze
+ * twee checks lezen uitsluitend het al door `berekenBegrotingUitInvoer`
+ * berekende `algemeneKosten`-resultaat — er wordt niets herberekend of
+ * dubbel gevalideerd (zie `begroteAlgemeneKosten.ts`). Frozen output bevat,
+ * naast het berekende resultaat, ook de volledige resolved lokale
+ * classificatie (`invoer.algemeneKostenClassificatie`, administratie-breed,
+ * GEEN begrotingsversie-gebonden data — zie
+ * `frozenAlgemeneKostenResultaat.ts`'s moduledoc).
+ *
  * Bundelt uitsluitend de al bestaande `Begrotingsversie`/`BgHuurResultaat`/
  * `BgBeheerResultaat`/`BgManagementResultaat`/`HerberekendGeplandOnderhoudResultaat`/
  * `HerberekendCorrectiefDagelijksResultaat`/`HerberekendVerzekeringResultaat`/
- * `FrozenGemeentelijkeLastenResultaat` — bewust geen shadow-rekenresultaattype.
+ * `FrozenGemeentelijkeLastenResultaat`/`FrozenAlgemeneKostenResultaat` —
+ * bewust geen shadow-rekenresultaattype.
  */
 export interface VastgesteldeBegroting {
   versie: Begrotingsversie;
@@ -130,6 +154,7 @@ export interface VastgesteldeBegroting {
   correctiefDagelijksOnderhoud: HerberekendCorrectiefDagelijksResultaat;
   verzekering: HerberekendVerzekeringResultaat;
   gemeentelijkeLasten: FrozenGemeentelijkeLastenResultaat;
+  algemeneKosten: FrozenAlgemeneKostenResultaat;
 }
 
 /**
@@ -203,10 +228,8 @@ export function stelBegrotingVast(db: DatabaseSync, versieId: string, vastgestel
       );
     }
 
-    const { module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud, verzekering, gemeentelijkeLasten } = berekenBegrotingUitInvoer(
-      versieId,
-      invoer,
-    );
+    const { module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud, verzekering, gemeentelijkeLasten, algemeneKosten } =
+      berekenBegrotingUitInvoer(versieId, invoer);
     // Lokale, expliciete narrowing: `module3` is hier altijd niet-null, want `invoer.module3Invoer !== null`
     // is hierboven al gecontroleerd en `berekenBegrotingUitInvoer` berekent Module 3 uitsluitend (en dan
     // altijd naar een niet-null resultaat) wanneer `module3Invoer` niet-null is. Deze check is dus puur
@@ -273,12 +296,29 @@ export function stelBegrotingVast(db: DatabaseSync, versieId: string, vastgestel
       );
     }
 
+    // Algemene-Kosten-lifecycle-validatie (OB-035/036, fase P3, zie moduledoc) — UITSLUITEND lokaal voor
+    // Algemene Kosten, wijzigt niets aan hoe de eerdere modules' eigen controleVereist wordt behandeld
+    // hierboven. PER CATEGORIE: ALLE vijf moeten expliciet beoordeeld=true zijn (Accountant bewust op €0
+    // terwijl Juridische kosten nog niet behandeld is, blokkeert dus terecht op de laatste).
+    const nietBeoordeeldeCategorie = algemeneKosten.perCategorie.find((c) => !c.beoordeeld);
+    if (nietBeoordeeldeCategorie !== undefined) {
+      throw new Error(
+        `Begrotingsversie ${versieId}: Algemene Kosten — categorie ${nietBeoordeeldeCategorie.categorie} is niet beoordeeld (beoordeeld !== true) — vaststellen is niet mogelijk zonder expliciete beoordeling van ALLE vijf categorieën.`,
+      );
+    }
+    if (algemeneKosten.controleVereist.some((c) => c.ernst === "KRITIEK")) {
+      throw new Error(
+        `Begrotingsversie ${versieId}: Algemene Kosten bevat één of meer KRITIEKE controls — vaststellen is niet mogelijk vóórdat deze zijn opgelost.`,
+      );
+    }
+
     schrijfFrozenBegrotingsresultaatZonderTransactie(db, versieId, { module1, module2 });
     schrijfFrozenModule3ResultaatZonderTransactie(db, versieId, module3);
     schrijfFrozenGeplandOnderhoudResultaatZonderTransactie(db, versieId, geplandOnderhoud);
     schrijfFrozenCorrectiefDagelijksOnderhoudResultaatZonderTransactie(db, versieId, correctiefDagelijksOnderhoud);
     schrijfFrozenVerzekeringResultaatZonderTransactie(db, versieId, verzekering);
     schrijfFrozenGemeentelijkeLastenResultaatZonderTransactie(db, versieId, gemeentelijkeLasten, invoer.gemeentelijkeLastenModule.werkelijkeGemeentelijkeLasten);
+    schrijfFrozenAlgemeneKostenResultaatZonderTransactie(db, versieId, algemeneKosten, invoer.algemeneKostenClassificatie);
     markeerVastgesteld(db, versieId, vastgesteldAt); // allerlaatste schrijfactie vóór commit
 
     const versie = leesBegrotingsversie(db, versieId);
@@ -290,7 +330,21 @@ export function stelBegrotingVast(db: DatabaseSync, versieId: string, vastgestel
       ...gemeentelijkeLasten,
       werkelijkeGemeentelijkeLasten: invoer.gemeentelijkeLastenModule.werkelijkeGemeentelijkeLasten,
     };
+    const frozenAlgemeneKosten: FrozenAlgemeneKostenResultaat = {
+      ...algemeneKosten,
+      classificatie: invoer.algemeneKostenClassificatie,
+    };
 
-    return { versie, module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud, verzekering, gemeentelijkeLasten: frozenGemeentelijkeLasten };
+    return {
+      versie,
+      module1,
+      module2,
+      module3,
+      geplandOnderhoud,
+      correctiefDagelijksOnderhoud,
+      verzekering,
+      gemeentelijkeLasten: frozenGemeentelijkeLasten,
+      algemeneKosten: frozenAlgemeneKosten,
+    };
   });
 }
