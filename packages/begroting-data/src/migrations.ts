@@ -2587,6 +2587,250 @@ export const MIGRATIONS: readonly Migration[] = [
        END`,
     ],
   },
+  /**
+   * Migratie 18 — Leegstandskosten (OB-031): concept-input, drie tabellen,
+   * exact het patroon van migratie 16 met twee bewuste verschillen:
+   *
+   * 1. GEEN OGB-kolom op `begroting_leegstand_regel` — het bronproef
+   *    (2026-09) toonde dat OGB-classificatie hier uitsluitend zinvol is om
+   *    WERKELIJKE boekingen te classificeren, niet om een begrotingsregel te
+   *    valideren (zie `begroteLeegstand.ts`'s moduledoc). Een begrotingsregel
+   *    heeft in plaats daarvan `complexnummer`/`complexomschrijving`
+   *    (optioneel, puur presentatie) + `omschrijving` + vier kwartaalkolommen
+   *    `q1`..`q4` (i.p.v. één `jaarbedrag`).
+   *
+   * 2. De rekenhulp op `begroting_leegstand_categorie_state` heeft een eigen
+   *    formule-specifieke vorm (`laatst_bekend_servicekostenvoorschot_jaar` +
+   *    `laatst_bekend_servicekostenvoorschot_jaar_herkomst` (CHECK IN
+   *    ('BRON','HANDMATIG'), NULL uitsluitend als het bedrag zelf ook NULL is
+   *    — correctie 2026-09-10, zie `leegstandCategorieState.ts`'s moduledoc)
+   *    + `verwachte_leegstandsperiode_maanden`) i.p.v. de generieke
+   *    vorig-jaar-bedrag/percentage-vorm van migratie 16 — zelfde
+   *    "structureel op elke categorie, functioneel vooral voor één"-principe,
+   *    hier voor SERVICEKOSTEN_LEEGSTAND.
+   *
+   * `begroting_leegstand_classificatie` volgt exact het architectuurpatroon
+   * van `begroting_algemene_kosten_classificatie` (migratie 16): bedrijfsnr-
+   * gescoped, GEEN `begroting_versie_id`, GEEN triggers (geen versie om aan
+   * te toetsen) — bewezen voor 070: OGB 4319 = "Servicekosten leegstand".
+   *
+   * Immutability: `begroting_leegstand_categorie_state` en
+   * `begroting_leegstand_regel` krijgen elk de gebruikelijke drie triggers —
+   * zes triggers totaal.
+   */
+  {
+    version: 18,
+    description: "Leegstandskosten: concept-input (lokale OGB-classificatie + categorie-state + regels)",
+    ddl: [
+      `CREATE TABLE begroting_leegstand_classificatie (
+        bedrijfsnr TEXT NOT NULL,
+        ogb_kostensoort TEXT NOT NULL,
+        ogb_kostensoort_omschrijving TEXT NOT NULL,
+        categorie TEXT NOT NULL CHECK (categorie IN ('NUTS_LEEGSTAND', 'SERVICEKOSTEN_LEEGSTAND', 'OVERIGE_LEEGSTANDSKOSTEN')),
+        PRIMARY KEY (bedrijfsnr, ogb_kostensoort)
+      )`,
+      `CREATE INDEX idx_begroting_leegstand_classificatie_bedrijfsnr ON begroting_leegstand_classificatie(bedrijfsnr)`,
+      `CREATE TABLE begroting_leegstand_categorie_state (
+        begroting_versie_id TEXT NOT NULL REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        categorie TEXT NOT NULL CHECK (categorie IN ('NUTS_LEEGSTAND', 'SERVICEKOSTEN_LEEGSTAND', 'OVERIGE_LEEGSTANDSKOSTEN')),
+        beoordeeld INTEGER NOT NULL CHECK (beoordeeld IN (0, 1)),
+        laatst_bekend_servicekostenvoorschot_jaar TEXT NULL,
+        laatst_bekend_servicekostenvoorschot_jaar_herkomst TEXT NULL CHECK (laatst_bekend_servicekostenvoorschot_jaar_herkomst IN ('BRON', 'HANDMATIG')),
+        verwachte_leegstandsperiode_maanden TEXT NULL,
+        PRIMARY KEY (begroting_versie_id, categorie)
+      )`,
+      `CREATE TABLE begroting_leegstand_regel (
+        id INTEGER PRIMARY KEY,
+        begroting_versie_id TEXT NOT NULL REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        categorie TEXT NOT NULL CHECK (categorie IN ('NUTS_LEEGSTAND', 'SERVICEKOSTEN_LEEGSTAND', 'OVERIGE_LEEGSTANDSKOSTEN')),
+        complexnummer TEXT NULL,
+        complexomschrijving TEXT NULL,
+        omschrijving TEXT NOT NULL,
+        q1 TEXT NULL,
+        q2 TEXT NULL,
+        q3 TEXT NULL,
+        q4 TEXT NULL
+      )`,
+      `CREATE INDEX idx_begroting_leegstand_regel_versie ON begroting_leegstand_regel(begroting_versie_id)`,
+      `CREATE TRIGGER trg_begroting_leegstand_categorie_state_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_leegstand_categorie_state
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_leegstand_categorie_state: begrotingsversie is VASTGESTELD, categorie-state is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_leegstand_categorie_state_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_leegstand_categorie_state
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_leegstand_categorie_state: begrotingsversie is VASTGESTELD, categorie-state is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_leegstand_categorie_state_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_leegstand_categorie_state
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_leegstand_categorie_state: begrotingsversie is VASTGESTELD, categorie-state is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_leegstand_regel_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_leegstand_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_leegstand_regel: begrotingsversie is VASTGESTELD, regels zijn immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_leegstand_regel_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_leegstand_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_leegstand_regel: begrotingsversie is VASTGESTELD, regels zijn immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_leegstand_regel_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_leegstand_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_leegstand_regel: begrotingsversie is VASTGESTELD, regels zijn immutable');
+       END`,
+    ],
+  },
+  /**
+   * Migratie 19 — bevroren Leegstandskosten-OUTPUT (OB-031, fase P3), exact
+   * zoals `begroteLeegstand.ts`/`HerberekendLeegstandResultaat` op HEAD
+   * kennen. Uitsluitend serialisatie/deserialisatie van een reeds berekend,
+   * puur Begroting-resultaat — Werkelijk/Estimated worden NOOIT bevroren
+   * (ze zijn per ontwerp altijd live herberekend uit de actuele boekhouding,
+   * zie `begroteLeegstand.ts`'s moduledoc), dus GEEN frozen-tabel daarvoor.
+   *
+   * DRIE TABELLEN (i.p.v. vier bij migratie 17): GEEN frozen-classificatie-
+   * tabel — een Leegstandskosten-begrotingsregel heeft geen OGB-koppeling
+   * (zie migratie 18), dus is er niets classificatie-afhankelijks om op het
+   * moment van vaststellen te bevriezen.
+   *
+   * 1. `begroting_frozen_leegstand_categorie` — per categorie:
+   *    `beoordeeld`/`review_status`/`categorie_totaal`/rekenhulpvelden/
+   *    `berekend_voorstel`. `module_totaal` gedenormaliseerd op elke rij
+   *    (zelfde "GEEN opnieuw berekenen moduleTotaal"-principe als migratie 17).
+   * 2. `begroting_frozen_leegstand_regel` — PK `(begroting_versie_id,
+   *    regel_id)`, `regel_id` = de oorspronkelijke CONCEPT-`id`. `q1`..`q4`
+   *    blijven NULLABLE (originele invoer, ongewijzigd bevroren);
+   *    `totaal` bevat de reeds door de pure calculator berekende veilige som
+   *    (nooit opnieuw af te leiden bij frozen read).
+   * 3. `begroting_frozen_leegstand_control` — zelfde `volgnr`-patroon als
+   *    migratie 17.
+   *
+   * FROZEN-STATE INVARIANTEN: `CHECK (beoordeeld = 1)` en
+   * `CHECK (review_status IN ('REVIEWED_ZERO_RULES', 'REVIEWED_WITH_RULES'))`.
+   *
+   * Immutability: dezelfde drie triggers per tabel — negen triggers totaal.
+   */
+  {
+    version: 19,
+    description: "Bevroren Leegstandskosten-output (Begroting-resultaat, Werkelijk/Estimated blijven live)",
+    ddl: [
+      `CREATE TABLE begroting_frozen_leegstand_categorie (
+        begroting_versie_id TEXT NOT NULL REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        categorie TEXT NOT NULL CHECK (categorie IN ('NUTS_LEEGSTAND', 'SERVICEKOSTEN_LEEGSTAND', 'OVERIGE_LEEGSTANDSKOSTEN')),
+        beoordeeld INTEGER NOT NULL CHECK (beoordeeld = 1),
+        review_status TEXT NOT NULL CHECK (review_status IN ('REVIEWED_ZERO_RULES', 'REVIEWED_WITH_RULES')),
+        categorie_totaal TEXT NOT NULL,
+        laatst_bekend_servicekostenvoorschot_jaar TEXT NULL,
+        laatst_bekend_servicekostenvoorschot_jaar_herkomst TEXT NULL CHECK (laatst_bekend_servicekostenvoorschot_jaar_herkomst IN ('BRON', 'HANDMATIG')),
+        verwachte_leegstandsperiode_maanden TEXT NULL,
+        berekend_voorstel TEXT NULL,
+        module_totaal TEXT NOT NULL,
+        PRIMARY KEY (begroting_versie_id, categorie)
+      )`,
+      `CREATE TABLE begroting_frozen_leegstand_regel (
+        begroting_versie_id TEXT NOT NULL REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        regel_id INTEGER NOT NULL,
+        categorie TEXT NOT NULL CHECK (categorie IN ('NUTS_LEEGSTAND', 'SERVICEKOSTEN_LEEGSTAND', 'OVERIGE_LEEGSTANDSKOSTEN')),
+        complexnummer TEXT NULL,
+        complexomschrijving TEXT NULL,
+        omschrijving TEXT NOT NULL,
+        q1 TEXT NULL,
+        q2 TEXT NULL,
+        q3 TEXT NULL,
+        q4 TEXT NULL,
+        totaal TEXT NOT NULL,
+        PRIMARY KEY (begroting_versie_id, regel_id)
+      )`,
+      `CREATE TABLE begroting_frozen_leegstand_control (
+        begroting_versie_id TEXT NOT NULL REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        volgnr INTEGER NOT NULL,
+        categorie TEXT NOT NULL CHECK (categorie IN ('NUTS_LEEGSTAND', 'SERVICEKOSTEN_LEEGSTAND', 'OVERIGE_LEEGSTANDSKOSTEN')),
+        regel_id INTEGER NULL,
+        ernst TEXT NOT NULL CHECK (ernst IN ('KRITIEK', 'WAARSCHUWING', 'INFORMATIEF')),
+        bericht TEXT NOT NULL,
+        PRIMARY KEY (begroting_versie_id, volgnr)
+      )`,
+      `CREATE TRIGGER trg_begroting_frozen_leegstand_categorie_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_frozen_leegstand_categorie
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_leegstand_categorie: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_leegstand_categorie_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_frozen_leegstand_categorie
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_leegstand_categorie: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_leegstand_categorie_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_frozen_leegstand_categorie
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_leegstand_categorie: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_leegstand_regel_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_frozen_leegstand_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_leegstand_regel: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_leegstand_regel_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_frozen_leegstand_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_leegstand_regel: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_leegstand_regel_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_frozen_leegstand_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_leegstand_regel: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_leegstand_control_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_frozen_leegstand_control
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_leegstand_control: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_leegstand_control_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_frozen_leegstand_control
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_leegstand_control: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_leegstand_control_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_frozen_leegstand_control
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_leegstand_control: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+    ],
+  },
 ];
 
 function schemaMetaTableExists(db: DatabaseSync): boolean {

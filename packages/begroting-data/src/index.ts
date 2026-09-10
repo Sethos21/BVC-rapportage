@@ -65,6 +65,9 @@ export {
   type HerberekendAlgemeneKostenResultaat,
   type HerberekendAlgemeneKostenCategorieResultaat,
   type AlgemeneKostenRegelUitkomstMetId,
+  type HerberekendLeegstandResultaat,
+  type HerberekendLeegstandCategorieResultaat,
+  type LeegstandRegelUitkomstMetId,
 } from "./herberekenen.js";
 
 // Bevroren Module-1/Module-2-output (1D.6a) — uitsluitend serialisatie/
@@ -153,6 +156,21 @@ export {
   type FrozenAlgemeneKostenResultaat,
 } from "./frozenAlgemeneKostenResultaat.js";
 
+// Bevroren Leegstandskosten-output (OB-031, fase P3) — uitsluitend
+// serialisatie/deserialisatie van het bestaande `HerberekendLeegstandResultaat`
+// (uitsluitend de Begroting-kant — Werkelijk/Estimated worden per ontwerp
+// NOOIT bevroren, zie `frozenLeegstandResultaat.ts`'s moduledoc). Strikt
+// gescheiden van `leegstandRegels.ts`/`leegstandCategorieState.ts` (de
+// persistente CONCEPT-input): deze laag leest die tabellen nooit terug om
+// een resultaat te reconstrueren. `schrijfFrozenLeegstandResultaatZonderTransactie`
+// blijft bewust intern — de publieke schrijf-ingang is en blijft
+// `schrijfFrozenLeegstandResultaat`.
+export {
+  schrijfFrozenLeegstandResultaat,
+  leesFrozenLeegstandResultaat,
+  type FrozenLeegstandResultaat,
+} from "./frozenLeegstandResultaat.js";
+
 // De atomaire VASTSTELLEN-operatie (1D.6b) — de enige publieke weg om een
 // CONCEPT-versie definitief VASTGESTELD te maken. Bundelt uitsluitend de
 // bestaande `Begrotingsversie`/`BgHuurResultaat`/`BgBeheerResultaat`/
@@ -237,3 +255,28 @@ export {
   type AlgemeneKostenRegel,
   type AlgemeneKostenRegelInvoer,
 } from "./algemeneKostenRegels.js";
+
+// Leegstandskosten (OB-031) — fase P1, UITSLUITEND concept-persistence
+// (geen pure-calculator-integratie in dit bestand zelf; herberekening/frozen
+// output zitten in herberekenen.js/frozenLeegstandResultaat.js). De lokale
+// OGB-classificatie (`leegstandClassificatie.ts`) is bewust ADMINISTRATIE-
+// BREED (sleutel `bedrijfsnr`), niet begrotingsversie-gebonden — zie dat
+// bestand se moduledoc. Werkelijk/Estimated worden NOOIT gepersisteerd (zie
+// `@bvc/reporting`'s `begroteLeegstand.ts`) — uitsluitend de Begroting-kant
+// heeft persistence/frozen-lifecycle.
+export {
+  schrijfLeegstandClassificatie,
+  leesLeegstandClassificatie,
+  type LeegstandClassificatieRegel,
+} from "./leegstandClassificatie.js";
+export {
+  schrijfLeegstandCategorieState,
+  leesLeegstandCategorieState,
+  type LeegstandCategorieStateInvoer,
+} from "./leegstandCategorieState.js";
+export {
+  schrijfLeegstandRegels,
+  leesLeegstandRegels,
+  type LeegstandRegel,
+  type LeegstandRegelInvoer,
+} from "./leegstandRegels.js";

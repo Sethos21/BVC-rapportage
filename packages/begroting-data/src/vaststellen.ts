@@ -11,6 +11,7 @@ import {
   type FrozenGemeentelijkeLastenResultaat,
 } from "./frozenGemeentelijkeLastenResultaat.js";
 import { schrijfFrozenGeplandOnderhoudResultaatZonderTransactie } from "./frozenGeplandOnderhoudResultaat.js";
+import { schrijfFrozenLeegstandResultaatZonderTransactie, type FrozenLeegstandResultaat } from "./frozenLeegstandResultaat.js";
 import { schrijfFrozenModule3ResultaatZonderTransactie } from "./frozenModule3Resultaat.js";
 import { schrijfFrozenBegrotingsresultaatZonderTransactie } from "./frozenResultaat.js";
 import { schrijfFrozenVerzekeringResultaatZonderTransactie } from "./frozenVerzekeringResultaat.js";
@@ -139,11 +140,21 @@ import {
  * GEEN begrotingsversie-gebonden data — zie
  * `frozenAlgemeneKostenResultaat.ts`'s moduledoc).
  *
+ * LEEGSTANDSKOSTEN (OB-031, fase P3): volgt exact hetzelfde per-categorie-
+ * lokale-blokkade-patroon als Algemene Kosten — ALLE DRIE categorieën
+ * (`beoordeeld !== true` op één van de drie blokkeert) en GEEN `KRITIEK` in
+ * `leegstand.controleVereist`. ANDERS dan Algemene Kosten wordt hier GEEN
+ * classificatie meebevroren — een Leegstand-begrotingsregel heeft geen
+ * OGB-koppeling (zie `frozenLeegstandResultaat.ts`'s moduledoc); de lokale
+ * leegstand-classificatie wordt uitsluitend door de losstaande, nooit
+ * gepersisteerde Werkelijk-berekening gebruikt en blijft hier volledig
+ * buiten beeld.
+ *
  * Bundelt uitsluitend de al bestaande `Begrotingsversie`/`BgHuurResultaat`/
  * `BgBeheerResultaat`/`BgManagementResultaat`/`HerberekendGeplandOnderhoudResultaat`/
  * `HerberekendCorrectiefDagelijksResultaat`/`HerberekendVerzekeringResultaat`/
- * `FrozenGemeentelijkeLastenResultaat`/`FrozenAlgemeneKostenResultaat` —
- * bewust geen shadow-rekenresultaattype.
+ * `FrozenGemeentelijkeLastenResultaat`/`FrozenAlgemeneKostenResultaat`/
+ * `FrozenLeegstandResultaat` — bewust geen shadow-rekenresultaattype.
  */
 export interface VastgesteldeBegroting {
   versie: Begrotingsversie;
@@ -155,6 +166,7 @@ export interface VastgesteldeBegroting {
   verzekering: HerberekendVerzekeringResultaat;
   gemeentelijkeLasten: FrozenGemeentelijkeLastenResultaat;
   algemeneKosten: FrozenAlgemeneKostenResultaat;
+  leegstand: FrozenLeegstandResultaat;
 }
 
 /**
@@ -228,7 +240,7 @@ export function stelBegrotingVast(db: DatabaseSync, versieId: string, vastgestel
       );
     }
 
-    const { module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud, verzekering, gemeentelijkeLasten, algemeneKosten } =
+    const { module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud, verzekering, gemeentelijkeLasten, algemeneKosten, leegstand } =
       berekenBegrotingUitInvoer(versieId, invoer);
     // Lokale, expliciete narrowing: `module3` is hier altijd niet-null, want `invoer.module3Invoer !== null`
     // is hierboven al gecontroleerd en `berekenBegrotingUitInvoer` berekent Module 3 uitsluitend (en dan
@@ -312,6 +324,21 @@ export function stelBegrotingVast(db: DatabaseSync, versieId: string, vastgestel
       );
     }
 
+    // Leegstand-lifecycle-validatie (OB-031, fase P3, zie moduledoc) — UITSLUITEND lokaal voor
+    // Leegstandskosten, wijzigt niets aan hoe de eerdere modules' eigen controleVereist wordt behandeld
+    // hierboven. PER CATEGORIE: ALLE drie moeten expliciet beoordeeld=true zijn.
+    const nietBeoordeeldeLeegstandCategorie = leegstand.perCategorie.find((c) => !c.beoordeeld);
+    if (nietBeoordeeldeLeegstandCategorie !== undefined) {
+      throw new Error(
+        `Begrotingsversie ${versieId}: Leegstandskosten — categorie ${nietBeoordeeldeLeegstandCategorie.categorie} is niet beoordeeld (beoordeeld !== true) — vaststellen is niet mogelijk zonder expliciete beoordeling van ALLE drie categorieën.`,
+      );
+    }
+    if (leegstand.controleVereist.some((c) => c.ernst === "KRITIEK")) {
+      throw new Error(
+        `Begrotingsversie ${versieId}: Leegstandskosten bevat één of meer KRITIEKE controls — vaststellen is niet mogelijk vóórdat deze zijn opgelost.`,
+      );
+    }
+
     schrijfFrozenBegrotingsresultaatZonderTransactie(db, versieId, { module1, module2 });
     schrijfFrozenModule3ResultaatZonderTransactie(db, versieId, module3);
     schrijfFrozenGeplandOnderhoudResultaatZonderTransactie(db, versieId, geplandOnderhoud);
@@ -319,6 +346,7 @@ export function stelBegrotingVast(db: DatabaseSync, versieId: string, vastgestel
     schrijfFrozenVerzekeringResultaatZonderTransactie(db, versieId, verzekering);
     schrijfFrozenGemeentelijkeLastenResultaatZonderTransactie(db, versieId, gemeentelijkeLasten, invoer.gemeentelijkeLastenModule.werkelijkeGemeentelijkeLasten);
     schrijfFrozenAlgemeneKostenResultaatZonderTransactie(db, versieId, algemeneKosten, invoer.algemeneKostenClassificatie);
+    schrijfFrozenLeegstandResultaatZonderTransactie(db, versieId, leegstand);
     markeerVastgesteld(db, versieId, vastgesteldAt); // allerlaatste schrijfactie vóór commit
 
     const versie = leesBegrotingsversie(db, versieId);
@@ -345,6 +373,7 @@ export function stelBegrotingVast(db: DatabaseSync, versieId: string, vastgestel
       verzekering,
       gemeentelijkeLasten: frozenGemeentelijkeLasten,
       algemeneKosten: frozenAlgemeneKosten,
+      leegstand,
     };
   });
 }

@@ -1,12 +1,14 @@
 import type { DatabaseSync } from "node:sqlite";
 import {
   ALGEMENE_KOSTEN_CATEGORIEEN,
+  LEEGSTAND_CATEGORIEEN,
   berekenBegroteAlgemeneKosten,
   berekenBegroteBeheersvergoeding,
   berekenBegroteCorrectiefDagelijksOnderhoud,
   berekenBegroteGemeentelijkeLasten,
   berekenBegroteGeplandOnderhoud,
   berekenBegroteHuuropbrengsten,
+  berekenBegroteLeegstand,
   berekenBegroteManagementvergoeding,
   berekenBegroteVerzekeringen,
   type BgAlgemeneKostenCategorie,
@@ -31,6 +33,12 @@ import {
   type BgGeplandOnderhoudStatus,
   type BgHuurAannames,
   type BgHuurResultaat,
+  type BgLeegstandCategorie,
+  type BgLeegstandCategorieAannames,
+  type BgLeegstandCategorieResultaat,
+  type BgLeegstandRegelInvoer,
+  type BgLeegstandRegelUitkomst,
+  type BgLeegstandResultaat,
   type BgManagementInvoer,
   type BgManagementResultaat,
   type BgVerzekeringRegelInvoer,
@@ -56,6 +64,11 @@ import {
 import { leesGemeentelijkeLastenModule, type GemeentelijkeLastenModuleInvoer } from "./gemeentelijkeLastenModule.js";
 import { leesGeplandOnderhoudActiviteiten, type GeplandOnderhoudActiviteit } from "./geplandOnderhoudActiviteiten.js";
 import { leesGeplandOnderhoudBeoordeeld } from "./geplandOnderhoudBeoordeeld.js";
+import {
+  leesLeegstandCategorieState,
+  type LeegstandCategorieStateInvoer,
+} from "./leegstandCategorieState.js";
+import { leesLeegstandRegels, type LeegstandRegel } from "./leegstandRegels.js";
 import { leesModule1Aannames } from "./module1Aannames.js";
 import { leesModule1Overrides } from "./module1Overrides.js";
 import { leesModule1Snapshot } from "./module1Snapshot.js";
@@ -181,6 +194,19 @@ import { leesWozObjecten, type WozObject } from "./wozObjecten.js";
  * calculator dat zelf ook doet), waarna `resultaat.perCategorie[i].
  * regels[j]` correspondeert met de j-de regel van diezelfde categorie in de
  * oorspronkelijke, ongefilterde lijst — zie `berekenAlgemeneKostenUitInvoer`.
+ *
+ * LEEGSTANDSKOSTEN (OB-031, Nuts/Servicekosten/Overige leegstand): volgt
+ * hetzelfde niet-nullable ALTIJD-berekend-patroon en dezelfde per-categorie
+ * positionele ID-correlatie als Algemene Kosten (`berekenLeegstandUitInvoer`).
+ * ANDERS dan Algemene Kosten heeft een Leegstand-begrotingsregel GEEN
+ * OGB-koppeling (zie `begroteLeegstand.ts`'s moduledoc) — deze module leest
+ * dus GEEN classificatie in `HerberekenInvoer`. De lokale leegstand-
+ * classificatie (`leegstandClassificatie.ts`) wordt UITSLUITEND door de
+ * losstaande, nooit-gepersisteerde Werkelijk-berekening
+ * (`berekenWerkelijkLeegstand`) gebruikt — die maakt bewust GEEN onderdeel
+ * uit van `HerberekendeBegroting`/`herberekenBegroting`, want Werkelijk moet
+ * altijd live tegen de actuele boekhouding berekend worden, nooit tegen een
+ * herberekende CONCEPT-snapshot.
  */
 export interface HerberekendeBegroting {
   versie: Begrotingsversie;
@@ -192,6 +218,7 @@ export interface HerberekendeBegroting {
   verzekering: HerberekendVerzekeringResultaat;
   gemeentelijkeLasten: HerberekendGemeentelijkeLastenResultaat;
   algemeneKosten: HerberekendAlgemeneKostenResultaat;
+  leegstand: HerberekendLeegstandResultaat;
 }
 
 /** Koppelt een berekende activiteit-uitkomst terug aan haar persistente `id` — uitsluitend positioneel bepaald, nooit herzocht op inhoud (zie moduledoc). */
@@ -254,6 +281,22 @@ export interface HerberekendAlgemeneKostenResultaat extends Omit<BgAlgemeneKoste
   perCategorie: readonly HerberekendAlgemeneKostenCategorieResultaat[];
 }
 
+/** Koppelt een berekende Leegstand-regel-uitkomst terug aan haar persistente `id` — uitsluitend positioneel bepaald BINNEN de regels van diezelfde categorie, zelfde principe als `AlgemeneKostenRegelUitkomstMetId`. */
+export interface LeegstandRegelUitkomstMetId {
+  persistentieId: number;
+  regel: BgLeegstandRegelUitkomst;
+}
+
+/** `BgLeegstandCategorieResultaat` met uitsluitend `regels` vervangen door de ID-geannoteerde variant — alle overige velden ongewijzigd, rechtstreeks van de pure calculator. */
+export interface HerberekendLeegstandCategorieResultaat extends Omit<BgLeegstandCategorieResultaat, "regels"> {
+  regels: readonly LeegstandRegelUitkomstMetId[];
+}
+
+/** `BgLeegstandResultaat` met uitsluitend `perCategorie` vervangen door de ID-geannoteerde variant — alle overige velden (incl. de drie met naam benoemde categorietotalen en `moduleTotaal`) ongewijzigd, rechtstreeks van de pure calculator. */
+export interface HerberekendLeegstandResultaat extends Omit<BgLeegstandResultaat, "perCategorie"> {
+  perCategorie: readonly HerberekendLeegstandCategorieResultaat[];
+}
+
 /** Kleine, herbruikbare read-transactie-helper — zelfde BEGIN/COMMIT/ROLLBACK-idioom als elders in dit package (bewust hier gedupliceerd, zie 1D.5-rapport). */
 function withReadTransaction<T>(db: DatabaseSync, fn: () => T): T {
   db.exec("BEGIN");
@@ -304,6 +347,10 @@ export interface HerberekenInvoer {
   algemeneKostenRegels: readonly AlgemeneKostenRegel[];
   /** `leesAlgemeneKostenCategorieState`'s "geen rij → beoordeeld false, rekenhulp null"-semantiek, ongewijzigd doorgegeven. */
   algemeneKostenCategorieState: Record<BgAlgemeneKostenCategorie, AlgemeneKostenCategorieStateInvoer>;
+  /** Rauwe Leegstand-regelpersistence (OB-031) — GEEN pure-module-vorm; de mapping naar `BgLeegstandRegelInvoer` gebeurt pas in `berekenBegrotingUitInvoer`. GEEN classificatie hier — zie `HerberekendeBegroting`'s moduledoc. */
+  leegstandRegels: readonly LeegstandRegel[];
+  /** `leesLeegstandCategorieState`'s "geen rij → beoordeeld false, rekenhulp null"-semantiek, ongewijzigd doorgegeven. */
+  leegstandCategorieState: Record<BgLeegstandCategorie, LeegstandCategorieStateInvoer>;
 }
 
 /**
@@ -351,6 +398,8 @@ export function leesHerberekenInvoerZonderTransactie(db: DatabaseSync, versieId:
     algemeneKostenClassificatie: leesAlgemeneKostenClassificatie(db, versie.bedrijfsnr),
     algemeneKostenRegels: leesAlgemeneKostenRegels(db, versieId),
     algemeneKostenCategorieState: leesAlgemeneKostenCategorieState(db, versieId),
+    leegstandRegels: leesLeegstandRegels(db, versieId),
+    leegstandCategorieState: leesLeegstandCategorieState(db, versieId),
   };
 }
 
@@ -650,6 +699,71 @@ function berekenAlgemeneKostenUitInvoer(
   return { ...resultaat, perCategorie: perCategorieMetId };
 }
 
+/** Letterlijke veldkopie, GEEN transformatie/validatie — GEEN type-boundary-cast nodig (zie `HerberekendeBegroting`'s moduledoc). GEEN OGB-koppeling: een Leegstand-regel kent dat veld niet (zie `begroteLeegstand.ts`'s moduledoc). */
+function naarPureLeegstandRegelInvoer(regel: LeegstandRegel): BgLeegstandRegelInvoer {
+  return {
+    categorie: regel.categorie,
+    complexnummer: regel.complexnummer,
+    complexomschrijving: regel.complexomschrijving,
+    omschrijving: regel.omschrijving,
+    q1: regel.q1,
+    q2: regel.q2,
+    q3: regel.q3,
+    q4: regel.q4,
+  };
+}
+
+/**
+ * Roept de pure Leegstand-Begroting-calculator aan en koppelt uitsluitend
+ * persistentie-ID's terug aan de resulterende regel-uitkomsten — PER
+ * CATEGORIE positioneel, exact hetzelfde principe en dezelfde defensieve
+ * lengte-controle als `berekenAlgemeneKostenUitInvoer`.
+ */
+function berekenLeegstandUitInvoer(
+  versieId: string,
+  begrotingsjaar: number,
+  regels: readonly LeegstandRegel[],
+  categorieState: Record<BgLeegstandCategorie, LeegstandCategorieStateInvoer>,
+): HerberekendLeegstandResultaat {
+  const categorieAannames = Object.fromEntries(
+    LEEGSTAND_CATEGORIEEN.map((categorie): [BgLeegstandCategorie, BgLeegstandCategorieAannames] => [
+      categorie,
+      {
+        beoordeeld: categorieState[categorie].beoordeeld,
+        laatstBekendServicekostenvoorschotJaar: categorieState[categorie].laatstBekendServicekostenvoorschotJaar,
+        laatstBekendServicekostenvoorschotJaarHerkomst: categorieState[categorie].laatstBekendServicekostenvoorschotJaarHerkomst,
+        verwachteLeegstandsperiodeMaanden: categorieState[categorie].verwachteLeegstandsperiodeMaanden,
+      },
+    ]),
+  ) as Record<BgLeegstandCategorie, BgLeegstandCategorieAannames>;
+
+  let resultaat: BgLeegstandResultaat;
+  try {
+    resultaat = berekenBegroteLeegstand(regels.map(naarPureLeegstandRegelInvoer), categorieAannames, { begrotingsjaar });
+  } catch (error) {
+    throw new Error(
+      `Berekening van begrotingsversie ${versieId} is mislukt tijdens Leegstandskosten: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
+
+  const perCategorieMetId: HerberekendLeegstandCategorieResultaat[] = resultaat.perCategorie.map((categorieResultaat) => {
+    const regelsVoorCategorie = regels.filter((r) => r.categorie === categorieResultaat.categorie);
+    if (categorieResultaat.regels.length !== regelsVoorCategorie.length) {
+      throw new Error(
+        `Interne fout: begrotingsversie ${versieId}: Leegstand-calculator gaf ${categorieResultaat.regels.length} regel-uitkomsten terug voor categorie ${categorieResultaat.categorie} met ${regelsVoorCategorie.length} ingevoerde regels — positionele id-correlatie geschonden.`,
+      );
+    }
+    const regelsMetId: LeegstandRegelUitkomstMetId[] = categorieResultaat.regels.map((regelUitkomst, index) => ({
+      persistentieId: regelsVoorCategorie[index]!.id,
+      regel: regelUitkomst,
+    }));
+    return { ...categorieResultaat, regels: regelsMetId };
+  });
+
+  return { ...resultaat, perCategorie: perCategorieMetId };
+}
+
 /**
  * Voert de pure Module-1-, Module-2-, (indien aanwezig) Module-3- en
  * Gepland-Onderhoud-berekening uit op reeds-gelezen invoer — GEEN eigen
@@ -681,6 +795,7 @@ export function berekenBegrotingUitInvoer(
   verzekering: HerberekendVerzekeringResultaat;
   gemeentelijkeLasten: HerberekendGemeentelijkeLastenResultaat;
   algemeneKosten: HerberekendAlgemeneKostenResultaat;
+  leegstand: HerberekendLeegstandResultaat;
 } {
   let module1: BgHuurResultaat;
   try {
@@ -745,7 +860,9 @@ export function berekenBegrotingUitInvoer(
     invoer.algemeneKostenClassificatie,
   );
 
-  return { module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud, verzekering, gemeentelijkeLasten, algemeneKosten };
+  const leegstand = berekenLeegstandUitInvoer(versieId, invoer.versie.begrotingsjaar, invoer.leegstandRegels, invoer.leegstandCategorieState);
+
+  return { module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud, verzekering, gemeentelijkeLasten, algemeneKosten, leegstand };
 }
 
 /**
@@ -771,7 +888,7 @@ export function berekenBegrotingUitInvoer(
  */
 export function herberekenBegroting(db: DatabaseSync, versieId: string): HerberekendeBegroting {
   const invoer = withReadTransaction(db, () => leesHerberekenInvoerZonderTransactie(db, versieId));
-  const { module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud, verzekering, gemeentelijkeLasten, algemeneKosten } =
+  const { module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud, verzekering, gemeentelijkeLasten, algemeneKosten, leegstand } =
     berekenBegrotingUitInvoer(versieId, invoer);
   return {
     versie: invoer.versie,
@@ -783,5 +900,6 @@ export function herberekenBegroting(db: DatabaseSync, versieId: string): Herbere
     verzekering,
     gemeentelijkeLasten,
     algemeneKosten,
+    leegstand,
   };
 }

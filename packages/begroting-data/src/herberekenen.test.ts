@@ -6,10 +6,12 @@ import type { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   ALGEMENE_KOSTEN_CATEGORIEEN,
+  LEEGSTAND_CATEGORIEEN,
   berekenBegroteCorrectiefDagelijksOnderhoud,
   berekenBegroteGemeentelijkeLasten,
   berekenBegroteGeplandOnderhoud,
   berekenBegroteVerzekeringen,
+  berekenWerkelijkLeegstand,
   type BgAlgemeneKostenCategorie,
   type BgBeheerComplexConfig,
   type BgContractFeiten,
@@ -17,6 +19,7 @@ import {
   type BgCorrectiefDagelijksRegelInvoer,
   type BgGeplandOnderhoudActiviteitInvoer,
   type BgHuurAannames,
+  type BgLeegstandCategorie,
   type BgManagementInvoer,
   type BgVerzekeringRegelInvoer,
   type BgWozObjectInvoer,
@@ -28,6 +31,11 @@ import {
 import { schrijfAlgemeneKostenClassificatie, type AlgemeneKostenClassificatieRegel } from "./algemeneKostenClassificatie.js";
 import { schrijfAlgemeneKostenRegels, type AlgemeneKostenRegelInvoer } from "./algemeneKostenRegels.js";
 import { maakBegrotingsversie, markeerVastgesteld, type NieuweBegrotingsversieInput } from "./begrotingsversies.js";
+import {
+  schrijfLeegstandCategorieState,
+  type LeegstandCategorieStateInvoer,
+} from "./leegstandCategorieState.js";
+import { schrijfLeegstandRegels, type LeegstandRegelInvoer } from "./leegstandRegels.js";
 import { schrijfCorrectiefDagelijksOnderhoudBeoordeeld } from "./correctiefDagelijksOnderhoudBeoordeeld.js";
 import {
   schrijfCorrectiefDagelijksOnderhoudRegels,
@@ -1677,5 +1685,195 @@ describe("herberekenBegroting — Algemene Kosten (OB-035/036)", () => {
     expect(normaliseer(zonderAlgemeneKosten.gemeentelijkeLasten)).toBe(normaliseer(metAlgemeneKosten.gemeentelijkeLasten));
     expect(zonderAlgemeneKosten.module3).toBeNull();
     expect(metAlgemeneKosten.module3).toBeNull();
+  });
+});
+
+describe("herberekenBegroting — Leegstandskosten (OB-031)", () => {
+  function regelInvoer(overrides: Partial<LeegstandRegelInvoer> = {}): LeegstandRegelInvoer {
+    return {
+      id: null,
+      categorie: "OVERIGE_LEEGSTANDSKOSTEN",
+      complexnummer: null,
+      complexomschrijving: null,
+      omschrijving: "Beveiliging leegstand",
+      q1: new Decimal(100),
+      q2: new Decimal(100),
+      q3: new Decimal(100),
+      q4: new Decimal(100),
+      ...overrides,
+    };
+  }
+
+  function alleStates(
+    overrides: Partial<Record<BgLeegstandCategorie, Partial<LeegstandCategorieStateInvoer>>> = {},
+  ): Record<BgLeegstandCategorie, LeegstandCategorieStateInvoer> {
+    return Object.fromEntries(
+      LEEGSTAND_CATEGORIEEN.map((categorie) => [
+        categorie,
+        { beoordeeld: true, laatstBekendServicekostenvoorschotJaar: null, laatstBekendServicekostenvoorschotJaarHerkomst: null, verwachteLeegstandsperiodeMaanden: null, ...overrides[categorie] },
+      ]),
+    ) as Record<BgLeegstandCategorie, LeegstandCategorieStateInvoer>;
+  }
+
+  it("1. geen regels + geen categorie-state: resultaat altijd aanwezig, alle drie REVIEWED_ZERO_RULES na expliciete beoordeling", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    const resultaat = herberekenBegroting(db, versie.id);
+
+    expect(resultaat.leegstand).toBeDefined();
+    expect(resultaat.leegstand.perCategorie).toHaveLength(3);
+    for (const c of resultaat.leegstand.perCategorie) {
+      expect(c.beoordeeld).toBe(false);
+      expect(c.reviewStatus).toBe("NOT_REVIEWED");
+    }
+    expect(resultaat.leegstand.moduleTotaal.toString()).toBe("0");
+  });
+
+  it("2. review onafhankelijk per categorie: Servicekosten leegstand beoordeeld, Nuts leegstand niet", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfLeegstandCategorieState(db, versie.id, alleStates({ SERVICEKOSTEN_LEEGSTAND: { beoordeeld: true }, NUTS_LEEGSTAND: { beoordeeld: false } }));
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    expect(resultaat.leegstand.perCategorie.find((c) => c.categorie === "SERVICEKOSTEN_LEEGSTAND")!.reviewStatus).toBe("REVIEWED_ZERO_RULES");
+    expect(resultaat.leegstand.perCategorie.find((c) => c.categorie === "NUTS_LEEGSTAND")!.reviewStatus).toBe("NOT_REVIEWED");
+  });
+
+  it("3. totaal = som Q1-Q4, complex/complexomschrijving puur doorgegeven (geen OGB-koppeling op de begrotingsregel)", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfLeegstandRegels(db, versie.id, [
+      regelInvoer({
+        categorie: "SERVICEKOSTEN_LEEGSTAND",
+        complexnummer: "003",
+        complexomschrijving: "Rooise Zoom III",
+        q1: new Decimal(1000),
+        q2: new Decimal(1000),
+        q3: new Decimal(1000),
+        q4: new Decimal(1000),
+      }),
+    ]);
+    schrijfLeegstandCategorieState(db, versie.id, alleStates());
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    const servicekosten = resultaat.leegstand.perCategorie.find((c) => c.categorie === "SERVICEKOSTEN_LEEGSTAND")!;
+    expect(servicekosten.regels[0]!.regel.invoer.complexnummer).toBe("003");
+    expect(servicekosten.regels[0]!.regel.invoer.complexomschrijving).toBe("Rooise Zoom III");
+    expect(servicekosten.regels[0]!.regel.totaal.toString()).toBe("4000");
+    expect(resultaat.leegstand.servicekostenLeegstand.toString()).toBe("4000");
+    expect(resultaat.leegstand.controleVereist).toHaveLength(0);
+  });
+
+  it("4. lege omschrijving: KRITIEK, bedrag blijft financieel meetellen", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfLeegstandRegels(db, versie.id, [regelInvoer({ categorie: "NUTS_LEEGSTAND", omschrijving: "  " })]);
+    schrijfLeegstandCategorieState(db, versie.id, alleStates());
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    expect(resultaat.leegstand.controleVereist.some((c) => c.ernst === "KRITIEK")).toBe(true);
+    expect(resultaat.leegstand.nutsLeegstand.toString()).toBe("400");
+  });
+
+  it("5. persistentie-ID wordt correct per categorie teruggekoppeld (meerdere categorieën, meerdere regels)", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    const [n1, n2, s1] = schrijfLeegstandRegels(db, versie.id, [
+      regelInvoer({ categorie: "NUTS_LEEGSTAND", omschrijving: "Gas" }),
+      regelInvoer({ categorie: "NUTS_LEEGSTAND", omschrijving: "Elektra" }),
+      regelInvoer({ categorie: "SERVICEKOSTEN_LEEGSTAND", omschrijving: "Voorschot" }),
+    ]);
+    schrijfLeegstandCategorieState(db, versie.id, alleStates());
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    const nuts = resultaat.leegstand.perCategorie.find((c) => c.categorie === "NUTS_LEEGSTAND")!;
+    const servicekosten = resultaat.leegstand.perCategorie.find((c) => c.categorie === "SERVICEKOSTEN_LEEGSTAND")!;
+    expect(nuts.regels.map((r) => r.persistentieId)).toEqual([n1!.id, n2!.id]);
+    expect(servicekosten.regels.map((r) => r.persistentieId)).toEqual([s1!.id]);
+  });
+
+  it("6. Servicekosten-leegstand-rekenhulp: geldig voorstel, wijzigt de begroting niet", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfLeegstandRegels(db, versie.id, [regelInvoer({ categorie: "SERVICEKOSTEN_LEEGSTAND", q1: new Decimal(500), q2: new Decimal(500), q3: new Decimal(500), q4: new Decimal(500) })]);
+    schrijfLeegstandCategorieState(
+      db,
+      versie.id,
+      alleStates({ SERVICEKOSTEN_LEEGSTAND: { laatstBekendServicekostenvoorschotJaar: new Decimal(12000), verwachteLeegstandsperiodeMaanden: new Decimal(6) } }),
+    );
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    const servicekosten = resultaat.leegstand.perCategorie.find((c) => c.categorie === "SERVICEKOSTEN_LEEGSTAND")!;
+    expect(servicekosten.berekendVoorstel?.toString()).toBe("6000");
+    expect(resultaat.leegstand.servicekostenLeegstand.toString()).toBe("2000");
+  });
+
+  it("7. herberekening schrijft niets naar de Leegstand-concepttabellen", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfLeegstandRegels(db, versie.id, [regelInvoer()]);
+    schrijfLeegstandCategorieState(db, versie.id, alleStates());
+
+    const dump = () => ({
+      state: db.prepare(`SELECT * FROM begroting_leegstand_categorie_state`).all(),
+      regels: db.prepare(`SELECT * FROM begroting_leegstand_regel`).all(),
+    });
+
+    const voor = dump();
+    herberekenBegroting(db, versie.id);
+    const na = dump();
+
+    expect(na).toEqual(voor);
+  });
+
+  it("8. twee opeenvolgende herberekeningen zonder writes geven inhoudelijk identiek resultaat", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfLeegstandRegels(db, versie.id, [regelInvoer({ categorie: "SERVICEKOSTEN_LEEGSTAND" })]);
+    schrijfLeegstandCategorieState(db, versie.id, alleStates());
+
+    const eersteKeer = herberekenBegroting(db, versie.id);
+    const tweedeKeer = herberekenBegroting(db, versie.id);
+    const normaliseer = (waarde: unknown) => JSON.stringify(waarde, (_key, v) => (v instanceof Decimal ? v.toString() : v));
+
+    expect(normaliseer(eersteKeer.leegstand)).toBe(normaliseer(tweedeKeer.leegstand));
+  });
+
+  it("9 (070-bronproef). Werkelijk-classificatie (los van Begroting) herkent OGB 4319 = Servicekosten leegstand op de bewezen 2025-boekingen", () => {
+    // Geen persistence hier — de bronproef bewijst de PURE Werkelijk-calculator (@bvc/reporting),
+    // die per ontwerp nooit gepersisteerd wordt (zie begroteLeegstand.ts's moduledoc). Deze test
+    // toont uitsluitend dat de herberekende Begroting-kant en de losstaande Werkelijk-berekening
+    // ONAFHANKELIJK naast elkaar bestaan en beide op de echte 070-bronwaarden kloppen.
+    const werkelijk = berekenWerkelijkLeegstand(
+      [
+        { ogbKostensoort: "4319", complexnummer: "003", saldo: new Decimal(1000) }, // Prol 02/2025 003-0002
+        { ogbKostensoort: "4319", complexnummer: "003", saldo: new Decimal(1000) }, // Prol 03/2025 003-0002
+        { ogbKostensoort: "4319", complexnummer: "003", saldo: new Decimal(1000) }, // Prol 04/2025 003-0002
+        { ogbKostensoort: "4319", complexnummer: "003", saldo: new Decimal("97.53") }, // Service-afrekening 0007
+        { ogbKostensoort: "4319", complexnummer: "003", saldo: new Decimal("-1283.17") }, // Service-afrekening 0007
+        { ogbKostensoort: "4319", complexnummer: "003", saldo: new Decimal("-460.26") }, // afboeking
+      ],
+      [{ ogbKostensoort: "4319", ogbKostensoortOmschrijving: "Servicekosten leegstand", categorie: "SERVICEKOSTEN_LEEGSTAND" }],
+    );
+    expect(werkelijk.perCategorie.find((c) => c.categorie === "SERVICEKOSTEN_LEEGSTAND")!.categorieTotaal.toString()).toBe("1354.1");
+    expect(werkelijk.moduleTotaal.toString()).toBe("1354.1");
+    expect(werkelijk.nietGeclassificeerdAantalBoekingen).toBe(0);
+  });
+
+  it("10 (regressie). bestaande Module 1/2/3/GO/CD/Verzekering/WOZ/Algemene-Kosten-uitkomst blijft byte-identiek naast aanwezige Leegstand-regels", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    schrijfModule1Snapshot(db, versie.id, [maakContract("0000000028", { complexnummer: "001" })]);
+    schrijfModule1Aannames(db, versie.id, STANDAARD_AANNAMES);
+    schrijfModule2Config(db, versie.id, [
+      { complexnummer: "001", vastBedragJaar: new Decimal(1000), vastIndexatiePercentage: null, vastIndexatiedatum: null, variabelPercentage: new Decimal(6) },
+    ]);
+
+    const zonderLeegstand = herberekenBegroting(db, versie.id);
+    schrijfLeegstandRegels(db, versie.id, [regelInvoer()]);
+    schrijfLeegstandCategorieState(db, versie.id, alleStates());
+    const metLeegstand = herberekenBegroting(db, versie.id);
+
+    const normaliseer = (waarde: unknown) => JSON.stringify(waarde, (_key, v) => (v instanceof Decimal ? v.toString() : v));
+    expect(normaliseer(zonderLeegstand.module1)).toBe(normaliseer(metLeegstand.module1));
+    expect(normaliseer(zonderLeegstand.module2)).toBe(normaliseer(metLeegstand.module2));
+    expect(normaliseer(zonderLeegstand.geplandOnderhoud)).toBe(normaliseer(metLeegstand.geplandOnderhoud));
+    expect(normaliseer(zonderLeegstand.correctiefDagelijksOnderhoud)).toBe(normaliseer(metLeegstand.correctiefDagelijksOnderhoud));
+    expect(normaliseer(zonderLeegstand.verzekering)).toBe(normaliseer(metLeegstand.verzekering));
+    expect(normaliseer(zonderLeegstand.gemeentelijkeLasten)).toBe(normaliseer(metLeegstand.gemeentelijkeLasten));
+    expect(normaliseer(zonderLeegstand.algemeneKosten)).toBe(normaliseer(metLeegstand.algemeneKosten));
+    expect(zonderLeegstand.module3).toBeNull();
+    expect(metLeegstand.module3).toBeNull();
   });
 });
