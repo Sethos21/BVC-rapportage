@@ -1,0 +1,227 @@
+import { z } from "zod";
+
+/**
+ * Centrale, config-gestuurde grootboekmapping per administratie (CLAUDE.md
+ * §3/§6): welke rapportagepost/-categorie bij een grootboekrekening hoort,
+ * en met welke tekenconventie, staat hier — nooit hardcoded/verspreid in
+ * rapportage- of KPI-code. Eén JSON-bestand per administratie
+ * (`config/grootboekmappingen/<administratieId>.json` in de data root, zie
+ * apps/worker/src/paths.ts's `grootboekmappingPad`), bewust géén centrale
+ * standaardmapping/fallback: een ontbrekend bestand voor een administratie
+ * betekent "nog niet geconfigureerd", nooit stilzwijgend de mapping van een
+ * andere administratie hergebruiken.
+ *
+ * Bewust eerste, eenvoudige versie: alleen de velden die de huidige
+ * classificatiebehoefte dekken. Dit is een ANDER, eenvoudiger model dan het
+ * bestaande `GrootboekMapping`-type in `@bvc/domain` (dat een uitgebreider,
+ * nog ongebruikt geldigheids-/goedkeuringsmodel uit een extern
+ * dossierdocument (GROOTBOEKMAPPING_SPEC_v0.1.md) volgt) — zie
+ * packages/config/README.md voor hoe deze twee zich tot elkaar verhouden
+ * en waarom ze (nog) niet zijn samengevoegd.
+ */
+
+/**
+ * ZOALS_BRON: rapportagebedrag = brondata-saldo (debet - credit) ongewijzigd.
+ * OMGEKEERD: rapportagebedrag = -1 x brondata-saldo (bv. een opbrengst-
+ * rekening die credit-normaal geboekt wordt en in de rapportage als
+ * positief bedrag getoond moet worden).
+ *
+ * Nullable: `null` betekent expliciet "nog niet bevestigd" — nooit een
+ * standaardwaarde aannemen (CLAUDE.md §6, "Controle vereist" i.p.v.
+ * gokken). Downstream-code moet een `null`-tekenconventie behandelen als
+ * onbekend (zie `@bvc/domain`'s `presentatiefactorVoorRegel`), nooit als
+ * "ZOALS_BRON" interpreteren.
+ */
+export const TekenconventieSchema = z.enum(["ZOALS_BRON", "OMGEKEERD"]);
+export type Tekenconventie = z.infer<typeof TekenconventieSchema>;
+
+/**
+ * Rapportmapping-status (CLAUDE.md §6): een AI/Claude-sessie mag een regel
+ * uitsluitend als VOORGESTELD registreren. GOEDGEKEURD is uitsluitend een
+ * menselijke stap — er is bewust geen code in deze repository die een
+ * regel van VOORGESTELD naar GOEDGEKEURD zet.
+ */
+export const MappingStatusSchema = z.enum(["VOORGESTELD", "GOEDGEKEURD"]);
+export type MappingStatus = z.infer<typeof MappingStatusSchema>;
+
+/**
+ * Direct overgenomen uit de "Srt"-kolom van het echte rekeningschema
+ * (PxPlus/Informant, "Rekeningschema basisgegevens" per administratie) —
+ * geen zelfbedachte categorie. BALANS-rekeningen (Bal) horen per definitie
+ * niet op een P&L thuis; RESULTAAT-rekeningen (V&W) wel.
+ */
+export const RekeningSoortSchema = z.enum(["BALANS", "RESULTAAT"]);
+export type RekeningSoort = z.infer<typeof RekeningSoortSchema>;
+
+/**
+ * Balanszijde: een VASTE eigenschap van de grootboekrekening zelf (bank en
+ * debiteuren horen bij Activa, crediteuren/voorzieningen/eigen vermogen bij
+ * Passiva), nooit afgeleid uit het actuele teken van het saldo. Een
+ * debiteurenrekening die tijdelijk een creditsaldo heeft (bv. een
+ * vooruitbetalende huurder) blijft Activa, met een negatief bedrag — de
+ * balanszijde en het saldoteken zijn twee onafhankelijke dingen
+ * (CLAUDE.md §6, "debet/credit blijven gescheiden").
+ *
+ * Nullable: `null` betekent expliciet "nog niet bevestigd" — nooit een
+ * standaardwaarde aannemen. `@bvc/domain`'s `balanszijdeVoorRegel` geeft dan
+ * `OnbekendOf`-`onbekend` terug; `berekenBalansPeriode`
+ * (`@bvc/reporting`) zet zo'n rekening in `controleVereist`, nooit een kant
+ * gokt.
+ */
+export const BalanszijdeSchema = z.enum(["ACTIVA", "PASSIVA"]);
+export type Balanszijde = z.infer<typeof BalanszijdeSchema>;
+
+/**
+ * Een BALANS-regel markeert een grootboekrekening als bekend en bewust
+ * buiten de P&L-scope (bv. bank, debiteuren/crediteuren, voorzieningen,
+ * tussenrekeningen) — géén rapportagepost/-categorie/tekenconventie nodig,
+ * want die rekening komt nooit in een P&L-uitkomst terecht. Dit is iets
+ * anders dan een onbekende/niet-gemapte rekening: `berekenPlPeriode`
+ * (`@bvc/reporting`) negeert een bekende BALANS-rekening stil, terwijl een
+ * écht onbekende rekening met saldo in `controleVereist` verschijnt. Wél
+ * verplicht aanwezig (als veld, zie hierboven voor de `null`-betekenis):
+ * `balanszijde` — de balansrenderer bepaalt hiermee uitsluitend in welke
+ * tabel (Activa/Passiva) een rekening verschijnt, nooit op het saldoteken.
+ *
+ * `tekenconventie` is een TWEEDE, onafhankelijke classificatie (ontwerp-
+ * correctie 2026-08-19, na een echte productie-run): balanszijde bepaalt
+ * WELKE tabel, tekenconventie bepaalt hoe het werkelijk berekende saldo
+ * (debet - credit) in die tabel WORDT GETOOND. Zonder deze scheiding zou
+ * een enkele generieke tekenregel per balanszijde toegepast moeten worden
+ * (bv. "alle Passiva tonen als negatief") — en dat klopt niet: sommige
+ * PASSIVA-rekeningen horen positief te tonen (bv. een schuld als Crediteuren),
+ * andere negatief (bv. Onttrekkingen, die het eigen vermogen verminderen).
+ * Hergebruikt exact hetzelfde schema/patroon als RESULTAAT's
+ * `tekenconventie` (zie `@bvc/domain`'s `presentatiefactorVoorRegel`, die
+ * generiek werkt op elk object met dit veld). Nullable: `null` = nog niet
+ * bevestigd — nooit "ZOALS_BRON" aannemen als standaard. Een BALANS-regel
+ * met een bevestigde `balanszijde` maar een onbevestigde `tekenconventie`
+ * (of omgekeerd) komt nog steeds in `controleVereist` terecht.
+ */
+/**
+ * Derde, onafhankelijke classificatie op een BALANS-regel (2026-08-22,
+ * voorbereiding op de Kasstroom-sectie): is dit een liquide-middelen-
+ * rekening (bank/kas)? Los van `balanszijde` (ALLE liquide middelen zijn
+ * ACTIVA, maar niet alle ACTIVA-rekeningen zijn liquide middelen — bv.
+ * huurdebiteuren/vooruitbetaalde kosten horen niet in een kasstroom-
+ * mutatie thuis) en los van `tekenconventie`. Config-gestuurd, niet
+ * afgeleid uit de omschrijving/naam van de rekening (CLAUDE.md §3: geen
+ * string-matching op "Bank" in de rekeningomschrijving) — een
+ * administratie kan een bankrekening een afwijkende naam geven.
+ *
+ * Nullable: `null` = nog niet bevestigd. Een niet-bevestigde rekening
+ * telt NIET mee in de kasstroom-mutatie, maar blijft (bij een niet-nul
+ * mutatie in de periode) zichtbaar in `controleVereist` — nooit
+ * stilzwijgend als "geen liquide middelen" aangenomen.
+ */
+/**
+ * Kasstroom-tegenrekeningcategorie (2026-08-22, Kasstroom-managementoverzicht):
+ * classificeert een grootboekrekening als TEGENREKENING van een
+ * liquide-middelen-mutatie — dus onafhankelijk van of de rekening zelf
+ * BALANS of RESULTAAT is (bv. huur loopt bij 070 via Huurdebiteuren, een
+ * BALANS-rekening, niet rechtstreeks via een Opbrengsten-rekening). Staat
+ * daarom op ZOWEL `BalansRegelSchema` als `ResultaatRegelSchema`. Bewust
+ * NIET afgeleid uit `rapportagecategorie` (vrije tekst, zie
+ * `ResultaatRegelSchema` hieronder) — dat zou CLAUDE.md §6 schenden
+ * (classificatie via string-matching op een niet-gegarandeerd veld).
+ *
+ * - `"HUURONTVANGST"` / `"EXPLOITATIE_UITGAVE"` / `"EIGENAARONTTREKKING"` —
+ *   de drie kasstroom-KPI-categorieën.
+ * - `"OVERIG"` — bevestigd GEEN van de drie (bv. BTW-afdracht, voorziening,
+ *   tussenrekening servicekosten). Anders dan `null`: dit is een bewuste,
+ *   afgeronde classificatie, geen `controleVereist`.
+ * - `null` — nog niet bevestigd. Nooit aangenomen; een boekstuk met een
+ *   onbevestigde tegenrekening blijft zichtbaar in `controleVereist`.
+ */
+export const KasstroomCategorieSchema = z.enum(["HUURONTVANGST", "EXPLOITATIE_UITGAVE", "EIGENAARONTTREKKING", "OVERIG"]);
+export type KasstroomCategorie = z.infer<typeof KasstroomCategorieSchema>;
+
+export const BalansRegelSchema = z
+  .object({
+    grootboekrekening: z.string().min(1),
+    soort: z.literal("BALANS"),
+    balanszijde: BalanszijdeSchema.nullable(),
+    tekenconventie: TekenconventieSchema.nullable(),
+    liquideMiddelen: z.boolean().nullable(),
+    kasstroomCategorie: KasstroomCategorieSchema.nullable(),
+    actief: z.boolean(),
+    status: MappingStatusSchema,
+  })
+  .strict();
+
+export const ResultaatRegelSchema = z
+  .object({
+    grootboekrekening: z.string().min(1),
+    soort: z.literal("RESULTAAT"),
+    /** Specifieke rapportregel, bv. "Beheerkosten". */
+    rapportagepost: z.string().min(1),
+    /** Bredere groepering van rapportageposten, bv. "Kosten" / "Opbrengsten". */
+    rapportagecategorie: z.string().min(1),
+    tekenconventie: TekenconventieSchema.nullable(),
+    kasstroomCategorie: KasstroomCategorieSchema.nullable(),
+    actief: z.boolean(),
+    status: MappingStatusSchema,
+  })
+  .strict();
+
+export const GrootboekMappingRegelSchema = z.discriminatedUnion("soort", [BalansRegelSchema, ResultaatRegelSchema]);
+export type GrootboekMappingRegel = z.infer<typeof GrootboekMappingRegelSchema>;
+export type BalansRegel = z.infer<typeof BalansRegelSchema>;
+export type ResultaatRegel = z.infer<typeof ResultaatRegelSchema>;
+
+/**
+ * Administratie-eigen mapping ("override") — mag voortaan PARTIEEL zijn:
+ * alleen de regels die voor deze administratie afwijken van (of ontbreken
+ * in) de centrale master (zie `GrootboekMappingMasterSchema` hieronder).
+ * Een lege/ontbrekende override betekent "volg de master volledig".
+ */
+export const GrootboekMappingSchema = z.object({
+  versie: z.string(),
+  administratieId: z.string().min(1),
+  regels: z.array(GrootboekMappingRegelSchema),
+});
+export type GrootboekMappingConfig = z.infer<typeof GrootboekMappingSchema>;
+
+/**
+ * Centrale master-grootboekmapping (`config/grootboekmapping_master.json`,
+ * één bestand, niet per administratie): rekeningen waarvan de classificatie
+ * betrouwbaar gelijk is gebleken over ≥2 administraties (bevestigd via
+ * `@bvc/reporting`'s `inventariseerGrootboekrekeningen`) — nooit een
+ * rekening die maar bij één Bedrijfsnr voorkomt, ook niet als die op
+ * zichzelf `consistent: true` scoort (dat bewijst dan alleen interne
+ * consistentie, niet consistentie ÓVER administraties heen). Zie
+ * `resolveerGrootboekMapping` (`@bvc/domain`) voor hoe master + een
+ * administratie-override tot één effectieve mapping samenkomen.
+ */
+export const GrootboekMappingMasterSchema = z.object({
+  versie: z.string(),
+  regels: z.array(GrootboekMappingRegelSchema),
+});
+export type GrootboekMappingMasterConfig = z.infer<typeof GrootboekMappingMasterSchema>;
+
+function controleerGeenDubbeleRekeningen(regels: readonly GrootboekMappingRegel[], contextLabel: string): void {
+  const nummers = regels.map((regel) => regel.grootboekrekening);
+  const duplicaten = [...new Set(nummers.filter((nummer, index) => nummers.indexOf(nummer) !== index))];
+  if (duplicaten.length > 0) {
+    throw new Error(`${contextLabel} bevat dubbele grootboekrekening(en): ${duplicaten.join(", ")}`);
+  }
+}
+
+/**
+ * Valideert en normaliseert een ruwe administratie-override. Faalt hard
+ * (geen stilzwijgende correctie) op een ongeldige structuur of op dubbele
+ * grootboekrekeningnummers — een rekening mag maar één keer voorkomen,
+ * anders is de mapping voor die rekening ambigu.
+ */
+export function parseGrootboekMapping(ruw: unknown): GrootboekMappingConfig {
+  const geparsed = GrootboekMappingSchema.parse(ruw);
+  controleerGeenDubbeleRekeningen(geparsed.regels, `Grootboekmapping voor administratie "${geparsed.administratieId}"`);
+  return geparsed;
+}
+
+/** Valideert en normaliseert de ruwe master-grootboekmapping — zelfde regels als parseGrootboekMapping, zonder administratieId. */
+export function parseGrootboekMappingMaster(ruw: unknown): GrootboekMappingMasterConfig {
+  const geparsed = GrootboekMappingMasterSchema.parse(ruw);
+  controleerGeenDubbeleRekeningen(geparsed.regels, "Master-grootboekmapping");
+  return geparsed;
+}
