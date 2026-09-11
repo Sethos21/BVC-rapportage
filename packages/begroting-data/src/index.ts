@@ -68,6 +68,9 @@ export {
   type HerberekendLeegstandResultaat,
   type HerberekendLeegstandCategorieResultaat,
   type LeegstandRegelUitkomstMetId,
+  type HerberekendRenteResultaat,
+  type HerberekendRenteCategorieResultaat,
+  type RenteRegelUitkomstMetId,
 } from "./herberekenen.js";
 
 // Bevroren Module-1/Module-2-output (1D.6a) — uitsluitend serialisatie/
@@ -170,6 +173,21 @@ export {
   leesFrozenLeegstandResultaat,
   type FrozenLeegstandResultaat,
 } from "./frozenLeegstandResultaat.js";
+
+// Bevroren Rente-output (OB-037/038, fase P3) — uitsluitend serialisatie/
+// deserialisatie van het bestaande `HerberekendRenteResultaat` (uitsluitend
+// de Begroting-kant — Werkelijk/Estimated worden per ontwerp NOOIT
+// bevroren, zie `frozenRenteResultaat.ts`'s moduledoc). Strikt gescheiden
+// van `renteRegels.ts`/`renteCategorieState.ts` (de persistente CONCEPT-
+// input): deze laag leest die tabellen nooit terug om een resultaat te
+// reconstrueren. `schrijfFrozenRenteResultaatZonderTransactie` blijft
+// bewust intern — de publieke schrijf-ingang is en blijft
+// `schrijfFrozenRenteResultaat`.
+export {
+  schrijfFrozenRenteResultaat,
+  leesFrozenRenteResultaat,
+  type FrozenRenteResultaat,
+} from "./frozenRenteResultaat.js";
 
 // De atomaire VASTSTELLEN-operatie (1D.6b) — de enige publieke weg om een
 // CONCEPT-versie definitief VASTGESTELD te maken. Bundelt uitsluitend de
@@ -280,3 +298,29 @@ export {
   type LeegstandRegel,
   type LeegstandRegelInvoer,
 } from "./leegstandRegels.js";
+
+// Rente (OB-037 Rentekosten / OB-038 Rente opbrengsten) — fase P1,
+// UITSLUITEND concept-persistence (geen pure-calculator-integratie in dit
+// bestand zelf; herberekening/frozen output zitten in
+// herberekenen.js/frozenRenteResultaat.js). De lokale OGB-classificatie
+// (`renteClassificatie.ts`) is bewust ADMINISTRATIE-BREED (sleutel
+// `bedrijfsnr`), niet begrotingsversie-gebonden, en NOOIT portfolio-breed
+// (bewezen: dezelfde OGB-code kan tussen administraties tegengestelde
+// betekenissen hebben) — zie dat bestand se moduledoc. Werkelijk/Estimated
+// worden NOOIT gepersisteerd (zie `@bvc/reporting`'s `begroteRente.ts`).
+export {
+  schrijfRenteClassificatie,
+  leesRenteClassificatie,
+  type RenteClassificatieRegel,
+} from "./renteClassificatie.js";
+export {
+  schrijfRenteCategorieState,
+  leesRenteCategorieState,
+  type RenteCategorieStateInvoer,
+} from "./renteCategorieState.js";
+export {
+  schrijfRenteRegels,
+  leesRenteRegels,
+  type RenteRegel,
+  type RenteRegelInvoer,
+} from "./renteRegels.js";

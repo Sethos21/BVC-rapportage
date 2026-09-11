@@ -2831,6 +2831,243 @@ export const MIGRATIONS: readonly Migration[] = [
        END`,
     ],
   },
+  /**
+   * Migratie 20 — Rente (OB-037 Rentekosten / OB-038 Rente opbrengsten):
+   * concept-input, drie tabellen, exact het architectuurpatroon van migratie
+   * 16/18 met de volgende bewuste verschillen:
+   *
+   * 1. GEEN OGB-kolom op `begroting_rente_regel` — een begrotingsregel heeft
+   *    geen OGB-koppeling/join (zie `begroteRente.ts`'s moduledoc). In
+   *    plaats daarvan `ogb_referentie` (TEXT NULL): een puur informatief
+   *    vrij tekstveld, NOOIT gevalideerd/gejoined.
+   *
+   * 2. GEEN kwartaalkolommen (i.t.t. migratie 18) — één jaarlijks
+   *    `begrotingsbedrag` (zoals migratie 16's `jaarbedrag`), aangevuld met
+   *    de PER-REGEL rekenhulpvelden `laatst_bekend_saldo`/`rentepercentage`
+   *    (bewust op de REGEL, niet op de categorie-state — anders dan
+   *    migratie 16/18, zie `renteCategorieState.ts`'s moduledoc: elke
+   *    financieringsregel heeft zijn eigen saldo/percentage, een
+   *    categoriebrede rekenhulp zou hier geen betekenis hebben).
+   *
+   * 3. `begroting_rente_categorie_state` bevat UITSLUITEND `beoordeeld` —
+   *    geen rekenhulpvelden (die leven op de regel, zie boven).
+   *
+   * `begroting_rente_classificatie` volgt exact het architectuurpatroon van
+   * `begroting_algemene_kosten_classificatie`/`begroting_leegstand_classificatie`:
+   * bedrijfsnr-gescoped, GEEN `begroting_versie_id`, GEEN triggers — bewezen
+   * ADMINISTRATIE-SPECIFIEK (2026-09): OGB 4604 betekent bij 023 "Rente
+   * lening .500" (RENTEKOSTEN), bij 013 "Rente r/c" (RENTE_OPBRENGSTEN) —
+   * dezelfde code, tegengestelde categorieën. Nooit portfolio-breed.
+   *
+   * Immutability: `begroting_rente_categorie_state` en `begroting_rente_regel`
+   * krijgen elk de gebruikelijke drie triggers — zes triggers totaal.
+   */
+  {
+    version: 20,
+    description: "Rente: concept-input (lokale OGB-classificatie + categorie-state + regels)",
+    ddl: [
+      `CREATE TABLE begroting_rente_classificatie (
+        bedrijfsnr TEXT NOT NULL,
+        ogb_kostensoort TEXT NOT NULL,
+        ogb_kostensoort_omschrijving TEXT NOT NULL,
+        categorie TEXT NOT NULL CHECK (categorie IN ('RENTEKOSTEN', 'RENTE_OPBRENGSTEN')),
+        PRIMARY KEY (bedrijfsnr, ogb_kostensoort)
+      )`,
+      `CREATE INDEX idx_begroting_rente_classificatie_bedrijfsnr ON begroting_rente_classificatie(bedrijfsnr)`,
+      `CREATE TABLE begroting_rente_categorie_state (
+        begroting_versie_id TEXT NOT NULL REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        categorie TEXT NOT NULL CHECK (categorie IN ('RENTEKOSTEN', 'RENTE_OPBRENGSTEN')),
+        beoordeeld INTEGER NOT NULL CHECK (beoordeeld IN (0, 1)),
+        PRIMARY KEY (begroting_versie_id, categorie)
+      )`,
+      `CREATE TABLE begroting_rente_regel (
+        id INTEGER PRIMARY KEY,
+        begroting_versie_id TEXT NOT NULL REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        categorie TEXT NOT NULL CHECK (categorie IN ('RENTEKOSTEN', 'RENTE_OPBRENGSTEN')),
+        omschrijving TEXT NOT NULL,
+        complexnummer TEXT NULL,
+        ogb_referentie TEXT NULL,
+        laatst_bekend_saldo TEXT NULL,
+        rentepercentage TEXT NULL,
+        begrotingsbedrag TEXT NULL
+      )`,
+      `CREATE INDEX idx_begroting_rente_regel_versie ON begroting_rente_regel(begroting_versie_id)`,
+      `CREATE TRIGGER trg_begroting_rente_categorie_state_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_rente_categorie_state
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_rente_categorie_state: begrotingsversie is VASTGESTELD, categorie-state is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_rente_categorie_state_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_rente_categorie_state
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_rente_categorie_state: begrotingsversie is VASTGESTELD, categorie-state is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_rente_categorie_state_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_rente_categorie_state
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_rente_categorie_state: begrotingsversie is VASTGESTELD, categorie-state is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_rente_regel_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_rente_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_rente_regel: begrotingsversie is VASTGESTELD, regels zijn immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_rente_regel_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_rente_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_rente_regel: begrotingsversie is VASTGESTELD, regels zijn immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_rente_regel_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_rente_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_rente_regel: begrotingsversie is VASTGESTELD, regels zijn immutable');
+       END`,
+    ],
+  },
+  /**
+   * Migratie 21 — bevroren Rente-OUTPUT (OB-037/038, fase P3), exact zoals
+   * `begroteRente.ts`/`HerberekendRenteResultaat` op HEAD kennen. Uitsluitend
+   * serialisatie/deserialisatie van een reeds berekend, puur Begroting-
+   * resultaat — Werkelijk/Estimated worden NOOIT bevroren, zelfde
+   * architectuurregel als migratie 19 (`frozenLeegstandResultaat.ts`'s
+   * moduledoc).
+   *
+   * DRIE TABELLEN: GEEN frozen-classificatietabel (zelfde reden als migratie
+   * 19: een Rente-begrotingsregel heeft geen OGB-koppeling). GEEN
+   * gedenormaliseerd `module_totaal` (zelfde reden als het ontbreken van
+   * `moduleTotaal` in `BgRenteResultaat`: Rentekosten en Rente opbrengsten
+   * zijn twee afzonderlijke P&L-posten, nooit samengevoegd — er is dus geen
+   * enkele afgeleide "module"-waarde om te denormaliseren of per ongeluk
+   * opnieuw te berekenen).
+   *
+   * 1. `begroting_frozen_rente_categorie` — per categorie:
+   *    `beoordeeld`/`review_status`/`categorie_totaal`.
+   * 2. `begroting_frozen_rente_regel` — PK `(begroting_versie_id, regel_id)`,
+   *    `regel_id` = de oorspronkelijke CONCEPT-`id`. Alle invoervelden
+   *    (inclusief `ogb_referentie`, `laatst_bekend_saldo`, `rentepercentage`)
+   *    blijven ongewijzigd bevroren, plus `berekend_voorstel` (de reeds
+   *    berekende rekenhulp-waarde) en `bedrag` (de reeds berekende veilige
+   *    bijdrage) — geen van beide wordt bij lezen opnieuw afgeleid.
+   * 3. `begroting_frozen_rente_control` — zelfde `volgnr`-patroon als
+   *    migratie 17/19.
+   *
+   * FROZEN-STATE INVARIANTEN: `CHECK (beoordeeld = 1)` en
+   * `CHECK (review_status IN ('REVIEWED_ZERO_RULES', 'REVIEWED_WITH_RULES'))`.
+   *
+   * Immutability: dezelfde drie triggers per tabel — negen triggers totaal.
+   */
+  {
+    version: 21,
+    description: "Bevroren Rente-output (Begroting-resultaat, Werkelijk/Estimated blijven live)",
+    ddl: [
+      `CREATE TABLE begroting_frozen_rente_categorie (
+        begroting_versie_id TEXT NOT NULL REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        categorie TEXT NOT NULL CHECK (categorie IN ('RENTEKOSTEN', 'RENTE_OPBRENGSTEN')),
+        beoordeeld INTEGER NOT NULL CHECK (beoordeeld = 1),
+        review_status TEXT NOT NULL CHECK (review_status IN ('REVIEWED_ZERO_RULES', 'REVIEWED_WITH_RULES')),
+        categorie_totaal TEXT NOT NULL,
+        PRIMARY KEY (begroting_versie_id, categorie)
+      )`,
+      `CREATE TABLE begroting_frozen_rente_regel (
+        begroting_versie_id TEXT NOT NULL REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        regel_id INTEGER NOT NULL,
+        categorie TEXT NOT NULL CHECK (categorie IN ('RENTEKOSTEN', 'RENTE_OPBRENGSTEN')),
+        omschrijving TEXT NOT NULL,
+        complexnummer TEXT NULL,
+        ogb_referentie TEXT NULL,
+        laatst_bekend_saldo TEXT NULL,
+        rentepercentage TEXT NULL,
+        begrotingsbedrag TEXT NULL,
+        berekend_voorstel TEXT NULL,
+        bedrag TEXT NOT NULL,
+        PRIMARY KEY (begroting_versie_id, regel_id)
+      )`,
+      `CREATE TABLE begroting_frozen_rente_control (
+        begroting_versie_id TEXT NOT NULL REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        volgnr INTEGER NOT NULL,
+        categorie TEXT NOT NULL CHECK (categorie IN ('RENTEKOSTEN', 'RENTE_OPBRENGSTEN')),
+        regel_id INTEGER NULL,
+        ernst TEXT NOT NULL CHECK (ernst IN ('KRITIEK', 'WAARSCHUWING', 'INFORMATIEF')),
+        bericht TEXT NOT NULL,
+        PRIMARY KEY (begroting_versie_id, volgnr)
+      )`,
+      `CREATE TRIGGER trg_begroting_frozen_rente_categorie_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_frozen_rente_categorie
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_rente_categorie: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_rente_categorie_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_frozen_rente_categorie
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_rente_categorie: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_rente_categorie_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_frozen_rente_categorie
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_rente_categorie: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_rente_regel_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_frozen_rente_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_rente_regel: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_rente_regel_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_frozen_rente_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_rente_regel: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_rente_regel_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_frozen_rente_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_rente_regel: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_rente_control_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_frozen_rente_control
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_rente_control: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_rente_control_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_frozen_rente_control
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_rente_control: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_rente_control_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_frozen_rente_control
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_rente_control: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+    ],
+  },
 ];
 
 function schemaMetaTableExists(db: DatabaseSync): boolean {

@@ -2,6 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import {
   ALGEMENE_KOSTEN_CATEGORIEEN,
   LEEGSTAND_CATEGORIEEN,
+  RENTE_CATEGORIEEN,
   berekenBegroteAlgemeneKosten,
   berekenBegroteBeheersvergoeding,
   berekenBegroteCorrectiefDagelijksOnderhoud,
@@ -10,6 +11,7 @@ import {
   berekenBegroteHuuropbrengsten,
   berekenBegroteLeegstand,
   berekenBegroteManagementvergoeding,
+  berekenBegroteRente,
   berekenBegroteVerzekeringen,
   type BgAlgemeneKostenCategorie,
   type BgAlgemeneKostenCategorieAannames,
@@ -41,6 +43,12 @@ import {
   type BgLeegstandResultaat,
   type BgManagementInvoer,
   type BgManagementResultaat,
+  type BgRenteCategorie,
+  type BgRenteCategorieAannames,
+  type BgRenteCategorieResultaat,
+  type BgRenteRegelInvoer,
+  type BgRenteRegelUitkomst,
+  type BgRenteResultaat,
   type BgVerzekeringRegelInvoer,
   type BgVerzekeringRegelUitkomst,
   type BgVerzekeringResultaat,
@@ -70,6 +78,11 @@ import {
 } from "./leegstandCategorieState.js";
 import { leesLeegstandRegels, type LeegstandRegel } from "./leegstandRegels.js";
 import { leesModule1Aannames } from "./module1Aannames.js";
+import {
+  leesRenteCategorieState,
+  type RenteCategorieStateInvoer,
+} from "./renteCategorieState.js";
+import { leesRenteRegels, type RenteRegel } from "./renteRegels.js";
 import { leesModule1Overrides } from "./module1Overrides.js";
 import { leesModule1Snapshot } from "./module1Snapshot.js";
 import { leesModule2Config } from "./module2Config.js";
@@ -207,6 +220,16 @@ import { leesWozObjecten, type WozObject } from "./wozObjecten.js";
  * uit van `HerberekendeBegroting`/`herberekenBegroting`, want Werkelijk moet
  * altijd live tegen de actuele boekhouding berekend worden, nooit tegen een
  * herberekende CONCEPT-snapshot.
+ *
+ * RENTE (OB-037 Rentekosten / OB-038 Rente opbrengsten): volgt hetzelfde
+ * patroon als Leegstandskosten (geen OGB-koppeling op de begrotingsregel,
+ * classificatie uitsluitend gebruikt door de losstaande Werkelijk-
+ * berekening `berekenWerkelijkRente`), met ÉÉN verschil: de rekenhulp
+ * (`laatstBekendSaldo`/`rentepercentage` → `berekendVoorstel`) zit hier PER
+ * REGEL, niet op de categorie-state (zie `begroteRente.ts`'s moduledoc) —
+ * `renteCategorieState.ts` bevat daarom uitsluitend `beoordeeld`. Rentekosten
+ * en Rente opbrengsten zijn twee afzonderlijke P&L-posten (`BgRenteResultaat`
+ * kent bewust GEEN `moduleTotaal`, zie die moduledoc).
  */
 export interface HerberekendeBegroting {
   versie: Begrotingsversie;
@@ -219,6 +242,7 @@ export interface HerberekendeBegroting {
   gemeentelijkeLasten: HerberekendGemeentelijkeLastenResultaat;
   algemeneKosten: HerberekendAlgemeneKostenResultaat;
   leegstand: HerberekendLeegstandResultaat;
+  rente: HerberekendRenteResultaat;
 }
 
 /** Koppelt een berekende activiteit-uitkomst terug aan haar persistente `id` — uitsluitend positioneel bepaald, nooit herzocht op inhoud (zie moduledoc). */
@@ -297,6 +321,22 @@ export interface HerberekendLeegstandResultaat extends Omit<BgLeegstandResultaat
   perCategorie: readonly HerberekendLeegstandCategorieResultaat[];
 }
 
+/** Koppelt een berekende Rente-regel-uitkomst terug aan haar persistente `id` — uitsluitend positioneel bepaald BINNEN de regels van diezelfde categorie, zelfde principe als `LeegstandRegelUitkomstMetId`. */
+export interface RenteRegelUitkomstMetId {
+  persistentieId: number;
+  regel: BgRenteRegelUitkomst;
+}
+
+/** `BgRenteCategorieResultaat` met uitsluitend `regels` vervangen door de ID-geannoteerde variant — alle overige velden ongewijzigd, rechtstreeks van de pure calculator. */
+export interface HerberekendRenteCategorieResultaat extends Omit<BgRenteCategorieResultaat, "regels"> {
+  regels: readonly RenteRegelUitkomstMetId[];
+}
+
+/** `BgRenteResultaat` met uitsluitend `perCategorie` vervangen door de ID-geannoteerde variant — alle overige velden (incl. de twee met naam benoemde categorietotalen) ongewijzigd, rechtstreeks van de pure calculator. GEEN `moduleTotaal` (zie `begroteRente.ts`'s moduledoc — twee afzonderlijke P&L-posten). */
+export interface HerberekendRenteResultaat extends Omit<BgRenteResultaat, "perCategorie"> {
+  perCategorie: readonly HerberekendRenteCategorieResultaat[];
+}
+
 /** Kleine, herbruikbare read-transactie-helper — zelfde BEGIN/COMMIT/ROLLBACK-idioom als elders in dit package (bewust hier gedupliceerd, zie 1D.5-rapport). */
 function withReadTransaction<T>(db: DatabaseSync, fn: () => T): T {
   db.exec("BEGIN");
@@ -351,6 +391,10 @@ export interface HerberekenInvoer {
   leegstandRegels: readonly LeegstandRegel[];
   /** `leesLeegstandCategorieState`'s "geen rij → beoordeeld false, rekenhulp null"-semantiek, ongewijzigd doorgegeven. */
   leegstandCategorieState: Record<BgLeegstandCategorie, LeegstandCategorieStateInvoer>;
+  /** Rauwe Rente-regelpersistence (OB-037/038) — GEEN pure-module-vorm; de mapping naar `BgRenteRegelInvoer` gebeurt pas in `berekenBegrotingUitInvoer`. GEEN classificatie hier — zie `HerberekendeBegroting`'s moduledoc. */
+  renteRegels: readonly RenteRegel[];
+  /** `leesRenteCategorieState`'s "geen rij → beoordeeld false"-semantiek, ongewijzigd doorgegeven. */
+  renteCategorieState: Record<BgRenteCategorie, RenteCategorieStateInvoer>;
 }
 
 /**
@@ -400,6 +444,8 @@ export function leesHerberekenInvoerZonderTransactie(db: DatabaseSync, versieId:
     algemeneKostenCategorieState: leesAlgemeneKostenCategorieState(db, versieId),
     leegstandRegels: leesLeegstandRegels(db, versieId),
     leegstandCategorieState: leesLeegstandCategorieState(db, versieId),
+    renteRegels: leesRenteRegels(db, versieId),
+    renteCategorieState: leesRenteCategorieState(db, versieId),
   };
 }
 
@@ -764,6 +810,59 @@ function berekenLeegstandUitInvoer(
   return { ...resultaat, perCategorie: perCategorieMetId };
 }
 
+/** Letterlijke veldkopie, GEEN transformatie/validatie — GEEN type-boundary-cast nodig (zie `HerberekendeBegroting`'s moduledoc). GEEN OGB-koppeling: een Rente-regel kent dat veld niet (zie `begroteRente.ts`'s moduledoc). */
+function naarPureRenteRegelInvoer(regel: RenteRegel): BgRenteRegelInvoer {
+  return {
+    categorie: regel.categorie,
+    omschrijving: regel.omschrijving,
+    complexnummer: regel.complexnummer,
+    ogbReferentie: regel.ogbReferentie,
+    laatstBekendSaldo: regel.laatstBekendSaldo,
+    rentepercentage: regel.rentepercentage,
+    begrotingsbedrag: regel.begrotingsbedrag,
+  };
+}
+
+/**
+ * Roept de pure Rente-Begroting-calculator aan en koppelt uitsluitend
+ * persistentie-ID's terug aan de resulterende regel-uitkomsten — PER
+ * CATEGORIE positioneel, exact hetzelfde principe en dezelfde defensieve
+ * lengte-controle als `berekenLeegstandUitInvoer`.
+ */
+function berekenRenteUitInvoer(
+  versieId: string,
+  begrotingsjaar: number,
+  regels: readonly RenteRegel[],
+  categorieState: Record<BgRenteCategorie, RenteCategorieStateInvoer>,
+): HerberekendRenteResultaat {
+  const categorieAannames = Object.fromEntries(
+    RENTE_CATEGORIEEN.map((categorie): [BgRenteCategorie, BgRenteCategorieAannames] => [categorie, { beoordeeld: categorieState[categorie].beoordeeld }]),
+  ) as Record<BgRenteCategorie, BgRenteCategorieAannames>;
+
+  let resultaat: BgRenteResultaat;
+  try {
+    resultaat = berekenBegroteRente(regels.map(naarPureRenteRegelInvoer), categorieAannames, { begrotingsjaar });
+  } catch (error) {
+    throw new Error(`Berekening van begrotingsversie ${versieId} is mislukt tijdens Rente: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+  }
+
+  const perCategorieMetId: HerberekendRenteCategorieResultaat[] = resultaat.perCategorie.map((categorieResultaat) => {
+    const regelsVoorCategorie = regels.filter((r) => r.categorie === categorieResultaat.categorie);
+    if (categorieResultaat.regels.length !== regelsVoorCategorie.length) {
+      throw new Error(
+        `Interne fout: begrotingsversie ${versieId}: Rente-calculator gaf ${categorieResultaat.regels.length} regel-uitkomsten terug voor categorie ${categorieResultaat.categorie} met ${regelsVoorCategorie.length} ingevoerde regels — positionele id-correlatie geschonden.`,
+      );
+    }
+    const regelsMetId: RenteRegelUitkomstMetId[] = categorieResultaat.regels.map((regelUitkomst, index) => ({
+      persistentieId: regelsVoorCategorie[index]!.id,
+      regel: regelUitkomst,
+    }));
+    return { ...categorieResultaat, regels: regelsMetId };
+  });
+
+  return { ...resultaat, perCategorie: perCategorieMetId };
+}
+
 /**
  * Voert de pure Module-1-, Module-2-, (indien aanwezig) Module-3- en
  * Gepland-Onderhoud-berekening uit op reeds-gelezen invoer — GEEN eigen
@@ -796,6 +895,7 @@ export function berekenBegrotingUitInvoer(
   gemeentelijkeLasten: HerberekendGemeentelijkeLastenResultaat;
   algemeneKosten: HerberekendAlgemeneKostenResultaat;
   leegstand: HerberekendLeegstandResultaat;
+  rente: HerberekendRenteResultaat;
 } {
   let module1: BgHuurResultaat;
   try {
@@ -862,7 +962,9 @@ export function berekenBegrotingUitInvoer(
 
   const leegstand = berekenLeegstandUitInvoer(versieId, invoer.versie.begrotingsjaar, invoer.leegstandRegels, invoer.leegstandCategorieState);
 
-  return { module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud, verzekering, gemeentelijkeLasten, algemeneKosten, leegstand };
+  const rente = berekenRenteUitInvoer(versieId, invoer.versie.begrotingsjaar, invoer.renteRegels, invoer.renteCategorieState);
+
+  return { module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud, verzekering, gemeentelijkeLasten, algemeneKosten, leegstand, rente };
 }
 
 /**
@@ -888,7 +990,7 @@ export function berekenBegrotingUitInvoer(
  */
 export function herberekenBegroting(db: DatabaseSync, versieId: string): HerberekendeBegroting {
   const invoer = withReadTransaction(db, () => leesHerberekenInvoerZonderTransactie(db, versieId));
-  const { module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud, verzekering, gemeentelijkeLasten, algemeneKosten, leegstand } =
+  const { module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud, verzekering, gemeentelijkeLasten, algemeneKosten, leegstand, rente } =
     berekenBegrotingUitInvoer(versieId, invoer);
   return {
     versie: invoer.versie,
@@ -901,5 +1003,6 @@ export function herberekenBegroting(db: DatabaseSync, versieId: string): Herbere
     gemeentelijkeLasten,
     algemeneKosten,
     leegstand,
+    rente,
   };
 }

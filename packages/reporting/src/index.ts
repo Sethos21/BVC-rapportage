@@ -46,4 +46,5 @@ export * from "./begroting/begroteVerzekeringen.js";
 export * from "./begroting/begroteGemeentelijkeLasten.js";
 export * from "./begroting/begroteAlgemeneKosten.js";
 export * from "./begroting/begroteLeegstand.js";
+export * from "./begroting/begroteRente.js";
 export { HUISSTIJL_CSS, escapeHtml, formatBedragHtml, renderRapportDocument } from "./huisstijl.js";

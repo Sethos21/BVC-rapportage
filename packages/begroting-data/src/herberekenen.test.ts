@@ -7,11 +7,13 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   ALGEMENE_KOSTEN_CATEGORIEEN,
   LEEGSTAND_CATEGORIEEN,
+  RENTE_CATEGORIEEN,
   berekenBegroteCorrectiefDagelijksOnderhoud,
   berekenBegroteGemeentelijkeLasten,
   berekenBegroteGeplandOnderhoud,
   berekenBegroteVerzekeringen,
   berekenWerkelijkLeegstand,
+  berekenWerkelijkRente,
   type BgAlgemeneKostenCategorie,
   type BgBeheerComplexConfig,
   type BgContractFeiten,
@@ -21,6 +23,7 @@ import {
   type BgHuurAannames,
   type BgLeegstandCategorie,
   type BgManagementInvoer,
+  type BgRenteCategorie,
   type BgVerzekeringRegelInvoer,
   type BgWozObjectInvoer,
 } from "@bvc/reporting";
@@ -36,6 +39,11 @@ import {
   type LeegstandCategorieStateInvoer,
 } from "./leegstandCategorieState.js";
 import { schrijfLeegstandRegels, type LeegstandRegelInvoer } from "./leegstandRegels.js";
+import {
+  schrijfRenteCategorieState,
+  type RenteCategorieStateInvoer,
+} from "./renteCategorieState.js";
+import { schrijfRenteRegels, type RenteRegelInvoer } from "./renteRegels.js";
 import { schrijfCorrectiefDagelijksOnderhoudBeoordeeld } from "./correctiefDagelijksOnderhoudBeoordeeld.js";
 import {
   schrijfCorrectiefDagelijksOnderhoudRegels,
@@ -1875,5 +1883,171 @@ describe("herberekenBegroting — Leegstandskosten (OB-031)", () => {
     expect(normaliseer(zonderLeegstand.algemeneKosten)).toBe(normaliseer(metLeegstand.algemeneKosten));
     expect(zonderLeegstand.module3).toBeNull();
     expect(metLeegstand.module3).toBeNull();
+  });
+});
+
+describe("herberekenBegroting — Rente (OB-037/038)", () => {
+  function regelInvoer(overrides: Partial<RenteRegelInvoer> = {}): RenteRegelInvoer {
+    return {
+      id: null,
+      categorie: "RENTEKOSTEN",
+      omschrijving: "Lening 747",
+      complexnummer: null,
+      ogbReferentie: null,
+      laatstBekendSaldo: null,
+      rentepercentage: null,
+      begrotingsbedrag: new Decimal(350000),
+      ...overrides,
+    };
+  }
+
+  function alleStates(overrides: Partial<Record<BgRenteCategorie, Partial<RenteCategorieStateInvoer>>> = {}): Record<BgRenteCategorie, RenteCategorieStateInvoer> {
+    return Object.fromEntries(RENTE_CATEGORIEEN.map((categorie) => [categorie, { beoordeeld: true, ...overrides[categorie] }])) as Record<BgRenteCategorie, RenteCategorieStateInvoer>;
+  }
+
+  it("1. geen regels + geen categorie-state: resultaat altijd aanwezig, beide REVIEWED_ZERO_RULES na expliciete beoordeling", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    const resultaat = herberekenBegroting(db, versie.id);
+
+    expect(resultaat.rente).toBeDefined();
+    expect(resultaat.rente.perCategorie).toHaveLength(2);
+    for (const c of resultaat.rente.perCategorie) {
+      expect(c.beoordeeld).toBe(false);
+      expect(c.reviewStatus).toBe("NOT_REVIEWED");
+    }
+    expect(resultaat.rente.rentekosten.toString()).toBe("0");
+    expect(resultaat.rente.renteOpbrengsten.toString()).toBe("0");
+  });
+
+  it("2. review onafhankelijk per categorie: Rentekosten beoordeeld, Rente opbrengsten niet", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfRenteCategorieState(db, versie.id, alleStates({ RENTEKOSTEN: { beoordeeld: true }, RENTE_OPBRENGSTEN: { beoordeeld: false } }));
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    expect(resultaat.rente.perCategorie.find((c) => c.categorie === "RENTEKOSTEN")!.reviewStatus).toBe("REVIEWED_ZERO_RULES");
+    expect(resultaat.rente.perCategorie.find((c) => c.categorie === "RENTE_OPBRENGSTEN")!.reviewStatus).toBe("NOT_REVIEWED");
+  });
+
+  it("3. begrotingsbedrag per regel, complex/ogbReferentie puur doorgegeven (geen OGB-koppeling/validatie op de begrotingsregel)", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfRenteRegels(db, versie.id, [regelInvoer({ categorie: "RENTEKOSTEN", complexnummer: "001", ogbReferentie: "OGB 4606 — lening 747", begrotingsbedrag: new Decimal(357441) })]);
+    schrijfRenteCategorieState(db, versie.id, alleStates());
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    const rentekosten = resultaat.rente.perCategorie.find((c) => c.categorie === "RENTEKOSTEN")!;
+    expect(rentekosten.regels[0]!.regel.invoer.complexnummer).toBe("001");
+    expect(rentekosten.regels[0]!.regel.invoer.ogbReferentie).toBe("OGB 4606 — lening 747");
+    expect(resultaat.rente.rentekosten.toString()).toBe("357441");
+    expect(resultaat.rente.controleVereist).toHaveLength(0);
+  });
+
+  it("4. lege omschrijving: KRITIEK, bedrag blijft financieel meetellen", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfRenteRegels(db, versie.id, [regelInvoer({ categorie: "RENTE_OPBRENGSTEN", omschrijving: "  ", begrotingsbedrag: new Decimal(-500) })]);
+    schrijfRenteCategorieState(db, versie.id, alleStates());
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    expect(resultaat.rente.controleVereist.some((c) => c.ernst === "KRITIEK")).toBe(true);
+    expect(resultaat.rente.renteOpbrengsten.toString()).toBe("-500");
+  });
+
+  it("5. persistentie-ID wordt correct per categorie teruggekoppeld (meerdere categorieën, meerdere regels)", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    const [k1, k2, o1] = schrijfRenteRegels(db, versie.id, [
+      regelInvoer({ categorie: "RENTEKOSTEN", omschrijving: "Lening 747" }),
+      regelInvoer({ categorie: "RENTEKOSTEN", omschrijving: "Lening .962" }),
+      regelInvoer({ categorie: "RENTE_OPBRENGSTEN", omschrijving: "Spaarrekening" }),
+    ]);
+    schrijfRenteCategorieState(db, versie.id, alleStates());
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    const rentekosten = resultaat.rente.perCategorie.find((c) => c.categorie === "RENTEKOSTEN")!;
+    const renteOpbrengsten = resultaat.rente.perCategorie.find((c) => c.categorie === "RENTE_OPBRENGSTEN")!;
+    expect(rentekosten.regels.map((r) => r.persistentieId)).toEqual([k1!.id, k2!.id]);
+    expect(renteOpbrengsten.regels.map((r) => r.persistentieId)).toEqual([o1!.id]);
+  });
+
+  it("6. rekenhulp per regel: geldig voorstel, wijzigt begrotingsbedrag niet", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfRenteRegels(db, versie.id, [
+      regelInvoer({ categorie: "RENTEKOSTEN", laatstBekendSaldo: new Decimal(7700000), rentepercentage: new Decimal(6), begrotingsbedrag: new Decimal(357441) }),
+    ]);
+    schrijfRenteCategorieState(db, versie.id, alleStates());
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    const rentekosten = resultaat.rente.perCategorie.find((c) => c.categorie === "RENTEKOSTEN")!;
+    expect(rentekosten.regels[0]!.regel.berekendVoorstel!.toString()).toBe("462000");
+    expect(resultaat.rente.rentekosten.toString()).toBe("357441");
+  });
+
+  it("7. herberekening schrijft niets naar de Rente-concepttabellen", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfRenteRegels(db, versie.id, [regelInvoer()]);
+    schrijfRenteCategorieState(db, versie.id, alleStates());
+
+    const dump = () => ({
+      state: db.prepare(`SELECT * FROM begroting_rente_categorie_state`).all(),
+      regels: db.prepare(`SELECT * FROM begroting_rente_regel`).all(),
+    });
+
+    const voor = dump();
+    herberekenBegroting(db, versie.id);
+    const na = dump();
+
+    expect(na).toEqual(voor);
+  });
+
+  it("8. twee opeenvolgende herberekeningen zonder writes geven inhoudelijk identiek resultaat", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfRenteRegels(db, versie.id, [regelInvoer({ categorie: "RENTE_OPBRENGSTEN" })]);
+    schrijfRenteCategorieState(db, versie.id, alleStates());
+
+    const eersteKeer = herberekenBegroting(db, versie.id);
+    const tweedeKeer = herberekenBegroting(db, versie.id);
+    const normaliseer = (waarde: unknown) => JSON.stringify(waarde, (_key, v) => (v instanceof Decimal ? v.toString() : v));
+
+    expect(normaliseer(eersteKeer.rente)).toBe(normaliseer(tweedeKeer.rente));
+  });
+
+  it("9 (070-bronproef). Werkelijk-classificatie (los van Begroting) herkent administratie-specifieke OGB-codes op de bewezen 023/013-boekingen — dezelfde OGB 4604 betekent bij 023 RENTEKOSTEN en bij 013 RENTE_OPBRENGSTEN", () => {
+    // Geen persistence hier — de bronproef bewijst de PURE Werkelijk-calculator (@bvc/reporting),
+    // die per ontwerp nooit gepersisteerd wordt (zie begroteRente.ts's moduledoc).
+    const klassificatie023 = [
+      { ogbKostensoort: "4601", ogbKostensoortOmschrijving: "Rente lening .962", categorie: "RENTEKOSTEN" as const },
+      { ogbKostensoort: "4604", ogbKostensoortOmschrijving: "Rente lening .500", categorie: "RENTEKOSTEN" as const },
+    ];
+    const klassificatie013 = [{ ogbKostensoort: "4604", ogbKostensoortOmschrijving: "Rente r/c", categorie: "RENTE_OPBRENGSTEN" as const }];
+
+    const werkelijk023 = berekenWerkelijkRente([{ ogbKostensoort: "4601", saldo: new Decimal("522837.15") }, { ogbKostensoort: "4604", saldo: new Decimal("66211.49") }], klassificatie023);
+    const werkelijk013 = berekenWerkelijkRente([{ ogbKostensoort: "4604", saldo: new Decimal("-1215.67") }], klassificatie013);
+
+    expect(werkelijk023.perCategorie.find((c) => c.categorie === "RENTEKOSTEN")!.categorieTotaal.toString()).toBe("589048.64");
+    expect(werkelijk013.perCategorie.find((c) => c.categorie === "RENTE_OPBRENGSTEN")!.categorieTotaal.toString()).toBe("-1215.67");
+  });
+
+  it("10 (regressie). bestaande Module 1/2/3/GO/CD/Verzekering/WOZ/Algemene-Kosten/Leegstand-uitkomst blijft byte-identiek naast aanwezige Rente-regels", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    schrijfModule1Snapshot(db, versie.id, [maakContract("0000000028", { complexnummer: "001" })]);
+    schrijfModule1Aannames(db, versie.id, STANDAARD_AANNAMES);
+    schrijfModule2Config(db, versie.id, [
+      { complexnummer: "001", vastBedragJaar: new Decimal(1000), vastIndexatiePercentage: null, vastIndexatiedatum: null, variabelPercentage: new Decimal(6) },
+    ]);
+
+    const zonderRente = herberekenBegroting(db, versie.id);
+    schrijfRenteRegels(db, versie.id, [regelInvoer()]);
+    schrijfRenteCategorieState(db, versie.id, alleStates());
+    const metRente = herberekenBegroting(db, versie.id);
+
+    const normaliseer = (waarde: unknown) => JSON.stringify(waarde, (_key, v) => (v instanceof Decimal ? v.toString() : v));
+    expect(normaliseer(zonderRente.module1)).toBe(normaliseer(metRente.module1));
+    expect(normaliseer(zonderRente.module2)).toBe(normaliseer(metRente.module2));
+    expect(normaliseer(zonderRente.geplandOnderhoud)).toBe(normaliseer(metRente.geplandOnderhoud));
+    expect(normaliseer(zonderRente.correctiefDagelijksOnderhoud)).toBe(normaliseer(metRente.correctiefDagelijksOnderhoud));
+    expect(normaliseer(zonderRente.verzekering)).toBe(normaliseer(metRente.verzekering));
+    expect(normaliseer(zonderRente.gemeentelijkeLasten)).toBe(normaliseer(metRente.gemeentelijkeLasten));
+    expect(normaliseer(zonderRente.algemeneKosten)).toBe(normaliseer(metRente.algemeneKosten));
+    expect(normaliseer(zonderRente.leegstand)).toBe(normaliseer(metRente.leegstand));
+    expect(zonderRente.module3).toBeNull();
+    expect(metRente.module3).toBeNull();
   });
 });

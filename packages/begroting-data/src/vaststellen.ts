@@ -13,6 +13,7 @@ import {
 import { schrijfFrozenGeplandOnderhoudResultaatZonderTransactie } from "./frozenGeplandOnderhoudResultaat.js";
 import { schrijfFrozenLeegstandResultaatZonderTransactie, type FrozenLeegstandResultaat } from "./frozenLeegstandResultaat.js";
 import { schrijfFrozenModule3ResultaatZonderTransactie } from "./frozenModule3Resultaat.js";
+import { schrijfFrozenRenteResultaatZonderTransactie, type FrozenRenteResultaat } from "./frozenRenteResultaat.js";
 import { schrijfFrozenBegrotingsresultaatZonderTransactie } from "./frozenResultaat.js";
 import { schrijfFrozenVerzekeringResultaatZonderTransactie } from "./frozenVerzekeringResultaat.js";
 import {
@@ -167,6 +168,7 @@ export interface VastgesteldeBegroting {
   gemeentelijkeLasten: FrozenGemeentelijkeLastenResultaat;
   algemeneKosten: FrozenAlgemeneKostenResultaat;
   leegstand: FrozenLeegstandResultaat;
+  rente: FrozenRenteResultaat;
 }
 
 /**
@@ -240,7 +242,7 @@ export function stelBegrotingVast(db: DatabaseSync, versieId: string, vastgestel
       );
     }
 
-    const { module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud, verzekering, gemeentelijkeLasten, algemeneKosten, leegstand } =
+    const { module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud, verzekering, gemeentelijkeLasten, algemeneKosten, leegstand, rente } =
       berekenBegrotingUitInvoer(versieId, invoer);
     // Lokale, expliciete narrowing: `module3` is hier altijd niet-null, want `invoer.module3Invoer !== null`
     // is hierboven al gecontroleerd en `berekenBegrotingUitInvoer` berekent Module 3 uitsluitend (en dan
@@ -339,6 +341,19 @@ export function stelBegrotingVast(db: DatabaseSync, versieId: string, vastgestel
       );
     }
 
+    // Rente-lifecycle-validatie (OB-037/038, fase P3, zie moduledoc) — UITSLUITEND lokaal voor Rente,
+    // wijzigt niets aan hoe de eerdere modules' eigen controleVereist wordt behandeld hierboven. PER
+    // CATEGORIE: BEIDE (Rentekosten + Rente opbrengsten) moeten expliciet beoordeeld=true zijn.
+    const nietBeoordeeldeRenteCategorie = rente.perCategorie.find((c) => !c.beoordeeld);
+    if (nietBeoordeeldeRenteCategorie !== undefined) {
+      throw new Error(
+        `Begrotingsversie ${versieId}: Rente — categorie ${nietBeoordeeldeRenteCategorie.categorie} is niet beoordeeld (beoordeeld !== true) — vaststellen is niet mogelijk zonder expliciete beoordeling van BEIDE categorieën.`,
+      );
+    }
+    if (rente.controleVereist.some((c) => c.ernst === "KRITIEK")) {
+      throw new Error(`Begrotingsversie ${versieId}: Rente bevat één of meer KRITIEKE controls — vaststellen is niet mogelijk vóórdat deze zijn opgelost.`);
+    }
+
     schrijfFrozenBegrotingsresultaatZonderTransactie(db, versieId, { module1, module2 });
     schrijfFrozenModule3ResultaatZonderTransactie(db, versieId, module3);
     schrijfFrozenGeplandOnderhoudResultaatZonderTransactie(db, versieId, geplandOnderhoud);
@@ -347,6 +362,7 @@ export function stelBegrotingVast(db: DatabaseSync, versieId: string, vastgestel
     schrijfFrozenGemeentelijkeLastenResultaatZonderTransactie(db, versieId, gemeentelijkeLasten, invoer.gemeentelijkeLastenModule.werkelijkeGemeentelijkeLasten);
     schrijfFrozenAlgemeneKostenResultaatZonderTransactie(db, versieId, algemeneKosten, invoer.algemeneKostenClassificatie);
     schrijfFrozenLeegstandResultaatZonderTransactie(db, versieId, leegstand);
+    schrijfFrozenRenteResultaatZonderTransactie(db, versieId, rente);
     markeerVastgesteld(db, versieId, vastgesteldAt); // allerlaatste schrijfactie vóór commit
 
     const versie = leesBegrotingsversie(db, versieId);
@@ -374,6 +390,7 @@ export function stelBegrotingVast(db: DatabaseSync, versieId: string, vastgestel
       gemeentelijkeLasten: frozenGemeentelijkeLasten,
       algemeneKosten: frozenAlgemeneKosten,
       leegstand,
+      rente,
     };
   });
 }
