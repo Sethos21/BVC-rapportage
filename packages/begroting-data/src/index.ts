@@ -71,6 +71,8 @@ export {
   type HerberekendRenteResultaat,
   type HerberekendRenteCategorieResultaat,
   type RenteRegelUitkomstMetId,
+  type HerberekendGeplandeVerkoopResultaat,
+  type GeplandeVerkoopRegelUitkomstMetId,
 } from "./herberekenen.js";
 
 // Bevroren Module-1/Module-2-output (1D.6a) — uitsluitend serialisatie/
@@ -188,6 +190,19 @@ export {
   leesFrozenRenteResultaat,
   type FrozenRenteResultaat,
 } from "./frozenRenteResultaat.js";
+
+// Bevroren Geplande-Verkoop-output (OB-039, fase P3) — uitsluitend
+// serialisatie/deserialisatie van het bestaande
+// `HerberekendGeplandeVerkoopResultaat` (uitsluitend de Begroting-kant —
+// Werkelijk/Estimated worden per ontwerp NOOIT bevroren, zie
+// `frozenGeplandeVerkoopResultaat.ts`'s moduledoc). Strikt gescheiden van
+// `geplandeVerkoopRegels.ts`/`geplandeVerkoopBeoordeeld.ts` (de persistente
+// CONCEPT-input) EN van `geplandeVerkoopEstimatedRegels.ts` (de
+// nooit-bevroren Estimated-input): deze laag leest die tabellen nooit terug
+// om een resultaat te reconstrueren. `schrijfFrozenGeplandeVerkoopResultaatZonderTransactie`
+// blijft bewust intern — de publieke schrijf-ingang is en blijft
+// `schrijfFrozenGeplandeVerkoopResultaat`.
+export { schrijfFrozenGeplandeVerkoopResultaat, leesFrozenGeplandeVerkoopResultaat } from "./frozenGeplandeVerkoopResultaat.js";
 
 // De atomaire VASTSTELLEN-operatie (1D.6b) — de enige publieke weg om een
 // CONCEPT-versie definitief VASTGESTELD te maken. Bundelt uitsluitend de
@@ -324,3 +339,43 @@ export {
   type RenteRegel,
   type RenteRegelInvoer,
 } from "./renteRegels.js";
+
+// Geplande Verkoop (OB-039) — UITSLUITEND concept-persistence (geen
+// pure-calculator-integratie in dit bestand zelf; herberekening/frozen
+// output zitten in herberekenen.js/frozenGeplandeVerkoopResultaat.js). De
+// lokale OGB-classificatie (`geplandeVerkoopClassificatie.ts`) EN de lokale
+// GL-classificatie (`geplandeVerkoopGrootboekClassificatie.ts`, 2026-09-11-
+// correctie: het 023-bronproef bewees dat GL 08830 zonder OGB-kostensoort
+// voorkomt, dus een zuiver OGB-gebaseerde classificatie zou VERKOOPOPBRENGST
+// nooit herkennen) zijn beide bewust ADMINISTRATIE-BREED (sleutel
+// `bedrijfsnr`), niet begrotingsversie-gebonden, en volledig ONAFHANKELIJK
+// van elkaar (zie die bestanden se moduledoc + `begroteGeplandeVerkoop.ts`'s
+// `berekenWerkelijkGeplandeVerkoop` voor de resolutievolgorde). GEEN
+// categoriedimensie (OB-039 kent er geen — module-brede `beoordeeld`-vlag
+// i.p.v. per-categorie). Werkelijk wordt NOOIT gepersisteerd.
+// Estimated-regels (`geplandeVerkoopEstimatedRegels.ts`) zijn STRUCTUREEL EEN
+// EIGEN TABEL — bewust NOOIT geblokkeerd door de VASTGESTELD-lifecycle van de
+// Begroting-regels, zie dat bestand se moduledoc.
+export {
+  schrijfGeplandeVerkoopClassificatie,
+  leesGeplandeVerkoopClassificatie,
+  type GeplandeVerkoopClassificatieRegel,
+} from "./geplandeVerkoopClassificatie.js";
+export {
+  schrijfGeplandeVerkoopGrootboekClassificatie,
+  leesGeplandeVerkoopGrootboekClassificatie,
+  type GeplandeVerkoopGrootboekClassificatieRegel,
+} from "./geplandeVerkoopGrootboekClassificatie.js";
+export { schrijfGeplandeVerkoopBeoordeeld, leesGeplandeVerkoopBeoordeeld } from "./geplandeVerkoopBeoordeeld.js";
+export {
+  schrijfGeplandeVerkoopRegels,
+  leesGeplandeVerkoopRegels,
+  type GeplandeVerkoopRegel,
+  type GeplandeVerkoopRegelInvoer,
+} from "./geplandeVerkoopRegels.js";
+export {
+  schrijfGeplandeVerkoopEstimatedRegels,
+  leesGeplandeVerkoopEstimatedRegels,
+  type GeplandeVerkoopEstimatedRegel,
+  type GeplandeVerkoopEstimatedRegelInvoer,
+} from "./geplandeVerkoopEstimatedRegels.js";

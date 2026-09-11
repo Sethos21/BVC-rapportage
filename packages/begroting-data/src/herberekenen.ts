@@ -7,6 +7,7 @@ import {
   berekenBegroteBeheersvergoeding,
   berekenBegroteCorrectiefDagelijksOnderhoud,
   berekenBegroteGemeentelijkeLasten,
+  berekenBegroteGeplandeVerkoop,
   berekenBegroteGeplandOnderhoud,
   berekenBegroteHuuropbrengsten,
   berekenBegroteLeegstand,
@@ -28,6 +29,9 @@ import {
   type BgCorrectiefDagelijksRegelUitkomst,
   type BgCorrectiefDagelijksResultaat,
   type BgGemeentelijkeLastenResultaat,
+  type BgGeplandeVerkoopRegelInvoer,
+  type BgGeplandeVerkoopRegelUitkomst,
+  type BgGeplandeVerkoopResultaat,
   type BgGeplandOnderhoudAanleidingType,
   type BgGeplandOnderhoudActiviteitInvoer,
   type BgGeplandOnderhoudActiviteitUitkomst,
@@ -70,6 +74,8 @@ import {
   type CorrectiefDagelijksOnderhoudRegel,
 } from "./correctiefDagelijksOnderhoudRegels.js";
 import { leesGemeentelijkeLastenModule, type GemeentelijkeLastenModuleInvoer } from "./gemeentelijkeLastenModule.js";
+import { leesGeplandeVerkoopBeoordeeld } from "./geplandeVerkoopBeoordeeld.js";
+import { leesGeplandeVerkoopRegels, type GeplandeVerkoopRegel } from "./geplandeVerkoopRegels.js";
 import { leesGeplandOnderhoudActiviteiten, type GeplandOnderhoudActiviteit } from "./geplandOnderhoudActiviteiten.js";
 import { leesGeplandOnderhoudBeoordeeld } from "./geplandOnderhoudBeoordeeld.js";
 import {
@@ -243,6 +249,7 @@ export interface HerberekendeBegroting {
   algemeneKosten: HerberekendAlgemeneKostenResultaat;
   leegstand: HerberekendLeegstandResultaat;
   rente: HerberekendRenteResultaat;
+  geplandeVerkoop: HerberekendGeplandeVerkoopResultaat;
 }
 
 /** Koppelt een berekende activiteit-uitkomst terug aan haar persistente `id` — uitsluitend positioneel bepaald, nooit herzocht op inhoud (zie moduledoc). */
@@ -337,6 +344,17 @@ export interface HerberekendRenteResultaat extends Omit<BgRenteResultaat, "perCa
   perCategorie: readonly HerberekendRenteCategorieResultaat[];
 }
 
+/** Koppelt een berekende Geplande-Verkoop-regel-uitkomst terug aan haar persistente `id` — uitsluitend positioneel bepaald, zelfde principe als `RenteRegelUitkomstMetId`. GEEN categoriedimensie (OB-039 kent er geen, zie `begroteGeplandeVerkoop.ts`'s moduledoc). */
+export interface GeplandeVerkoopRegelUitkomstMetId {
+  persistentieId: number;
+  regel: BgGeplandeVerkoopRegelUitkomst;
+}
+
+/** `BgGeplandeVerkoopResultaat` met uitsluitend `regels` vervangen door de ID-geannoteerde variant — alle overige velden ongewijzigd, rechtstreeks van de pure calculator. GEEN totaal/moduleTotaal (zie `begroteGeplandeVerkoop.ts`'s moduledoc — schijnzekerheid voorkomen). */
+export interface HerberekendGeplandeVerkoopResultaat extends Omit<BgGeplandeVerkoopResultaat, "regels"> {
+  regels: readonly GeplandeVerkoopRegelUitkomstMetId[];
+}
+
 /** Kleine, herbruikbare read-transactie-helper — zelfde BEGIN/COMMIT/ROLLBACK-idioom als elders in dit package (bewust hier gedupliceerd, zie 1D.5-rapport). */
 function withReadTransaction<T>(db: DatabaseSync, fn: () => T): T {
   db.exec("BEGIN");
@@ -395,6 +413,10 @@ export interface HerberekenInvoer {
   renteRegels: readonly RenteRegel[];
   /** `leesRenteCategorieState`'s "geen rij → beoordeeld false"-semantiek, ongewijzigd doorgegeven. */
   renteCategorieState: Record<BgRenteCategorie, RenteCategorieStateInvoer>;
+  /** Rauwe Geplande-Verkoop-Begrotingsregelpersistence (OB-039) — GEEN pure-module-vorm; de mapping naar `BgGeplandeVerkoopRegelInvoer` gebeurt pas in `berekenBegrotingUitInvoer`. GEEN Estimated-regels hier — die zijn nooit onderdeel van `herberekenBegroting`'s Begroting-output, zie `geplandeVerkoopEstimatedRegels.ts`'s moduledoc. */
+  geplandeVerkoopRegels: readonly GeplandeVerkoopRegel[];
+  /** `leesGeplandeVerkoopBeoordeeld`'s "geen rij → false"-semantiek, ongewijzigd doorgegeven. */
+  geplandeVerkoopBeoordeeld: boolean;
 }
 
 /**
@@ -446,6 +468,8 @@ export function leesHerberekenInvoerZonderTransactie(db: DatabaseSync, versieId:
     leegstandCategorieState: leesLeegstandCategorieState(db, versieId),
     renteRegels: leesRenteRegels(db, versieId),
     renteCategorieState: leesRenteCategorieState(db, versieId),
+    geplandeVerkoopRegels: leesGeplandeVerkoopRegels(db, versieId),
+    geplandeVerkoopBeoordeeld: leesGeplandeVerkoopBeoordeeld(db, versieId),
   };
 }
 
@@ -863,6 +887,54 @@ function berekenRenteUitInvoer(
   return { ...resultaat, perCategorie: perCategorieMetId };
 }
 
+/** Letterlijke veldkopie, GEEN transformatie/validatie — GEEN type-boundary-cast nodig (zie `HerberekendeBegroting`'s moduledoc). */
+function naarPureGeplandeVerkoopInvoer(regel: GeplandeVerkoopRegel): BgGeplandeVerkoopRegelInvoer {
+  return {
+    objectreferentie: regel.objectreferentie,
+    omschrijving: regel.omschrijving,
+    geplandeVerkoopdatum: regel.geplandeVerkoopdatum,
+    verwachteVerkoopopbrengst: regel.verwachteVerkoopopbrengst,
+    verwachteBoekwaarde: regel.verwachteBoekwaarde,
+    verwachteVerkoopkosten: regel.verwachteVerkoopkosten,
+    verwachteEinddatumHuurExploitatie: regel.verwachteEinddatumHuurExploitatie,
+    toelichting: regel.toelichting,
+  };
+}
+
+/**
+ * Roept de pure Geplande-Verkoop-Begroting-calculator aan en koppelt
+ * uitsluitend persistentie-ID's terug aan de resulterende regel-uitkomsten —
+ * positioneel (`invoer[i] ↔ resultaat.regels[i]`), zelfde principe en
+ * defensieve lengte-controle als `berekenCorrectiefDagelijksUitInvoer` (geen
+ * categoriedimensie, zie `begroteGeplandeVerkoop.ts`'s moduledoc).
+ */
+function berekenGeplandeVerkoopUitInvoer(
+  versieId: string,
+  begrotingsjaar: number,
+  regels: readonly GeplandeVerkoopRegel[],
+  beoordeeld: boolean,
+): HerberekendGeplandeVerkoopResultaat {
+  let resultaat: BgGeplandeVerkoopResultaat;
+  try {
+    resultaat = berekenBegroteGeplandeVerkoop(regels.map(naarPureGeplandeVerkoopInvoer), { begrotingsjaar, beoordeeld });
+  } catch (error) {
+    throw new Error(`Berekening van begrotingsversie ${versieId} is mislukt tijdens Geplande Verkoop: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+  }
+
+  if (resultaat.regels.length !== regels.length) {
+    throw new Error(
+      `Interne fout: begrotingsversie ${versieId}: Geplande-Verkoop-calculator gaf ${resultaat.regels.length} regel-uitkomsten terug voor ${regels.length} ingevoerde regels — positionele id-correlatie geschonden.`,
+    );
+  }
+
+  const regelsMetId: GeplandeVerkoopRegelUitkomstMetId[] = resultaat.regels.map((regelUitkomst, index) => ({
+    persistentieId: regels[index]!.id,
+    regel: regelUitkomst,
+  }));
+
+  return { ...resultaat, regels: regelsMetId };
+}
+
 /**
  * Voert de pure Module-1-, Module-2-, (indien aanwezig) Module-3- en
  * Gepland-Onderhoud-berekening uit op reeds-gelezen invoer — GEEN eigen
@@ -896,6 +968,7 @@ export function berekenBegrotingUitInvoer(
   algemeneKosten: HerberekendAlgemeneKostenResultaat;
   leegstand: HerberekendLeegstandResultaat;
   rente: HerberekendRenteResultaat;
+  geplandeVerkoop: HerberekendGeplandeVerkoopResultaat;
 } {
   let module1: BgHuurResultaat;
   try {
@@ -964,7 +1037,9 @@ export function berekenBegrotingUitInvoer(
 
   const rente = berekenRenteUitInvoer(versieId, invoer.versie.begrotingsjaar, invoer.renteRegels, invoer.renteCategorieState);
 
-  return { module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud, verzekering, gemeentelijkeLasten, algemeneKosten, leegstand, rente };
+  const geplandeVerkoop = berekenGeplandeVerkoopUitInvoer(versieId, invoer.versie.begrotingsjaar, invoer.geplandeVerkoopRegels, invoer.geplandeVerkoopBeoordeeld);
+
+  return { module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud, verzekering, gemeentelijkeLasten, algemeneKosten, leegstand, rente, geplandeVerkoop };
 }
 
 /**
@@ -990,7 +1065,7 @@ export function berekenBegrotingUitInvoer(
  */
 export function herberekenBegroting(db: DatabaseSync, versieId: string): HerberekendeBegroting {
   const invoer = withReadTransaction(db, () => leesHerberekenInvoerZonderTransactie(db, versieId));
-  const { module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud, verzekering, gemeentelijkeLasten, algemeneKosten, leegstand, rente } =
+  const { module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud, verzekering, gemeentelijkeLasten, algemeneKosten, leegstand, rente, geplandeVerkoop } =
     berekenBegrotingUitInvoer(versieId, invoer);
   return {
     versie: invoer.versie,
@@ -1004,5 +1079,6 @@ export function herberekenBegroting(db: DatabaseSync, versieId: string): Herbere
     algemeneKosten,
     leegstand,
     rente,
+    geplandeVerkoop,
   };
 }

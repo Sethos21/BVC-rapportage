@@ -10,6 +10,7 @@ import {
   schrijfFrozenGemeentelijkeLastenResultaatZonderTransactie,
   type FrozenGemeentelijkeLastenResultaat,
 } from "./frozenGemeentelijkeLastenResultaat.js";
+import { schrijfFrozenGeplandeVerkoopResultaatZonderTransactie } from "./frozenGeplandeVerkoopResultaat.js";
 import { schrijfFrozenGeplandOnderhoudResultaatZonderTransactie } from "./frozenGeplandOnderhoudResultaat.js";
 import { schrijfFrozenLeegstandResultaatZonderTransactie, type FrozenLeegstandResultaat } from "./frozenLeegstandResultaat.js";
 import { schrijfFrozenModule3ResultaatZonderTransactie } from "./frozenModule3Resultaat.js";
@@ -20,6 +21,7 @@ import {
   berekenBegrotingUitInvoer,
   leesHerberekenInvoerZonderTransactie,
   type HerberekendCorrectiefDagelijksResultaat,
+  type HerberekendGeplandeVerkoopResultaat,
   type HerberekendGeplandOnderhoudResultaat,
   type HerberekendVerzekeringResultaat,
 } from "./herberekenen.js";
@@ -169,6 +171,7 @@ export interface VastgesteldeBegroting {
   algemeneKosten: FrozenAlgemeneKostenResultaat;
   leegstand: FrozenLeegstandResultaat;
   rente: FrozenRenteResultaat;
+  geplandeVerkoop: HerberekendGeplandeVerkoopResultaat;
 }
 
 /**
@@ -242,7 +245,7 @@ export function stelBegrotingVast(db: DatabaseSync, versieId: string, vastgestel
       );
     }
 
-    const { module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud, verzekering, gemeentelijkeLasten, algemeneKosten, leegstand, rente } =
+    const { module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud, verzekering, gemeentelijkeLasten, algemeneKosten, leegstand, rente, geplandeVerkoop } =
       berekenBegrotingUitInvoer(versieId, invoer);
     // Lokale, expliciete narrowing: `module3` is hier altijd niet-null, want `invoer.module3Invoer !== null`
     // is hierboven al gecontroleerd en `berekenBegrotingUitInvoer` berekent Module 3 uitsluitend (en dan
@@ -354,6 +357,16 @@ export function stelBegrotingVast(db: DatabaseSync, versieId: string, vastgestel
       throw new Error(`Begrotingsversie ${versieId}: Rente bevat één of meer KRITIEKE controls — vaststellen is niet mogelijk vóórdat deze zijn opgelost.`);
     }
 
+    // Geplande-Verkoop-lifecycle-validatie (OB-039, fase P3, zie moduledoc) — UITSLUITEND lokaal voor
+    // Geplande Verkoop, wijzigt niets aan hoe de eerdere modules' eigen controleVereist wordt behandeld
+    // hierboven. GEEN categoriedimensie (OB-039 kent er geen) — één module-brede beoordeeld-vlag.
+    if (!geplandeVerkoop.beoordeeld) {
+      throw new Error(`Begrotingsversie ${versieId}: Geplande Verkoop is niet beoordeeld (beoordeeld !== true) — vaststellen is niet mogelijk zonder expliciete beoordeling.`);
+    }
+    if (geplandeVerkoop.controleVereist.some((c) => c.ernst === "KRITIEK")) {
+      throw new Error(`Begrotingsversie ${versieId}: Geplande Verkoop bevat één of meer KRITIEKE controls — vaststellen is niet mogelijk vóórdat deze zijn opgelost.`);
+    }
+
     schrijfFrozenBegrotingsresultaatZonderTransactie(db, versieId, { module1, module2 });
     schrijfFrozenModule3ResultaatZonderTransactie(db, versieId, module3);
     schrijfFrozenGeplandOnderhoudResultaatZonderTransactie(db, versieId, geplandOnderhoud);
@@ -363,6 +376,7 @@ export function stelBegrotingVast(db: DatabaseSync, versieId: string, vastgestel
     schrijfFrozenAlgemeneKostenResultaatZonderTransactie(db, versieId, algemeneKosten, invoer.algemeneKostenClassificatie);
     schrijfFrozenLeegstandResultaatZonderTransactie(db, versieId, leegstand);
     schrijfFrozenRenteResultaatZonderTransactie(db, versieId, rente);
+    schrijfFrozenGeplandeVerkoopResultaatZonderTransactie(db, versieId, geplandeVerkoop);
     markeerVastgesteld(db, versieId, vastgesteldAt); // allerlaatste schrijfactie vóór commit
 
     const versie = leesBegrotingsversie(db, versieId);
@@ -391,6 +405,7 @@ export function stelBegrotingVast(db: DatabaseSync, versieId: string, vastgestel
       algemeneKosten: frozenAlgemeneKosten,
       leegstand,
       rente,
+      geplandeVerkoop,
     };
   });
 }

@@ -3068,6 +3068,285 @@ export const MIGRATIONS: readonly Migration[] = [
        END`,
     ],
   },
+  /**
+   * Migratie 22 — Geplande Verkoop (OB-039): concept-input, VIER tabellen.
+   *
+   * 1. `begroting_geplande_verkoop_classificatie` — OGB-classificatie, zelfde
+   *    architectuurpatroon als `begroting_rente_classificatie`/
+   *    `begroting_leegstand_classificatie`: bedrijfsnr-gescoped, GEEN
+   *    `begroting_versie_id`, GEEN triggers.
+   *
+   * 1b. `begroting_geplande_verkoop_grootboek_classificatie` — GL-classificatie,
+   *    2026-09-11-correctie (nog vóór eerste push van deze migratie): het
+   *    023-bronproef bewees dat GL 08830 "Opbrengst verkoop pand" op BEIDE
+   *    geconstateerde regels GEEN OGB-kostensoort droeg — een zuiver
+   *    OGB-gebaseerde classificatie zou VERKOOPOPBRENGST voor die
+   *    administratie dus NOOIT herkennen. Zelfde structuur/patroon als (1),
+   *    uitsluitend de sleutel is `grootboekrekening` i.p.v. `ogb_kostensoort`.
+   *    GEEN koppeling tussen (1) en (1b) — een boeking wordt onafhankelijk via
+   *    beide bronnen geprobeerd (eerst OGB, dan GL), zie
+   *    `berekenWerkelijkGeplandeVerkoop`'s moduledoc. Bewezen
+   *    ADMINISTRATIE-SPECIFIEK, net als (1) (OB-039-bronproef 2026-09,
+   *    administratie 023, GL 08830/00166/00167, boekjaar 2026 periode 04):
+   *    GL/periode alleen was onvoldoende om een verkoop eenduidig te
+   *    classificeren — twee onafhankelijke verkopen (Hoofdstraat/Driebergen)
+   *    deelden dezelfde grootboekrekening én periode; dat blijft ook met (1b)
+   *    zo — GL-classificatie koppelt een GL aan een COMPONENT, nooit aan een
+   *    specifieke verkoop/transactie, en koppelt nooit automatisch
+   *    VERKOOPOPBRENGST aan BOEKWAARDE_AFBOEKING.
+   *
+   * 2. `begroting_geplande_verkoop_module` — module-brede `beoordeeld`-vlag,
+   *    GEEN categoriedimensie (zelfde patroon als
+   *    `begroting_correctief_dagelijks_onderhoud_module`, migratie 11) — OB-039
+   *    kent één homogene regelsoort.
+   *
+   * 3. `begroting_geplande_verkoop_regel` — de Begroting-regels.
+   *    `objectreferentie`/`omschrijving` NOT NULL (verplicht,
+   *    KRITIEK-gevalideerd door de pure calculator, GEEN DB-CHECK — zelfde
+   *    "functioneel incompleet ≠ financieel onberekenbaar"-principe als
+   *    overal elders: de KOLOM staat NOT NULL toe leeg te zijn qua betekenis
+   *    ('') maar de applicatielaag valideert, niet de DB). Alle overige
+   *    kolommen NULL-abel: `geplande_verkoopdatum`/
+   *    `verwachte_verkoopopbrengst`/`verwachte_boekwaarde`/
+   *    `verwachte_verkoopkosten`/`verwachte_einddatum_huur_exploitatie`/
+   *    `toelichting` — "onbekend blijft onbekend" (OB039-008), GEEN
+   *    `Decimal(0)`-achtige default-kolom. Data/geldbedragen zijn TEXT (zelfde
+   *    Decimal-als-TEXT-conventie als elke eerdere regeltabel); datums zijn
+   *    TEXT (ISO-8601, zelfde conventie als `begrotingsversies.created_at`/
+   *    `vastgesteld_at`).
+   *
+   * 4. `begroting_geplande_verkoop_estimated_regel` — STRUCTUREEL DEZELFDE
+   *    KOLOMMEN als (3), maar EEN EIGEN TABEL, BEWUST ZONDER de drie
+   *    gebruikelijke VASTGESTELD-immutability-triggers (zie
+   *    `geplandeVerkoopEstimatedRegels.ts`'s moduledoc voor de volledige
+   *    onderbouwing): Estimated is een onafhankelijk bijgewerkte actuele
+   *    verwachting (OB039-006/7) die na vaststellen van de Begroting moet
+   *    kunnen blijven bewegen — de enige tabel in dit hele pakket die
+   *    versie-gebonden is (FK ON DELETE CASCADE blijft gelden) maar NOOIT
+   *    door de CONCEPT/VASTGESTELD-lifecycle wordt geblokkeerd.
+   *
+   * Immutability: (2) en (3) krijgen elk de gebruikelijke drie triggers, (1),
+   * (1b) en (4) krijgen er NUL — zes triggers totaal.
+   */
+  {
+    version: 22,
+    description: "Geplande Verkoop (OB-039): concept-input (OGB-/GL-classificatie + module-beoordeeld + Begrotingsregels + Estimated-regels)",
+    ddl: [
+      `CREATE TABLE begroting_geplande_verkoop_classificatie (
+        bedrijfsnr TEXT NOT NULL,
+        ogb_kostensoort TEXT NOT NULL,
+        ogb_kostensoort_omschrijving TEXT NOT NULL,
+        component TEXT NOT NULL CHECK (component IN ('VERKOOPOPBRENGST', 'BOEKWAARDE_AFBOEKING')),
+        PRIMARY KEY (bedrijfsnr, ogb_kostensoort)
+      )`,
+      `CREATE INDEX idx_begroting_geplande_verkoop_classificatie_bedrijfsnr ON begroting_geplande_verkoop_classificatie(bedrijfsnr)`,
+      `CREATE TABLE begroting_geplande_verkoop_grootboek_classificatie (
+        bedrijfsnr TEXT NOT NULL,
+        grootboekrekening TEXT NOT NULL,
+        grootboek_omschrijving TEXT NOT NULL,
+        component TEXT NOT NULL CHECK (component IN ('VERKOOPOPBRENGST', 'BOEKWAARDE_AFBOEKING')),
+        PRIMARY KEY (bedrijfsnr, grootboekrekening)
+      )`,
+      `CREATE INDEX idx_begroting_geplande_verkoop_grootboek_classificatie_bedrijfsnr ON begroting_geplande_verkoop_grootboek_classificatie(bedrijfsnr)`,
+      `CREATE TABLE begroting_geplande_verkoop_module (
+        begroting_versie_id TEXT PRIMARY KEY REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        beoordeeld INTEGER NOT NULL CHECK (beoordeeld IN (0, 1))
+      )`,
+      `CREATE TABLE begroting_geplande_verkoop_regel (
+        id INTEGER PRIMARY KEY,
+        begroting_versie_id TEXT NOT NULL REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        objectreferentie TEXT NOT NULL,
+        omschrijving TEXT NOT NULL,
+        geplande_verkoopdatum TEXT NULL,
+        verwachte_verkoopopbrengst TEXT NULL,
+        verwachte_boekwaarde TEXT NULL,
+        verwachte_verkoopkosten TEXT NULL,
+        verwachte_einddatum_huur_exploitatie TEXT NULL,
+        toelichting TEXT NULL
+      )`,
+      `CREATE INDEX idx_begroting_geplande_verkoop_regel_versie ON begroting_geplande_verkoop_regel(begroting_versie_id)`,
+      `CREATE TABLE begroting_geplande_verkoop_estimated_regel (
+        id INTEGER PRIMARY KEY,
+        begroting_versie_id TEXT NOT NULL REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        objectreferentie TEXT NOT NULL,
+        omschrijving TEXT NOT NULL,
+        geplande_verkoopdatum TEXT NULL,
+        verwachte_verkoopopbrengst TEXT NULL,
+        verwachte_boekwaarde TEXT NULL,
+        verwachte_verkoopkosten TEXT NULL,
+        verwachte_einddatum_huur_exploitatie TEXT NULL,
+        toelichting TEXT NULL
+      )`,
+      `CREATE INDEX idx_begroting_geplande_verkoop_estimated_regel_versie ON begroting_geplande_verkoop_estimated_regel(begroting_versie_id)`,
+      `CREATE TRIGGER trg_begroting_geplande_verkoop_module_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_geplande_verkoop_module
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_geplande_verkoop_module: begrotingsversie is VASTGESTELD, beoordeeld-vlag is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_geplande_verkoop_module_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_geplande_verkoop_module
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_geplande_verkoop_module: begrotingsversie is VASTGESTELD, beoordeeld-vlag is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_geplande_verkoop_module_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_geplande_verkoop_module
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_geplande_verkoop_module: begrotingsversie is VASTGESTELD, beoordeeld-vlag is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_geplande_verkoop_regel_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_geplande_verkoop_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_geplande_verkoop_regel: begrotingsversie is VASTGESTELD, regels zijn immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_geplande_verkoop_regel_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_geplande_verkoop_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_geplande_verkoop_regel: begrotingsversie is VASTGESTELD, regels zijn immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_geplande_verkoop_regel_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_geplande_verkoop_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_geplande_verkoop_regel: begrotingsversie is VASTGESTELD, regels zijn immutable');
+       END`,
+    ],
+  },
+  /**
+   * Migratie 23 — bevroren Geplande-Verkoop-OUTPUT (OB-039, fase P3), exact
+   * zoals `begroteGeplandeVerkoop.ts`/`HerberekendGeplandeVerkoopResultaat`
+   * op HEAD die kennen. Uitsluitend serialisatie/deserialisatie van een
+   * reeds berekend, puur Begroting-resultaat — Werkelijk/Estimated worden
+   * NOOIT bevroren (zelfde architectuurregel als migratie 19/21).
+   *
+   * DRIE TABELLEN: GEEN frozen-classificatietabel (een Geplande-Verkoop-
+   * Begrotingsregel heeft geen OGB-koppeling). GEEN totaal/moduletotaal-kolom
+   * (zelfde reden als het ontbreken van een totaal in `BgGeplandeVerkoopResultaat`:
+   * een naïeve som van `verwacht_verkoopresultaat` zou regels met een
+   * onbekend resultaat stilzwijgend als €0 moeten behandelen — exact de
+   * schijnzekerheid die OB039-008 verbiedt).
+   *
+   * 1. `begroting_frozen_geplande_verkoop_resultaat` — module-breed:
+   *    `beoordeeld`/`review_status`.
+   * 2. `begroting_frozen_geplande_verkoop_regel` — PK
+   *    `(begroting_versie_id, regel_id)`, `regel_id` = de oorspronkelijke
+   *    CONCEPT-`id`. Alle invoervelden blijven ongewijzigd bevroren, plus
+   *    `verwacht_verkoopresultaat` (de reeds berekende rekenhulp-waarde, NULL-
+   *    abel — nooit bij lezen opnieuw afgeleid).
+   * 3. `begroting_frozen_geplande_verkoop_control` — zelfde `volgnr`-patroon
+   *    als migratie 17/19/21.
+   *
+   * FROZEN-STATE INVARIANTEN: `CHECK (beoordeeld = 1)` en
+   * `CHECK (review_status IN ('REVIEWED_ZERO_RULES', 'REVIEWED_WITH_RULES'))`.
+   *
+   * Immutability: dezelfde drie triggers per tabel — negen triggers totaal.
+   */
+  {
+    version: 23,
+    description: "Bevroren Geplande-Verkoop-output (Begroting-resultaat, Werkelijk/Estimated blijven live)",
+    ddl: [
+      `CREATE TABLE begroting_frozen_geplande_verkoop_resultaat (
+        begroting_versie_id TEXT PRIMARY KEY REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        beoordeeld INTEGER NOT NULL CHECK (beoordeeld = 1),
+        review_status TEXT NOT NULL CHECK (review_status IN ('REVIEWED_ZERO_RULES', 'REVIEWED_WITH_RULES'))
+      )`,
+      `CREATE TABLE begroting_frozen_geplande_verkoop_regel (
+        begroting_versie_id TEXT NOT NULL REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        regel_id INTEGER NOT NULL,
+        objectreferentie TEXT NOT NULL,
+        omschrijving TEXT NOT NULL,
+        geplande_verkoopdatum TEXT NULL,
+        verwachte_verkoopopbrengst TEXT NULL,
+        verwachte_boekwaarde TEXT NULL,
+        verwachte_verkoopkosten TEXT NULL,
+        verwachte_einddatum_huur_exploitatie TEXT NULL,
+        toelichting TEXT NULL,
+        verwacht_verkoopresultaat TEXT NULL,
+        PRIMARY KEY (begroting_versie_id, regel_id)
+      )`,
+      `CREATE TABLE begroting_frozen_geplande_verkoop_control (
+        begroting_versie_id TEXT NOT NULL REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        volgnr INTEGER NOT NULL,
+        regel_id INTEGER NULL,
+        ernst TEXT NOT NULL CHECK (ernst IN ('KRITIEK', 'WAARSCHUWING', 'INFORMATIEF')),
+        bericht TEXT NOT NULL,
+        PRIMARY KEY (begroting_versie_id, volgnr)
+      )`,
+      `CREATE TRIGGER trg_begroting_frozen_geplande_verkoop_resultaat_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_frozen_geplande_verkoop_resultaat
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_geplande_verkoop_resultaat: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_geplande_verkoop_resultaat_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_frozen_geplande_verkoop_resultaat
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_geplande_verkoop_resultaat: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_geplande_verkoop_resultaat_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_frozen_geplande_verkoop_resultaat
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_geplande_verkoop_resultaat: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_geplande_verkoop_regel_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_frozen_geplande_verkoop_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_geplande_verkoop_regel: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_geplande_verkoop_regel_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_frozen_geplande_verkoop_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_geplande_verkoop_regel: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_geplande_verkoop_regel_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_frozen_geplande_verkoop_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_geplande_verkoop_regel: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_geplande_verkoop_control_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_frozen_geplande_verkoop_control
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_geplande_verkoop_control: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_geplande_verkoop_control_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_frozen_geplande_verkoop_control
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_geplande_verkoop_control: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_geplande_verkoop_control_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_frozen_geplande_verkoop_control
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_geplande_verkoop_control: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+    ],
+  },
 ];
 
 function schemaMetaTableExists(db: DatabaseSync): boolean {

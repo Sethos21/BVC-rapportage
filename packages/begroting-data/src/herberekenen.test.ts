@@ -10,8 +10,10 @@ import {
   RENTE_CATEGORIEEN,
   berekenBegroteCorrectiefDagelijksOnderhoud,
   berekenBegroteGemeentelijkeLasten,
+  berekenBegroteGeplandeVerkoop,
   berekenBegroteGeplandOnderhoud,
   berekenBegroteVerzekeringen,
+  berekenWerkelijkGeplandeVerkoop,
   berekenWerkelijkLeegstand,
   berekenWerkelijkRente,
   type BgAlgemeneKostenCategorie,
@@ -19,6 +21,7 @@ import {
   type BgContractFeiten,
   type BgContractOverride,
   type BgCorrectiefDagelijksRegelInvoer,
+  type BgGeplandeVerkoopRegelInvoer,
   type BgGeplandOnderhoudActiviteitInvoer,
   type BgHuurAannames,
   type BgLeegstandCategorie,
@@ -51,6 +54,8 @@ import {
 } from "./correctiefDagelijksOnderhoudRegels.js";
 import { openOrCreateDatabase } from "./database.js";
 import { schrijfGemeentelijkeLastenModule, type GemeentelijkeLastenModuleInvoer } from "./gemeentelijkeLastenModule.js";
+import { schrijfGeplandeVerkoopBeoordeeld } from "./geplandeVerkoopBeoordeeld.js";
+import { schrijfGeplandeVerkoopRegels, type GeplandeVerkoopRegelInvoer } from "./geplandeVerkoopRegels.js";
 import { schrijfGeplandOnderhoudActiviteiten, type GeplandOnderhoudActiviteitInvoer } from "./geplandOnderhoudActiviteiten.js";
 import { schrijfGeplandOnderhoudBeoordeeld } from "./geplandOnderhoudBeoordeeld.js";
 import { herberekenBegroting } from "./herberekenen.js";
@@ -2049,5 +2054,185 @@ describe("herberekenBegroting — Rente (OB-037/038)", () => {
     expect(normaliseer(zonderRente.leegstand)).toBe(normaliseer(metRente.leegstand));
     expect(zonderRente.module3).toBeNull();
     expect(metRente.module3).toBeNull();
+  });
+});
+
+describe("herberekenBegroting — Geplande Verkoop (OB-039)", () => {
+  function regelInvoer(overrides: Partial<GeplandeVerkoopRegelInvoer> = {}): GeplandeVerkoopRegelInvoer {
+    return {
+      id: null,
+      objectreferentie: "Hoofdstraat 103",
+      omschrijving: "Verkoop pand Hoofdstraat 103",
+      geplandeVerkoopdatum: new Date("2027-06-01T00:00:00.000Z"),
+      verwachteVerkoopopbrengst: new Decimal(785000),
+      verwachteBoekwaarde: new Decimal(600000),
+      verwachteVerkoopkosten: new Decimal(15000),
+      verwachteEinddatumHuurExploitatie: null,
+      toelichting: null,
+      ...overrides,
+    };
+  }
+
+  /** Zelfde type-boundary-conversie als de productiecode (`naarPureGeplandeVerkoopInvoer` in `herberekenen.ts`) — bewust GEEN `id` in de pure vorm. */
+  function alsPureInvoer(r: GeplandeVerkoopRegelInvoer): BgGeplandeVerkoopRegelInvoer {
+    return {
+      objectreferentie: r.objectreferentie,
+      omschrijving: r.omschrijving,
+      geplandeVerkoopdatum: r.geplandeVerkoopdatum,
+      verwachteVerkoopopbrengst: r.verwachteVerkoopopbrengst,
+      verwachteBoekwaarde: r.verwachteBoekwaarde,
+      verwachteVerkoopkosten: r.verwachteVerkoopkosten,
+      verwachteEinddatumHuurExploitatie: r.verwachteEinddatumHuurExploitatie,
+      toelichting: r.toelichting,
+    };
+  }
+
+  it("1. nul regels + geen beoordeeld-rij: resultaat aanwezig, beoordeeld=false, NOT_REVIEWED, GEEN totaal-veld", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    const resultaat = herberekenBegroting(db, versie.id);
+
+    expect(resultaat.geplandeVerkoop).toBeDefined();
+    expect(resultaat.geplandeVerkoop.beoordeeld).toBe(false);
+    expect(resultaat.geplandeVerkoop.reviewStatus).toBe("NOT_REVIEWED");
+    expect(resultaat.geplandeVerkoop.regels).toEqual([]);
+    expect((resultaat.geplandeVerkoop as unknown as { totaal?: unknown }).totaal).toBeUndefined();
+  });
+
+  it("2. nul regels + beoordeeld=true: REVIEWED_ZERO_RULES", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    expect(resultaat.geplandeVerkoop.reviewStatus).toBe("REVIEWED_ZERO_RULES");
+  });
+
+  it("3. één geldige regel: exact gelijk aan directe pure-calculator-uitkomst", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    const invoer = regelInvoer();
+    schrijfGeplandeVerkoopRegels(db, versie.id, [invoer]);
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    const direct = berekenBegroteGeplandeVerkoop([alsPureInvoer(invoer)], { begrotingsjaar: 2027, beoordeeld: false });
+
+    expect(resultaat.geplandeVerkoop.regels[0]?.regel).toEqual(direct.regels[0]);
+  });
+
+  it("4. verwacht verkoopresultaat correct berekend (opbrengst - boekwaarde - kosten)", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfGeplandeVerkoopRegels(db, versie.id, [regelInvoer()]);
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    expect(resultaat.geplandeVerkoop.regels[0]?.regel.verwachtVerkoopresultaat?.toString()).toBe("170000");
+  });
+
+  it("5. persistentie-id wordt correct teruggekoppeld per regel", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    const [a, b] = schrijfGeplandeVerkoopRegels(db, versie.id, [regelInvoer({ objectreferentie: "A" }), regelInvoer({ objectreferentie: "B" })]);
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    expect(resultaat.geplandeVerkoop.regels[0]?.persistentieId).toBe(a!.id);
+    expect(resultaat.geplandeVerkoop.regels[1]?.persistentieId).toBe(b!.id);
+  });
+
+  it("6. ontbrekende verwachte verkoopopbrengst: GEEN KRITIEK, verwachtVerkoopresultaat blijft null (NOOIT 0-fallback)", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfGeplandeVerkoopRegels(db, versie.id, [regelInvoer({ verwachteVerkoopopbrengst: null })]);
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    expect(resultaat.geplandeVerkoop.regels[0]?.regel.verwachtVerkoopresultaat).toBeNull();
+    expect(resultaat.geplandeVerkoop.controleVereist.some((c) => c.ernst === "KRITIEK")).toBe(false);
+  });
+
+  it("7. ontbrekende geplande verkoopdatum: KRITIEK", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfGeplandeVerkoopRegels(db, versie.id, [regelInvoer({ geplandeVerkoopdatum: null })]);
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    expect(resultaat.geplandeVerkoop.controleVereist.some((c) => c.ernst === "KRITIEK" && c.bericht.includes("verkoopdatum"))).toBe(true);
+  });
+
+  it("8. herberekening schrijft niets naar de Geplande-Verkoop-concepttabellen", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfGeplandeVerkoopRegels(db, versie.id, [regelInvoer()]);
+    schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+
+    const dump = () => ({
+      module: db.prepare(`SELECT * FROM begroting_geplande_verkoop_module`).all(),
+      regels: db.prepare(`SELECT * FROM begroting_geplande_verkoop_regel`).all(),
+    });
+
+    const voor = dump();
+    herberekenBegroting(db, versie.id);
+    const na = dump();
+
+    expect(na).toEqual(voor);
+  });
+
+  it("9. twee opeenvolgende herberekeningen zonder writes geven inhoudelijk identiek resultaat", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    schrijfGeplandeVerkoopRegels(db, versie.id, [regelInvoer()]);
+    schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+
+    const eersteKeer = herberekenBegroting(db, versie.id);
+    const tweedeKeer = herberekenBegroting(db, versie.id);
+    const normaliseer = (waarde: unknown) => JSON.stringify(waarde, (_key, v) => (v instanceof Decimal ? v.toString() : v));
+
+    expect(normaliseer(eersteKeer.geplandeVerkoop)).toBe(normaliseer(tweedeKeer.geplandeVerkoop));
+  });
+
+  it("10 (023-bronproef). Werkelijk-classificatie (los van Begroting) toont VERKOOPOPBRENGST/BOEKWAARDE_AFBOEKING strikt gescheiden op de bewezen 023-boekingen (boekjaar 2026, periode 04) — GEEN gecombineerd verkoopresultaat, GL08830 zonder OGB herkend via GL-classificatie", () => {
+    // Geen persistence hier — de bronproef bewijst de PURE Werkelijk-calculator (@bvc/reporting), die per
+    // ontwerp nooit gepersisteerd wordt (zie begroteGeplandeVerkoop.ts's moduledoc). Boekstuk 202650000047
+    // (Hoofdstraat, credit 785000 op GL08830, geen OGB) en boekstuk 202690000004 (Driebergen: GL00166
+    // -535000/OGB 3010, GL00167 -100000/geen OGB, GL08830 +635000/geen OGB) — structureel bewezen twee
+    // aparte boekstukken die toevallig dezelfde periode/GL delen. 2026-09-11-correctie: GEEN van de
+    // GL08830-regels droeg een OGB-kostensoort — zonder GL-classificatie zou VERKOOPOPBRENGST hier dus
+    // NOOIT herkenbaar zijn geweest.
+    const ogbKlassificatie023 = [{ ogbKostensoort: "3010", ogbKostensoortOmschrijving: "afwaardering ASW", component: "BOEKWAARDE_AFBOEKING" as const }];
+    const glKlassificatie023 = [{ grootboekrekening: "08830", grootboekOmschrijving: "Opbrengst verkoop pand", component: "VERKOOPOPBRENGST" as const }];
+    const boekingen = [
+      { grootboekrekening: "08830", ogbKostensoort: null, saldo: new Decimal(-785000) },
+      { grootboekrekening: "00166", ogbKostensoort: "3010", saldo: new Decimal(-535000) },
+      { grootboekrekening: "00167", ogbKostensoort: null, saldo: new Decimal(-100000) },
+      { grootboekrekening: "08830", ogbKostensoort: null, saldo: new Decimal(635000) },
+    ];
+
+    const werkelijk = berekenWerkelijkGeplandeVerkoop(boekingen, ogbKlassificatie023, glKlassificatie023);
+
+    // VERKOOPOPBRENGST = -785000 + 635000 = -150000 (beide GL08830-regels, via GL herkend, GEEN OGB nodig).
+    expect(werkelijk.perComponent.find((c) => c.component === "VERKOOPOPBRENGST")!.componentTotaal.toString()).toBe("-150000");
+    expect(werkelijk.perComponent.find((c) => c.component === "BOEKWAARDE_AFBOEKING")!.componentTotaal.toString()).toBe("-535000");
+    expect((werkelijk as unknown as { verkoopresultaat?: unknown }).verkoopresultaat).toBeUndefined();
+    // GL00167 blijft terecht ongeclassificeerd — geen OGB, geen GL-regel voor 00167 geconfigureerd, en
+    // GEEN automatische aanname dat het "bij Driebergen hoort" via boekstukSleutel.
+    expect(werkelijk.nietGeclassificeerdTotaal.toString()).toBe("-100000");
+    expect(werkelijk.nietGeclassificeerdAantalBoekingen).toBe(1);
+  });
+
+  it("11 (regressie). bestaande Module 1/2/3/GO/CD/Verzekering/WOZ/Algemene-Kosten/Leegstand/Rente-uitkomst blijft byte-identiek naast aanwezige Geplande-Verkoop-regels", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    schrijfModule1Snapshot(db, versie.id, [maakContract("0000000028", { complexnummer: "001" })]);
+    schrijfModule1Aannames(db, versie.id, STANDAARD_AANNAMES);
+    schrijfModule2Config(db, versie.id, [
+      { complexnummer: "001", vastBedragJaar: new Decimal(1000), vastIndexatiePercentage: null, vastIndexatiedatum: null, variabelPercentage: new Decimal(6) },
+    ]);
+
+    const zonderGeplandeVerkoop = herberekenBegroting(db, versie.id);
+    schrijfGeplandeVerkoopRegels(db, versie.id, [regelInvoer()]);
+    schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    const metGeplandeVerkoop = herberekenBegroting(db, versie.id);
+
+    const normaliseer = (waarde: unknown) => JSON.stringify(waarde, (_key, v) => (v instanceof Decimal ? v.toString() : v));
+    expect(normaliseer(zonderGeplandeVerkoop.module1)).toBe(normaliseer(metGeplandeVerkoop.module1));
+    expect(normaliseer(zonderGeplandeVerkoop.module2)).toBe(normaliseer(metGeplandeVerkoop.module2));
+    expect(normaliseer(zonderGeplandeVerkoop.geplandOnderhoud)).toBe(normaliseer(metGeplandeVerkoop.geplandOnderhoud));
+    expect(normaliseer(zonderGeplandeVerkoop.correctiefDagelijksOnderhoud)).toBe(normaliseer(metGeplandeVerkoop.correctiefDagelijksOnderhoud));
+    expect(normaliseer(zonderGeplandeVerkoop.verzekering)).toBe(normaliseer(metGeplandeVerkoop.verzekering));
+    expect(normaliseer(zonderGeplandeVerkoop.gemeentelijkeLasten)).toBe(normaliseer(metGeplandeVerkoop.gemeentelijkeLasten));
+    expect(normaliseer(zonderGeplandeVerkoop.algemeneKosten)).toBe(normaliseer(metGeplandeVerkoop.algemeneKosten));
+    expect(normaliseer(zonderGeplandeVerkoop.leegstand)).toBe(normaliseer(metGeplandeVerkoop.leegstand));
+    expect(normaliseer(zonderGeplandeVerkoop.rente)).toBe(normaliseer(metGeplandeVerkoop.rente));
+    expect(zonderGeplandeVerkoop.module3).toBeNull();
+    expect(metGeplandeVerkoop.module3).toBeNull();
   });
 });
