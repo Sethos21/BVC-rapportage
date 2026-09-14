@@ -11,7 +11,14 @@ import {
   type RenteClassificatieRegel,
   type WerkelijkRenteBoekingRegel,
 } from "./begroteRente.js";
-import { bouwRenteClassificatieViaCentraleMapping, resolveerRenteCategorieViaCentraleMapping, type RenteCentraleMappingInvoer } from "./renteCentraleMapping.js";
+import {
+  berekenWerkelijkRenteViaCentraleMapping,
+  bouwRenteClassificatieViaCentraleMapping,
+  resolveerRenteCategorieViaCentraleMapping,
+  type RenteCentraleMappingInvoer,
+  type RenteRuweBoekingRegel,
+  type RenteWerkelijkViaCentraleMappingInvoer,
+} from "./renteCentraleMapping.js";
 import type { PnLBronmappingRegel } from "../pnlBronmapping.js";
 
 /**
@@ -248,5 +255,122 @@ describe("berekenEstimatedRente — oud vs. nieuw, byte-identiek", () => {
 
     expect(normaliseer(estimatedNieuw)).toBe(normaliseer(estimatedOud));
     expect(estimatedOud.perCategorie.find((c) => c.categorie === "RENTEKOSTEN")!.estimatedTotaal!.toString()).toBe("1148524.51");
+  });
+});
+
+describe("berekenWerkelijkRenteViaCentraleMapping — FASE M3b: de daadwerkelijk gewirede productieketen", () => {
+  function ruweBoeking(overrides: Partial<RenteRuweBoekingRegel> = {}): RenteRuweBoekingRegel {
+    return { grootboekrekening: "4600", ogbKostensoort: "4601", ogbKostensoortOmschrijving: "Rente lening .962", saldo: new Decimal(1000), ...overrides };
+  }
+
+  function keteninvoer023(overrides: Partial<RenteWerkelijkViaCentraleMappingInvoer> = {}): RenteWerkelijkViaCentraleMappingInvoer {
+    return { bedrijfsnr: "023", boekjaar: 2025, boekperiode: "12", opSysteemtijdstip: new Date("2026-09-14T12:00:00.000Z"), ...overrides };
+  }
+  function keteninvoer013(overrides: Partial<RenteWerkelijkViaCentraleMappingInvoer> = {}): RenteWerkelijkViaCentraleMappingInvoer {
+    return { bedrijfsnr: "013", boekjaar: 2024, boekperiode: "12", opSysteemtijdstip: new Date("2026-09-14T12:00:00.000Z"), ...overrides };
+  }
+
+  const RUWE_BOEKINGEN_023: RenteRuweBoekingRegel[] = [
+    ruweBoeking({ grootboekrekening: "4600", ogbKostensoort: "4601", ogbKostensoortOmschrijving: "Rente lening .962", saldo: new Decimal("522837.15") }),
+    ruweBoeking({ grootboekrekening: "4600", ogbKostensoort: "4602", ogbKostensoortOmschrijving: "Rente en Provisie ING R/C", saldo: new Decimal("49045.59") }),
+    ruweBoeking({ grootboekrekening: "4600", ogbKostensoort: "4603", ogbKostensoortOmschrijving: "Rente lening .586", saldo: new Decimal("104989.35") }),
+    ruweBoeking({ grootboekrekening: "4600", ogbKostensoort: "4604", ogbKostensoortOmschrijving: "Rente lening .500", saldo: new Decimal("66211.49") }),
+    ruweBoeking({ grootboekrekening: "4600", ogbKostensoort: "4606", ogbKostensoortOmschrijving: "rente lening 747", saldo: new Decimal("357440.93") }),
+    ruweBoeking({ grootboekrekening: "4600", ogbKostensoort: "4620", ogbKostensoortOmschrijving: "Overige rentes", saldo: new Decimal("48000") }),
+  ];
+  const RUWE_BOEKINGEN_013: RenteRuweBoekingRegel[] = [
+    ruweBoeking({ grootboekrekening: "4620", ogbKostensoort: "4604", ogbKostensoortOmschrijving: "Rente r/c", saldo: new Decimal("-1215.67") }),
+    ruweBoeking({ grootboekrekening: "4620", ogbKostensoort: "4621", ogbKostensoortOmschrijving: "Rente opbrengst telerek", saldo: new Decimal("-34.42") }),
+  ];
+
+  it("B. de gewirede keten gebruikt daadwerkelijk de aangeleverde centrale mapping (geen stille interne oude-classificatie-fallback)", () => {
+    // Verwijder OGB 4602 uit de mapping — als de functie stiekem de oude, hardcoded classificatie zou
+    // gebruiken, zou 4602 (49045.59) alsnog als RENTEKOSTEN meetellen. Met alleen de aangeleverde mapping
+    // moet dit bedrag naar "niet geclassificeerd" verschuiven.
+    const mappingZonder4602 = MAPPING_023.filter((r) => r.ogbKostensoort !== "4602");
+    const { werkelijk, nietGemapt } = berekenWerkelijkRenteViaCentraleMapping(keteninvoer023(), RUWE_BOEKINGEN_023, mappingZonder4602);
+
+    expect(nietGemapt).toEqual([{ grootboekrekening: "4600", ogbKostensoort: "4602" }]);
+    expect(werkelijk.nietGeclassificeerdTotaal.toString()).toBe("49045.59");
+    expect(werkelijk.perCategorie.find((c) => c.categorie === "RENTEKOSTEN")!.categorieTotaal.toString()).toBe("1099478.92"); // 1148524.51 - 49045.59
+  });
+
+  it("C. 023 (Malcon Beheer BV): volledig gewirede Werkelijk Rentekosten blijft exact €1.148.524,51", () => {
+    const { werkelijk, nietGemapt } = berekenWerkelijkRenteViaCentraleMapping(keteninvoer023(), RUWE_BOEKINGEN_023, MAPPING_023);
+    expect(nietGemapt).toEqual([]);
+    expect(werkelijk.perCategorie.find((c) => c.categorie === "RENTEKOSTEN")!.categorieTotaal.toString()).toBe("1148524.51");
+    expect(werkelijk.perCategorie.find((c) => c.categorie === "RENTE_OPBRENGSTEN")!.categorieTotaal.toString()).toBe("0");
+    expect(werkelijk.nietGeclassificeerdAantalBoekingen).toBe(0);
+    // Byte-identiek aan de oude keten (M3-bewijs herhaald op het NIEUWE, volledig gewirede pad).
+    const resultaatOud = berekenWerkelijkRente(
+      RUWE_BOEKINGEN_023.map((b) => ({ ogbKostensoort: b.ogbKostensoort, saldo: b.saldo })),
+      OUDE_KLASSIFICATIE_023,
+    );
+    expect(normaliseer(werkelijk)).toBe(normaliseer(resultaatOud));
+  });
+
+  it("D. 013 (bewezen bronproef): volledig gewirede Werkelijk Rente opbrengsten blijft exact -€1.250,09", () => {
+    const { werkelijk, nietGemapt } = berekenWerkelijkRenteViaCentraleMapping(keteninvoer013(), RUWE_BOEKINGEN_013, MAPPING_013);
+    expect(nietGemapt).toEqual([]);
+    expect(werkelijk.perCategorie.find((c) => c.categorie === "RENTE_OPBRENGSTEN")!.categorieTotaal.toString()).toBe("-1250.09");
+    expect(werkelijk.perCategorie.find((c) => c.categorie === "RENTEKOSTEN")!.categorieTotaal.toString()).toBe("0");
+    const resultaatOud = berekenWerkelijkRente(
+      RUWE_BOEKINGEN_013.map((b) => ({ ogbKostensoort: b.ogbKostensoort, saldo: b.saldo })),
+      OUDE_KLASSIFICATIE_013,
+    );
+    expect(normaliseer(werkelijk)).toBe(normaliseer(resultaatOud));
+  });
+
+  it("E. Estimated op basis van de volledig gewirede keten blijft byte-identiek aan Estimated op basis van de oude keten", () => {
+    const BEGROTING = berekenBegroteRente(
+      [regel({ categorie: "RENTEKOSTEN", begrotingsbedrag: new Decimal(1148524.51) }), regel({ categorie: "RENTE_OPBRENGSTEN", begrotingsbedrag: new Decimal(-1250.09) })],
+      alleAannames(),
+      { begrotingsjaar: BEGROTINGSJAAR },
+    );
+    function geenVerwachting(): Record<BgRenteCategorie, Decimal | null> {
+      return Object.fromEntries(RENTE_CATEGORIEEN.map((c) => [c, null])) as Record<BgRenteCategorie, Decimal | null>;
+    }
+    // RUWE_BOEKINGEN_023 dekt hier al het volledige jaartotaal (1.148.524,51) — geen resterende
+    // verwachting nodig; Estimated moet dan exact gelijk zijn aan Werkelijk.
+    const verwachting = geenVerwachting();
+
+    const { werkelijk: werkelijkNieuw } = berekenWerkelijkRenteViaCentraleMapping(keteninvoer023(), RUWE_BOEKINGEN_023, MAPPING_023);
+    const werkelijkOud = berekenWerkelijkRente(
+      RUWE_BOEKINGEN_023.map((b) => ({ ogbKostensoort: b.ogbKostensoort, saldo: b.saldo })),
+      OUDE_KLASSIFICATIE_023,
+    );
+
+    const estimatedNieuw = berekenEstimatedRente(BEGROTING, werkelijkNieuw, verwachting);
+    const estimatedOud = berekenEstimatedRente(BEGROTING, werkelijkOud, verwachting);
+
+    expect(normaliseer(estimatedNieuw)).toBe(normaliseer(estimatedOud));
+    expect(estimatedNieuw.perCategorie.find((c) => c.categorie === "RENTEKOSTEN")!.werkelijkTotaal.toString()).toBe("1148524.51");
+  });
+
+  it("F. onbekende OGB-code binnen een bekende Rente-GL -> expliciet NIET_GEMAPT, niet stil verdwenen/genold/geraden", () => {
+    const boekingen = [...RUWE_BOEKINGEN_023, ruweBoeking({ grootboekrekening: "4600", ogbKostensoort: "9999", ogbKostensoortOmschrijving: "onbekend", saldo: new Decimal(500) })];
+    const { werkelijk, nietGemapt } = berekenWerkelijkRenteViaCentraleMapping(keteninvoer023(), boekingen, MAPPING_023);
+
+    expect(nietGemapt).toEqual([{ grootboekrekening: "4600", ogbKostensoort: "9999" }]);
+    expect(werkelijk.nietGeclassificeerdTotaal.toString()).toBe("500");
+    expect(werkelijk.perCategorie.find((c) => c.categorie === "RENTEKOSTEN")!.categorieTotaal.toString()).toBe("1148524.51"); // ongewijzigd — 9999 telt nergens mee
+  });
+
+  it("G. boeking zonder OGB-kostensoort (null) -> expliciet NIET_GEMAPT, geen GL-default toegepast", () => {
+    const boekingen = [...RUWE_BOEKINGEN_023, ruweBoeking({ grootboekrekening: "4600", ogbKostensoort: null, ogbKostensoortOmschrijving: null, saldo: new Decimal(250) })];
+    const { werkelijk, nietGemapt } = berekenWerkelijkRenteViaCentraleMapping(keteninvoer023(), boekingen, MAPPING_023);
+
+    expect(nietGemapt).toEqual([{ grootboekrekening: "4600", ogbKostensoort: null }]);
+    expect(werkelijk.nietGeclassificeerdTotaal.toString()).toBe("250");
+  });
+
+  it("H. GL wordt nooit uit OGB afgeleid: dezelfde OGB-code op een ANDERE, niet-gemapte GL resolveert onafhankelijk (blijft NIET_GEMAPT, geen toevallige match via de OGB-waarde)", () => {
+    // OGB "4601" bestaat wél in de mapping voor GL 4600/023, maar NIET voor een fictieve andere GL "9999".
+    const boekingOpAndereGl = ruweBoeking({ grootboekrekening: "9999", ogbKostensoort: "4601", ogbKostensoortOmschrijving: "Rente lening .962", saldo: new Decimal(777) });
+    const { werkelijk, nietGemapt } = berekenWerkelijkRenteViaCentraleMapping(keteninvoer023(), [boekingOpAndereGl], MAPPING_023);
+
+    expect(nietGemapt).toEqual([{ grootboekrekening: "9999", ogbKostensoort: "4601" }]);
+    expect(werkelijk.nietGeclassificeerdTotaal.toString()).toBe("777");
+    expect(werkelijk.perCategorie.every((c) => c.categorieTotaal.toString() === "0")).toBe(true);
   });
 });
