@@ -3347,6 +3347,143 @@ export const MIGRATIONS: readonly Migration[] = [
        END`,
     ],
   },
+  /**
+   * Migratie 24 (FASE M4, 2026-09-14) — persistence voor de centrale
+   * P&L-bronmappingarchitectuur (`@bvc/reporting`'s `PnLBronmappingRegel`/
+   * `resolveerPnLBronmapping`, commit 5ece248). Bewust GEEN "begroting_"-
+   * prefix op deze twee tabellen: in tegenstelling tot alle voorgaande
+   * migraties is deze data NIET aan een begrotingsversie of de
+   * CONCEPT/VASTGESTELD-levenscyclus gekoppeld — het is een eigen,
+   * portfolio-onafhankelijke, per-administratie bronmappinglaag die evengoed
+   * door de (nog te bouwen) Werkelijk-/P&L-rapportage als door Begroting zal
+   * worden gebruikt. Zelfde database (`begrotingen.sqlite`), zelfde
+   * migratierunner/PRAGMA's/`withWriteTransaction`("BEGIN IMMEDIATE")-
+   * patroon — GEEN tweede database, GEEN ORM.
+   *
+   * `pnl_bronmapping` — één rij per mappingregel. Codes zijn leidend;
+   * `grootboek_omschrijving`/`ogb_kostensoort_omschrijving` zijn uitsluitend
+   * informatief (nooit onderdeel van enige CHECK/vergelijking). Append-only
+   * in de praktijk: de enige toegestane UPDATE is het sluiten van een
+   * openstaand geldigheidsinterval (`geldig_tot_boekjaar`/`geldig_tot_periode`,
+   * uitsluitend bij een NIEUWE_MAPPING_VANAF_PERIODE-mutatie op de rij die ze
+   * vervangt) — elk ander veld is write-once, afgedwongen door
+   * `trg_pnl_bronmapping_alleen_geldig_tot_wijzigbaar`. Verwijderen is nooit
+   * toegestaan (`trg_pnl_bronmapping_no_delete`) — een foutieve mapping wordt
+   * gecorrigeerd via een nieuwe rij (HISTORISCHE_CORRECTIE), nooit
+   * overschreven of verwijderd.
+   *
+   * CHECK-constraints als eerste verdedigingslinie (invariant A/B uit de
+   * M4-opdracht) — de mutatiefunctie in `pnlBronmappingRepository.ts`
+   * controleert dezelfde regels VÓÓR het schrijven met een duidelijke
+   * foutmelding; deze CHECK's zijn de database-garantie voor elk ander
+   * schrijfpad. `economische_module` herhaalt bewust de huidige
+   * `PNL_ECONOMISCHE_MODULES`-lijst (`@bvc/reporting`'s `pnlBronmapping.ts`)
+   * als CHECK IN (...) — zelfde patroon als elders in dit bestand (bv.
+   * `belast_onbelast`), moet bij een toekomstige nieuwe module handmatig in
+   * sync blijven.
+   *
+   * De cross-module-invariant (C/D: een OGB mag nooit naar een andere
+   * economische module springen dan zijn eigen GL, en dat geldt symmetrisch
+   * voor alle GL+OGB-rijen van dezelfde GL onderling wanneer er geen
+   * GL-default bestaat — zie de M4-opdracht se Rente-nuance) is GEEN
+   * database-CHECK (vereist een cross-row-query, wat SQLite CHECK niet kan)
+   * — die wordt uitsluitend in de mutatiefunctie afgedwongen, vóór de INSERT,
+   * binnen dezelfde `BEGIN IMMEDIATE`-transactie.
+   *
+   * `pnl_mapping_wijziging_log` — volledig append-only audittrail
+   * (`trg_pnl_mapping_wijziging_log_no_update`/`_no_delete`): elke mutatie
+   * op `pnl_bronmapping` produceert precies één logregel in dezelfde
+   * transactie (invariant F/G). `bedrijfsnr` staat hier bewust ook
+   * gedenormaliseerd op (i.p.v. uitsluitend via `nieuwe_mapping_id` te
+   * joinen) — zelfde afweging als elders in dit bestand (bv.
+   * `begroting_contract_snapshot.bedrijfsnr`): simpele, index-vriendelijke
+   * filtering op administratie zonder join. `gebruiker` is hier al een
+   * verplichte, vrije actorwaarde (geen rollen/rechtenmodel — dat is
+   * expliciet nog niet in scope, zie M4-opdracht §10) zodat een toekomstig
+   * rechtenmodel deze kolom kan hergebruiken zonder schema-wijziging.
+   */
+  {
+    version: 24,
+    description: "Centrale P&L-bronmapping (FASE M4): pnl_bronmapping + pnl_mapping_wijziging_log",
+    ddl: [
+      `CREATE TABLE pnl_bronmapping (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        bedrijfsnr TEXT NOT NULL,
+        grootboekrekening TEXT NOT NULL,
+        grootboek_omschrijving TEXT NULL,
+        ogb_kostensoort TEXT NULL,
+        ogb_kostensoort_omschrijving TEXT NULL,
+        economische_module TEXT NOT NULL CHECK (economische_module IN (
+          'HUUR', 'BEHEER', 'MANAGEMENT', 'ONDERHOUD', 'LEEGSTAND', 'VERZEKERINGEN',
+          'GEMEENTELIJKE_LASTEN', 'ALGEMENE_KOSTEN', 'RENTE', 'VERKOOP',
+          'NIET_VERREKENBARE_BTW', 'WAARDERING', 'ADMINISTRATIEKOSTEN_DOORBELASTING'
+        )),
+        economische_categorie TEXT NOT NULL,
+        geldig_vanaf_boekjaar INTEGER NOT NULL,
+        geldig_vanaf_periode TEXT NOT NULL CHECK (length(geldig_vanaf_periode) = 2 AND geldig_vanaf_periode BETWEEN '01' AND '12'),
+        geldig_tot_boekjaar INTEGER NULL,
+        geldig_tot_periode TEXT NULL CHECK (geldig_tot_periode IS NULL OR (length(geldig_tot_periode) = 2 AND geldig_tot_periode BETWEEN '01' AND '12')),
+        aangemaakt_op TEXT NOT NULL,
+        aangemaakt_door TEXT NOT NULL,
+        CHECK ((geldig_tot_boekjaar IS NULL) = (geldig_tot_periode IS NULL)),
+        CHECK (
+          geldig_tot_boekjaar IS NULL
+          OR geldig_tot_boekjaar > geldig_vanaf_boekjaar
+          OR (geldig_tot_boekjaar = geldig_vanaf_boekjaar AND geldig_tot_periode > geldig_vanaf_periode)
+        )
+      )`,
+      `CREATE INDEX idx_pnl_bronmapping_bedrijfsnr ON pnl_bronmapping(bedrijfsnr)`,
+      `CREATE INDEX idx_pnl_bronmapping_bedrijfsnr_gl ON pnl_bronmapping(bedrijfsnr, grootboekrekening)`,
+      `CREATE TRIGGER trg_pnl_bronmapping_alleen_geldig_tot_wijzigbaar
+       BEFORE UPDATE ON pnl_bronmapping
+       FOR EACH ROW
+       WHEN
+         NEW.id <> OLD.id
+         OR NEW.bedrijfsnr <> OLD.bedrijfsnr
+         OR NEW.grootboekrekening <> OLD.grootboekrekening
+         OR NEW.grootboek_omschrijving IS NOT OLD.grootboek_omschrijving
+         OR NEW.ogb_kostensoort IS NOT OLD.ogb_kostensoort
+         OR NEW.ogb_kostensoort_omschrijving IS NOT OLD.ogb_kostensoort_omschrijving
+         OR NEW.economische_module <> OLD.economische_module
+         OR NEW.economische_categorie <> OLD.economische_categorie
+         OR NEW.geldig_vanaf_boekjaar <> OLD.geldig_vanaf_boekjaar
+         OR NEW.geldig_vanaf_periode <> OLD.geldig_vanaf_periode
+         OR NEW.aangemaakt_op <> OLD.aangemaakt_op
+         OR NEW.aangemaakt_door <> OLD.aangemaakt_door
+       BEGIN
+         SELECT RAISE(ABORT, 'pnl_bronmapping: uitsluitend geldig_tot_boekjaar/geldig_tot_periode mag worden bijgewerkt (interval sluiten) — alle overige velden zijn write-once');
+       END`,
+      `CREATE TRIGGER trg_pnl_bronmapping_no_delete
+       BEFORE DELETE ON pnl_bronmapping
+       BEGIN
+         SELECT RAISE(ABORT, 'pnl_bronmapping: append-only, verwijderen is nooit toegestaan — een foutieve mapping wordt gecorrigeerd via een nieuwe rij (HISTORISCHE_CORRECTIE)');
+       END`,
+      `CREATE TABLE pnl_mapping_wijziging_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        bedrijfsnr TEXT NOT NULL,
+        type TEXT NOT NULL CHECK (type IN ('HISTORISCHE_CORRECTIE', 'NIEUWE_MAPPING_VANAF_PERIODE')),
+        geldig_vanaf_boekjaar INTEGER NOT NULL,
+        geldig_vanaf_periode TEXT NOT NULL CHECK (length(geldig_vanaf_periode) = 2 AND geldig_vanaf_periode BETWEEN '01' AND '12'),
+        vorige_mapping_id INTEGER NULL REFERENCES pnl_bronmapping(id),
+        nieuwe_mapping_id INTEGER NOT NULL REFERENCES pnl_bronmapping(id),
+        gewijzigd_op TEXT NOT NULL,
+        gebruiker TEXT NOT NULL,
+        wijzigingsreden TEXT NOT NULL
+      )`,
+      `CREATE INDEX idx_pnl_mapping_wijziging_log_bedrijfsnr ON pnl_mapping_wijziging_log(bedrijfsnr)`,
+      `CREATE INDEX idx_pnl_mapping_wijziging_log_nieuwe_mapping ON pnl_mapping_wijziging_log(nieuwe_mapping_id)`,
+      `CREATE TRIGGER trg_pnl_mapping_wijziging_log_no_update
+       BEFORE UPDATE ON pnl_mapping_wijziging_log
+       BEGIN
+         SELECT RAISE(ABORT, 'pnl_mapping_wijziging_log: append-only, geen update-in-place van historische logregels');
+       END`,
+      `CREATE TRIGGER trg_pnl_mapping_wijziging_log_no_delete
+       BEFORE DELETE ON pnl_mapping_wijziging_log
+       BEGIN
+         SELECT RAISE(ABORT, 'pnl_mapping_wijziging_log: append-only, verwijderen is nooit toegestaan');
+       END`,
+    ],
+  },
 ];
 
 function schemaMetaTableExists(db: DatabaseSync): boolean {

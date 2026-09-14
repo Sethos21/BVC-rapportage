@@ -379,3 +379,20 @@ export {
   type GeplandeVerkoopEstimatedRegel,
   type GeplandeVerkoopEstimatedRegelInvoer,
 } from "./geplandeVerkoopEstimatedRegels.js";
+
+// Centrale P&L-bronmapping (FASE M4) — persistence voor `@bvc/reporting`'s
+// `PnLBronmappingRegel`/`resolveerPnLBronmapping` (commit 5ece248). Bewust
+// GEEN begrotingsversie-koppeling (zie `pnlBronmappingRepository.ts`'s
+// moduledoc/migratie 24) — portfolio-onafhankelijke, per-administratie
+// bronmappinglaag. `voegPnLBronmappingMutatieToe` is de ENIGE schrijf-ingang
+// (mapping + wijzigingslog + eventuele sluiting van de vorige rij, atomair).
+export {
+  leesPnLBronmappingRegels,
+  leesPnLMappingWijzigingLog,
+  voegPnLBronmappingMutatieToe,
+  type PnLBronmappingOpgeslagenRegel,
+  type PnLBronmappingMutatieInvoer,
+  type PnLBronmappingMutatieResultaat,
+  type PnLMappingMutatieType,
+  type PnLMappingWijzigingLogRegel,
+} from "./pnlBronmappingRepository.js";
