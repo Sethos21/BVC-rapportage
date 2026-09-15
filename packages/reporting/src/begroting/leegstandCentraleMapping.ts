@@ -8,6 +8,7 @@ import {
   type WerkelijkLeegstandResultaat,
 } from "./begroteLeegstand.js";
 import { resolveerPnLBronmapping, type PnLBronmappingRegel } from "../pnlBronmapping.js";
+import { classificeerBoekingenViaPnLMapping } from "../pnlBronmappingClassificatie.js";
 
 /**
  * FASE M5 (2026-09-15) — Leegstand (OB-031) als eerste échte, volledig
@@ -206,48 +207,26 @@ export interface LeegstandWerkelijkViaCentraleMappingResultaat {
  * `@bvc/begroting-data`-orchestratie) hoort dit — en NOOIT de oude
  * classificatietabel rechtstreeks — aan te roepen voor Leegstand-Werkelijk.
  *
- * Classificeert elke UNIEKE `(grootboekrekening, ogbKostensoort)`-combinatie
- * in de batch precies één keer. Een combinatie met `ogbKostensoort: null`
- * wordt NOOIT aan de resolver aangeboden — Leegstand heeft bewust geen
- * GL-default (zie moduledoc), dus dit is per definitie NIET_GEMAPT, zonder
- * dat de resolver ervoor hoeft te draaien. `complexnummer` is bronfeit, geen
- * classificatiedimensie — wordt ongewijzigd per boeking doorgegeven aan de
- * calculator (die zelf al op complex aggregeert).
+ * FASE M6-CONSOLIDATIE: de "ruwe boekingen → unieke (GL, OGB)-combinaties →
+ * resolver → NIET_GEMAPT verzamelen"-stap zelf is verplaatst naar de
+ * generieke `classificeerBoekingenViaPnLMapping` (`pnlBronmappingClassificatie.ts`)
+ * — Rente (M3b) bevatte exact dezelfde boilerplate. Deze functie blijft zelf
+ * verantwoordelijk voor het LEEGSTAND-eigen deel: de vertaling naar
+ * `LeegstandClassificatieRegel[]`, het ongewijzigd doorgeven van
+ * `complexnummer` (bronfeit, geen classificatiedimensie) en de aanroep van
+ * de ongewijzigde `berekenWerkelijkLeegstand`.
  */
 export function berekenWerkelijkLeegstandViaCentraleMapping(
   invoer: LeegstandWerkelijkViaCentraleMappingInvoer,
   boekingen: readonly LeegstandRuweBoekingRegel[],
   mappingregels: readonly PnLBronmappingRegel[],
 ): LeegstandWerkelijkViaCentraleMappingResultaat {
-  const uniekeCombinaties = new Map<string, LeegstandRuweBoekingRegel>();
-  for (const b of boekingen) {
-    uniekeCombinaties.set(`${b.grootboekrekening}::${b.ogbKostensoort ?? ""}`, b);
-  }
-
-  const nietGemapt: { grootboekrekening: string; ogbKostensoort: string | null }[] = [];
-  const geresolvdeInfoPerOgb = new Map<string, { categorie: BgLeegstandCategorie; ogbKostensoortOmschrijving: string }>();
-
-  for (const combinatie of uniekeCombinaties.values()) {
-    if (combinatie.ogbKostensoort === null) {
-      nietGemapt.push({ grootboekrekening: combinatie.grootboekrekening, ogbKostensoort: null });
-      continue;
-    }
-    const resultaat = resolveerLeegstandCategorieViaCentraleMapping(
-      { bedrijfsnr: invoer.bedrijfsnr, grootboekrekening: combinatie.grootboekrekening, boekjaar: invoer.boekjaar, boekperiode: invoer.boekperiode, opSysteemtijdstip: invoer.opSysteemtijdstip },
-      combinatie.ogbKostensoort,
-      mappingregels,
-    );
-    if (resultaat === null) {
-      nietGemapt.push({ grootboekrekening: combinatie.grootboekrekening, ogbKostensoort: combinatie.ogbKostensoort });
-      continue;
-    }
-    geresolvdeInfoPerOgb.set(combinatie.ogbKostensoort, { categorie: resultaat.categorie, ogbKostensoortOmschrijving: combinatie.ogbKostensoortOmschrijving ?? combinatie.ogbKostensoort });
-  }
+  const { perOgb, nietGemapt } = classificeerBoekingenViaPnLMapping(invoer, boekingen, mappingregels, resolveerLeegstandCategorieViaCentraleMapping);
 
   // Uitsluitend succesvol geresolvede OGB-codes krijgen een classificatie-entry — een niet-geresolvde
   // (GL, OGB)-combinatie komt hier bewust NIET in voor, waardoor de ONGEWIJZIGDE `berekenWerkelijkLeegstand`
   // die boeking via haar eigen, bestaande "onbekende code"-pad automatisch als niet-geclassificeerd afvangt.
-  const classificatie: LeegstandClassificatieRegel[] = Array.from(geresolvdeInfoPerOgb.entries()).map(([ogbKostensoort, info]) => ({
+  const classificatie: LeegstandClassificatieRegel[] = Array.from(perOgb.entries()).map(([ogbKostensoort, info]) => ({
     ogbKostensoort,
     ogbKostensoortOmschrijving: info.ogbKostensoortOmschrijving,
     categorie: info.categorie,

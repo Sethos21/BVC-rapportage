@@ -1,6 +1,7 @@
 import type Decimal from "decimal.js";
 import { RENTE_CATEGORIEEN, berekenWerkelijkRente, type BgRenteCategorie, type RenteClassificatieRegel, type WerkelijkRenteBoekingRegel, type WerkelijkRenteResultaat } from "./begroteRente.js";
 import { resolveerPnLBronmapping, type PnLBronmappingRegel } from "../pnlBronmapping.js";
+import { classificeerBoekingenViaPnLMapping } from "../pnlBronmappingClassificatie.js";
 
 /**
  * FASE M3 (2026-09-14) — eerste ECHTE Werkelijk-migratieproef op de centrale
@@ -209,48 +210,25 @@ export interface RenteWerkelijkViaCentraleMappingResultaat {
  * hoort dit — en NOOIT de oude classificatietabel rechtstreeks — aan te
  * roepen voor Rente-Werkelijk.
  *
- * Classificeert elke UNIEKE `(grootboekrekening, ogbKostensoort)`-combinatie
- * in de batch precies één keer (efficiënt, en voorkomt dat dezelfde
- * combinatie tegenstrijdig herbeoordeeld zou kunnen worden binnen één
- * aanroep). Een combinatie met `ogbKostensoort: null` wordt NOOIT aan de
- * resolver aangeboden — Rente heeft bewust geen GL-default (zie moduledoc),
- * dus dit is per definitie NIET_GEMAPT, zonder dat de resolver ervoor hoeft
- * te draaien.
+ * FASE M6-CONSOLIDATIE: de "ruwe boekingen → unieke (GL, OGB)-combinaties →
+ * resolver → NIET_GEMAPT verzamelen"-stap zelf is verplaatst naar de
+ * generieke `classificeerBoekingenViaPnLMapping` (`pnlBronmappingClassificatie.ts`)
+ * — Leegstand (M5) bevatte exact dezelfde boilerplate. Deze functie blijft
+ * zelf verantwoordelijk voor het RENTE-eigen deel: de vertaling naar
+ * `RenteClassificatieRegel[]` en de aanroep van de ongewijzigde
+ * `berekenWerkelijkRente`.
  */
 export function berekenWerkelijkRenteViaCentraleMapping(
   invoer: RenteWerkelijkViaCentraleMappingInvoer,
   boekingen: readonly RenteRuweBoekingRegel[],
   mappingregels: readonly PnLBronmappingRegel[],
 ): RenteWerkelijkViaCentraleMappingResultaat {
-  const uniekeCombinaties = new Map<string, RenteRuweBoekingRegel>();
-  for (const b of boekingen) {
-    uniekeCombinaties.set(`${b.grootboekrekening}::${b.ogbKostensoort ?? ""}`, b);
-  }
-
-  const nietGemapt: { grootboekrekening: string; ogbKostensoort: string | null }[] = [];
-  const geresolvdeInfoPerOgb = new Map<string, { categorie: BgRenteCategorie; ogbKostensoortOmschrijving: string }>();
-
-  for (const combinatie of uniekeCombinaties.values()) {
-    if (combinatie.ogbKostensoort === null) {
-      nietGemapt.push({ grootboekrekening: combinatie.grootboekrekening, ogbKostensoort: null });
-      continue;
-    }
-    const resultaat = resolveerRenteCategorieViaCentraleMapping(
-      { bedrijfsnr: invoer.bedrijfsnr, grootboekrekening: combinatie.grootboekrekening, boekjaar: invoer.boekjaar, boekperiode: invoer.boekperiode, opSysteemtijdstip: invoer.opSysteemtijdstip },
-      combinatie.ogbKostensoort,
-      mappingregels,
-    );
-    if (resultaat === null) {
-      nietGemapt.push({ grootboekrekening: combinatie.grootboekrekening, ogbKostensoort: combinatie.ogbKostensoort });
-      continue;
-    }
-    geresolvdeInfoPerOgb.set(combinatie.ogbKostensoort, { categorie: resultaat.categorie, ogbKostensoortOmschrijving: combinatie.ogbKostensoortOmschrijving ?? combinatie.ogbKostensoort });
-  }
+  const { perOgb, nietGemapt } = classificeerBoekingenViaPnLMapping(invoer, boekingen, mappingregels, resolveerRenteCategorieViaCentraleMapping);
 
   // Uitsluitend succesvol geresolvede OGB-codes krijgen een classificatie-entry — een niet-geresolvde
   // (GL, OGB)-combinatie komt hier bewust NIET in voor, waardoor de ONGEWIJZIGDE `berekenWerkelijkRente`
   // die boeking via haar eigen, bestaande "onbekende code"-pad automatisch als niet-geclassificeerd afvangt.
-  const classificatie: RenteClassificatieRegel[] = Array.from(geresolvdeInfoPerOgb.entries()).map(([ogbKostensoort, info]) => ({
+  const classificatie: RenteClassificatieRegel[] = Array.from(perOgb.entries()).map(([ogbKostensoort, info]) => ({
     ogbKostensoort,
     ogbKostensoortOmschrijving: info.ogbKostensoortOmschrijving,
     categorie: info.categorie,

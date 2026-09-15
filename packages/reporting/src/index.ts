@@ -43,6 +43,7 @@ export * from "./onderhoudBoekingenDiagnose.js";
 export * from "./boekingenJarenDiagnose.js";
 export * from "./begroting/begroteGeplandeVerkoop.js";
 export * from "./pnlBronmapping.js";
+export * from "./pnlBronmappingClassificatie.js";
 export * from "./begroting/algemeneKostenCentraleMapping.js";
 export * from "./begroting/renteCentraleMapping.js";
 export * from "./begroting/leegstandCentraleMapping.js";
