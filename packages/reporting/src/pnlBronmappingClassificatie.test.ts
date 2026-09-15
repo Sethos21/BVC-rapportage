@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classificeerBoekingenViaPnLMapping, type PnLRuweBoekingBasis } from "./pnlBronmappingClassificatie.js";
+import { classificeerBoekingenViaPnLMapping, classificeerElkeBoekingViaPnLMapping, type PnLRuweBoekingBasis } from "./pnlBronmappingClassificatie.js";
 import type { PnLBronmappingRegel } from "./pnlBronmapping.js";
 
 /**
@@ -141,5 +141,58 @@ describe("classificeerBoekingenViaPnLMapping", () => {
       invoer.grootboekrekening === "00166" ? { categorie: "BOEKWAARDE_AFBOEKING", specificiteit: "GL_OGB" } : { categorie: "VERKOOPOPBRENGST", specificiteit: "GL_DEFAULT" };
     const boekingen = [boeking({ grootboekrekening: "00166", ogbKostensoort: "3010" }), boeking({ grootboekrekening: "08830", ogbKostensoort: "3010" })];
     expect(() => classificeerBoekingenViaPnLMapping(CONTEXT, boekingen, [], resolveer)).toThrow(/resolveert binnen deze batch verschillend afhankelijk van de grootboekrekening/);
+  });
+});
+
+describe("classificeerElkeBoekingViaPnLMapping — FASE M7: het nieuwe patroon voor nieuwe Werkelijk-calculators", () => {
+  it("geeft elke oorspronkelijke boeking terug, in de oorspronkelijke volgorde, met haar eigen geresolveerde categorie", () => {
+    const resolveer = (invoer: { grootboekrekening: string }): { categorie: "A" | "B"; specificiteit: "GL_OGB" } => ({
+      categorie: invoer.grootboekrekening === "1000" ? "A" : "B",
+      specificiteit: "GL_OGB",
+    });
+    const b1 = boeking({ grootboekrekening: "1000", ogbKostensoort: "X", saldo: 10 });
+    const b2 = boeking({ grootboekrekening: "2000", ogbKostensoort: "Y", saldo: 20 });
+    const { boekingen, nietGemapt } = classificeerElkeBoekingViaPnLMapping(CONTEXT, [b1, b2], [], resolveer);
+    expect(nietGemapt).toEqual([]);
+    expect(boekingen).toEqual([
+      { boeking: b1, categorie: "A" },
+      { boeking: b2, categorie: "B" },
+    ]);
+  });
+
+  it("resolveert elke unieke (GL, OGB)-combinatie precies één keer, ook als meerdere boekingen dezelfde combinatie delen", () => {
+    let aanroepen = 0;
+    const resolveer = (): { categorie: "X"; specificiteit: "GL_OGB" } => {
+      aanroepen += 1;
+      return { categorie: "X", specificiteit: "GL_OGB" };
+    };
+    classificeerElkeBoekingViaPnLMapping(CONTEXT, [boeking({ saldo: 1 }), boeking({ saldo: 2 }), boeking({ saldo: 3 })], [], resolveer);
+    expect(aanroepen).toBe(1);
+  });
+
+  it("een NIET_GEMAPT-boeking krijgt categorie null, en verschijnt precies één keer (gededupliceerd) in nietGemapt ook al komt de combinatie vaker voor", () => {
+    const resolveer = (): null => null;
+    const b1 = boeking({ grootboekrekening: "9999", ogbKostensoort: "9999", saldo: 5 });
+    const b2 = boeking({ grootboekrekening: "9999", ogbKostensoort: "9999", saldo: 7 });
+    const { boekingen, nietGemapt } = classificeerElkeBoekingViaPnLMapping(CONTEXT, [b1, b2], [], resolveer);
+    expect(boekingen).toEqual([
+      { boeking: b1, categorie: null },
+      { boeking: b2, categorie: null },
+    ]);
+    expect(nietGemapt).toEqual([{ grootboekrekening: "9999", ogbKostensoort: "9999" }]);
+  });
+
+  it("STRUCTUREEL IMMUUN voor het M6a-collisieprobleem: dezelfde OGB-code op twee verschillende GL's met twee verschillende uitkomsten wordt correct per boeking teruggegeven, GEEN fail-fast nodig", () => {
+    // Exact het GL00166/GL08830 + OGB3010-scenario dat classificeerBoekingenViaPnLMapping hierboven bewust
+    // laat falen — hier is dat geen probleem, want elke boeking behoudt haar eigen resolutie.
+    const resolveer = (invoer: { grootboekrekening: string }): { categorie: "BOEKWAARDE_AFBOEKING" | "VERKOOPOPBRENGST"; specificiteit: "GL_OGB" | "GL_DEFAULT" } =>
+      invoer.grootboekrekening === "00166" ? { categorie: "BOEKWAARDE_AFBOEKING", specificiteit: "GL_OGB" } : { categorie: "VERKOOPOPBRENGST", specificiteit: "GL_DEFAULT" };
+    const b1 = boeking({ grootboekrekening: "00166", ogbKostensoort: "3010" });
+    const b2 = boeking({ grootboekrekening: "08830", ogbKostensoort: "3010" });
+    const { boekingen } = classificeerElkeBoekingViaPnLMapping(CONTEXT, [b1, b2], [], resolveer);
+    expect(boekingen).toEqual([
+      { boeking: b1, categorie: "BOEKWAARDE_AFBOEKING" },
+      { boeking: b2, categorie: "VERKOOPOPBRENGST" },
+    ]);
   });
 });

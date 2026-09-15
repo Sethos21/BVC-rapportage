@@ -2,8 +2,10 @@ import Decimal from "decimal.js";
 import { describe, expect, it } from "vitest";
 import {
   berekenBegroteGemeentelijkeLasten,
+  berekenWerkelijkGemeentelijkeLasten,
   type BgGemeentelijkeLastenAannames,
   type BgWozObjectInvoer,
+  type WerkelijkGemeentelijkeLastenBoekingRegel,
 } from "./begroteGemeentelijkeLasten.js";
 
 const BEGROTINGSJAAR = 2027;
@@ -259,5 +261,41 @@ describe("berekenBegroteGemeentelijkeLasten", () => {
       aannames(),
     );
     expect(r.totaleEffectiefVerwachteWoz.toString()).toBe("300.3");
+  });
+});
+
+describe("berekenWerkelijkGemeentelijkeLasten — FASE M7 (nieuw patroon: reeds geclassificeerde invoer, geen GL/OGB-kennis)", () => {
+  function boeking(overrides: Partial<WerkelijkGemeentelijkeLastenBoekingRegel> = {}): WerkelijkGemeentelijkeLastenBoekingRegel {
+    return { economischeCategorie: "GEMEENTELIJKE_LASTEN", complexnummer: "003", saldo: new Decimal(0), ...overrides };
+  }
+
+  it("34. geclassificeerde boekingen (van beide bewezen GL's) tellen op tot ÉÉN categorieTotaal — geen OZB/water/riool-splitsing", () => {
+    const r = berekenWerkelijkGemeentelijkeLasten([boeking({ saldo: new Decimal(1500) }), boeking({ saldo: new Decimal(750) })]);
+    expect(r.perCategorie).toHaveLength(1);
+    expect(r.perCategorie[0]!.categorie).toBe("GEMEENTELIJKE_LASTEN");
+    expect(r.perCategorie[0]!.categorieTotaal.toString()).toBe("2250");
+    expect(r.moduleTotaal.toString()).toBe("2250");
+  });
+
+  it("35. economischeCategorie: null (NIET_GEMAPT) wordt nooit geraden — apart gehouden", () => {
+    const r = berekenWerkelijkGemeentelijkeLasten([boeking({ economischeCategorie: null, saldo: new Decimal(300) })]);
+    expect(r.moduleTotaal.toString()).toBe("0");
+    expect(r.nietGeclassificeerdTotaal.toString()).toBe("300");
+    expect(r.nietGeclassificeerdAantalBoekingen).toBe(1);
+  });
+
+  it("36. complexaggregatie: per complex correct opgeteld", () => {
+    const r = berekenWerkelijkGemeentelijkeLasten([boeking({ complexnummer: "001", saldo: new Decimal(400) }), boeking({ complexnummer: "001", saldo: new Decimal(100) }), boeking({ complexnummer: "002", saldo: new Decimal(50) })]);
+    const cat = r.perCategorie[0]!;
+    expect(cat.perComplex.find((c) => c.complexnummer === "001")!.saldo.toString()).toBe("500");
+    expect(cat.perComplex.find((c) => c.complexnummer === "002")!.saldo.toString()).toBe("50");
+  });
+
+  it("37. geen dubbele telling: som(perCategorie) + nietGeclassificeerd = alle aangeleverde boekingen", () => {
+    const boekingen = [boeking({ saldo: new Decimal(1000) }), boeking({ economischeCategorie: null, saldo: new Decimal(200) })];
+    const r = berekenWerkelijkGemeentelijkeLasten(boekingen);
+    const somAlleBoekingen = boekingen.reduce((t, b) => t.plus(b.saldo), new Decimal(0));
+    const somCategorieen = r.perCategorie.reduce((t, c) => t.plus(c.categorieTotaal), new Decimal(0));
+    expect(somCategorieen.plus(r.nietGeclassificeerdTotaal).toString()).toBe(somAlleBoekingen.toString());
   });
 });

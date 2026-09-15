@@ -380,3 +380,109 @@ export function berekenBegroteGemeentelijkeLasten(
     controleVereist,
   };
 }
+
+// ── Werkelijk (FASE M7, 2026-09-15) ─────────────────────────────────────────
+
+/**
+ * ÉÉN CATEGORIE, GEEN OZB/WATER/RIOOL-SPLITSING (M7-opdracht §4, zelfde
+ * businessbeslissing als Begroting se OB033-001 hierboven — "ÉÉN P&L-POST"):
+ * de bewezen bronmapping omvat GL4700 ("WOZ / OZB") + OGB4701 ("OZB") EN
+ * GL4710 ("Gemeentelijke heffingen"), maar BEIDE grootboekrekeningen voeden
+ * dezelfde, ENE categorie — geen fictieve uitsplitsing tussen OZB/water/
+ * riool/overige heffingen, want de bron ondersteunt die splitsing niet
+ * betrouwbaar. GL4700 heeft uitsluitend een bewezen GL+OGB-specifieke rij
+ * (OGB4701); GL4710 heeft GEEN bewezen OGB-verfijning en krijgt daarom een
+ * GL-default. Zie `gemeentelijkeLastenCentraleMapping.ts` voor de
+ * daadwerkelijke bron-naar-categorie-vertaling.
+ *
+ * NIEUW ARCHITECTUURPATROON (M7-opdracht §0, zelfde als Verzekeringen
+ * hierboven): deze calculator kent GEEN grootboekrekening/OGB — puur
+ * economische betekenis in, economisch resultaat uit.
+ *
+ * DE BESTAANDE HANDMATIGE WOZ-/BEGROTINGSLOGICA WORDT NIET VERVANGEN
+ * (M7-opdracht §4): `berekenBegroteGemeentelijkeLasten` hierboven (met haar
+ * handmatige `werkelijkeGemeentelijkeLasten`-aanname en WOZ-objecten) blijft
+ * volledig ongewijzigd — deze Werkelijk-calculator is een AANVULLING, geen
+ * vervanging, en de twee zijn NIET aan elkaar gekoppeld (de aanroeper mag
+ * `berekenWerkelijkGemeentelijkeLasten`'s `moduleTotaal` desgewenst als
+ * betere/actuele bron voor de bestaande `werkelijkeGemeentelijkeLasten`-
+ * aanname gebruiken — dat is een latere, aparte keuze, geen onderdeel van
+ * deze fase).
+ *
+ * GEEN ESTIMATED IN DEZE FASE (M7-opdracht §8/§2, zelfde afweging als
+ * Verzekeringen): OB-033 heeft nooit een eenduidige Estimated-formule
+ * vastgelegd ("BUITEN SCOPE: ... Estimated" in de Begroting-moduledoc) —
+ * geen bestaande logica om op voort te bouwen. Uitsluitend Werkelijk wordt
+ * gebouwd; Estimated blijft een expliciet BRONGAT (zie de M7-rapportage).
+ */
+export const GEMEENTELIJKE_LASTEN_WERKELIJK_CATEGORIEEN = ["GEMEENTELIJKE_LASTEN"] as const;
+export type BgGemeentelijkeLastenWerkelijkCategorie = (typeof GEMEENTELIJKE_LASTEN_WERKELIJK_CATEGORIEEN)[number];
+
+/** Eén reeds economisch geclassificeerde boeking — GEEN grootboekrekening/OGB, zie moduledoc. */
+export interface WerkelijkGemeentelijkeLastenBoekingRegel {
+  /** `null` = niet centraal geclassificeerd (NIET_GEMAPT) — nooit geraden, nooit stil weggelaten. */
+  economischeCategorie: BgGemeentelijkeLastenWerkelijkCategorie | null;
+  complexnummer: string | null;
+  saldo: Decimal;
+}
+
+export interface WerkelijkGemeentelijkeLastenComplexTotaal {
+  complexnummer: string | null;
+  saldo: Decimal;
+  aantalBoekingen: number;
+}
+
+export interface WerkelijkGemeentelijkeLastenCategorieResultaat {
+  categorie: BgGemeentelijkeLastenWerkelijkCategorie;
+  categorieTotaal: Decimal;
+  perComplex: WerkelijkGemeentelijkeLastenComplexTotaal[];
+}
+
+export interface WerkelijkGemeentelijkeLastenResultaat {
+  /** Vaste volgorde: `GEMEENTELIJKE_LASTEN_WERKELIJK_CATEGORIEEN` (momenteel één element). */
+  perCategorie: WerkelijkGemeentelijkeLastenCategorieResultaat[];
+  moduleTotaal: Decimal;
+  nietGeclassificeerdTotaal: Decimal;
+  nietGeclassificeerdAantalBoekingen: number;
+}
+
+function complexTotalenGemeentelijkeLasten(regels: readonly WerkelijkGemeentelijkeLastenBoekingRegel[]): WerkelijkGemeentelijkeLastenComplexTotaal[] {
+  const perComplexMap = new Map<string | null, WerkelijkGemeentelijkeLastenBoekingRegel[]>();
+  for (const regel of regels) {
+    const groep = perComplexMap.get(regel.complexnummer) ?? [];
+    groep.push(regel);
+    perComplexMap.set(regel.complexnummer, groep);
+  }
+  return Array.from(perComplexMap.entries())
+    .map(([complexnummer, groep]) => ({ complexnummer, saldo: som(groep.map((r) => r.saldo)), aantalBoekingen: groep.length }))
+    .sort((a, b) => (a.complexnummer ?? "").localeCompare(b.complexnummer ?? ""));
+}
+
+/**
+ * Groepeert reeds economisch geclassificeerde boekingen per categorie —
+ * GEEN classificatielogica hierin (zie moduledoc).
+ */
+export function berekenWerkelijkGemeentelijkeLasten(boekingen: readonly WerkelijkGemeentelijkeLastenBoekingRegel[]): WerkelijkGemeentelijkeLastenResultaat {
+  const perCategorieRegels = new Map<BgGemeentelijkeLastenWerkelijkCategorie, WerkelijkGemeentelijkeLastenBoekingRegel[]>(GEMEENTELIJKE_LASTEN_WERKELIJK_CATEGORIEEN.map((c) => [c, []]));
+  const nietGeclassificeerd: WerkelijkGemeentelijkeLastenBoekingRegel[] = [];
+
+  for (const regel of boekingen) {
+    if (regel.economischeCategorie === null) {
+      nietGeclassificeerd.push(regel);
+      continue;
+    }
+    perCategorieRegels.get(regel.economischeCategorie)!.push(regel);
+  }
+
+  const perCategorie: WerkelijkGemeentelijkeLastenCategorieResultaat[] = GEMEENTELIJKE_LASTEN_WERKELIJK_CATEGORIEEN.map((categorie) => {
+    const regels = perCategorieRegels.get(categorie)!;
+    return { categorie, categorieTotaal: som(regels.map((r) => r.saldo)), perComplex: complexTotalenGemeentelijkeLasten(regels) };
+  });
+
+  return {
+    perCategorie,
+    moduleTotaal: som(perCategorie.map((c) => c.categorieTotaal)),
+    nietGeclassificeerdTotaal: som(nietGeclassificeerd.map((r) => r.saldo)),
+    nietGeclassificeerdAantalBoekingen: nietGeclassificeerd.length,
+  };
+}

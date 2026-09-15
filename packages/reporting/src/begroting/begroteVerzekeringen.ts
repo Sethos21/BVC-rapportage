@@ -414,3 +414,108 @@ export function berekenBegroteVerzekeringen(regelsInvoer: readonly BgVerzekering
     controleVereist,
   };
 }
+
+// ── Werkelijk (FASE M7, 2026-09-15) ─────────────────────────────────────────
+
+/**
+ * ÉÉN BEWEZEN CATEGORIE (M7-opdracht §3): GL4130 "Verzekering" + OGB4131
+ * "Brand-/opstalverzekering" is de enige bewezen (GL, OGB)-classificatie
+ * voor deze module — geen nieuwe verzekeringstypen verzonnen. De enum blijft
+ * bewust een gesloten lijst (zelfde patroon als `LEEGSTAND_CATEGORIEEN`/
+ * `RENTE_CATEGORIEEN`) zodat een toekomstig TWEEDE bewezen type de lijst
+ * expliciet moet uitbreiden, nooit stilzwijgend via een vrije string.
+ *
+ * NIEUW ARCHITECTUURPATROON (M7-opdracht §0 — GEEN GL/OGB-vertaling meer):
+ * anders dan Rente/Leegstand/Geplande Verkoop (M3b/M5/M6a, die een BESTAANDE,
+ * GL/OGB-classificerende calculator ongewijzigd moesten laten) is er voor
+ * Verzekeringen NOOIT een Werkelijk-calculator geweest — dit is de EERSTE
+ * calculator die vanaf het begin het NIEUWE patroon volgt:
+ * `WerkelijkVerzekeringBoekingRegel.economischeCategorie` is de reeds door de
+ * centrale P&L-bronmappingresolver bepaalde categorie (`null` = NIET_GEMAPT).
+ * Deze calculator kent GEEN grootboekrekening, GEEN OGB-kostensoort, GEEN
+ * classificatietabel — puur economische betekenis in, economisch resultaat
+ * uit (zie `verzekeringCentraleMapping.ts` voor de daadwerkelijke
+ * bron-naar-categorie-vertaling).
+ *
+ * GEEN ESTIMATED IN DEZE FASE (M7-opdracht §8/§2): OB-032 heeft nooit een
+ * eenduidige Estimated-formule vastgelegd (de Begroting-moduledoc noemt
+ * "Estimated" expliciet BUITEN SCOPE) — geen bestaande logica om op voort te
+ * bouwen, dus wordt hier NIET gegokt. Uitsluitend Werkelijk wordt gebouwd;
+ * Estimated blijft een expliciet BRONGAT voor een latere, aparte
+ * businessbeslissing (zie de M7-rapportage).
+ */
+export const VERZEKERING_WERKELIJK_CATEGORIEEN = ["BRAND_OPSTALVERZEKERING"] as const;
+export type BgVerzekeringWerkelijkCategorie = (typeof VERZEKERING_WERKELIJK_CATEGORIEEN)[number];
+
+/** Eén reeds economisch geclassificeerde boeking — GEEN grootboekrekening/OGB, zie moduledoc. */
+export interface WerkelijkVerzekeringBoekingRegel {
+  /** `null` = niet centraal geclassificeerd (NIET_GEMAPT) — nooit geraden, nooit stil weggelaten. */
+  economischeCategorie: BgVerzekeringWerkelijkCategorie | null;
+  complexnummer: string | null;
+  saldo: Decimal;
+}
+
+export interface WerkelijkVerzekeringComplexTotaal {
+  complexnummer: string | null;
+  saldo: Decimal;
+  aantalBoekingen: number;
+}
+
+export interface WerkelijkVerzekeringCategorieResultaat {
+  categorie: BgVerzekeringWerkelijkCategorie;
+  categorieTotaal: Decimal;
+  perComplex: WerkelijkVerzekeringComplexTotaal[];
+}
+
+export interface WerkelijkVerzekeringResultaat {
+  /** Vaste volgorde: `VERZEKERING_WERKELIJK_CATEGORIEEN`. */
+  perCategorie: WerkelijkVerzekeringCategorieResultaat[];
+  /** Som van de categorieTotalen — het werkelijk geboekte Verzekeringen-saldo. */
+  moduleTotaal: Decimal;
+  /** Boekingen zonder geldige centrale mapping — NOOIT geraden, NOOIT meegeteld in een categorie. */
+  nietGeclassificeerdTotaal: Decimal;
+  nietGeclassificeerdAantalBoekingen: number;
+}
+
+function complexTotalenVerzekering(regels: readonly WerkelijkVerzekeringBoekingRegel[]): WerkelijkVerzekeringComplexTotaal[] {
+  const perComplexMap = new Map<string | null, WerkelijkVerzekeringBoekingRegel[]>();
+  for (const regel of regels) {
+    const groep = perComplexMap.get(regel.complexnummer) ?? [];
+    groep.push(regel);
+    perComplexMap.set(regel.complexnummer, groep);
+  }
+  return Array.from(perComplexMap.entries())
+    .map(([complexnummer, groep]) => ({ complexnummer, saldo: som(groep.map((r) => r.saldo)), aantalBoekingen: groep.length }))
+    .sort((a, b) => (a.complexnummer ?? "").localeCompare(b.complexnummer ?? ""));
+}
+
+/**
+ * Groepeert reeds economisch geclassificeerde boekingen per categorie —
+ * GEEN classificatielogica hierin (zie moduledoc). `moduleTotaal` is
+ * uitsluitend de som van de categorieTotalen, nooit een aparte, potentieel
+ * dubbelgetelde boekingscategorie.
+ */
+export function berekenWerkelijkVerzekeringen(boekingen: readonly WerkelijkVerzekeringBoekingRegel[]): WerkelijkVerzekeringResultaat {
+  const perCategorieRegels = new Map<BgVerzekeringWerkelijkCategorie, WerkelijkVerzekeringBoekingRegel[]>(VERZEKERING_WERKELIJK_CATEGORIEEN.map((c) => [c, []]));
+  const nietGeclassificeerd: WerkelijkVerzekeringBoekingRegel[] = [];
+
+  for (const regel of boekingen) {
+    if (regel.economischeCategorie === null) {
+      nietGeclassificeerd.push(regel);
+      continue;
+    }
+    perCategorieRegels.get(regel.economischeCategorie)!.push(regel);
+  }
+
+  const perCategorie: WerkelijkVerzekeringCategorieResultaat[] = VERZEKERING_WERKELIJK_CATEGORIEEN.map((categorie) => {
+    const regels = perCategorieRegels.get(categorie)!;
+    return { categorie, categorieTotaal: som(regels.map((r) => r.saldo)), perComplex: complexTotalenVerzekering(regels) };
+  });
+
+  return {
+    perCategorie,
+    moduleTotaal: som(perCategorie.map((c) => c.categorieTotaal)),
+    nietGeclassificeerdTotaal: som(nietGeclassificeerd.map((r) => r.saldo)),
+    nietGeclassificeerdAantalBoekingen: nietGeclassificeerd.length,
+  };
+}

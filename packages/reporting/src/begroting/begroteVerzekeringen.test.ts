@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import {
   bepaalRelevanteVerlengmomenten,
   berekenBegroteVerzekeringen,
+  berekenWerkelijkVerzekeringen,
   type BgVerzekeringAannames,
   type BgVerzekeringRegelInvoer,
+  type WerkelijkVerzekeringBoekingRegel,
 } from "./begroteVerzekeringen.js";
 
 describe("bepaalRelevanteVerlengmomenten — geïsoleerde datumlogica", () => {
@@ -337,5 +339,57 @@ describe("berekenBegroteVerzekeringen", () => {
       AANNAMES,
     );
     expect(r.totaalBerekendBegroot.toString()).toBe("300.3");
+  });
+});
+
+describe("berekenWerkelijkVerzekeringen — FASE M7 (nieuw patroon: reeds geclassificeerde invoer, geen GL/OGB-kennis)", () => {
+  function boeking(overrides: Partial<WerkelijkVerzekeringBoekingRegel> = {}): WerkelijkVerzekeringBoekingRegel {
+    return { economischeCategorie: "BRAND_OPSTALVERZEKERING", complexnummer: "003", saldo: new Decimal(0), ...overrides };
+  }
+
+  it("29. geclassificeerde boekingen tellen op tot de categorieTotaal en het moduleTotaal", () => {
+    const r = berekenWerkelijkVerzekeringen([boeking({ saldo: new Decimal(500) }), boeking({ saldo: new Decimal("299.99") })]);
+    const cat = r.perCategorie.find((c) => c.categorie === "BRAND_OPSTALVERZEKERING")!;
+    expect(cat.categorieTotaal.toString()).toBe("799.99");
+    expect(r.moduleTotaal.toString()).toBe("799.99");
+    expect(r.nietGeclassificeerdAantalBoekingen).toBe(0);
+  });
+
+  it("30. economischeCategorie: null (NIET_GEMAPT) wordt nooit geraden — apart gehouden, telt niet mee in een categorie", () => {
+    const r = berekenWerkelijkVerzekeringen([boeking({ economischeCategorie: null, saldo: new Decimal(250) })]);
+    expect(r.moduleTotaal.toString()).toBe("0");
+    expect(r.nietGeclassificeerdTotaal.toString()).toBe("250");
+    expect(r.nietGeclassificeerdAantalBoekingen).toBe(1);
+  });
+
+  it("31. complexaggregatie: per complex correct opgeteld, complexnummer null apart gegroepeerd", () => {
+    const r = berekenWerkelijkVerzekeringen([
+      boeking({ complexnummer: "001", saldo: new Decimal(100) }),
+      boeking({ complexnummer: "003", saldo: new Decimal(200) }),
+      boeking({ complexnummer: "003", saldo: new Decimal(50) }),
+      boeking({ complexnummer: null, saldo: new Decimal(30) }),
+    ]);
+    const cat = r.perCategorie.find((c) => c.categorie === "BRAND_OPSTALVERZEKERING")!;
+    expect(cat.perComplex).toEqual([
+      { complexnummer: null, saldo: expect.any(Decimal), aantalBoekingen: 1 },
+      { complexnummer: "001", saldo: expect.any(Decimal), aantalBoekingen: 1 },
+      { complexnummer: "003", saldo: expect.any(Decimal), aantalBoekingen: 2 },
+    ]);
+    expect(cat.perComplex.find((c) => c.complexnummer === "003")!.saldo.toString()).toBe("250");
+  });
+
+  it("32. geen dubbele telling: som(perCategorie) + nietGeclassificeerd = alle aangeleverde boekingen", () => {
+    const boekingen = [boeking({ saldo: new Decimal(500) }), boeking({ economischeCategorie: null, saldo: new Decimal(100) })];
+    const r = berekenWerkelijkVerzekeringen(boekingen);
+    const somAlleBoekingen = boekingen.reduce((t, b) => t.plus(b.saldo), new Decimal(0));
+    const somCategorieen = r.perCategorie.reduce((t, c) => t.plus(c.categorieTotaal), new Decimal(0));
+    expect(somCategorieen.plus(r.nietGeclassificeerdTotaal).toString()).toBe(somAlleBoekingen.toString());
+  });
+
+  it("33. geen boekingen: alles 0, geen fouten", () => {
+    const r = berekenWerkelijkVerzekeringen([]);
+    expect(r.moduleTotaal.toString()).toBe("0");
+    expect(r.perCategorie).toHaveLength(1);
+    expect(r.nietGeclassificeerdAantalBoekingen).toBe(0);
   });
 });

@@ -212,3 +212,88 @@ export function classificeerBoekingenViaPnLMapping<TBoeking extends PnLRuweBoeki
 
   return { perOgb, perGrootboek, nietGemapt };
 }
+
+/**
+ * FASE M7 (2026-09-15) — TWEEDE, EENVOUDIGER generieke classificatiehelper,
+ * voor NIEUWE Werkelijk-calculators (Verzekeringen/Gemeentelijke Lasten/
+ * Onderhoud) die vanaf het begin volgens het architectuurprincipe uit de
+ * M7-opdracht §0 zijn ontworpen: "bronboeking → centrale classificatie →
+ * economische categorie → calculator", NOOIT "centrale classificatie →
+ * terugvertalen naar een legacy GL/OGB-classificatietabel → opnieuw
+ * classificeren" (dat GL-blinde legacy-vertaalpatroon — `perOgb`/
+ * `perGrootboek` hierboven — bestaat uitsluitend om Rente/Leegstand/Geplande
+ * Verkoop se BESTAANDE, ongewijzigde calculators te kunnen blijven voeden;
+ * gebruik het niet als ontwerp voor iets nieuws).
+ *
+ * Een nieuwe calculator ontvangt daarom simpelweg, per boeking, haar eigen
+ * al-bepaalde economische categorie (`null` = NIET_GEMAPT) — GEEN GL, GEEN
+ * OGB, geen classificatietabel. Dat maakt deze helper STRUCTUREEL IMMUUN
+ * voor het batch-brede-consistentieprobleem van M6a hierboven: omdat elke
+ * boeking haar EIGEN resolutie behoudt (nooit gecollapsed tot één
+ * OGB-gesleutelde waarde voor de hele batch), kan dezelfde OGB-code op twee
+ * verschillende GL's binnen één batch hier gewoon naar twee verschillende
+ * (of één NIET_GEMAPT en één wél gemapte) categorieën resolveren zonder
+ * enig risico — er is geen calculator meer die een OGB-array GL-blind
+ * toepast.
+ *
+ * Classificeert nog steeds elke unieke `(grootboekrekening, ogbKostensoort)`-
+ * combinatie precies één keer (dezelfde efficiëntie als hierboven), maar
+ * geeft daarna een resultaat TERUG PER OORSPRONKELIJKE BOEKING (in de
+ * oorspronkelijke volgorde, elk veld van de boeking behouden) in plaats van
+ * gecollapsed per OGB-code — precies wat een calculator nodig heeft die per
+ * boeking saldo/complexnummer/etc. wil blijven zien.
+ */
+export interface PnLGeclassificeerdeBoeking<TBoeking, TCategorie extends string> {
+  readonly boeking: TBoeking;
+  /** `null` = deze boeking kon centraal niet worden geclassificeerd (NIET_GEMAPT) — nooit geraden, nooit stil weggelaten. */
+  readonly categorie: TCategorie | null;
+}
+
+export interface PnLElkeBoekingGeclassificeerdResultaat<TBoeking, TCategorie extends string> {
+  /** Elke oorspronkelijke boeking, in de oorspronkelijke volgorde, met haar eigen geresolveerde categorie (of `null`). */
+  readonly boekingen: readonly PnLGeclassificeerdeBoeking<TBoeking, TCategorie>[];
+  /** Unieke (GL, OGB)-combinaties zonder geldige centrale mapping — voor diagnostiek, dupliceert geen telling (die zit al in `boekingen`). */
+  readonly nietGemapt: readonly PnLNietGemapteCombinatie[];
+}
+
+export function classificeerElkeBoekingViaPnLMapping<TBoeking extends PnLRuweBoekingBasis, TCategorie extends string>(
+  context: PnLClassificatieContext,
+  boekingen: readonly TBoeking[],
+  mappingregels: readonly PnLBronmappingRegel[],
+  resolveerCategorie: (
+    invoer: { bedrijfsnr: string; grootboekrekening: string; boekjaar: number; boekperiode: string; opSysteemtijdstip: Date },
+    ogbKostensoort: string | null,
+    mappingregels: readonly PnLBronmappingRegel[],
+  ) => { categorie: TCategorie; specificiteit: PnLMappingSpecificiteit } | null,
+): PnLElkeBoekingGeclassificeerdResultaat<TBoeking, TCategorie> {
+  const resolutiePerCombo = new Map<string, { categorie: TCategorie; specificiteit: PnLMappingSpecificiteit } | null>();
+  for (const boeking of boekingen) {
+    const sleutel = `${boeking.grootboekrekening}::${boeking.ogbKostensoort ?? ""}`;
+    if (resolutiePerCombo.has(sleutel)) continue;
+    resolutiePerCombo.set(
+      sleutel,
+      resolveerCategorie(
+        { bedrijfsnr: context.bedrijfsnr, grootboekrekening: boeking.grootboekrekening, boekjaar: context.boekjaar, boekperiode: context.boekperiode, opSysteemtijdstip: context.opSysteemtijdstip },
+        boeking.ogbKostensoort,
+        mappingregels,
+      ),
+    );
+  }
+
+  const nietGemapt: PnLNietGemapteCombinatie[] = [];
+  const nietGemapteSleutels = new Set<string>();
+  const resultaat: PnLGeclassificeerdeBoeking<TBoeking, TCategorie>[] = boekingen.map((boeking) => {
+    const sleutel = `${boeking.grootboekrekening}::${boeking.ogbKostensoort ?? ""}`;
+    const resolutie = resolutiePerCombo.get(sleutel)!;
+    if (resolutie === null) {
+      if (!nietGemapteSleutels.has(sleutel)) {
+        nietGemapteSleutels.add(sleutel);
+        nietGemapt.push({ grootboekrekening: boeking.grootboekrekening, ogbKostensoort: boeking.ogbKostensoort });
+      }
+      return { boeking, categorie: null };
+    }
+    return { boeking, categorie: resolutie.categorie };
+  });
+
+  return { boekingen: resultaat, nietGemapt };
+}

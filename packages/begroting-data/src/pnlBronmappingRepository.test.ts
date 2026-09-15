@@ -6,13 +6,19 @@ import Decimal from "decimal.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   berekenWerkelijkGeplandeVerkoopViaCentraleMapping,
+  berekenWerkelijkGemeentelijkeLastenViaCentraleMapping,
   berekenWerkelijkLeegstandViaCentraleMapping,
+  berekenWerkelijkOnderhoudViaCentraleMapping,
   berekenWerkelijkRenteViaCentraleMapping,
+  berekenWerkelijkVerzekeringenViaCentraleMapping,
   resolveerPnLBronmapping,
+  type GemeentelijkeLastenRuweBoekingRegel,
   type GeplandeVerkoopRuweBoekingRegel,
   type LeegstandRuweBoekingRegel,
+  type OnderhoudRuweBoekingRegel,
   type PnLBronmappingRegel,
   type RenteRuweBoekingRegel,
+  type VerzekeringRuweBoekingRegel,
 } from "@bvc/reporting";
 import { openOrCreateDatabase } from "./database.js";
 import {
@@ -684,5 +690,144 @@ describe("M6a. Geplande Verkoop end-to-end via persistence (023, GL08830-default
     ).toThrow(/mag nooit van economische module wisselen/);
 
     expect(leesPnLBronmappingRegels(db, "023")).toHaveLength(1);
+  });
+});
+
+/**
+ * FASE M7 (2026-09-15) — Verzekeringen/Gemeentelijke Lasten/Onderhoud
+ * end-to-end via de bestaande M4/M4b-persistence: mapping opslaan →
+ * teruglezen → centrale resolver/generieke helper → de nieuwe, pure
+ * Werkelijk-calculators. Geen module-specifieke persistence — dezelfde
+ * generieke `voegPnLBronmappingMutatieToe`/`leesPnLBronmappingRegels` als
+ * Rente/Leegstand/Geplande Verkoop hierboven. Bronmapping is bronbewezen
+ * (aangeleverd in de M7-opdracht); er is GEEN bestaand, uit een echte
+ * administratie geëxtraheerd eurobedrag beschikbaar voor deze GL's — de
+ * testbedragen hieronder zijn expliciete testfixtures (zie ook de
+ * moduledocs van `verzekeringCentraleMapping.ts`/
+ * `gemeentelijkeLastenCentraleMapping.ts`/`onderhoudCentraleMapping.ts`).
+ */
+describe("M7. Verzekeringen end-to-end via persistence (070, GL4130/OGB4131)", () => {
+  it("mapping opgeslagen via de repository, teruggelezen, en via de centrale keten -> Brand-/opstalverzekering correct opgeteld", () => {
+    voegPnLBronmappingMutatieToe(
+      db,
+      mutatie({
+        bedrijfsnr: "070",
+        grootboekrekening: "4130",
+        ogbKostensoort: "4131",
+        ogbKostensoortOmschrijving: "Brand-/opstalverzekering",
+        economischeModule: "VERZEKERINGEN",
+        economischeCategorie: "BRAND_OPSTALVERZEKERING",
+      }),
+    );
+
+    const mappingregels: readonly PnLBronmappingRegel[] = leesPnLBronmappingRegels(db, "070");
+    expect(mappingregels).toHaveLength(1);
+
+    const boekingen: VerzekeringRuweBoekingRegel[] = [
+      { grootboekrekening: "4130", ogbKostensoort: "4131", ogbKostensoortOmschrijving: "Brand-/opstalverzekering", complexnummer: "003", saldo: new Decimal("1150.75") },
+    ];
+    const { werkelijk, nietGemapt } = berekenWerkelijkVerzekeringenViaCentraleMapping(
+      { bedrijfsnr: "070", boekjaar: 2026, boekperiode: "12", opSysteemtijdstip: new Date("2026-09-15T12:00:00.000Z") },
+      boekingen,
+      mappingregels,
+    );
+
+    expect(nietGemapt).toEqual([]);
+    expect(werkelijk.perCategorie.find((c) => c.categorie === "BRAND_OPSTALVERZEKERING")!.categorieTotaal.toString()).toBe("1150.75");
+  });
+});
+
+describe("M7. Gemeentelijke Lasten end-to-end via persistence (070, GL4700/OGB4701 + GL4710-default)", () => {
+  it("mappings opgeslagen via de repository, teruggelezen, en via de centrale keten -> één gecombineerde categorie, geen fictieve splitsing", () => {
+    voegPnLBronmappingMutatieToe(
+      db,
+      mutatie({
+        bedrijfsnr: "070",
+        grootboekrekening: "4700",
+        ogbKostensoort: "4701",
+        ogbKostensoortOmschrijving: "OZB",
+        economischeModule: "GEMEENTELIJKE_LASTEN",
+        economischeCategorie: "GEMEENTELIJKE_LASTEN",
+      }),
+    );
+    voegPnLBronmappingMutatieToe(
+      db,
+      mutatie({
+        bedrijfsnr: "070",
+        grootboekrekening: "4710",
+        ogbKostensoort: null,
+        ogbKostensoortOmschrijving: null,
+        economischeModule: "GEMEENTELIJKE_LASTEN",
+        economischeCategorie: "GEMEENTELIJKE_LASTEN",
+      }),
+    );
+
+    const mappingregels: readonly PnLBronmappingRegel[] = leesPnLBronmappingRegels(db, "070");
+    expect(mappingregels).toHaveLength(2);
+
+    const boekingen: GemeentelijkeLastenRuweBoekingRegel[] = [
+      { grootboekrekening: "4700", ogbKostensoort: "4701", ogbKostensoortOmschrijving: "OZB", complexnummer: "003", saldo: new Decimal("900") },
+      { grootboekrekening: "4710", ogbKostensoort: null, ogbKostensoortOmschrijving: null, complexnummer: "003", saldo: new Decimal("175.50") },
+    ];
+    const { werkelijk, nietGemapt } = berekenWerkelijkGemeentelijkeLastenViaCentraleMapping(
+      { bedrijfsnr: "070", boekjaar: 2026, boekperiode: "12", opSysteemtijdstip: new Date("2026-09-15T12:00:00.000Z") },
+      boekingen,
+      mappingregels,
+    );
+
+    expect(nietGemapt).toEqual([]);
+    expect(werkelijk.perCategorie).toHaveLength(1);
+    expect(werkelijk.perCategorie[0]!.categorieTotaal.toString()).toBe("1075.5");
+  });
+});
+
+describe("M7. Onderhoud end-to-end via persistence (070, GL4300/GL4330/GL4340)", () => {
+  it("mappings opgeslagen via de repository, teruggelezen, en via de centrale keten -> drie strikt gescheiden categorieën", () => {
+    voegPnLBronmappingMutatieToe(
+      db,
+      mutatie({ bedrijfsnr: "070", grootboekrekening: "4300", ogbKostensoort: null, ogbKostensoortOmschrijving: null, economischeModule: "ONDERHOUD", economischeCategorie: "ONDERHOUD_GEBOUWEN" }),
+    );
+    voegPnLBronmappingMutatieToe(
+      db,
+      mutatie({ bedrijfsnr: "070", grootboekrekening: "4330", ogbKostensoort: null, ogbKostensoortOmschrijving: null, economischeModule: "ONDERHOUD", economischeCategorie: "ONDERHOUD_TERREIN" }),
+    );
+    voegPnLBronmappingMutatieToe(
+      db,
+      mutatie({ bedrijfsnr: "070", grootboekrekening: "4340", ogbKostensoort: null, ogbKostensoortOmschrijving: null, economischeModule: "ONDERHOUD", economischeCategorie: "ONDERHOUD_INSTALLATIES" }),
+    );
+
+    const mappingregels: readonly PnLBronmappingRegel[] = leesPnLBronmappingRegels(db, "070");
+    expect(mappingregels).toHaveLength(3);
+
+    const boekingen: OnderhoudRuweBoekingRegel[] = [
+      { grootboekrekening: "4300", ogbKostensoort: null, ogbKostensoortOmschrijving: null, complexnummer: "003", saldo: new Decimal("600") },
+      { grootboekrekening: "4330", ogbKostensoort: null, ogbKostensoortOmschrijving: null, complexnummer: "003", saldo: new Decimal("150") },
+      { grootboekrekening: "4340", ogbKostensoort: null, ogbKostensoortOmschrijving: null, complexnummer: "003", saldo: new Decimal("225") },
+    ];
+    const { werkelijk, nietGemapt } = berekenWerkelijkOnderhoudViaCentraleMapping(
+      { bedrijfsnr: "070", boekjaar: 2026, boekperiode: "12", opSysteemtijdstip: new Date("2026-09-15T12:00:00.000Z") },
+      boekingen,
+      mappingregels,
+    );
+
+    expect(nietGemapt).toEqual([]);
+    expect(werkelijk.perCategorie.find((c) => c.categorie === "ONDERHOUD_GEBOUWEN")!.categorieTotaal.toString()).toBe("600");
+    expect(werkelijk.perCategorie.find((c) => c.categorie === "ONDERHOUD_TERREIN")!.categorieTotaal.toString()).toBe("150");
+    expect(werkelijk.perCategorie.find((c) => c.categorie === "ONDERHOUD_INSTALLATIES")!.categorieTotaal.toString()).toBe("225");
+    expect(werkelijk.moduleTotaal.toString()).toBe("975");
+  });
+
+  it("M4b GL-module-invariant geldt onverkort: GL4300 mag na deze mapping nooit meer een andere module krijgen", () => {
+    voegPnLBronmappingMutatieToe(
+      db,
+      mutatie({ bedrijfsnr: "070", grootboekrekening: "4300", ogbKostensoort: null, ogbKostensoortOmschrijving: null, economischeModule: "ONDERHOUD", economischeCategorie: "ONDERHOUD_GEBOUWEN" }),
+    );
+    expect(() =>
+      voegPnLBronmappingMutatieToe(
+        db,
+        mutatie({ bedrijfsnr: "070", grootboekrekening: "4300", ogbKostensoort: "9999", ogbKostensoortOmschrijving: "fictief", economischeModule: "LEEGSTAND", economischeCategorie: "OVERIGE_LEEGSTANDSKOSTEN" }),
+      ),
+    ).toThrow(/mag nooit van economische module wisselen/);
+    expect(leesPnLBronmappingRegels(db, "070")).toHaveLength(1);
   });
 });
