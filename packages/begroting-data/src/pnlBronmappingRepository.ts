@@ -42,14 +42,26 @@ import type { PnLBronmappingRegel, PnLEconomischeModule } from "@bvc/reporting";
  *     heldere JS-foutmelding VÓÓR enige schrijfactie (de gelijknamige
  *     database-CHECK's in migratie 24 zijn de backstop voor elk ander
  *     schrijfpad, nooit de enige verdedigingslinie hier);
- *  2. valideert de cross-module-invariant (C/D) door ALLE bestaande rijen
- *     van dezelfde (bedrijfsnr, grootboekrekening) met een overlappend
- *     geldigheidsinterval op te halen en te eisen dat ze allemaal dezelfde
- *     `economischeModule` dragen als de nieuwe rij — dit geldt symmetrisch
- *     tussen een GL-default (`ogbKostensoort: null`) en elke GL+OGB-rij, ÉN
- *     tussen GL+OGB-rijen onderling. Bestaat er nog GEEN enkele rij voor die
- *     GL/periode, dan is er niets om tegen te vergelijken (Rente-nuance,
- *     zie M4-opdracht §5: een GL zonder GL-default is en blijft geldig).
+ *  2. valideert de GL-ECONOMISCH-DOMEIN-INVARIANT (aangescherpt in FASE M4b,
+ *     2026-09-15 — ziet strenger dan M4's oorspronkelijke, overlap-gebaseerde
+ *     check): voor (bedrijfsnr, grootboekrekening) geldt precies ÉÉN
+ *     `economischeModule` over de VOLLEDIGE mappinghistorie — ongeacht
+ *     `ogbKostensoort`, ONGEACHT overlap, en ongeacht of een bestaande rij
+ *     inmiddels gesloten is. M4's eerste versie controleerde uitsluitend
+ *     OVERLAPPENDE rijen, wat een loophole opende: een
+ *     `NIEUWE_MAPPING_VANAF_PERIODE` kon een GL na het sluiten van de vorige
+ *     rij alsnog naar een ANDERE `economischeModule` laten "springen" (bv.
+ *     GL4600 RENTE → vanaf periode X LEEGSTAND) — technisch consistent met de
+ *     overlapcheck, maar in strijd met de hoofdregel "grootboekrekening
+ *     bepaalt het economische hoofddomein". M4b sluit die loophole: de check
+ *     kijkt nu naar ALLE rijen van de GL, punt, niet alleen overlappende. Een
+ *     bewuste, latere betekeniswijziging van een grootboekrekening zelf is
+ *     GEEN gewone mappingmutatie — dat vereist een aparte, expliciete
+ *     architectuur-/businessbeslissing met eigen migratie (bewust NIET hier
+ *     gebouwd, zie M4b-opdracht §3). Bestaat er nog GEEN enkele rij voor die
+ *     GL, dan legt DEZE mutatie het domein vast (Rente-nuance, M4-opdracht
+ *     §5: de EERSTE GL+OGB-rij bepaalt het domein, een GL zonder GL-default
+ *     is en blijft geldig).
  *  3. schrijft — ALTIJD binnen dezelfde `BEGIN IMMEDIATE`-transactie —
  *     de nieuwe mappingrij, optioneel de sluiting van de vorige rij se
  *     geldigheidsinterval (uitsluitend bij `NIEUWE_MAPPING_VANAF_PERIODE`
@@ -289,19 +301,11 @@ export function voegPnLBronmappingMutatieToe(db: DatabaseSync, invoer: PnLBronma
   }
 
   return withWriteTransaction(db, () => {
-    // Cross-module-invariant (C/D, met de Rente-nuance uit §5): alle bestaande rijen van dezelfde
-    // (bedrijfsnr, grootboekrekening) met een overlappend geldigheidsinterval — ongeacht ogbKostensoort —
-    // moeten dezelfde economischeModule dragen als de nieuwe rij. Overlap: bestaande.geldigVanaf < nieuwe.geldigTot
-    // (of nieuwe.geldigTot is open) EN (bestaande.geldigTot is open OF bestaande.geldigTot > nieuwe.geldigVanaf).
     const nieuweVanaf: Periode = { boekjaar: invoer.geldigVanafBoekjaar, boekperiode: invoer.geldigVanafPeriode };
-    const nieuweTot: Periode | null = invoer.geldigTotBoekjaar !== null ? { boekjaar: invoer.geldigTotBoekjaar, boekperiode: invoer.geldigTotPeriode! } : null;
 
     // Optioneel EERST: sluit het geldigheidsinterval van de vorige mapping (uitsluitend
     // NIEUWE_MAPPING_VANAF_PERIODE mét een opgegeven vorigeMappingId — zie moduledoc). Geen enkele
-    // andere update op een bestaande rij. Dit gebeurt VÓÓR de cross-module-invariantcheck hieronder,
-    // zodat de rij die deze mutatie bewust vervangt na het sluiten geen overlap meer met de nieuwe
-    // mapping heeft — alleen ECHT nog-overlappende, ONGERELATEERDE mappings van dezelfde GL kunnen de
-    // check hieronder nog raken.
+    // andere update op een bestaande rij.
     if (invoer.type === "NIEUWE_MAPPING_VANAF_PERIODE" && invoer.vorigeMappingId !== null) {
       const vorige = leesPnLBronmappingRegelById(db, invoer.vorigeMappingId);
       if (vorige === null) {
@@ -331,41 +335,20 @@ export function voegPnLBronmappingMutatieToe(db: DatabaseSync, invoer: PnLBronma
       );
     }
 
-    // Cross-module-invariant (C/D, met de Rente-nuance uit §5): alle bestaande rijen van dezelfde
-    // (bedrijfsnr, grootboekrekening) met een overlappend geldigheidsinterval — ongeacht ogbKostensoort —
-    // moeten dezelfde economischeModule dragen als de nieuwe rij. Overlap: bestaande.geldigVanaf < nieuwe.geldigTot
-    // (of nieuwe.geldigTot is open) EN (bestaande.geldigTot is open OF bestaande.geldigTot > nieuwe.geldigVanaf).
-    // Wordt na de eventuele sluiting hierboven uitgevoerd, dus leest de AL-GESLOTEN staat van de vorige rij.
-    const kandidaten = db
-      .prepare(
-        `SELECT id, economische_module, geldig_vanaf_boekjaar, geldig_vanaf_periode, geldig_tot_boekjaar, geldig_tot_periode
-         FROM pnl_bronmapping
-         WHERE bedrijfsnr = ? AND grootboekrekening = ?`,
-      )
-      .all(invoer.bedrijfsnr, invoer.grootboekrekening) as unknown as {
-      id: number;
-      economische_module: PnLEconomischeModule;
-      geldig_vanaf_boekjaar: number;
-      geldig_vanaf_periode: string;
-      geldig_tot_boekjaar: number | null;
-      geldig_tot_periode: string | null;
-    }[];
+    // GL-ECONOMISCH-DOMEIN-INVARIANT (FASE M4b, aangescherpt t.o.v. M4): voor (bedrijfsnr,
+    // grootboekrekening) geldt precies ÉÉN economischeModule over de VOLLEDIGE mappinghistorie —
+    // ongeacht ogbKostensoort, ongeacht overlap, ongeacht of een rij inmiddels gesloten is (zie
+    // moduledoc "GL-economisch-domein" hierboven). Bestaat er nog geen enkele rij voor deze GL, dan
+    // legt DEZE mutatie het domein vast (geen check nodig — dit is precies hoe Rente zonder
+    // GL-default werkt: de eerste GL+OGB-rij bepaalt het domein voor alle latere rijen).
+    const afwijkendeModuleRij = db
+      .prepare(`SELECT id, economische_module FROM pnl_bronmapping WHERE bedrijfsnr = ? AND grootboekrekening = ? AND economische_module <> ? LIMIT 1`)
+      .get(invoer.bedrijfsnr, invoer.grootboekrekening, invoer.economischeModule) as { id: number; economische_module: PnLEconomischeModule } | undefined;
 
-    for (const kandidaat of kandidaten) {
-      const bestaandeVanaf: Periode = { boekjaar: kandidaat.geldig_vanaf_boekjaar, boekperiode: kandidaat.geldig_vanaf_periode };
-      const bestaandeTot: Periode | null = kandidaat.geldig_tot_boekjaar !== null ? { boekjaar: kandidaat.geldig_tot_boekjaar, boekperiode: kandidaat.geldig_tot_periode! } : null;
-
-      // Overlap: bestaande.geldigVanaf < nieuwe.geldigTot (of nieuwe.geldigTot is open) EN
-      // (bestaande.geldigTot is open OF bestaande.geldigTot > nieuwe.geldigVanaf) — standaard
-      // interval-overlaptest voor twee halfopen intervallen [vanaf, tot).
-      const overlaptGeldigheid =
-        (nieuweTot === null || vergelijkPeriode(bestaandeVanaf, nieuweTot) < 0) && (bestaandeTot === null || vergelijkPeriode(bestaandeTot, nieuweVanaf) > 0);
-
-      if (overlaptGeldigheid && kandidaat.economische_module !== invoer.economischeModule) {
-        throw new Error(
-          `Bedrijfsnr ${invoer.bedrijfsnr}, GL ${invoer.grootboekrekening}: bestaande mapping (id=${kandidaat.id}, economischeModule="${kandidaat.economische_module}") overlapt in geldigheid met de nieuwe mapping (economischeModule="${invoer.economischeModule}") — een OGB/GL-rij mag nooit naar een andere economische module springen dan de overige mappings van dezelfde grootboekrekening.`,
-        );
-      }
+    if (afwijkendeModuleRij !== undefined) {
+      throw new Error(
+        `Bedrijfsnr ${invoer.bedrijfsnr}, GL ${invoer.grootboekrekening}: deze grootboekrekening is al vastgelegd met economischeModule "${afwijkendeModuleRij.economische_module}" (mapping id=${afwijkendeModuleRij.id}) — een grootboekrekening mag nooit van economische module wisselen via een gewone mappingmutatie (GL-default, GL+OGB, historische correctie of nieuwe mapping vanaf periode — ongeacht overlap, ook een reeds afgesloten rij blijft het domein bepalen). Een echte betekeniswijziging van de grootboekrekening zelf vereist een aparte, expliciete architectuur-/businessbeslissing met eigen migratie, geen gewone mappingmutatie.`,
+      );
     }
 
     const aangemaaktOpIso = invoer.gewijzigdOp.toISOString();

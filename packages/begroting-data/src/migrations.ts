@@ -3382,10 +3382,11 @@ export const MIGRATIONS: readonly Migration[] = [
    * `belast_onbelast`), moet bij een toekomstige nieuwe module handmatig in
    * sync blijven.
    *
-   * De cross-module-invariant (C/D: een OGB mag nooit naar een andere
-   * economische module springen dan zijn eigen GL, en dat geldt symmetrisch
-   * voor alle GL+OGB-rijen van dezelfde GL onderling wanneer er geen
-   * GL-default bestaat — zie de M4-opdracht se Rente-nuance) is GEEN
+   * De GL-economisch-domein-invariant (aangescherpt in FASE M4b, 2026-09-15:
+   * (bedrijfsnr, grootboekrekening) draagt precies ÉÉN economischeModule over
+   * de VOLLEDIGE mappinghistorie — ongeacht ogbKostensoort, ongeacht overlap,
+   * ongeacht of een rij inmiddels gesloten is; Rente zonder GL-default blijft
+   * geldig omdat de EERSTE GL+OGB-rij voor die GL het domein vastlegt) is GEEN
    * database-CHECK (vereist een cross-row-query, wat SQLite CHECK niet kan)
    * — die wordt uitsluitend in de mutatiefunctie afgedwongen, vóór de INSERT,
    * binnen dezelfde `BEGIN IMMEDIATE`-transactie.

@@ -132,7 +132,7 @@ describe("E/G. cross-module GL+OGB geweigerd", () => {
 
     expect(() =>
       voegPnLBronmappingMutatieToe(db, mutatie({ ogbKostensoort: "4602", economischeModule: "LEEGSTAND", economischeCategorie: "NUTS_LEEGSTAND" })),
-    ).toThrow(/mag nooit naar een andere economische module springen/);
+    ).toThrow(/mag nooit van economische module wisselen/);
 
     // Geen half geschreven staat: nog steeds precies de ene, eerder geslaagde mapping/logregel.
     expect(leesPnLBronmappingRegels(db, "023")).toHaveLength(1);
@@ -144,7 +144,7 @@ describe("E/G. cross-module GL+OGB geweigerd", () => {
 
     expect(() =>
       voegPnLBronmappingMutatieToe(db, mutatie({ ogbKostensoort: null, economischeModule: "RENTE", economischeCategorie: "RENTEKOSTEN", grootboekrekening: "4990" })),
-    ).toThrow(/mag nooit naar een andere economische module springen/);
+    ).toThrow(/mag nooit van economische module wisselen/);
   });
 });
 
@@ -274,7 +274,7 @@ describe("J. rollback bij fout laat geen half wijzigingslog/mapping achter", () 
           vorigeMappingId: rijDieGesloten.nieuweMapping.id,
         }),
       ),
-    ).toThrow(/mag nooit naar een andere economische module springen/);
+    ).toThrow(/mag nooit van economische module wisselen/);
 
     const regelsNa = leesPnLBronmappingRegels(db, "023");
     expect(regelsNa).toHaveLength(2); // geen derde rij toegevoegd
@@ -396,5 +396,146 @@ describe("M. 070/GL4990 persistence proof", () => {
     expect(resolveerPnLBronmapping({ ...invoerBasis, ogbKostensoort: null }, mappingregels)).toEqual(
       expect.objectContaining({ status: "GEMAPT", economischeModule: "ALGEMENE_KOSTEN", economischeCategorie: "ALGEMENE_KOSTEN", specificiteit: "GL_DEFAULT" }),
     );
+  });
+});
+
+/**
+ * FASE M4b (2026-09-15) — GL-economisch-domein hard afdwingen. Sluit de
+ * loophole uit M4: een `NIEUWE_MAPPING_VANAF_PERIODE` mocht een GL, na het
+ * sluiten van de vorige rij, alsnog naar een ANDERE `economischeModule` laten
+ * springen (bv. GL4600 RENTE → vanaf periode X LEEGSTAND). Zie
+ * `pnlBronmappingRepository.ts`'s moduledoc voor de volledige motivatie.
+ */
+describe("M4b — GL-economisch-domein-invariant", () => {
+  it("A. de eerste mapping op een nieuwe GL bepaalt het economische domein (geen fout, niets om tegen te vergelijken)", () => {
+    const resultaat = voegPnLBronmappingMutatieToe(db, mutatie({ grootboekrekening: "8000", ogbKostensoort: "8001", economischeModule: "VERZEKERINGEN", economischeCategorie: "PREMIE" }));
+    expect(resultaat.nieuweMapping.economischeModule).toBe("VERZEKERINGEN");
+  });
+
+  it("B. een tweede OGB op dezelfde GL met dezelfde economischeModule is toegestaan", () => {
+    voegPnLBronmappingMutatieToe(db, mutatie({ grootboekrekening: "8000", ogbKostensoort: "8001", economischeModule: "VERZEKERINGEN", economischeCategorie: "PREMIE" }));
+    voegPnLBronmappingMutatieToe(db, mutatie({ grootboekrekening: "8000", ogbKostensoort: "8002", economischeModule: "VERZEKERINGEN", economischeCategorie: "EIGEN_RISICO" }));
+
+    const regels = leesPnLBronmappingRegels(db, "023").filter((r) => r.grootboekrekening === "8000");
+    expect(regels).toHaveLength(2);
+    expect(regels.every((r) => r.economischeModule === "VERZEKERINGEN")).toBe(true);
+  });
+
+  it("C. een tweede OGB op dezelfde GL met een andere economischeModule wordt geweigerd, ongeacht overlap", () => {
+    voegPnLBronmappingMutatieToe(db, mutatie({ grootboekrekening: "8000", ogbKostensoort: "8001", economischeModule: "VERZEKERINGEN", economischeCategorie: "PREMIE" }));
+
+    expect(() =>
+      voegPnLBronmappingMutatieToe(db, mutatie({ grootboekrekening: "8000", ogbKostensoort: "8002", economischeModule: "GEMEENTELIJKE_LASTEN", economischeCategorie: "OZB" })),
+    ).toThrow(/mag nooit van economische module wisselen/);
+    expect(leesPnLBronmappingRegels(db, "023").filter((r) => r.grootboekrekening === "8000")).toHaveLength(1);
+  });
+
+  it("D. exact de M4-loophole: NIEUWE_MAPPING_VANAF_PERIODE die de GL na sluiting van de vorige rij naar een andere module wil laten springen, wordt geweigerd", () => {
+    const eerste = voegPnLBronmappingMutatieToe(db, mutatie({ grootboekrekening: "4600", ogbKostensoort: "4601", economischeModule: "RENTE", economischeCategorie: "RENTEKOSTEN", geldigVanafBoekjaar: 2025, geldigVanafPeriode: "01" }));
+
+    expect(() =>
+      voegPnLBronmappingMutatieToe(
+        db,
+        mutatie({
+          grootboekrekening: "4600",
+          ogbKostensoort: "4601",
+          economischeModule: "LEEGSTAND",
+          economischeCategorie: "NUTS_LEEGSTAND",
+          geldigVanafBoekjaar: 2026,
+          geldigVanafPeriode: "01",
+          type: "NIEUWE_MAPPING_VANAF_PERIODE",
+          vorigeMappingId: eerste.nieuweMapping.id,
+          wijzigingsreden: "poging om GL4600 vanaf 2026 als LEEGSTAND te classificeren",
+        }),
+      ),
+    ).toThrow(/mag nooit van economische module wisselen/);
+
+    // De vorige rij is NIET gesloten (volledige rollback) — GL4600 blijft onveranderd RENTE, open-ended.
+    const regels = leesPnLBronmappingRegels(db, "023").filter((r) => r.grootboekrekening === "4600");
+    expect(regels).toHaveLength(1);
+    expect(regels[0]!.geldigTotBoekjaar).toBeNull();
+    expect(regels[0]!.geldigTotPeriode).toBeNull();
+  });
+
+  it("E. een historische correctie met een andere economischeModule op dezelfde GL wordt geweigerd", () => {
+    voegPnLBronmappingMutatieToe(db, mutatie({ grootboekrekening: "4600", ogbKostensoort: "4601", economischeModule: "RENTE", economischeCategorie: "RENTEKOSTEN" }));
+
+    expect(() =>
+      voegPnLBronmappingMutatieToe(
+        db,
+        mutatie({
+          grootboekrekening: "4600",
+          ogbKostensoort: "4601",
+          economischeModule: "ALGEMENE_KOSTEN",
+          economischeCategorie: "OVERIGE_ALGEMENE_KOSTEN",
+          type: "HISTORISCHE_CORRECTIE",
+          wijzigingsreden: "poging om GL4600 met terugwerkende kracht als Algemene Kosten te classificeren",
+        }),
+      ),
+    ).toThrow(/mag nooit van economische module wisselen/);
+    expect(leesPnLBronmappingRegels(db, "023").filter((r) => r.grootboekrekening === "4600")).toHaveLength(1);
+  });
+
+  it("F. GL zonder GL-default: meerdere OGB's met dezelfde economischeModule blijven toegestaan (Rente-nuance, ongewijzigd)", () => {
+    voegPnLBronmappingMutatieToe(db, mutatie({ grootboekrekening: "4600", ogbKostensoort: "4601", economischeModule: "RENTE", economischeCategorie: "RENTEKOSTEN" }));
+    voegPnLBronmappingMutatieToe(db, mutatie({ grootboekrekening: "4600", ogbKostensoort: "4602", economischeModule: "RENTE", economischeCategorie: "RENTEKOSTEN" }));
+
+    const regels = leesPnLBronmappingRegels(db, "023").filter((r) => r.grootboekrekening === "4600");
+    expect(regels).toHaveLength(2);
+    expect(regels.some((r) => r.ogbKostensoort === null)).toBe(false);
+  });
+
+  it("G. een reeds afgesloten historische rij blijft het economische domein van de GL bepalen", () => {
+    const eerste = voegPnLBronmappingMutatieToe(db, mutatie({ grootboekrekening: "4600", ogbKostensoort: "4601", economischeModule: "RENTE", economischeCategorie: "RENTEKOSTEN", geldigVanafBoekjaar: 2025, geldigVanafPeriode: "01" }));
+    // Legitieme NIEUWE_MAPPING_VANAF_PERIODE: zelfde module (RENTE), alleen de categorie verandert — dit sluit de eerste rij.
+    voegPnLBronmappingMutatieToe(
+      db,
+      mutatie({
+        grootboekrekening: "4600",
+        ogbKostensoort: "4601",
+        economischeModule: "RENTE",
+        economischeCategorie: "RENTE_OPBRENGSTEN",
+        geldigVanafBoekjaar: 2026,
+        geldigVanafPeriode: "01",
+        type: "NIEUWE_MAPPING_VANAF_PERIODE",
+        vorigeMappingId: eerste.nieuweMapping.id,
+      }),
+    );
+    const gesloten = leesPnLBronmappingRegels(db, "023").find((r) => r.id === eerste.nieuweMapping.id)!;
+    expect(gesloten.geldigTotBoekjaar).toBe(2026); // bevestigt dat de rij daadwerkelijk gesloten is
+
+    // Een DERDE mutatie op dezelfde GL met een andere module moet nog steeds worden geweigerd — de
+    // inmiddels gesloten eerste rij (en de tweede) blijven het domein (RENTE) bepalen.
+    expect(() =>
+      voegPnLBronmappingMutatieToe(db, mutatie({ grootboekrekening: "4600", ogbKostensoort: "4699", economischeModule: "VERZEKERINGEN", economischeCategorie: "PREMIE", geldigVanafBoekjaar: 2027, geldigVanafPeriode: "01" })),
+    ).toThrow(/mag nooit van economische module wisselen/);
+  });
+
+  it("H. rollback is volledig bij een moduleconflict: geen mapping, geen logregel, en een eventueel gesloten interval wordt teruggedraaid", () => {
+    const eerste = voegPnLBronmappingMutatieToe(db, mutatie({ grootboekrekening: "4600", ogbKostensoort: "4601", economischeModule: "RENTE", economischeCategorie: "RENTEKOSTEN", geldigVanafBoekjaar: 2025, geldigVanafPeriode: "01" }));
+    const aantalRegelsVoor = leesPnLBronmappingRegels(db, "023").length;
+    const aantalLogregelsVoor = leesPnLMappingWijzigingLog(db, "023").length;
+
+    expect(() =>
+      voegPnLBronmappingMutatieToe(
+        db,
+        mutatie({
+          grootboekrekening: "4600",
+          ogbKostensoort: "4601",
+          economischeModule: "LEEGSTAND",
+          economischeCategorie: "NUTS_LEEGSTAND",
+          geldigVanafBoekjaar: 2026,
+          geldigVanafPeriode: "01",
+          type: "NIEUWE_MAPPING_VANAF_PERIODE",
+          vorigeMappingId: eerste.nieuweMapping.id,
+        }),
+      ),
+    ).toThrow(/mag nooit van economische module wisselen/);
+
+    expect(leesPnLBronmappingRegels(db, "023")).toHaveLength(aantalRegelsVoor);
+    expect(leesPnLMappingWijzigingLog(db, "023")).toHaveLength(aantalLogregelsVoor);
+    const nogSteedsOpen = leesPnLBronmappingRegels(db, "023").find((r) => r.id === eerste.nieuweMapping.id)!;
+    expect(nogSteedsOpen.geldigTotBoekjaar).toBeNull();
+    expect(nogSteedsOpen.geldigTotPeriode).toBeNull();
   });
 });
