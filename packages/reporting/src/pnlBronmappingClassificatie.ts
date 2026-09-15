@@ -16,13 +16,13 @@ import type { PnLBronmappingRegel, PnLMappingSpecificiteit } from "./pnlBronmapp
  *    een generic, puur een `string`-subtype), GEEN calculator, GEEN
  *    economische berekening.
  *  - MODULE (de aanroeper, bv. `renteCentraleMapping.ts`/
- *    `leegstandCentraleMapping.ts`): categorie + bedragen/context →
- *    Werkelijk/Estimated. Blijft verantwoordelijk voor de eigen
- *    categorie-enum-validatie (via de meegegeven `resolveerCategorie`-
- *    functie, bv. `resolveerRenteCategorieViaCentraleMapping`) en voor het
- *    vertalen van dit resultaat naar de eigen, bestaande
- *    `XClassificatieRegel[]`-vorm en het aanroepen van de eigen,
- *    ONGEWIJZIGDE calculator.
+ *    `leegstandCentraleMapping.ts`/`geplandeVerkoopCentraleMapping.ts`):
+ *    categorie + bedragen/context → Werkelijk/Estimated. Blijft
+ *    verantwoordelijk voor de eigen categorie-enum-validatie (via de
+ *    meegegeven `resolveerCategorie`-functie, bv.
+ *    `resolveerRenteCategorieViaCentraleMapping`) en voor het vertalen van
+ *    dit resultaat naar de eigen, bestaande `XClassificatieRegel[]`-vorm en
+ *    het aanroepen van de eigen, ONGEWIJZIGDE calculator.
  *  - PRESENTATIE: geen onderdeel van deze of enige laag hierboven (latere
  *    fase).
  *
@@ -31,32 +31,57 @@ import type { PnLBronmappingRegel, PnLMappingSpecificiteit } from "./pnlBronmapp
  * sloeg een boeking met `ogbKostensoort: null` altijd rechtstreeks op als
  * NIET_GEMAPT, zonder de resolver te raadplegen — correct voor Rente/
  * Leegstand, want geen van beide kent een GL-default, dus de resolver zou
- * toch NIET_GEMAPT hebben teruggegeven. Die kortsluiting was echter impliciet
- * afhankelijk van "deze module heeft toevallig geen GL-default" — voor een
- * toekomstige module MET een GL-default zou hij ten onrechte een geldige
- * default-classificatie hebben overgeslagen. Deze generieke helper roept
- * daarom ALTIJD `resolveerCategorie` aan, ook voor `ogbKostensoort: null` —
- * de resolver zelf beslist dan correct tussen GL-default en NIET_GEMAPT (zie
- * `resolveerPnLBronmapping`). Bewezen bij Rente/Leegstand: identiek gedrag,
- * want zonder GL-default resolveert `null` daar sowieso altijd naar
- * NIET_GEMAPT (zie `renteCentraleMapping.test.ts`/`leegstandCentraleMapping.test.ts`).
+ * toch NIET_GEMAPT hebben teruggegeven. Deze helper roept daarom ALTIJD
+ * `resolveerCategorie` aan, ook voor `ogbKostensoort: null` — de resolver
+ * zelf beslist dan correct tussen GL-default en NIET_GEMAPT (zie
+ * `resolveerPnLBronmapping`).
+ *
+ * TWEE RESULTAATBRONNEN — `perOgb` (GL_OGB-specifiek) EN `perGrootboek`
+ * (GL_DEFAULT) — TOEGEVOEGD IN FASE M6a (2026-09-15) VOOR GEPLANDE VERKOOP:
+ * Rente/Leegstand kennen geen GL-default, dus voor hen bleef `perOgb` de
+ * enige relevante uitkomst (`perGrootboek` blijft voor die twee altijd leeg).
+ * Geplande Verkoop (OB-039) heeft daarentegen een bestaande, TWEEDELIGE
+ * classificatiebron (OGB-array + GL-array, zie `begroteGeplandeVerkoop.ts`)
+ * — een GL_DEFAULT-resolutie hoort daar NOOIT in de OGB-array te belanden
+ * (dat zou de bewust vervallen legacy-semantiek "een OGB-code betekent
+ * hetzelfde ongeacht de GL" ONBEDOELD terugbrengen), maar in de GL-array,
+ * gesleuteld op de grootboekrekening. Vandaar de expliciete
+ * `specificiteit`-routering hieronder: GL_OGB → `perOgb`, GL_DEFAULT →
+ * `perGrootboek`.
+ *
+ * FAIL-FAST BIJ EEN BATCH-BREDE OGB-INCONSISTENTIE (kern van de M6a-
+ * correctheid, niet alleen een cosmetische afronding): `perOgb` is
+ * uitsluitend OGB-gesleuteld, GEEN GL-dimensie — exact de vorm die
+ * `RenteClassificatieRegel`/`LeegstandClassificatieRegel`/
+ * `GeplandeVerkoopClassificatieRegel` vandaag AL hebben. Een calculator die
+ * zo'n array ontvangt (bv. `berekenWerkelijkGeplandeVerkoop`) past een
+ * gevonden OGB-match toe OP ELKE boeking met die OGB-code, ONGEACHT de GL
+ * van die boeking — de calculator zelf is dus inherent GL-blind zodra hij
+ * eenmaal een OGB-array in handen heeft. Zou dezelfde ogbKostensoort binnen
+ * één batch op TWEE VERSCHILLENDE grootboekrekeningen voorkomen met een
+ * verschillende centrale uitkomst (een andere categorie, EEN VAN BEIDE
+ * NIET_GEMAPT, of één ervan via GL-default in plaats van GL+OGB-specifiek),
+ * dan zou het plaatsen van die code in `perOgb` de boeking(en) op de ANDERE
+ * grootboekrekening(en) STILZWIJGEND FOUT classificeren zodra de aanroeper
+ * deze array aan de bestaande calculator doorgeeft — een risico dat pas met
+ * de M6a-Geplande-Verkoop-migratie relevant werd (Rente/Leegstand hergebruiken
+ * per bewezen administratie nooit dezelfde OGB-code op meerdere GL's).
+ * Vandaar de EXPLICIETE, VOORAFGAANDE batch-brede consistentiecheck
+ * hieronder — vóór welke uitkomst dan ook aan `perOgb`/`perGrootboek` wordt
+ * toegevoegd: elke ogbKostensoort die op meer dan één grootboekrekening in
+ * de batch voorkomt, moet overal IDENTIEK resolveren (zelfde categorie, of
+ * overal NIET_GEMAPT). Zo niet, dan gooit deze functie een expliciete fout
+ * — nooit een willekeurige/laatst-gewonnen keuze. Voor alle bewezen
+ * brondata (Rente/Leegstand/Geplande Verkoop) komt dit nooit voor; mocht een
+ * toekomstige administratie dit wél doen, dan is dat een expliciete
+ * architectuurvraag, nooit een stille misclassificatie. `perGrootboek` kan
+ * in de praktijk nooit onderling botsen (CLAUDE.md §6: één periodecontext
+ * per aanroep levert per GL altijd dezelfde default op) — de gelijknamige
+ * check daar is uitsluitend defensief.
  *
  * Classificeert elke UNIEKE `(grootboekrekening, ogbKostensoort)`-combinatie
  * in de batch precies één keer (zelfde efficiëntie-/consistentieoverweging
  * als de oorspronkelijke per-module implementaties).
- *
- * BEWUSTE BEPERKING (geen over-engineering voor een hypothetische toekomst):
- * `perOgb` is — exact zoals `RenteClassificatieRegel`/`LeegstandClassificatieRegel`
- * dat vandaag ZELF al zijn — uitsluitend OGB-gesleuteld, GEEN GL-dimensie.
- * Resolveert een `ogbKostensoort: null`-combinatie ooit succesvol (alleen
- * mogelijk voor een toekomstige module MET een GL-default; voor Rente/
- * Leegstand gebeurt dit nooit, zie boven), dan heeft die uitkomst hier geen
- * plek in `perOgb` — precies omdat de bestaande calculator-classificatieregels
- * van Rente/Leegstand zelf al geen "categorie zonder OGB"-concept kennen. Een
- * toekomstige module MET een GL-default en een GL-gesleutelde
- * classificatieregel-vorm hergebruikt deze helper dus niet 1-op-1 — dat is
- * verwacht en geen gebrek van deze functie, geen generiek framework
- * geforceerd.
  */
 
 export interface PnLRuweBoekingBasis {
@@ -64,6 +89,14 @@ export interface PnLRuweBoekingBasis {
   readonly ogbKostensoort: string | null;
   /** `null` als er geen OGB-kostensoort is — bij een gevulde OGB komt dit rechtstreeks van de bron, nooit verzonnen. */
   readonly ogbKostensoortOmschrijving: string | null;
+  /**
+   * Optioneel: uitsluitend relevant voor een module met een GL-default-
+   * classificatiebron (bv. Geplande Verkoop). Rente/Leegstand kennen geen
+   * GL-default en laten dit veld weg — dit veld MOET optioneel blijven zodat
+   * hun bestaande, rijkere boekingtypes (zonder dit veld) deze generieke
+   * helper kunnen blijven gebruiken zonder wijziging.
+   */
+  readonly grootboekOmschrijving?: string | null;
 }
 
 export interface PnLNietGemapteCombinatie {
@@ -72,8 +105,10 @@ export interface PnLNietGemapteCombinatie {
 }
 
 export interface PnLGeclassificeerdeBoekingenResultaat<TCategorie extends string> {
-  /** Per succesvol geresolvede OGB-kostensoort: de categorie + omschrijving — de aanroeper vertaalt dit naar de eigen module-classificatieregel-vorm. */
+  /** Per succesvol GL+OGB-specifiek geresolvede OGB-kostensoort: de categorie + omschrijving. */
   readonly perOgb: ReadonlyMap<string, { categorie: TCategorie; ogbKostensoortOmschrijving: string }>;
+  /** Per succesvol via GL-default geresolvede grootboekrekening: de categorie + omschrijving. Voor modules zonder GL-default (Rente/Leegstand) altijd leeg. */
+  readonly perGrootboek: ReadonlyMap<string, { categorie: TCategorie; grootboekOmschrijving: string }>;
   /** (GL, OGB)-combinaties waarvoor de centrale mapping GEEN uitkomst opleverde — expliciet zichtbaar, nooit stil genegeerd. */
   readonly nietGemapt: readonly PnLNietGemapteCombinatie[];
 }
@@ -108,23 +143,72 @@ export function classificeerBoekingenViaPnLMapping<TBoeking extends PnLRuweBoeki
     uniekeCombinaties.set(`${boeking.grootboekrekening}::${boeking.ogbKostensoort ?? ""}`, boeking);
   }
 
-  const nietGemapt: PnLNietGemapteCombinatie[] = [];
-  const perOgb = new Map<string, { categorie: TCategorie; ogbKostensoortOmschrijving: string }>();
+  interface ComboResolutie {
+    grootboekrekening: string;
+    ogbKostensoort: string | null;
+    ogbKostensoortOmschrijving: string | null;
+    grootboekOmschrijving: string | null | undefined;
+    resolutie: { categorie: TCategorie; specificiteit: PnLMappingSpecificiteit } | null;
+  }
 
-  for (const combinatie of uniekeCombinaties.values()) {
-    const resultaat = resolveerCategorie(
+  const combos: ComboResolutie[] = Array.from(uniekeCombinaties.values()).map((combinatie) => ({
+    grootboekrekening: combinatie.grootboekrekening,
+    ogbKostensoort: combinatie.ogbKostensoort,
+    ogbKostensoortOmschrijving: combinatie.ogbKostensoortOmschrijving,
+    grootboekOmschrijving: combinatie.grootboekOmschrijving,
+    resolutie: resolveerCategorie(
       { bedrijfsnr: context.bedrijfsnr, grootboekrekening: combinatie.grootboekrekening, boekjaar: context.boekjaar, boekperiode: context.boekperiode, opSysteemtijdstip: context.opSysteemtijdstip },
       combinatie.ogbKostensoort,
       mappingregels,
-    );
-    if (resultaat === null) {
-      nietGemapt.push({ grootboekrekening: combinatie.grootboekrekening, ogbKostensoort: combinatie.ogbKostensoort });
-      continue;
-    }
-    if (combinatie.ogbKostensoort !== null) {
-      perOgb.set(combinatie.ogbKostensoort, { categorie: resultaat.categorie, ogbKostensoortOmschrijving: combinatie.ogbKostensoortOmschrijving ?? combinatie.ogbKostensoort });
+    ),
+  }));
+
+  // Batch-brede consistentiecheck (zie moduledoc): dezelfde ogbKostensoort op meerdere grootboekrekeningen
+  // moet overal identiek resolveren, VOORDAT enige uitkomst aan perOgb/perGrootboek wordt toegevoegd.
+  const perOgbCode = new Map<string, ComboResolutie[]>();
+  for (const combo of combos) {
+    if (combo.ogbKostensoort === null) continue;
+    const groep = perOgbCode.get(combo.ogbKostensoort) ?? [];
+    groep.push(combo);
+    perOgbCode.set(combo.ogbKostensoort, groep);
+  }
+  for (const [ogbKostensoort, groep] of perOgbCode) {
+    const grootboekrekeningen = new Set(groep.map((c) => c.grootboekrekening));
+    if (grootboekrekeningen.size <= 1) continue; // dezelfde GL kan hier niet meermaals voorkomen (al gededupliceerd)
+    const eerste = groep[0]!;
+    const inconsistent = groep.some((c) => (c.resolutie === null) !== (eerste.resolutie === null) || c.resolutie?.categorie !== eerste.resolutie?.categorie);
+    if (inconsistent) {
+      const details = groep.map((c) => `GL ${c.grootboekrekening} → ${c.resolutie === null ? "NIET_GEMAPT" : `"${c.resolutie.categorie}" (${c.resolutie.specificiteit})`}`).join("; ");
+      throw new Error(
+        `OGB-kostensoort "${ogbKostensoort}" resolveert binnen deze batch verschillend afhankelijk van de grootboekrekening (${details}) — een OGB-gesleutelde classificatie-array kan dat niet correct weergeven voor de bestaande calculator (die een OGB-match onafhankelijk van de GL toepast). Dit is een architectuurvraag, geen stille aanname.`,
+      );
     }
   }
 
-  return { perOgb, nietGemapt };
+  const nietGemapt: PnLNietGemapteCombinatie[] = [];
+  const perOgb = new Map<string, { categorie: TCategorie; ogbKostensoortOmschrijving: string }>();
+  const perGrootboek = new Map<string, { categorie: TCategorie; grootboekOmschrijving: string }>();
+
+  for (const combo of combos) {
+    if (combo.resolutie === null) {
+      nietGemapt.push({ grootboekrekening: combo.grootboekrekening, ogbKostensoort: combo.ogbKostensoort });
+      continue;
+    }
+
+    if (combo.resolutie.specificiteit === "GL_OGB" && combo.ogbKostensoort !== null) {
+      perOgb.set(combo.ogbKostensoort, { categorie: combo.resolutie.categorie, ogbKostensoortOmschrijving: combo.ogbKostensoortOmschrijving ?? combo.ogbKostensoort });
+      continue;
+    }
+
+    // GL_DEFAULT (of, defensief, GL_OGB zonder ogbKostensoort — kan de resolver in de praktijk nooit teruggeven).
+    const bestaandeGl = perGrootboek.get(combo.grootboekrekening);
+    if (bestaandeGl !== undefined && bestaandeGl.categorie !== combo.resolutie.categorie) {
+      throw new Error(
+        `Grootboekrekening ${combo.grootboekrekening} resolveert binnen deze batch naar twee verschillende GL-default-categorieën ("${bestaandeGl.categorie}" vs. "${combo.resolutie.categorie}") — interne inconsistentie, dit kan bij een correcte, enkele periodecontext per aanroep niet gebeuren.`,
+      );
+    }
+    perGrootboek.set(combo.grootboekrekening, { categorie: combo.resolutie.categorie, grootboekOmschrijving: combo.grootboekOmschrijving ?? combo.grootboekrekening });
+  }
+
+  return { perOgb, perGrootboek, nietGemapt };
 }

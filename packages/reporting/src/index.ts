@@ -47,6 +47,7 @@ export * from "./pnlBronmappingClassificatie.js";
 export * from "./begroting/algemeneKostenCentraleMapping.js";
 export * from "./begroting/renteCentraleMapping.js";
 export * from "./begroting/leegstandCentraleMapping.js";
+export * from "./begroting/geplandeVerkoopCentraleMapping.js";
 export * from "./begroting/begroteGeplandOnderhoud.js";
 export * from "./begroting/begroteCorrectiefDagelijksOnderhoud.js";
 export * from "./begroting/begroteVerzekeringen.js";

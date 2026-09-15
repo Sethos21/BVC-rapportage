@@ -90,4 +90,56 @@ describe("classificeerBoekingenViaPnLMapping", () => {
     classificeerBoekingenViaPnLMapping(CONTEXT, [boeking()], mappingregels, resolveer);
     expect(ontvangenMapping).toBe(mappingregels);
   });
+
+  it("M6a: een GL_DEFAULT-resolutie belandt in perGrootboek, gesleuteld op de grootboekrekening, NOOIT in perOgb", () => {
+    const resolveer = (): { categorie: "VERKOOPOPBRENGST"; specificiteit: "GL_DEFAULT" } => ({ categorie: "VERKOOPOPBRENGST", specificiteit: "GL_DEFAULT" });
+    const { perOgb, perGrootboek, nietGemapt } = classificeerBoekingenViaPnLMapping(
+      CONTEXT,
+      [boeking({ grootboekrekening: "08830", ogbKostensoort: "3010", grootboekOmschrijving: "Opbrengst verkoop pand" })],
+      [],
+      resolveer,
+    );
+    expect(nietGemapt).toEqual([]);
+    expect(perOgb.size).toBe(0); // GL_DEFAULT hoort NOOIT in de OGB-array, ook al was ogbKostensoort niet-null
+    expect(perGrootboek.get("08830")).toEqual({ categorie: "VERKOOPOPBRENGST", grootboekOmschrijving: "Opbrengst verkoop pand" });
+  });
+
+  it("M6a: grootboekOmschrijving valt terug op de grootboekrekening zelf wanneer niet aangeleverd", () => {
+    const resolveer = (): { categorie: "X"; specificiteit: "GL_DEFAULT" } => ({ categorie: "X", specificiteit: "GL_DEFAULT" });
+    const { perGrootboek } = classificeerBoekingenViaPnLMapping(CONTEXT, [boeking({ grootboekrekening: "5000", grootboekOmschrijving: null })], [], resolveer);
+    expect(perGrootboek.get("5000")).toEqual({ categorie: "X", grootboekOmschrijving: "5000" });
+  });
+
+  it("M6a: dezelfde OGB-code op twee verschillende grootboekrekeningen met dezelfde uitkomst is toegestaan", () => {
+    const resolveer = (invoer: { grootboekrekening: string }): { categorie: "X"; specificiteit: "GL_OGB" } => ({ categorie: "X", specificiteit: "GL_OGB" });
+    const boekingen = [boeking({ grootboekrekening: "1000", ogbKostensoort: "AAA" }), boeking({ grootboekrekening: "2000", ogbKostensoort: "AAA" })];
+    const { perOgb } = classificeerBoekingenViaPnLMapping(CONTEXT, boekingen, [], resolveer);
+    expect(perOgb.get("AAA")).toEqual({ categorie: "X", ogbKostensoortOmschrijving: "test" });
+  });
+
+  it("M6a: dezelfde OGB-code op twee verschillende grootboekrekeningen met VERSCHILLENDE categorie faalt fail-fast (batch-brede consistentiecheck)", () => {
+    const resolveer = (invoer: { grootboekrekening: string }): { categorie: "X" | "Y"; specificiteit: "GL_OGB" } => ({
+      categorie: invoer.grootboekrekening === "1000" ? "X" : "Y",
+      specificiteit: "GL_OGB",
+    });
+    const boekingen = [boeking({ grootboekrekening: "1000", ogbKostensoort: "AAA" }), boeking({ grootboekrekening: "2000", ogbKostensoort: "AAA" })];
+    expect(() => classificeerBoekingenViaPnLMapping(CONTEXT, boekingen, [], resolveer)).toThrow(/resolveert binnen deze batch verschillend afhankelijk van de grootboekrekening/);
+  });
+
+  it("M6a: dezelfde OGB-code op twee verschillende grootboekrekeningen waarvan er één NIET_GEMAPT is faalt eveneens fail-fast", () => {
+    const resolveer = (invoer: { grootboekrekening: string }): { categorie: "X"; specificiteit: "GL_OGB" } | null =>
+      invoer.grootboekrekening === "1000" ? { categorie: "X", specificiteit: "GL_OGB" } : null;
+    const boekingen = [boeking({ grootboekrekening: "1000", ogbKostensoort: "AAA" }), boeking({ grootboekrekening: "2000", ogbKostensoort: "AAA" })];
+    expect(() => classificeerBoekingenViaPnLMapping(CONTEXT, boekingen, [], resolveer)).toThrow(/resolveert binnen deze batch verschillend afhankelijk van de grootboekrekening/);
+  });
+
+  it("M6a: het exacte GL08830/OGB3010-scenario — GL_OGB elders voor dezelfde code EN GL_DEFAULT hier zijn inconsistent binnen één batch, dus fail-fast (geen stille misclassificatie)", () => {
+    // Dit is precies het gevaar dat de batch-brede check afdekt: OGB "3010" is specifiek gemapt op GL00166
+    // (-> BOEKWAARDE_AFBOEKING), maar zou op GL08830 zonder specifieke mapping via het GL-default
+    // (-> VERKOOPOPBRENGST) resolveren — een OGB-gesleutelde array kan dat verschil niet weergeven.
+    const resolveer = (invoer: { grootboekrekening: string }): { categorie: "BOEKWAARDE_AFBOEKING" | "VERKOOPOPBRENGST"; specificiteit: "GL_OGB" | "GL_DEFAULT" } =>
+      invoer.grootboekrekening === "00166" ? { categorie: "BOEKWAARDE_AFBOEKING", specificiteit: "GL_OGB" } : { categorie: "VERKOOPOPBRENGST", specificiteit: "GL_DEFAULT" };
+    const boekingen = [boeking({ grootboekrekening: "00166", ogbKostensoort: "3010" }), boeking({ grootboekrekening: "08830", ogbKostensoort: "3010" })];
+    expect(() => classificeerBoekingenViaPnLMapping(CONTEXT, boekingen, [], resolveer)).toThrow(/resolveert binnen deze batch verschillend afhankelijk van de grootboekrekening/);
+  });
 });

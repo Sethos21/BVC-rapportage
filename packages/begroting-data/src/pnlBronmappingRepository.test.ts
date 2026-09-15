@@ -5,9 +5,11 @@ import type { DatabaseSync } from "node:sqlite";
 import Decimal from "decimal.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  berekenWerkelijkGeplandeVerkoopViaCentraleMapping,
   berekenWerkelijkLeegstandViaCentraleMapping,
   berekenWerkelijkRenteViaCentraleMapping,
   resolveerPnLBronmapping,
+  type GeplandeVerkoopRuweBoekingRegel,
   type LeegstandRuweBoekingRegel,
   type PnLBronmappingRegel,
   type RenteRuweBoekingRegel,
@@ -604,5 +606,83 @@ describe("M5. Leegstand end-to-end via persistence (070 GL4350/OGB4319)", () => 
     ).toThrow(/mag nooit van economische module wisselen/);
 
     expect(leesPnLBronmappingRegels(db, "070")).toHaveLength(1);
+  });
+});
+
+/**
+ * FASE M6a (2026-09-15) — Geplande Verkoop (OB-039) end-to-end via de
+ * bestaande M4/M4b-persistence: mapping opslaan → teruglezen → centrale
+ * resolver (via de generieke `classificeerBoekingenViaPnLMapping`) → de
+ * ongewijzigde `berekenWerkelijkGeplandeVerkoop`. Bewezen bronproef:
+ * 023_Malcon_Beheer_BV, boekjaar 2026 periode 04 (Hoofdstraat/Driebergen).
+ * Geen tweede/module-specifieke persistence — dezelfde generieke
+ * `voegPnLBronmappingMutatieToe`/`leesPnLBronmappingRegels` als Rente/
+ * Leegstand hierboven.
+ */
+describe("M6a. Geplande Verkoop end-to-end via persistence (023, GL08830-default + GL00166/OGB3010)", () => {
+  it("H. mappings opgeslagen via de repository, teruggelezen, en via de ongewijzigde centrale keten -> economisch identiek aan de echte 023-bronproef", () => {
+    voegPnLBronmappingMutatieToe(
+      db,
+      mutatie({
+        bedrijfsnr: "023",
+        grootboekrekening: "08830",
+        ogbKostensoort: null,
+        ogbKostensoortOmschrijving: null,
+        economischeModule: "VERKOOP",
+        economischeCategorie: "VERKOOPOPBRENGST",
+        geldigVanafBoekjaar: 2026,
+        geldigVanafPeriode: "01",
+      }),
+    );
+    voegPnLBronmappingMutatieToe(
+      db,
+      mutatie({
+        bedrijfsnr: "023",
+        grootboekrekening: "00166",
+        ogbKostensoort: "3010",
+        ogbKostensoortOmschrijving: "afwaardering ASW",
+        economischeModule: "VERKOOP",
+        economischeCategorie: "BOEKWAARDE_AFBOEKING",
+        geldigVanafBoekjaar: 2026,
+        geldigVanafPeriode: "01",
+      }),
+    );
+
+    const mappingregels: readonly PnLBronmappingRegel[] = leesPnLBronmappingRegels(db, "023");
+    expect(mappingregels).toHaveLength(2); // geen fictieve GL00167-mapping toegevoegd
+
+    const boekingen: GeplandeVerkoopRuweBoekingRegel[] = [
+      { grootboekrekening: "08830", grootboekOmschrijving: "Opbrengst verkoop pand", ogbKostensoort: null, ogbKostensoortOmschrijving: null, saldo: new Decimal(-785000) }, // Hoofdstraat-opbrengst
+      { grootboekrekening: "00166", grootboekOmschrijving: null, ogbKostensoort: "3010", ogbKostensoortOmschrijving: "afwaardering ASW", saldo: new Decimal(-535000) }, // Driebergen-boekwaarde ASW
+      { grootboekrekening: "00167", grootboekOmschrijving: null, ogbKostensoort: null, ogbKostensoortOmschrijving: null, saldo: new Decimal(-100000) }, // Driebergen-boekwaarde HW, nooit bewezen
+      { grootboekrekening: "08830", grootboekOmschrijving: "Opbrengst verkoop pand", ogbKostensoort: null, ogbKostensoortOmschrijving: null, saldo: new Decimal(635000) }, // Driebergen-reclassificatie op 08830
+    ];
+
+    const { werkelijk, nietGemapt } = berekenWerkelijkGeplandeVerkoopViaCentraleMapping(
+      { bedrijfsnr: "023", boekjaar: 2026, boekperiode: "04", opSysteemtijdstip: new Date("2026-09-15T12:00:00.000Z") },
+      boekingen,
+      mappingregels,
+    );
+
+    expect(nietGemapt).toEqual([{ grootboekrekening: "00167", ogbKostensoort: null }]);
+    expect(werkelijk.perComponent.find((c) => c.component === "VERKOOPOPBRENGST")!.componentTotaal.toString()).toBe("-150000");
+    expect(werkelijk.perComponent.find((c) => c.component === "BOEKWAARDE_AFBOEKING")!.componentTotaal.toString()).toBe("-535000");
+    expect(werkelijk.nietGeclassificeerdTotaal.toString()).toBe("-100000");
+  });
+
+  it("de M4b GL-module-invariant geldt onverkort voor Verkoop-GL's: GL08830 mag na deze mapping nooit meer een andere module krijgen", () => {
+    voegPnLBronmappingMutatieToe(
+      db,
+      mutatie({ bedrijfsnr: "023", grootboekrekening: "08830", ogbKostensoort: null, ogbKostensoortOmschrijving: null, economischeModule: "VERKOOP", economischeCategorie: "VERKOOPOPBRENGST" }),
+    );
+
+    expect(() =>
+      voegPnLBronmappingMutatieToe(
+        db,
+        mutatie({ bedrijfsnr: "023", grootboekrekening: "08830", ogbKostensoort: "3010", ogbKostensoortOmschrijving: "afwaardering ASW", economischeModule: "RENTE", economischeCategorie: "RENTEKOSTEN" }),
+      ),
+    ).toThrow(/mag nooit van economische module wisselen/);
+
+    expect(leesPnLBronmappingRegels(db, "023")).toHaveLength(1);
   });
 });

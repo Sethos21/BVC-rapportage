@@ -188,13 +188,44 @@ describe("berekenWerkelijkGeplandeVerkoop", () => {
     expect(r.perComponent.find((c) => c.component === "VERKOOPOPBRENGST")!.perOgbKostensoort).toHaveLength(0);
   });
 
-  it("V. OGB-classificatie krijgt voorrang boven GL-classificatie wanneer een boeking wél een bekende OGB-code draagt", () => {
+  /**
+   * V. LEGACY-DOCUMENTERENDE TEST (FASE M6a, 2026-09-15) — deze test bewees
+   * oorspronkelijk dat een OGB-code ADMINISTRATIEBREED (ongeacht welke GL)
+   * voorrang kreeg boven een GL-classificatie. Die semantiek is per
+   * expliciet businessbesluit (M6a) BEWUST VERVALLEN: een OGB-code heeft
+   * geen economische betekenis los van de grootboekrekening waarop de
+   * boeking staat. De centrale, GL-geneste resolver (`geplandeVerkoopCentraleMapping.ts`,
+   * via `resolveerPnLBronmapping`) classificeert dit exacte scenario
+   * (GL08830 + OGB "3010", zonder een specifieke (GL08830, "3010")-mapping)
+   * daarom voortaan als VERKOOPOPBRENGST via GL08830's eigen GL-default —
+   * NIET als BOEKWAARDE_AFBOEKING. Zie
+   * `geplandeVerkoopCentraleMapping.test.ts`'s "D"-test voor het bewijs van
+   * die NIEUWE regel op het echte productiepad.
+   *
+   * Deze test zelf blijft bestaan en haar verwachte uitkomst blijft
+   * ONGEWIJZIGD, want ze test uitsluitend het interne, LAAGENIVEAU-algoritme
+   * van de PURE, ONGEWIJZIGDE calculator `berekenWerkelijkGeplandeVerkoop`
+   * zelf (die nog altijd eerst een administratiebrede OGB-match probeert,
+   * dan een GL-match — dat interne algoritme verandert NIET, zie
+   * `begroteGeplandeVerkoop.ts`'s moduledoc) met een HANDMATIG samengestelde
+   * classificatie-invoer. De centrale-mapping-productieketen zal dit exacte
+   * paar (dezelfde OGB-code specifiek gemapt op de ene GL, terwijl de andere
+   * GL een conflicterend GL-default heeft) NOOIT als invoer aan deze
+   * calculator aanbieden — `classificeerBoekingenViaPnLMapping`'s
+   * batch-brede consistentiecheck (`pnlBronmappingClassificatie.ts`, M6a)
+   * gooit in dat geval juist een expliciete fout in plaats van zo'n
+   * tegenstrijdige classificatie-array te construeren. Deze test documenteert
+   * dus uitsluitend nog legacygedrag van de calculator in isolatie, GEEN
+   * bewezen of nagestreefd systeemgedrag.
+   */
+  it("V (LEGACY). de pure calculator zelf probeert nog altijd eerst een administratiebrede OGB-match — dit interne algoritme verandert niet, ook al voedt de centrale productieketen het nooit meer met een conflicterende invoer als deze", () => {
     const r = berekenWerkelijkGeplandeVerkoop(
       [boeking({ grootboekrekening: "08830", ogbKostensoort: "3010", saldo: new Decimal(-1000) })],
       OGB_KLASSIFICATIE_023,
       GL_KLASSIFICATIE_023,
     );
-    // OGB 3010 -> BOEKWAARDE_AFBOEKING wint van GL 08830 -> VERKOOPOPBRENGST.
+    // OGB 3010 -> BOEKWAARDE_AFBOEKING wint van GL 08830 -> VERKOOPOPBRENGST — uitsluitend het
+    // ongewijzigde interne calculatoralgoritme, zie de moduledoc hierboven.
     expect(r.perComponent.find((c) => c.component === "BOEKWAARDE_AFBOEKING")!.componentTotaal.toString()).toBe("-1000");
     expect(r.perComponent.find((c) => c.component === "VERKOOPOPBRENGST")!.componentTotaal.toString()).toBe("0");
   });
