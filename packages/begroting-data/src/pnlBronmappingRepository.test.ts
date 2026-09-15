@@ -5,8 +5,10 @@ import type { DatabaseSync } from "node:sqlite";
 import Decimal from "decimal.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  berekenWerkelijkLeegstandViaCentraleMapping,
   berekenWerkelijkRenteViaCentraleMapping,
   resolveerPnLBronmapping,
+  type LeegstandRuweBoekingRegel,
   type PnLBronmappingRegel,
   type RenteRuweBoekingRegel,
 } from "@bvc/reporting";
@@ -537,5 +539,70 @@ describe("M4b — GL-economisch-domein-invariant", () => {
     const nogSteedsOpen = leesPnLBronmappingRegels(db, "023").find((r) => r.id === eerste.nieuweMapping.id)!;
     expect(nogSteedsOpen.geldigTotBoekjaar).toBeNull();
     expect(nogSteedsOpen.geldigTotPeriode).toBeNull();
+  });
+});
+
+/**
+ * FASE M5 (2026-09-15) — Leegstand (OB-031) end-to-end via de bestaande
+ * M4/M4b-persistence: mapping opslaan → teruglezen → centrale resolver →
+ * de ongewijzigde `berekenWerkelijkLeegstand` (via M5's
+ * `berekenWerkelijkLeegstandViaCentraleMapping`). Bewezen bronproef:
+ * 070_Rooise_Zoom, GL4350/OGB4319 → SERVICEKOSTEN_LEEGSTAND, 6 boekingen,
+ * complex 003, totaal €1.354,10. Geen tweede/module-specifieke persistence —
+ * dezelfde generieke `voegPnLBronmappingMutatieToe`/`leesPnLBronmappingRegels`
+ * als Rente hierboven.
+ */
+describe("M5. Leegstand end-to-end via persistence (070 GL4350/OGB4319)", () => {
+  it("B/D. mapping opgeslagen via de repository, teruggelezen, en via de ongewijzigde centrale keten -> Servicekosten leegstand exact €1.354,10", () => {
+    voegPnLBronmappingMutatieToe(
+      db,
+      mutatie({
+        bedrijfsnr: "070",
+        grootboekrekening: "4350",
+        ogbKostensoort: "4319",
+        ogbKostensoortOmschrijving: "Servicekosten leegstand",
+        economischeModule: "LEEGSTAND",
+        economischeCategorie: "SERVICEKOSTEN_LEEGSTAND",
+      }),
+    );
+
+    const mappingregels: readonly PnLBronmappingRegel[] = leesPnLBronmappingRegels(db, "070");
+    expect(mappingregels).toHaveLength(1); // geen fictieve Nuts-/Overige-mapping toegevoegd
+
+    const boekingen: LeegstandRuweBoekingRegel[] = [
+      { grootboekrekening: "4350", ogbKostensoort: "4319", ogbKostensoortOmschrijving: "Servicekosten leegstand", complexnummer: "003", saldo: new Decimal(1000) },
+      { grootboekrekening: "4350", ogbKostensoort: "4319", ogbKostensoortOmschrijving: "Servicekosten leegstand", complexnummer: "003", saldo: new Decimal(1000) },
+      { grootboekrekening: "4350", ogbKostensoort: "4319", ogbKostensoortOmschrijving: "Servicekosten leegstand", complexnummer: "003", saldo: new Decimal(1000) },
+      { grootboekrekening: "4350", ogbKostensoort: "4319", ogbKostensoortOmschrijving: "Servicekosten leegstand", complexnummer: "003", saldo: new Decimal("97.53") },
+      { grootboekrekening: "4350", ogbKostensoort: "4319", ogbKostensoortOmschrijving: "Servicekosten leegstand", complexnummer: "003", saldo: new Decimal("-1283.17") },
+      { grootboekrekening: "4350", ogbKostensoort: "4319", ogbKostensoortOmschrijving: "Servicekosten leegstand", complexnummer: "003", saldo: new Decimal("-460.26") },
+    ];
+
+    const { werkelijk, nietGemapt } = berekenWerkelijkLeegstandViaCentraleMapping(
+      { bedrijfsnr: "070", boekjaar: 2025, boekperiode: "12", opSysteemtijdstip: new Date("2026-09-15T12:00:00.000Z") },
+      boekingen,
+      mappingregels,
+    );
+
+    expect(nietGemapt).toEqual([]);
+    expect(werkelijk.perCategorie.find((c) => c.categorie === "SERVICEKOSTEN_LEEGSTAND")!.categorieTotaal.toString()).toBe("1354.1");
+    expect(werkelijk.perCategorie.find((c) => c.categorie === "NUTS_LEEGSTAND")!.categorieTotaal.toString()).toBe("0");
+    expect(werkelijk.perCategorie.find((c) => c.categorie === "OVERIGE_LEEGSTANDSKOSTEN")!.categorieTotaal.toString()).toBe("0");
+  });
+
+  it("M. GL-module-invariant (M4b) geldt onverkort voor Leegstand: GL4350 mag na deze mapping nooit meer een andere module krijgen", () => {
+    voegPnLBronmappingMutatieToe(
+      db,
+      mutatie({ bedrijfsnr: "070", grootboekrekening: "4350", ogbKostensoort: "4319", ogbKostensoortOmschrijving: "Servicekosten leegstand", economischeModule: "LEEGSTAND", economischeCategorie: "SERVICEKOSTEN_LEEGSTAND" }),
+    );
+
+    expect(() =>
+      voegPnLBronmappingMutatieToe(
+        db,
+        mutatie({ bedrijfsnr: "070", grootboekrekening: "4350", ogbKostensoort: "4998", ogbKostensoortOmschrijving: "fictief Nuts-OGB", economischeModule: "ALGEMENE_KOSTEN", economischeCategorie: "OVERIGE_ALGEMENE_KOSTEN" }),
+      ),
+    ).toThrow(/mag nooit van economische module wisselen/);
+
+    expect(leesPnLBronmappingRegels(db, "070")).toHaveLength(1);
   });
 });
