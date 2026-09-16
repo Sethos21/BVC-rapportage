@@ -1,7 +1,14 @@
 import Decimal from "decimal.js";
 import { describe, expect, it } from "vitest";
 import { ALGEMENE_KOSTEN_CATEGORIEEN, berekenBegroteAlgemeneKosten, type BgAlgemeneKostenCategorie, type BgAlgemeneKostenCategorieAannames, type BgAlgemeneKostenClassificatieRegel } from "./begroteAlgemeneKosten.js";
-import { bouwAlgemeneKostenClassificatieViaCentraleMapping, resolveerAlgemeneKostenCategorieViaCentraleMapping, type AlgemeneKostenCentraleMappingInvoer } from "./algemeneKostenCentraleMapping.js";
+import {
+  berekenWerkelijkAlgemeneKostenViaCentraleMapping,
+  bouwAlgemeneKostenClassificatieViaCentraleMapping,
+  resolveerAlgemeneKostenCategorieViaCentraleMapping,
+  type AlgemeneKostenCentraleMappingInvoer,
+  type AlgemeneKostenRuweBoekingRegel,
+  type AlgemeneKostenWerkelijkViaCentraleMappingInvoer,
+} from "./algemeneKostenCentraleMapping.js";
 import type { PnLBronmappingRegel } from "../pnlBronmapping.js";
 
 /**
@@ -238,5 +245,174 @@ describe("070/GL4990 — bedragsvergelijking op de echte bronproefcijfers (boekj
     const somPerCategorieNieuw = Object.values(totalenNieuw).reduce((acc, v) => acc.plus(v), new Decimal(0));
     expect(glTotaal.toString()).toBe("6679.76");
     expect(somPerCategorieNieuw.toString()).toBe(glTotaal.toString());
+  });
+});
+
+/**
+ * FASE GAT-009 (2026-09-16) — de nieuwe Werkelijk-productieketen
+ * (`berekenWerkelijkAlgemeneKostenViaCentraleMapping`), gebouwd bovenop
+ * dezelfde `resolveerAlgemeneKostenCategorieViaCentraleMapping` als hierboven.
+ * Bewijst A/B/C/D/E uit de GAT-009-opdracht.
+ */
+describe("berekenWerkelijkAlgemeneKostenViaCentraleMapping — de gewirede 070-Werkelijk-productieketen", () => {
+  const MAPPING_070_GL4990: PnLBronmappingRegel[] = [
+    {
+      bedrijfsnr: "070",
+      grootboekrekening: "4990",
+      ogbKostensoort: null,
+      economischeModule: "ALGEMENE_KOSTEN",
+      economischeCategorie: "ALGEMENE_KOSTEN",
+      geldigVanafBoekjaar: 2025,
+      geldigVanafPeriode: "01",
+      geldigTotBoekjaar: null,
+      geldigTotPeriode: null,
+      aangemaaktOp: AANGEMAAKT,
+    },
+    {
+      bedrijfsnr: "070",
+      grootboekrekening: "4990",
+      ogbKostensoort: "4992",
+      economischeModule: "ALGEMENE_KOSTEN",
+      economischeCategorie: "MAKELAARSKOSTEN",
+      geldigVanafBoekjaar: 2025,
+      geldigVanafPeriode: "01",
+      geldigTotBoekjaar: null,
+      geldigTotPeriode: null,
+      aangemaaktOp: AANGEMAAKT,
+    },
+    {
+      bedrijfsnr: "070",
+      grootboekrekening: "4990",
+      ogbKostensoort: "4995",
+      economischeModule: "ALGEMENE_KOSTEN",
+      economischeCategorie: "BANKKOSTEN",
+      geldigVanafBoekjaar: 2025,
+      geldigVanafPeriode: "01",
+      geldigTotBoekjaar: null,
+      geldigTotPeriode: null,
+      aangemaaktOp: AANGEMAAKT,
+    },
+  ];
+
+  function ruweBoeking(overrides: Partial<AlgemeneKostenRuweBoekingRegel> = {}): AlgemeneKostenRuweBoekingRegel {
+    return { grootboekrekening: "4990", ogbKostensoort: null, ogbKostensoortOmschrijving: null, saldo: new Decimal(0), ...overrides };
+  }
+  function keteninvoer(overrides: Partial<AlgemeneKostenWerkelijkViaCentraleMappingInvoer> = {}): AlgemeneKostenWerkelijkViaCentraleMappingInvoer {
+    return { bedrijfsnr: "070", boekjaar: 2025, boekperiode: "06", opSysteemtijdstip: new Date("2026-09-16T12:00:00.000Z"), ...overrides };
+  }
+
+  it("A/B. de vier echte OGB-boekingen (070/GL4990, boekjaar 2025) reconciliëren op de bewezen categoriebedragen en het GL-totaal €6.679,76", () => {
+    const boekingen: AlgemeneKostenRuweBoekingRegel[] = [
+      ruweBoeking({ ogbKostensoort: "4990", saldo: new Decimal("572.99") }),
+      ruweBoeking({ ogbKostensoort: "4991", saldo: new Decimal("-0.62") }),
+      ruweBoeking({ ogbKostensoort: "4992", saldo: new Decimal("6067.24") }),
+      ruweBoeking({ ogbKostensoort: "4995", saldo: new Decimal("40.15") }),
+    ];
+    const { werkelijk, nietGemapt } = berekenWerkelijkAlgemeneKostenViaCentraleMapping(keteninvoer(), boekingen, MAPPING_070_GL4990);
+
+    expect(nietGemapt).toEqual([]);
+    expect(werkelijk.perCategorie.find((c) => c.categorie === "ALGEMENE_KOSTEN")!.categorieTotaal.toString()).toBe("572.37"); // 572.99 + (-0.62), GL-default
+    expect(werkelijk.perCategorie.find((c) => c.categorie === "MAKELAARSKOSTEN")!.categorieTotaal.toString()).toBe("6067.24");
+    expect(werkelijk.perCategorie.find((c) => c.categorie === "BANKKOSTEN")!.categorieTotaal.toString()).toBe("40.15");
+    expect(werkelijk.perCategorie.find((c) => c.categorie === "ACCOUNTANT")!.categorieTotaal.toString()).toBe("0");
+    expect(werkelijk.perCategorie.find((c) => c.categorie === "JURIDISCHE_KOSTEN")!.categorieTotaal.toString()).toBe("0");
+    expect(werkelijk.moduleTotaal.toString()).toBe("6679.76");
+  });
+
+  it("C. geen dubbele telling: som van de vijf categorieën + nietGeclassificeerdTotaal = alle aangeleverde boekingen, moduleTotaal telt niet nogmaals apart mee", () => {
+    const boekingen: AlgemeneKostenRuweBoekingRegel[] = [
+      ruweBoeking({ ogbKostensoort: "4990", saldo: new Decimal("572.99") }),
+      ruweBoeking({ ogbKostensoort: "4991", saldo: new Decimal("-0.62") }),
+      ruweBoeking({ ogbKostensoort: "4992", saldo: new Decimal("6067.24") }),
+      ruweBoeking({ ogbKostensoort: "4995", saldo: new Decimal("40.15") }),
+      ruweBoeking({ grootboekrekening: "9999", saldo: new Decimal(75) }),
+    ];
+    const { werkelijk } = berekenWerkelijkAlgemeneKostenViaCentraleMapping(keteninvoer(), boekingen, MAPPING_070_GL4990);
+    const somAlleBoekingen = boekingen.reduce((t, b) => t.plus(b.saldo), new Decimal(0));
+    const somCategorieen = werkelijk.perCategorie.reduce((t, c) => t.plus(c.categorieTotaal), new Decimal(0));
+    expect(somCategorieen.plus(werkelijk.nietGeclassificeerdTotaal).toString()).toBe(somAlleBoekingen.toString());
+    expect(werkelijk.moduleTotaal.toString()).toBe(somCategorieen.toString());
+  });
+
+  it("E. een fictieve, niet-gemapte GL -> expliciet NIET_GEMAPT, niet in een van de vijf categorieën gegokt", () => {
+    const boekingen = [ruweBoeking({ ogbKostensoort: "4990", saldo: new Decimal("572.99") }), ruweBoeking({ grootboekrekening: "9999", saldo: new Decimal(500) })];
+    const { werkelijk, nietGemapt } = berekenWerkelijkAlgemeneKostenViaCentraleMapping(keteninvoer(), boekingen, MAPPING_070_GL4990);
+
+    expect(nietGemapt).toEqual([{ grootboekrekening: "9999", ogbKostensoort: null }]);
+    expect(werkelijk.nietGeclassificeerdTotaal.toString()).toBe("500");
+    expect(werkelijk.perCategorie.find((c) => c.categorie === "ALGEMENE_KOSTEN")!.categorieTotaal.toString()).toBe("572.99"); // ongewijzigd
+  });
+
+  it("geen koppeling met Module 2: AlgemeneKostenRuweBoekingRegel kent geen jaarbedrag/verwachte-verhogingveld", () => {
+    const boeking: AlgemeneKostenRuweBoekingRegel = ruweBoeking({ saldo: new Decimal(1000) });
+    expect(Object.keys(boeking).sort()).toEqual(["grootboekrekening", "ogbKostensoort", "ogbKostensoortOmschrijving", "saldo"]);
+  });
+});
+
+describe("D. synthetische TEST072-administratie — dezelfde calculator/mapping-orchestratie, uitsluitend andere GL/OGB-nummers", () => {
+  const MAPPING_TEST072: PnLBronmappingRegel[] = [
+    {
+      bedrijfsnr: "TEST072",
+      grootboekrekening: "5500",
+      ogbKostensoort: null,
+      economischeModule: "ALGEMENE_KOSTEN",
+      economischeCategorie: "ALGEMENE_KOSTEN",
+      geldigVanafBoekjaar: 2025,
+      geldigVanafPeriode: "01",
+      geldigTotBoekjaar: null,
+      geldigTotPeriode: null,
+      aangemaaktOp: AANGEMAAKT,
+    },
+    {
+      bedrijfsnr: "TEST072",
+      grootboekrekening: "5500",
+      ogbKostensoort: "77",
+      economischeModule: "ALGEMENE_KOSTEN",
+      economischeCategorie: "ACCOUNTANT",
+      geldigVanafBoekjaar: 2025,
+      geldigVanafPeriode: "01",
+      geldigTotBoekjaar: null,
+      geldigTotPeriode: null,
+      aangemaaktOp: AANGEMAAKT,
+    },
+    {
+      bedrijfsnr: "TEST072",
+      grootboekrekening: "5510",
+      ogbKostensoort: null,
+      economischeModule: "ALGEMENE_KOSTEN",
+      economischeCategorie: "JURIDISCHE_KOSTEN",
+      geldigVanafBoekjaar: 2025,
+      geldigVanafPeriode: "01",
+      geldigTotBoekjaar: null,
+      geldigTotPeriode: null,
+      aangemaaktOp: AANGEMAAKT,
+    },
+  ];
+
+  it("exact dezelfde functies (resolveerAlgemeneKostenCategorieViaCentraleMapping/berekenWerkelijkAlgemeneKostenViaCentraleMapping) werken op TEST072's eigen GL/OGB-nummers zonder enige codewijziging", () => {
+    expect(resolveerAlgemeneKostenCategorieViaCentraleMapping({ bedrijfsnr: "TEST072", grootboekrekening: "5500", boekjaar: 2026, boekperiode: "06", opSysteemtijdstip: new Date() }, "77", MAPPING_TEST072)).toEqual(
+      { categorie: "ACCOUNTANT", specificiteit: "GL_OGB" },
+    );
+
+    const boekingen: AlgemeneKostenRuweBoekingRegel[] = [
+      { grootboekrekening: "5500", ogbKostensoort: "77", ogbKostensoortOmschrijving: null, saldo: new Decimal(2500) },
+      { grootboekrekening: "5500", ogbKostensoort: null, ogbKostensoortOmschrijving: null, saldo: new Decimal(300) }, // GL-default
+      { grootboekrekening: "5510", ogbKostensoort: null, ogbKostensoortOmschrijving: null, saldo: new Decimal(1250) },
+    ];
+    const { werkelijk, nietGemapt } = berekenWerkelijkAlgemeneKostenViaCentraleMapping(
+      { bedrijfsnr: "TEST072", boekjaar: 2026, boekperiode: "06", opSysteemtijdstip: new Date() },
+      boekingen,
+      MAPPING_TEST072,
+    );
+
+    expect(nietGemapt).toEqual([]);
+    expect(werkelijk.perCategorie.find((c) => c.categorie === "ACCOUNTANT")!.categorieTotaal.toString()).toBe("2500");
+    expect(werkelijk.perCategorie.find((c) => c.categorie === "ALGEMENE_KOSTEN")!.categorieTotaal.toString()).toBe("300");
+    expect(werkelijk.perCategorie.find((c) => c.categorie === "JURIDISCHE_KOSTEN")!.categorieTotaal.toString()).toBe("1250");
+    expect(werkelijk.moduleTotaal.toString()).toBe("4050");
+  });
+
+  it("070's mapping en TEST072's mapping leven volledig los van elkaar (bedrijfsnr-gescheiden)", () => {
+    expect(resolveerAlgemeneKostenCategorieViaCentraleMapping({ bedrijfsnr: "070", grootboekrekening: "5500", boekjaar: 2026, boekperiode: "06", opSysteemtijdstip: new Date() }, null, MAPPING_TEST072)).toBeNull();
   });
 });

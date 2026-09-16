@@ -62,6 +62,8 @@ export * from "./begroting/beheerWerkelijkPnLAdapter.js";
 export * from "./begroting/werkelijkManagement.js";
 export * from "./begroting/managementCentraleMapping.js";
 export * from "./begroting/managementWerkelijkPnLAdapter.js";
+export * from "./begroting/werkelijkAlgemeneKosten.js";
+export * from "./begroting/algemeneKostenWerkelijkPnLAdapter.js";
 export * from "./begroting/begroteGeplandOnderhoud.js";
 export * from "./begroting/begroteCorrectiefDagelijksOnderhoud.js";
 export * from "./begroting/begroteVerzekeringen.js";

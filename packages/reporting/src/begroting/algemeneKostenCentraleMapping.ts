@@ -1,5 +1,8 @@
+import type Decimal from "decimal.js";
 import { ALGEMENE_KOSTEN_CATEGORIEEN, type BgAlgemeneKostenCategorie, type BgAlgemeneKostenClassificatieRegel } from "./begroteAlgemeneKosten.js";
+import { berekenWerkelijkAlgemeneKosten, type WerkelijkAlgemeneKostenBoekingRegel, type WerkelijkAlgemeneKostenResultaat } from "./werkelijkAlgemeneKosten.js";
 import { resolveerPnLBronmapping, type PnLBronmappingRegel } from "../pnlBronmapping.js";
+import { classificeerElkeBoekingViaPnLMapping } from "../pnlBronmappingClassificatie.js";
 
 /**
  * FASE M2 (2026-09-14) — migratieproef Algemene Kosten op de centrale
@@ -32,6 +35,17 @@ import { resolveerPnLBronmapping, type PnLBronmappingRegel } from "../pnlBronmap
  * "module(GL+OGB) == module(GL-default)"-opslaan-invariant wordt dus ook pas
  * dán afgedwongen, hier uitsluitend als runtime-resolutiecheck via
  * `resolveerPnLBronmapping` zelf).
+ *
+ * ADDENDUM — FASE GAT-009 (2026-09-16): de hierboven beschreven bevinding
+ * ("geen Werkelijk-classificatie van boekingen") is met deze fase VERVALLEN
+ * — zie `berekenWerkelijkAlgemeneKostenViaCentraleMapping` verderop in dit
+ * bestand en `werkelijkAlgemeneKosten.ts` voor de nu wél bestaande,
+ * standalone Werkelijk-productieketen (Boekingen → centrale mapping →
+ * `berekenWerkelijkAlgemeneKosten` → Pure P&L-adapter). Deze nieuwe keten
+ * hergebruikt de M2-resolver hieronder ONGEWIJZIGD; de M2-functies zelf
+ * (`resolveerAlgemeneKostenCategorieViaCentraleMapping`/
+ * `bouwAlgemeneKostenClassificatieViaCentraleMapping`) en hun bestaande
+ * Begroting-validatiestroom blijven exact zoals hierboven beschreven.
  */
 
 function isBgAlgemeneKostenCategorie(waarde: string): waarde is BgAlgemeneKostenCategorie {
@@ -125,4 +139,71 @@ export function bouwAlgemeneKostenClassificatieViaCentraleMapping(
   }
 
   return { classificatie, nietGemapt };
+}
+
+/**
+ * FASE GAT-009 (2026-09-16) — AANVULLING: de Werkelijk-productieketen voor
+ * Algemene Kosten, volgens hetzelfde M7-/GAT-002B-/GAT-002C-/GAT-002D-patroon
+ * (`onderhoudCentraleMapping.ts`/`huurCentraleMapping.ts`/
+ * `beheerCentraleMapping.ts`/`managementCentraleMapping.ts`): ruwe boekingen
+ * (met GL) → centrale P&L-bronmappingresolver → economischeModule=
+ * ALGEMENE_KOSTEN + categorie → de pure `berekenWerkelijkAlgemeneKosten`.
+ * Hergebruikt bewust de BOVENSTAANDE, reeds bestaande
+ * `resolveerAlgemeneKostenCategorieViaCentraleMapping` (M2) — GEEN tweede
+ * resolver, GEEN gedupliceerde mappingarchitectuur. Het verschil met de
+ * M2-functies hierboven is uitsluitend WAT ermee gevoed wordt: M2 vertaalt
+ * naar de OUDE, OGB-array-gebaseerde `BgAlgemeneKostenClassificatieRegel[]`
+ * (voor de bestaande, ongewijzigde Begroting-validatiestroom); deze
+ * aanvulling classificeert RUWE BOEKINGEN rechtstreeks, per boeking, via
+ * `classificeerElkeBoekingViaPnLMapping` (het M7-patroon, structureel immuun
+ * voor het M6a-batchcollisieprobleem) voor de nieuwe Werkelijk-calculator.
+ *
+ * GENERIEK, GEEN 070-SPECIFIEKE CODE: deze functies bevatten zelf geen enkele
+ * GL-waarde, OGB-code of administratiecode — GL4990/OGB4990/4991/4992/4995
+ * bestaan uitsluitend als 070-MAPPINGGEGEVENS die als `PnLBronmappingRegel[]`
+ * worden aangeleverd (zie `algemeneKostenWerkelijkKetenProof.test.ts`), niet
+ * iets dat in deze broncode staat.
+ */
+
+/** Eén reeds-geselecteerde, RUWE boeking (bronformaat, vóór classificatie) — `grootboekrekening` komt rechtstreeks uit de bron, nooit afgeleid. */
+export interface AlgemeneKostenRuweBoekingRegel {
+  grootboekrekening: string;
+  ogbKostensoort: string | null;
+  /** `null` als er geen OGB-kostensoort is — bij een gevulde OGB komt dit rechtstreeks van de bron, nooit verzonnen. */
+  ogbKostensoortOmschrijving: string | null;
+  saldo: Decimal;
+}
+
+export interface AlgemeneKostenWerkelijkViaCentraleMappingInvoer {
+  bedrijfsnr: string;
+  boekjaar: number;
+  boekperiode: string;
+  opSysteemtijdstip: Date;
+}
+
+export interface AlgemeneKostenWerkelijkViaCentraleMappingResultaat {
+  werkelijk: WerkelijkAlgemeneKostenResultaat;
+  /** (GL, OGB)-combinaties waarvoor de centrale mapping GEEN uitkomst opleverde — expliciet beschikbaar voor latere mappingcontrole/P&L-diagnostiek. */
+  nietGemapt: readonly { grootboekrekening: string; ogbKostensoort: string | null }[];
+}
+
+/**
+ * DE CANONIEKE PRODUCTIEKETEN VOOR ALGEMENE-KOSTEN-WERKELIJK: ruwe boekingen
+ * (met GL) → centrale P&L-bronmappingresolver → economischeModule=
+ * ALGEMENE_KOSTEN + categorie → de pure `berekenWerkelijkAlgemeneKosten`.
+ * Geen legacy-classificatietabel, geen terugvertaling, geen koppeling met
+ * Module 2 (zie moduledoc `werkelijkAlgemeneKosten.ts`).
+ */
+export function berekenWerkelijkAlgemeneKostenViaCentraleMapping(
+  invoer: AlgemeneKostenWerkelijkViaCentraleMappingInvoer,
+  boekingen: readonly AlgemeneKostenRuweBoekingRegel[],
+  mappingregels: readonly PnLBronmappingRegel[],
+): AlgemeneKostenWerkelijkViaCentraleMappingResultaat {
+  const { boekingen: geclassificeerd, nietGemapt } = classificeerElkeBoekingViaPnLMapping(invoer, boekingen, mappingregels, resolveerAlgemeneKostenCategorieViaCentraleMapping);
+
+  const werkelijkBoekingen: WerkelijkAlgemeneKostenBoekingRegel[] = geclassificeerd.map(({ boeking, categorie }) => ({ economischeCategorie: categorie, saldo: boeking.saldo }));
+
+  const werkelijk = berekenWerkelijkAlgemeneKosten(werkelijkBoekingen);
+
+  return { werkelijk, nietGemapt };
 }
