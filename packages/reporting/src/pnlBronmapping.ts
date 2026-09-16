@@ -59,6 +59,35 @@
  * GEEN VRIJE TEKST, GEEN PORTFOLIO-BREDE BETEKENIS, GEEN IMPLICIETE FALLBACK
  * NAAR EEN ANDERE GL: onbekende combinaties leveren altijd `NIET_GEMAPT` op,
  * nooit een gok.
+ *
+ * ── ADDENDUM — FASE EBITDA-CANON (2026-09-16) ───────────────────────────────
+ * De EBITDA Coverage Gate (2026-09-15) constateerde dat GL4350 in de M5-
+ * testfixtures met `economischeModule: "LEEGSTAND"` is vastgelegd, terwijl
+ * diezelfde grootboekrekening in de praktijk BREDER kan zijn: naast
+ * servicekosten leegstand (bewezen: OGB4319) kan een GL zoals 4350 ook
+ * reguliere, niet-leegstandgerelateerde servicekosten van de eigenaar dragen.
+ * Businessbesluit (2026-09-16): dit was geen fout in de invariant HIERBOVEN
+ * — die blijft woordelijk correct en ONGEWIJZIGD ("GL bepaalt hoofddomein,
+ * OGB verfijnt BINNEN dat domein, OGB mag nooit naar een ander domein
+ * springen"). Het was een te specifieke KEUZE VAN WELKE MODULEWAARDE als
+ * hoofddomein diende voor déze ene GL, gemaakt in test fixtures die NOOIT
+ * echt gepersisteerd zijn (bevestigd: `voegPnLBronmappingMutatieToe` wordt
+ * nergens buiten haar eigen testbestand aangeroepen — er bestaat geen
+ * productie-mappingrij voor GL4350).
+ *
+ * Consequentie voor toekomstig gebruik van deze module-registry: een waarde
+ * in `PNL_ECONOMISCHE_MODULES` moet een economisch HOOFDDOMEIN
+ * vertegenwoordigen — breed genoeg om alle legitieme kostensoorten van een
+ * GL te omvatten — nooit een specifieke SUBCATEGORIE die toevallig de enige
+ * tot dusver bewezen invulling van die GL is. `ONDERHOUD` (drie GL's, drie
+ * categorieën) en `GEMEENTELIJKE_LASTEN` (twee GL's, één categorie, één met
+ * GL-default) zijn hiervan al werkende voorbeelden — hetzelfde patroon is
+ * bedoeld toe te passen op GL4350, zodra een geschikt hoofddomein is
+ * vastgesteld. Er is in deze fase BEWUST GEEN nieuwe module aan
+ * `PNL_ECONOMISCHE_MODULES` toegevoegd — dat vereist een aparte, expliciete
+ * architectuurgoedkeuring (zie de EBITDA-CANON-rapportage, businessbesluit 3
+ * / M4b-analyse, EBITDA-GAT-006). Tot die goedkeuring blijft GL4350 buiten
+ * elke centrale mapping — er bestaat vandaag geen mapping om aan te passen.
  */
 
 export const PNL_ECONOMISCHE_MODULES = [

@@ -58,6 +58,18 @@ import { classificeerBoekingenViaPnLMapping } from "../pnlBronmappingClassificat
  * categorie toe en herclassificeert niets — uitsluitend de bestaande drie
  * `LEEGSTAND_CATEGORIEEN` blijven bestaan.
  *
+ * ADDENDUM — FASE EBITDA-CANON (2026-09-16): de EBITDA Coverage Gate
+ * signaleerde dat GL4350 in de praktijk BREDER kan zijn dan uitsluitend
+ * leegstand — naast servicekosten leegstand (bewezen: OGB4319) kan dezelfde
+ * GL ook reguliere, niet-leegstandgerelateerde servicekosten van de eigenaar
+ * dragen. `economischeModule: "LEEGSTAND"` voor GL4350 in de testfixtures
+ * hieronder is daarom NIET automatisch de definitieve hoofddomeinkeuze voor
+ * die GL — zie `pnlBronmapping.ts`'s addendum voor de volledige analyse. Dit
+ * bestand/deze mapping is nooit echt gepersisteerd (uitsluitend testfixtures,
+ * geen productiedata), dus er is niets te migreren; een eventuele nieuwe,
+ * bredere hoofdmodule voor GL4350 vereist eerst een aparte architectuur-/
+ * businessgoedkeuring (EBITDA-GAT-006), geen wijziging in dit bestand.
+ *
  * GEEN WIJZIGING AAN DE BESTAANDE CALCULATORS: `berekenWerkelijkLeegstand` en
  * `berekenEstimatedLeegstand` blijven volledig ongewijzigd — deze module
  * levert uitsluitend een vertaling (centrale resolver →

@@ -28,6 +28,23 @@ import { classificeerElkeBoekingViaPnLMapping } from "../pnlBronmappingClassific
  * M7-opdracht) — geen bestaand, uit een echte administratie geëxtraheerd
  * eurobedrag. Tests bewijzen classificatie/sommatie op een expliciet
  * gemarkeerde testfixture.
+ *
+ * ADDENDUM — FASE EBITDA-CANON (2026-09-16), BEKENDE, NIET-BLOKKERENDE
+ * BEPERKING: de centrale bronmapping zelf (`PnLBronmappingRegel.economischeCategorie`)
+ * is een vrije string, dus een andere administratie zou in de mapping-tabel
+ * probleemloos eigen categorieën (bv. "GEPLAND"/"CORRECTIEF") aan het
+ * ONDERHOUD-hoofddomein kunnen koppelen — de centrale architectuur staat dat
+ * al toe, per administratie onafhankelijk. De BEPERKING zit uitsluitend in
+ * deze module: `isOnderhoudWerkelijkCategorie` (hieronder) accepteert
+ * portefeuillebreed UITSLUITEND de drie hardcoded categorieën van
+ * `ONDERHOUD_WERKELIJK_CATEGORIEEN` (`werkelijkOnderhoud.ts`) en gooit een
+ * configuratiefout bij elke andere waarde. Voor 070 is dat correct (enige
+ * bewezen bron: asset-/objecttype). Zodra een andere administratie een
+ * bewezen, structureel ANDERE categorie-indeling voor ONDERHOUD nodig heeft,
+ * volstaat deze ene calculator niet meer — dat is dan een bewuste
+ * uitbreiding (een eigen categorie-enum/calculator-variant per
+ * administratietype, geen wijziging van dit bestand op zichzelf), geen
+ * architectuurfout. Zie de EBITDA-CANON-rapportage, besluit 1.
  */
 
 function isOnderhoudWerkelijkCategorie(waarde: string): waarde is OnderhoudWerkelijkCategorie {
