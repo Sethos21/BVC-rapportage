@@ -81,13 +81,21 @@
  * GL te omvatten — nooit een specifieke SUBCATEGORIE die toevallig de enige
  * tot dusver bewezen invulling van die GL is. `ONDERHOUD` (drie GL's, drie
  * categorieën) en `GEMEENTELIJKE_LASTEN` (twee GL's, één categorie, één met
- * GL-default) zijn hiervan al werkende voorbeelden — hetzelfde patroon is
- * bedoeld toe te passen op GL4350, zodra een geschikt hoofddomein is
- * vastgesteld. Er is in deze fase BEWUST GEEN nieuwe module aan
- * `PNL_ECONOMISCHE_MODULES` toegevoegd — dat vereist een aparte, expliciete
- * architectuurgoedkeuring (zie de EBITDA-CANON-rapportage, businessbesluit 3
- * / M4b-analyse, EBITDA-GAT-006). Tot die goedkeuring blijft GL4350 buiten
- * elke centrale mapping — er bestaat vandaag geen mapping om aan te passen.
+ * GL-default) zijn hiervan al werkende voorbeelden.
+ *
+ * ── RESOLUTIE — FASE GAT-006 (2026-09-17) ───────────────────────────────────
+ * Het hierboven aangekondigde hoofddomein is vastgesteld: `SERVICEKOSTEN_EIGENAAR`
+ * (toegevoegd aan `PNL_ECONOMISCHE_MODULES`). GL4350 is GEEN Leegstand-GL —
+ * het draagt zowel reguliere als tijdens-leegstand servicekosten van de
+ * eigenaar. Zie `servicekostenEigenaarCentraleMapping.ts`/
+ * `werkelijkServicekostenEigenaar.ts` voor de volledige uitwerking
+ * (categorieën `SERVICEKOSTEN_EIGENAAR_REGULIER`/`SERVICEKOSTEN_LEEGSTAND`,
+ * bewezen 070/GL4350/OGB4319 → `SERVICEKOSTEN_LEEGSTAND`, €1.354,10). Geen
+ * migratie nodig: er bestond nooit een gepersisteerde mapping voor GL4350
+ * (bevestigd, zie hierboven). `LEEGSTAND` blijft een zelfstandig hoofddomein
+ * voor GL's die daadwerkelijk uitsluitend leegstand betreffen (bewezen: geen
+ * enkele voor 070) — `SERVICEKOSTEN_EIGENAAR` is geen vervanging van
+ * `LEEGSTAND` en geen verzamelbak voor alle leegstandsgerelateerde kosten.
  */
 
 export const PNL_ECONOMISCHE_MODULES = [
@@ -96,6 +104,7 @@ export const PNL_ECONOMISCHE_MODULES = [
   "MANAGEMENT",
   "ONDERHOUD",
   "LEEGSTAND",
+  "SERVICEKOSTEN_EIGENAAR",
   "VERZEKERINGEN",
   "GEMEENTELIJKE_LASTEN",
   "ALGEMENE_KOSTEN",

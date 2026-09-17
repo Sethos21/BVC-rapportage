@@ -10,6 +10,7 @@ import {
   berekenWerkelijkLeegstandViaCentraleMapping,
   berekenWerkelijkOnderhoudViaCentraleMapping,
   berekenWerkelijkRenteViaCentraleMapping,
+  berekenWerkelijkServicekostenEigenaarViaCentraleMapping,
   berekenWerkelijkVerzekeringenViaCentraleMapping,
   resolveerPnLBronmapping,
   type GemeentelijkeLastenRuweBoekingRegel,
@@ -18,6 +19,7 @@ import {
   type OnderhoudRuweBoekingRegel,
   type PnLBronmappingRegel,
   type RenteRuweBoekingRegel,
+  type ServicekostenEigenaarRuweBoekingRegel,
   type VerzekeringRuweBoekingRegel,
 } from "@bvc/reporting";
 import { openOrCreateDatabase } from "./database.js";
@@ -554,19 +556,24 @@ describe("M4b — GL-economisch-domein-invariant", () => {
  * FASE M5 (2026-09-15) — Leegstand (OB-031) end-to-end via de bestaande
  * M4/M4b-persistence: mapping opslaan → teruglezen → centrale resolver →
  * de ongewijzigde `berekenWerkelijkLeegstand` (via M5's
- * `berekenWerkelijkLeegstandViaCentraleMapping`). Bewezen bronproef:
- * 070_Rooise_Zoom, GL4350/OGB4319 → SERVICEKOSTEN_LEEGSTAND, 6 boekingen,
- * complex 003, totaal €1.354,10. Geen tweede/module-specifieke persistence —
- * dezelfde generieke `voegPnLBronmappingMutatieToe`/`leesPnLBronmappingRegels`
- * als Rente hierboven.
+ * `berekenWerkelijkLeegstandViaCentraleMapping`).
+ *
+ * RESOLUTIE — FASE GAT-006 (2026-09-17): het oorspronkelijke bronbewijs
+ * (070_Rooise_Zoom, GL4350/OGB4319, €1.354,10) is NIET meer LEEGSTAND —
+ * GL4350's echte hoofddomein is `SERVICEKOSTEN_EIGENAAR` (zie
+ * `pnlBronmapping.ts`'s addendum). Dit blok gebruikt vanaf nu een FICTIEF
+ * placeholder-GL ("5350", GEEN echte grootboekrekening) om uitsluitend het
+ * LEEGSTAND-persistence-/M4b-architectuurpatroon zelf te blijven bewijzen —
+ * het echte GL4350/OGB4319-bewijs staat nu, onder het juiste hoofddomein,
+ * in het GAT-006-blok direct hieronder.
  */
-describe("M5. Leegstand end-to-end via persistence (070 GL4350/OGB4319)", () => {
+describe("M5. Leegstand end-to-end via persistence (070 GL5350, fictief — architectuurbewijs)", () => {
   it("B/D. mapping opgeslagen via de repository, teruggelezen, en via de ongewijzigde centrale keten -> Servicekosten leegstand exact €1.354,10", () => {
     voegPnLBronmappingMutatieToe(
       db,
       mutatie({
         bedrijfsnr: "070",
-        grootboekrekening: "4350",
+        grootboekrekening: "5350",
         ogbKostensoort: "4319",
         ogbKostensoortOmschrijving: "Servicekosten leegstand",
         economischeModule: "LEEGSTAND",
@@ -578,12 +585,12 @@ describe("M5. Leegstand end-to-end via persistence (070 GL4350/OGB4319)", () => 
     expect(mappingregels).toHaveLength(1); // geen fictieve Nuts-/Overige-mapping toegevoegd
 
     const boekingen: LeegstandRuweBoekingRegel[] = [
-      { grootboekrekening: "4350", ogbKostensoort: "4319", ogbKostensoortOmschrijving: "Servicekosten leegstand", complexnummer: "003", saldo: new Decimal(1000) },
-      { grootboekrekening: "4350", ogbKostensoort: "4319", ogbKostensoortOmschrijving: "Servicekosten leegstand", complexnummer: "003", saldo: new Decimal(1000) },
-      { grootboekrekening: "4350", ogbKostensoort: "4319", ogbKostensoortOmschrijving: "Servicekosten leegstand", complexnummer: "003", saldo: new Decimal(1000) },
-      { grootboekrekening: "4350", ogbKostensoort: "4319", ogbKostensoortOmschrijving: "Servicekosten leegstand", complexnummer: "003", saldo: new Decimal("97.53") },
-      { grootboekrekening: "4350", ogbKostensoort: "4319", ogbKostensoortOmschrijving: "Servicekosten leegstand", complexnummer: "003", saldo: new Decimal("-1283.17") },
-      { grootboekrekening: "4350", ogbKostensoort: "4319", ogbKostensoortOmschrijving: "Servicekosten leegstand", complexnummer: "003", saldo: new Decimal("-460.26") },
+      { grootboekrekening: "5350", ogbKostensoort: "4319", ogbKostensoortOmschrijving: "Servicekosten leegstand", complexnummer: "003", saldo: new Decimal(1000) },
+      { grootboekrekening: "5350", ogbKostensoort: "4319", ogbKostensoortOmschrijving: "Servicekosten leegstand", complexnummer: "003", saldo: new Decimal(1000) },
+      { grootboekrekening: "5350", ogbKostensoort: "4319", ogbKostensoortOmschrijving: "Servicekosten leegstand", complexnummer: "003", saldo: new Decimal(1000) },
+      { grootboekrekening: "5350", ogbKostensoort: "4319", ogbKostensoortOmschrijving: "Servicekosten leegstand", complexnummer: "003", saldo: new Decimal("97.53") },
+      { grootboekrekening: "5350", ogbKostensoort: "4319", ogbKostensoortOmschrijving: "Servicekosten leegstand", complexnummer: "003", saldo: new Decimal("-1283.17") },
+      { grootboekrekening: "5350", ogbKostensoort: "4319", ogbKostensoortOmschrijving: "Servicekosten leegstand", complexnummer: "003", saldo: new Decimal("-460.26") },
     ];
 
     const { werkelijk, nietGemapt } = berekenWerkelijkLeegstandViaCentraleMapping(
@@ -598,20 +605,145 @@ describe("M5. Leegstand end-to-end via persistence (070 GL4350/OGB4319)", () => 
     expect(werkelijk.perCategorie.find((c) => c.categorie === "OVERIGE_LEEGSTANDSKOSTEN")!.categorieTotaal.toString()).toBe("0");
   });
 
-  it("M. GL-module-invariant (M4b) geldt onverkort voor Leegstand: GL4350 mag na deze mapping nooit meer een andere module krijgen", () => {
+  it("M. GL-module-invariant (M4b) geldt onverkort voor Leegstand: GL5350 mag na deze mapping nooit meer een andere module krijgen", () => {
     voegPnLBronmappingMutatieToe(
       db,
-      mutatie({ bedrijfsnr: "070", grootboekrekening: "4350", ogbKostensoort: "4319", ogbKostensoortOmschrijving: "Servicekosten leegstand", economischeModule: "LEEGSTAND", economischeCategorie: "SERVICEKOSTEN_LEEGSTAND" }),
+      mutatie({ bedrijfsnr: "070", grootboekrekening: "5350", ogbKostensoort: "4319", ogbKostensoortOmschrijving: "Servicekosten leegstand", economischeModule: "LEEGSTAND", economischeCategorie: "SERVICEKOSTEN_LEEGSTAND" }),
     );
 
     expect(() =>
       voegPnLBronmappingMutatieToe(
         db,
-        mutatie({ bedrijfsnr: "070", grootboekrekening: "4350", ogbKostensoort: "4998", ogbKostensoortOmschrijving: "fictief Nuts-OGB", economischeModule: "ALGEMENE_KOSTEN", economischeCategorie: "OVERIGE_ALGEMENE_KOSTEN" }),
+        mutatie({ bedrijfsnr: "070", grootboekrekening: "5350", ogbKostensoort: "4998", ogbKostensoortOmschrijving: "fictief Nuts-OGB", economischeModule: "ALGEMENE_KOSTEN", economischeCategorie: "OVERIGE_ALGEMENE_KOSTEN" }),
       ),
     ).toThrow(/mag nooit van economische module wisselen/);
 
     expect(leesPnLBronmappingRegels(db, "070")).toHaveLength(1);
+  });
+});
+
+/**
+ * FASE GAT-006 (2026-09-17) — Servicekosten Eigenaar (het ECHTE GL4350) end-
+ * to-end via de bestaande, ONGEWIJZIGDE M4/M4b-persistence. Bewezen bronproef
+ * (hergebruikt, geen nieuwe bronanalyse): 070_Rooise_Zoom, GL4350/OGB4319
+ * ("Servicekosten leegstand") → SERVICEKOSTEN_LEEGSTAND, 6 boekingen, complex
+ * 003, totaal €1.354,10 — nu onder het correcte hoofddomein
+ * `SERVICEKOSTEN_EIGENAAR`. Bewijst tegelijk het GAT-006-kernrisico: één GL
+ * (4350) draagt TWEE OGB-specifieke categorieën onder HETZELFDE hoofddomein
+ * zonder de M4b-invariant te schenden, én de invariant blokkeert nog steeds
+ * een poging om diezelfde GL naar een ANDER hoofddomein (bv. `LEEGSTAND`) te
+ * laten wisselen.
+ */
+describe("GAT-006. Servicekosten Eigenaar end-to-end via persistence (070 GL4350/OGB4319)", () => {
+  it("1. GL4350 draagt zowel OGB4319 (-> SERVICEKOSTEN_LEEGSTAND) als een tweede OGB (-> SERVICEKOSTEN_EIGENAAR_REGULIER) onder HETZELFDE hoofddomein, zonder M4b-schending", () => {
+    voegPnLBronmappingMutatieToe(
+      db,
+      mutatie({
+        bedrijfsnr: "070",
+        grootboekrekening: "4350",
+        ogbKostensoort: "4319",
+        ogbKostensoortOmschrijving: "Servicekosten leegstand",
+        economischeModule: "SERVICEKOSTEN_EIGENAAR",
+        economischeCategorie: "SERVICEKOSTEN_LEEGSTAND",
+      }),
+    );
+    voegPnLBronmappingMutatieToe(
+      db,
+      mutatie({
+        bedrijfsnr: "070",
+        grootboekrekening: "4350",
+        ogbKostensoort: "4400",
+        ogbKostensoortOmschrijving: "Servicekosten eigenaar regulier",
+        economischeModule: "SERVICEKOSTEN_EIGENAAR",
+        economischeCategorie: "SERVICEKOSTEN_EIGENAAR_REGULIER",
+      }),
+    );
+
+    const mappingregels = leesPnLBronmappingRegels(db, "070");
+    expect(mappingregels).toHaveLength(2);
+    expect(mappingregels.every((r) => r.economischeModule === "SERVICEKOSTEN_EIGENAAR")).toBe(true);
+  });
+
+  it("2/3/4/D. volledig gewirede keten: REGULIER en LEEGSTAND blijven onderscheidbaar, GL-residual (niet-gemapte OGB) blijft expliciet en apart, exact één keer geteld", () => {
+    voegPnLBronmappingMutatieToe(
+      db,
+      mutatie({ bedrijfsnr: "070", grootboekrekening: "4350", ogbKostensoort: "4319", ogbKostensoortOmschrijving: "Servicekosten leegstand", economischeModule: "SERVICEKOSTEN_EIGENAAR", economischeCategorie: "SERVICEKOSTEN_LEEGSTAND" }),
+    );
+    voegPnLBronmappingMutatieToe(
+      db,
+      mutatie({ bedrijfsnr: "070", grootboekrekening: "4350", ogbKostensoort: "4400", ogbKostensoortOmschrijving: "Servicekosten eigenaar regulier", economischeModule: "SERVICEKOSTEN_EIGENAAR", economischeCategorie: "SERVICEKOSTEN_EIGENAAR_REGULIER" }),
+    );
+    const mappingregels = leesPnLBronmappingRegels(db, "070");
+
+    const boekingen: ServicekostenEigenaarRuweBoekingRegel[] = [
+      { grootboekrekening: "4350", ogbKostensoort: "4319", ogbKostensoortOmschrijving: "Servicekosten leegstand", complexnummer: "003", saldo: new Decimal(1000) },
+      { grootboekrekening: "4350", ogbKostensoort: "4319", ogbKostensoortOmschrijving: "Servicekosten leegstand", complexnummer: "003", saldo: new Decimal(1000) },
+      { grootboekrekening: "4350", ogbKostensoort: "4319", ogbKostensoortOmschrijving: "Servicekosten leegstand", complexnummer: "003", saldo: new Decimal(1000) },
+      { grootboekrekening: "4350", ogbKostensoort: "4319", ogbKostensoortOmschrijving: "Servicekosten leegstand", complexnummer: "003", saldo: new Decimal("97.53") },
+      { grootboekrekening: "4350", ogbKostensoort: "4319", ogbKostensoortOmschrijving: "Servicekosten leegstand", complexnummer: "003", saldo: new Decimal("-1283.17") },
+      { grootboekrekening: "4350", ogbKostensoort: "4319", ogbKostensoortOmschrijving: "Servicekosten leegstand", complexnummer: "003", saldo: new Decimal("-460.26") },
+      { grootboekrekening: "4350", ogbKostensoort: "4400", ogbKostensoortOmschrijving: "Servicekosten eigenaar regulier", complexnummer: "003", saldo: new Decimal(500) },
+      { grootboekrekening: "4350", ogbKostensoort: "9999", ogbKostensoortOmschrijving: "onbekend", complexnummer: "003", saldo: new Decimal(200) }, // GL-residual: niet-gemapt
+    ];
+
+    const { werkelijk, nietGemapt } = berekenWerkelijkServicekostenEigenaarViaCentraleMapping(
+      { bedrijfsnr: "070", boekjaar: 2025, boekperiode: "12", opSysteemtijdstip: new Date("2026-09-15T12:00:00.000Z") },
+      boekingen,
+      mappingregels,
+    );
+
+    // 2. Regulier/Leegstand blijven economisch/presentatief onderscheidbaar.
+    expect(werkelijk.perCategorie.find((c) => c.categorie === "SERVICEKOSTEN_LEEGSTAND")!.categorieTotaal.toString()).toBe("1354.1");
+    expect(werkelijk.perCategorie.find((c) => c.categorie === "SERVICEKOSTEN_EIGENAAR_REGULIER")!.categorieTotaal.toString()).toBe("500");
+    // 4/D. Het GL-residual (OGB 9999) blijft expliciet zichtbaar, nooit stil verdeeld over de twee bekende categorieën.
+    expect(nietGemapt).toEqual([{ grootboekrekening: "4350", ogbKostensoort: "9999" }]);
+    expect(werkelijk.nietGeclassificeerdTotaal.toString()).toBe("200");
+    // Geen dubbele telling: som van alle categorieën + residual = som van alle aangeleverde boekingen.
+    const somAlleBoekingen = boekingen.reduce((t, b) => t.plus(b.saldo), new Decimal(0));
+    const somCategorieen = werkelijk.perCategorie.reduce((t, c) => t.plus(c.categorieTotaal), new Decimal(0));
+    expect(somCategorieen.plus(werkelijk.nietGeclassificeerdTotaal).toString()).toBe(somAlleBoekingen.toString());
+    expect(werkelijk.moduleTotaal.toString()).toBe(somCategorieen.toString());
+  });
+
+  it("3. M4b blijft onverkort van kracht: GL4350 mag na deze mapping nooit meer naar een ANDER hoofddomein wisselen (ook niet terug naar LEEGSTAND)", () => {
+    voegPnLBronmappingMutatieToe(
+      db,
+      mutatie({ bedrijfsnr: "070", grootboekrekening: "4350", ogbKostensoort: "4319", ogbKostensoortOmschrijving: "Servicekosten leegstand", economischeModule: "SERVICEKOSTEN_EIGENAAR", economischeCategorie: "SERVICEKOSTEN_LEEGSTAND" }),
+    );
+
+    expect(() =>
+      voegPnLBronmappingMutatieToe(
+        db,
+        mutatie({ bedrijfsnr: "070", grootboekrekening: "4350", ogbKostensoort: "4998", ogbKostensoortOmschrijving: "fictief Nuts-OGB", economischeModule: "LEEGSTAND", economischeCategorie: "NUTS_LEEGSTAND" }),
+      ),
+    ).toThrow(/mag nooit van economische module wisselen/);
+
+    expect(leesPnLBronmappingRegels(db, "070")).toHaveLength(1);
+    expect(leesPnLBronmappingRegels(db, "070")[0]!.economischeModule).toBe("SERVICEKOSTEN_EIGENAAR");
+  });
+
+  it("5. Leegstand se eigen Nuts-/Overige-logica blijft functioneren voor een andere, echte Leegstand-GL, onafhankelijk van GL4350/SERVICEKOSTEN_EIGENAAR", () => {
+    voegPnLBronmappingMutatieToe(
+      db,
+      mutatie({ bedrijfsnr: "070", grootboekrekening: "4350", ogbKostensoort: "4319", ogbKostensoortOmschrijving: "Servicekosten leegstand", economischeModule: "SERVICEKOSTEN_EIGENAAR", economischeCategorie: "SERVICEKOSTEN_LEEGSTAND" }),
+    );
+    // Leegstand se centrale mapping is BEWUST GEEN-GL-default (M5, OGB-only classificatie) — GL4360 heeft
+    // hier daarom een GL+OGB-specifieke rij, geen GL-default (zie leegstandCentraleMapping.ts-moduledoc).
+    voegPnLBronmappingMutatieToe(
+      db,
+      mutatie({ bedrijfsnr: "070", grootboekrekening: "4360", ogbKostensoort: "4998", ogbKostensoortOmschrijving: "fictief Nuts-OGB", economischeModule: "LEEGSTAND", economischeCategorie: "NUTS_LEEGSTAND" }),
+    );
+
+    const mappingregels = leesPnLBronmappingRegels(db, "070");
+    const boekingenLeegstand: LeegstandRuweBoekingRegel[] = [{ grootboekrekening: "4360", ogbKostensoort: "4998", ogbKostensoortOmschrijving: "fictief Nuts-OGB", complexnummer: "003", saldo: new Decimal(300) }];
+
+    const { werkelijk } = berekenWerkelijkLeegstandViaCentraleMapping(
+      { bedrijfsnr: "070", boekjaar: 2025, boekperiode: "12", opSysteemtijdstip: new Date("2026-09-15T12:00:00.000Z") },
+      boekingenLeegstand,
+      mappingregels,
+    );
+    expect(werkelijk.perCategorie.find((c) => c.categorie === "NUTS_LEEGSTAND")!.categorieTotaal.toString()).toBe("300");
+    expect(werkelijk.perCategorie.find((c) => c.categorie === "SERVICEKOSTEN_LEEGSTAND")!.categorieTotaal.toString()).toBe("0"); // GL4350 raakt de Leegstand-calculator niet: andere GL, ander hoofddomein
   });
 });
 

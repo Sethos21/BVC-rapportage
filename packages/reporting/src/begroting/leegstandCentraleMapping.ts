@@ -58,17 +58,21 @@ import { classificeerBoekingenViaPnLMapping } from "../pnlBronmappingClassificat
  * categorie toe en herclassificeert niets — uitsluitend de bestaande drie
  * `LEEGSTAND_CATEGORIEEN` blijven bestaan.
  *
- * ADDENDUM — FASE EBITDA-CANON (2026-09-16): de EBITDA Coverage Gate
- * signaleerde dat GL4350 in de praktijk BREDER kan zijn dan uitsluitend
- * leegstand — naast servicekosten leegstand (bewezen: OGB4319) kan dezelfde
- * GL ook reguliere, niet-leegstandgerelateerde servicekosten van de eigenaar
- * dragen. `economischeModule: "LEEGSTAND"` voor GL4350 in de testfixtures
- * hieronder is daarom NIET automatisch de definitieve hoofddomeinkeuze voor
- * die GL — zie `pnlBronmapping.ts`'s addendum voor de volledige analyse. Dit
- * bestand/deze mapping is nooit echt gepersisteerd (uitsluitend testfixtures,
- * geen productiedata), dus er is niets te migreren; een eventuele nieuwe,
- * bredere hoofdmodule voor GL4350 vereist eerst een aparte architectuur-/
- * businessgoedkeuring (EBITDA-GAT-006), geen wijziging in dit bestand.
+ * RESOLUTIE — FASE GAT-006 (2026-09-17): GL4350 is GEEN Leegstand-GL — het
+ * hoofddomein is vastgesteld als `SERVICEKOSTEN_EIGENAAR` (zie
+ * `servicekostenEigenaarCentraleMapping.ts`/`pnlBronmapping.ts`'s addendum).
+ * DAAROM IS DE TESTFIXTURE-GL IN DIT BESTAND EN `leegstandCentraleMapping.test.ts`
+ * OMGEZET NAAR EEN FICTIEF PLACEHOLDER-NUMMER ("5350", GEEN ECHTE
+ * grootboekrekening) — het architectuurbewijs zelf (M6-classificatiepatroon,
+ * M4b-invariant, batch-OGB-consistentie, de volledig gewirede Werkelijk-
+ * keten, Estimated) blijft ONGEWIJZIGD geldig, uitsluitend de GL-waarde is
+ * gecorrigeerd zodat dit bestand niet langer, ten onrechte, GL4350 aan
+ * `LEEGSTAND` toeschrijft. Het bewezen 070/GL4350/OGB4319-bronbewijs
+ * (€1.354,10) staat nu, onder het juiste hoofddomein, in
+ * `servicekostenEigenaarCentraleMapping.test.ts`. Er was nooit een
+ * gepersisteerde productiemapping voor GL4350 (bevestigd, zie
+ * `pnlBronmapping.ts`) — er is dus niets gemigreerd, uitsluitend
+ * testfixtures gecorrigeerd.
  *
  * GEEN WIJZIGING AAN DE BESTAANDE CALCULATORS: `berekenWerkelijkLeegstand` en
  * `berekenEstimatedLeegstand` blijven volledig ongewijzigd — deze module

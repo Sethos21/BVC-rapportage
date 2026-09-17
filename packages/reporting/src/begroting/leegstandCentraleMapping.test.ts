@@ -24,9 +24,18 @@ import type { PnLBronmappingRegel } from "../pnlBronmapping.js";
 /**
  * FASE M5 — migreert de bestaande Leegstand-Werkelijk-classificatie (OB-031)
  * naar de centrale P&L-bronmappingresolver, direct volgens het bewezen
- * M3b-patroon (Rente). Bewezen bronproef: 070_Rooise_Zoom, GL4350/OGB4319 →
- * SERVICEKOSTEN_LEEGSTAND, 6 boekingen, complex 003, totaal €1.354,10 (zie
- * `begroteLeegstand.test.ts`/`leegstandClassificatie.test.ts`).
+ * M3b-patroon (Rente).
+ *
+ * RESOLUTIE — FASE GAT-006 (2026-09-17): het oorspronkelijke bronbewijs
+ * (070_Rooise_Zoom, GL4350/OGB4319, 6 boekingen, complex 003, €1.354,10) is
+ * NIET meer LEEGSTAND — GL4350's echte hoofddomein is `SERVICEKOSTEN_EIGENAAR`
+ * (zie `pnlBronmapping.ts`/`servicekostenEigenaarCentraleMapping.ts`). Het
+ * bewijs zelf staat nu, onder het juiste hoofddomein, in
+ * `servicekostenEigenaarCentraleMapping.test.ts`. DIT bestand gebruikt vanaf
+ * nu een FICTIEF placeholder-GL ("5350", GEEN echte grootboekrekening) om
+ * uitsluitend het LEEGSTAND-architectuurpatroon zelf te blijven bewijzen
+ * (M6-classificatie, M4b-invariant, de volledig gewirede Werkelijk-keten,
+ * Estimated) — de bedragen/OGB-codes/architectuurlogica zijn ongewijzigd.
  */
 
 const BEGROTINGSJAAR = 2027;
@@ -63,13 +72,13 @@ function normaliseer(waarde: unknown): string {
   return JSON.stringify(waarde, (_key, v) => (v instanceof Decimal ? v.toString() : v));
 }
 
-/** OUDE, bewezen classificatie — exact zoals `begroteLeegstand.test.ts`/`leegstandClassificatie.test.ts` (070_Rooise_Zoom, GL4350, bronproef 2025). */
+/** OUDE, bewezen classificatie — exact zoals `begroteLeegstand.test.ts`/`leegstandClassificatie.test.ts` (070_Rooise_Zoom, oorspronkelijk GL4350, bronproef 2025 — hier op het fictieve GL5350 toegepast, zie moduledoc). */
 const OUDE_KLASSIFICATIE_070: LeegstandClassificatieRegel[] = [{ ogbKostensoort: "4319", ogbKostensoortOmschrijving: "Servicekosten leegstand", categorie: "SERVICEKOSTEN_LEEGSTAND" }];
 
 function mappingRegel(overrides: Partial<PnLBronmappingRegel>): PnLBronmappingRegel {
   return {
     bedrijfsnr: "070",
-    grootboekrekening: "4350",
+    grootboekrekening: "5350",
     ogbKostensoort: null,
     economischeModule: "LEEGSTAND",
     economischeCategorie: "SERVICEKOSTEN_LEEGSTAND",
@@ -83,20 +92,20 @@ function mappingRegel(overrides: Partial<PnLBronmappingRegel>): PnLBronmappingRe
 }
 
 /**
- * NIEUWE centrale mapping voor 070/GL4350 — BEWUST uitsluitend de ÉNE
- * bewezen GL+OGB-specifieke rij (4319 → SERVICEKOSTEN_LEEGSTAND), GEEN
- * GL-default (zie moduledoc: pariteit met de OGB-only oude classificatie).
+ * ARCHITECTUURBEWIJS-MAPPING voor 070/GL5350 (fictief, zie moduledoc) — BEWUST
+ * uitsluitend de ÉNE GL+OGB-specifieke rij (4319 → SERVICEKOSTEN_LEEGSTAND),
+ * GEEN GL-default (zie moduledoc: pariteit met de OGB-only oude classificatie).
  * GEEN fictieve rij voor NUTS_LEEGSTAND/OVERIGE_LEEGSTANDSKOSTEN — die zijn
  * voor 070 niet bewezen (zie M5-opdracht §6).
  */
 const MAPPING_070: PnLBronmappingRegel[] = [mappingRegel({ ogbKostensoort: "4319", economischeCategorie: "SERVICEKOSTEN_LEEGSTAND" })];
 
 function invoer070(overrides: Partial<LeegstandCentraleMappingInvoer> = {}): LeegstandCentraleMappingInvoer {
-  return { bedrijfsnr: "070", grootboekrekening: "4350", boekjaar: 2025, boekperiode: "12", opSysteemtijdstip: new Date("2026-09-15T12:00:00.000Z"), ...overrides };
+  return { bedrijfsnr: "070", grootboekrekening: "5350", boekjaar: 2025, boekperiode: "12", opSysteemtijdstip: new Date("2026-09-15T12:00:00.000Z"), ...overrides };
 }
 
-describe("resolveerLeegstandCategorieViaCentraleMapping — 070/GL4350", () => {
-  it("C. bewezen 070-mapping: OGB 4319 op GL4350 resolveert via de centrale mapping naar SERVICEKOSTEN_LEEGSTAND", () => {
+describe("resolveerLeegstandCategorieViaCentraleMapping — 070/GL5350 (fictief, architectuurbewijs)", () => {
+  it("C. architectuurbewijs: OGB 4319 op GL5350 resolveert via de centrale mapping naar SERVICEKOSTEN_LEEGSTAND", () => {
     expect(resolveerLeegstandCategorieViaCentraleMapping(invoer070(), "4319", MAPPING_070)).toEqual({ categorie: "SERVICEKOSTEN_LEEGSTAND", specificiteit: "GL_OGB" });
   });
 
@@ -140,8 +149,8 @@ describe("bouwLeegstandClassificatieViaCentraleMapping — oud-vs-nieuw classifi
   });
 });
 
-describe("berekenWerkelijkLeegstand — oud vs. nieuw, byte-identiek op de bewezen bronproef", () => {
-  it("K. 070 (bronproef 2025, GL4350): 6 echte boekingen, complex 003, totaal 1.354,10 — identiek Werkelijk-resultaat", () => {
+describe("berekenWerkelijkLeegstand — oud vs. nieuw, byte-identiek (architectuurbewijs)", () => {
+  it("K. architectuurbewijs (oorspronkelijk 070/GL4350-bronproef, hier op fictief GL5350): 6 boekingen, complex 003, totaal 1.354,10 — identiek Werkelijk-resultaat", () => {
     const boekingen: WerkelijkLeegstandBoekingRegel[] = [
       boeking({ saldo: new Decimal(1000) }),
       boeking({ saldo: new Decimal(1000) }),
@@ -210,7 +219,7 @@ describe("berekenEstimatedLeegstand — oud vs. nieuw, byte-identiek", () => {
 
 describe("berekenWerkelijkLeegstandViaCentraleMapping — FASE M5: de daadwerkelijk gewirede productieketen", () => {
   function ruweBoeking(overrides: Partial<LeegstandRuweBoekingRegel> = {}): LeegstandRuweBoekingRegel {
-    return { grootboekrekening: "4350", ogbKostensoort: "4319", ogbKostensoortOmschrijving: "Servicekosten leegstand", complexnummer: "003", saldo: new Decimal(1000), ...overrides };
+    return { grootboekrekening: "5350", ogbKostensoort: "4319", ogbKostensoortOmschrijving: "Servicekosten leegstand", complexnummer: "003", saldo: new Decimal(1000), ...overrides };
   }
 
   function keteninvoer070(overrides: Partial<LeegstandWerkelijkViaCentraleMappingInvoer> = {}): LeegstandWerkelijkViaCentraleMappingInvoer {
@@ -230,7 +239,7 @@ describe("berekenWerkelijkLeegstandViaCentraleMapping — FASE M5: de daadwerkel
     const mappingZonder4319 = MAPPING_070.filter((r) => r.ogbKostensoort !== "4319");
     const { werkelijk, nietGemapt } = berekenWerkelijkLeegstandViaCentraleMapping(keteninvoer070(), RUWE_BOEKINGEN_070, mappingZonder4319);
 
-    expect(nietGemapt).toEqual([{ grootboekrekening: "4350", ogbKostensoort: "4319" }]);
+    expect(nietGemapt).toEqual([{ grootboekrekening: "5350", ogbKostensoort: "4319" }]);
     expect(werkelijk.nietGeclassificeerdTotaal.toString()).toBe("1354.1");
     expect(werkelijk.perCategorie.find((c) => c.categorie === "SERVICEKOSTEN_LEEGSTAND")!.categorieTotaal.toString()).toBe("0");
   });
@@ -278,7 +287,7 @@ describe("berekenWerkelijkLeegstandViaCentraleMapping — FASE M5: de daadwerkel
     const boekingen = [...RUWE_BOEKINGEN_070, ruweBoeking({ ogbKostensoort: "9999", ogbKostensoortOmschrijving: "onbekend", saldo: new Decimal(500) })];
     const { werkelijk, nietGemapt } = berekenWerkelijkLeegstandViaCentraleMapping(keteninvoer070(), boekingen, MAPPING_070);
 
-    expect(nietGemapt).toEqual([{ grootboekrekening: "4350", ogbKostensoort: "9999" }]);
+    expect(nietGemapt).toEqual([{ grootboekrekening: "5350", ogbKostensoort: "9999" }]);
     expect(werkelijk.nietGeclassificeerdTotaal.toString()).toBe("500");
     expect(werkelijk.perCategorie.find((c) => c.categorie === "SERVICEKOSTEN_LEEGSTAND")!.categorieTotaal.toString()).toBe("1354.1");
   });
@@ -287,7 +296,7 @@ describe("berekenWerkelijkLeegstandViaCentraleMapping — FASE M5: de daadwerkel
     const boekingen = [...RUWE_BOEKINGEN_070, ruweBoeking({ ogbKostensoort: null, ogbKostensoortOmschrijving: null, saldo: new Decimal(250) })];
     const { werkelijk, nietGemapt } = berekenWerkelijkLeegstandViaCentraleMapping(keteninvoer070(), boekingen, MAPPING_070);
 
-    expect(nietGemapt).toEqual([{ grootboekrekening: "4350", ogbKostensoort: null }]);
+    expect(nietGemapt).toEqual([{ grootboekrekening: "5350", ogbKostensoort: null }]);
     expect(werkelijk.nietGeclassificeerdTotaal.toString()).toBe("250");
   });
 

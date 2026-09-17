@@ -3485,6 +3485,101 @@ export const MIGRATIONS: readonly Migration[] = [
        END`,
     ],
   },
+  {
+    version: 25,
+    description: "GAT-006: economische_module CHECK op pnl_bronmapping uitbreiden met SERVICEKOSTEN_EIGENAAR",
+    ddl: [
+      // SQLite ondersteunt geen ALTER TABLE ... ADD/DROP CHECK — een CHECK-constraint wijzigen vereist
+      // de standaard SQLite-tabelrebuild-procedure. `pnl_mapping_wijziging_log` verwijst via een FK naar
+      // `pnl_bronmapping(id)`, dus beide tabellen worden herbouwd, in afhankelijkheidsvolgorde (kind eerst
+      // hernoemen/herbouwen, dan ouder, zodat de FK-definitie na afloop weer naar de NIEUWE ouder wijst).
+      // Er bestaat vandaag geen productiedata in deze tabellen (bevestigd: `voegPnLBronmappingMutatieToe`
+      // wordt nergens buiten testbestanden aangeroepen) — dit is een structurele schemacorrectie, GEEN
+      // herschrijving van bestaande, echte mappingdata.
+      `ALTER TABLE pnl_mapping_wijziging_log RENAME TO pnl_mapping_wijziging_log_v24`,
+      `ALTER TABLE pnl_bronmapping RENAME TO pnl_bronmapping_v24`,
+      `CREATE TABLE pnl_bronmapping (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        bedrijfsnr TEXT NOT NULL,
+        grootboekrekening TEXT NOT NULL,
+        grootboek_omschrijving TEXT NULL,
+        ogb_kostensoort TEXT NULL,
+        ogb_kostensoort_omschrijving TEXT NULL,
+        economische_module TEXT NOT NULL CHECK (economische_module IN (
+          'HUUR', 'BEHEER', 'MANAGEMENT', 'ONDERHOUD', 'LEEGSTAND', 'SERVICEKOSTEN_EIGENAAR', 'VERZEKERINGEN',
+          'GEMEENTELIJKE_LASTEN', 'ALGEMENE_KOSTEN', 'RENTE', 'VERKOOP',
+          'NIET_VERREKENBARE_BTW', 'WAARDERING', 'ADMINISTRATIEKOSTEN_DOORBELASTING'
+        )),
+        economische_categorie TEXT NOT NULL,
+        geldig_vanaf_boekjaar INTEGER NOT NULL,
+        geldig_vanaf_periode TEXT NOT NULL CHECK (length(geldig_vanaf_periode) = 2 AND geldig_vanaf_periode BETWEEN '01' AND '12'),
+        geldig_tot_boekjaar INTEGER NULL,
+        geldig_tot_periode TEXT NULL CHECK (geldig_tot_periode IS NULL OR (length(geldig_tot_periode) = 2 AND geldig_tot_periode BETWEEN '01' AND '12')),
+        aangemaakt_op TEXT NOT NULL,
+        aangemaakt_door TEXT NOT NULL,
+        CHECK ((geldig_tot_boekjaar IS NULL) = (geldig_tot_periode IS NULL)),
+        CHECK (
+          geldig_tot_boekjaar IS NULL
+          OR geldig_tot_boekjaar > geldig_vanaf_boekjaar
+          OR (geldig_tot_boekjaar = geldig_vanaf_boekjaar AND geldig_tot_periode > geldig_vanaf_periode)
+        )
+      )`,
+      `INSERT INTO pnl_bronmapping SELECT * FROM pnl_bronmapping_v24`,
+      `CREATE TABLE pnl_mapping_wijziging_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        bedrijfsnr TEXT NOT NULL,
+        type TEXT NOT NULL CHECK (type IN ('HISTORISCHE_CORRECTIE', 'NIEUWE_MAPPING_VANAF_PERIODE')),
+        geldig_vanaf_boekjaar INTEGER NOT NULL,
+        geldig_vanaf_periode TEXT NOT NULL CHECK (length(geldig_vanaf_periode) = 2 AND geldig_vanaf_periode BETWEEN '01' AND '12'),
+        vorige_mapping_id INTEGER NULL REFERENCES pnl_bronmapping(id),
+        nieuwe_mapping_id INTEGER NOT NULL REFERENCES pnl_bronmapping(id),
+        gewijzigd_op TEXT NOT NULL,
+        gebruiker TEXT NOT NULL,
+        wijzigingsreden TEXT NOT NULL
+      )`,
+      `INSERT INTO pnl_mapping_wijziging_log SELECT * FROM pnl_mapping_wijziging_log_v24`,
+      `DROP TABLE pnl_mapping_wijziging_log_v24`,
+      `DROP TABLE pnl_bronmapping_v24`,
+      `CREATE INDEX idx_pnl_bronmapping_bedrijfsnr ON pnl_bronmapping(bedrijfsnr)`,
+      `CREATE INDEX idx_pnl_bronmapping_bedrijfsnr_gl ON pnl_bronmapping(bedrijfsnr, grootboekrekening)`,
+      `CREATE TRIGGER trg_pnl_bronmapping_alleen_geldig_tot_wijzigbaar
+       BEFORE UPDATE ON pnl_bronmapping
+       FOR EACH ROW
+       WHEN
+         NEW.id <> OLD.id
+         OR NEW.bedrijfsnr <> OLD.bedrijfsnr
+         OR NEW.grootboekrekening <> OLD.grootboekrekening
+         OR NEW.grootboek_omschrijving IS NOT OLD.grootboek_omschrijving
+         OR NEW.ogb_kostensoort IS NOT OLD.ogb_kostensoort
+         OR NEW.ogb_kostensoort_omschrijving IS NOT OLD.ogb_kostensoort_omschrijving
+         OR NEW.economische_module <> OLD.economische_module
+         OR NEW.economische_categorie <> OLD.economische_categorie
+         OR NEW.geldig_vanaf_boekjaar <> OLD.geldig_vanaf_boekjaar
+         OR NEW.geldig_vanaf_periode <> OLD.geldig_vanaf_periode
+         OR NEW.aangemaakt_op <> OLD.aangemaakt_op
+         OR NEW.aangemaakt_door <> OLD.aangemaakt_door
+       BEGIN
+         SELECT RAISE(ABORT, 'pnl_bronmapping: uitsluitend geldig_tot_boekjaar/geldig_tot_periode mag worden bijgewerkt (interval sluiten) — alle overige velden zijn write-once');
+       END`,
+      `CREATE TRIGGER trg_pnl_bronmapping_no_delete
+       BEFORE DELETE ON pnl_bronmapping
+       BEGIN
+         SELECT RAISE(ABORT, 'pnl_bronmapping: append-only, verwijderen is nooit toegestaan — een foutieve mapping wordt gecorrigeerd via een nieuwe rij (HISTORISCHE_CORRECTIE)');
+       END`,
+      `CREATE INDEX idx_pnl_mapping_wijziging_log_bedrijfsnr ON pnl_mapping_wijziging_log(bedrijfsnr)`,
+      `CREATE INDEX idx_pnl_mapping_wijziging_log_nieuwe_mapping ON pnl_mapping_wijziging_log(nieuwe_mapping_id)`,
+      `CREATE TRIGGER trg_pnl_mapping_wijziging_log_no_update
+       BEFORE UPDATE ON pnl_mapping_wijziging_log
+       BEGIN
+         SELECT RAISE(ABORT, 'pnl_mapping_wijziging_log: append-only, geen update-in-place van historische logregels');
+       END`,
+      `CREATE TRIGGER trg_pnl_mapping_wijziging_log_no_delete
+       BEFORE DELETE ON pnl_mapping_wijziging_log
+       BEGIN
+         SELECT RAISE(ABORT, 'pnl_mapping_wijziging_log: append-only, verwijderen is nooit toegestaan');
+       END`,
+    ],
+  },
 ];
 
 function schemaMetaTableExists(db: DatabaseSync): boolean {
