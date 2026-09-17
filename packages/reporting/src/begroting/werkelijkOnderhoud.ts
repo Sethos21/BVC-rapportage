@@ -36,11 +36,48 @@ import Decimal from "decimal.js";
  * uitsluitend de afgeleide som van de drie categorieTotalen — nooit een
  * eigen, apart bijgehouden "algemeen onderhoud"-boekingscategorie.
  *
- * GEEN ESTIMATED IN DEZE FASE (M7-opdracht §8): "geen automatische
- * extrapolatie van incidenteel/groot onderhoud" — er bestaat geen bestaande,
- * eenduidige Estimated-formule voor onderhoud om op voort te bouwen (GO/CD
- * kennen zelf ook geen Estimated). Uitsluitend Werkelijk wordt gebouwd;
- * Estimated blijft een expliciet BRONGAT (zie de M7-rapportage).
+ * ESTIMATED (FASE GAT-008B, 2026-09-17, `berekenEstimatedOnderhoud` hieronder)
+ * — zelfde bewezen OB-030/031-/GAT-008A-patroon: `estimatedTotaal =
+ * werkelijkTotaal + verwachtingResterendJaar`, per Werkelijk-categorie
+ * (`ONDERHOUD_WERKELIJK_CATEGORIEEN` — Gebouwen/Terrein/Installaties, DEZELFDE
+ * dimensie als Werkelijk, GEEN nieuwe "Gepland versus Correctief"-P&L-
+ * hoofdindeling, zie `onderhoudEstimatedPnLAdapter.ts`).
+ *
+ * BEWUST GEEN `begrotingTotaal`-VELD OP DIT RESULTAAT (kernontwerpbeslissing,
+ * GAT-008B): anders dan Verzekeringen/Gemeentelijke Lasten/Algemene Kosten
+ * (waar Begroting en Werkelijk dezelfde, of een reconcilieerbare, dimensie
+ * delen) heeft Onderhoud TWEE gescheiden Begrotingsmodellen
+ * (`begroteGeplandOnderhoud.ts`/`begroteCorrectiefDagelijksOnderhoud.ts`,
+ * gepland/correctief) die BEIDE een fundamenteel ANDERE dimensie gebruiken
+ * dan Werkelijk (asset-/objecttype) — er bestaat geen bewezen, betrouwbare
+ * verdeelsleutel om een Gepland/Correctief-jaarbedrag over Gebouwen/Terrein/
+ * Installaties te verdelen (dat zou precies de "kunstmatige koppeling" zijn
+ * die de GAT-008B-opdracht expliciet verbiedt). Deze functie ontvangt daarom
+ * BEWUST GEEN Begroting-resultaat als parameter — structureel onmogelijk om
+ * Begroting per ongeluk mee te tellen, in plaats van een gedisciplineerde
+ * "wel ontvangen, maar nooit gebruiken"-belofte. `begroteGeplandOnderhoud.ts`/
+ * `begroteCorrectiefDagelijksOnderhoud.ts` blijven zelf volledig ONGEWIJZIGD
+ * en herbruikbaar: de gebruiker mag bestaande activiteiten bijstellen,
+ * kwartalen aanpassen, status naar UITGESTELD/VERVALLEN/AFGEROND zetten, of
+ * nieuwe ONVOORZIEN-activiteiten toevoegen (allemaal al bestaande,
+ * ongewijzigde mogelijkheden van `BgGeplandOnderhoudActiviteitInvoer`/
+ * `BgGeplandOnderhoudStatus`) om zelf tot een `verwachtingResterendJaar`-
+ * getal te komen — die afleiding is en blijft een MENSELIJKE/aanroepende-
+ * laag-beslissing, nooit een automatische boeking-naar-activiteit-koppeling
+ * in deze module.
+ *
+ * WERKELIJKE BOEKINGEN WORDEN NOOIT AAN INDIVIDUELE GEPLANDE/CORRECTIEVE
+ * REGELS GEKOPPELD (GAT-008B-opdracht, expliciet — "daarvoor bestaat geen
+ * betrouwbare bronkoppeling"): `WerkelijkOnderhoudBoekingRegel` kent, exact
+ * zoals hierboven al gold voor Werkelijk, geen enkel veld dat naar een
+ * Gepland-/Correctief-activiteit/-regel verwijst.
+ *
+ * WERKELIJK-DEKKING ALS AANVULLENDE, EXPLICIETE VOORWAARDE (GAT-001B
+ * §5-invariant, zelfde toepassing als GAT-008A): `estimatedTotaal` is per
+ * categorie uitsluitend niet-`null` wanneer zowel Werkelijk-dekking bevestigd
+ * is (`werkelijkDekkingBevestigd`, modulebreed — één Boekingen-bron voedt
+ * alle drie categorieën, én `nietGeclassificeerdTotaal === 0`) als
+ * `verwachtingResterendJaar` voor DIE categorie een geldige Decimal is.
  */
 
 export const ONDERHOUD_WERKELIJK_CATEGORIEEN = ["ONDERHOUD_GEBOUWEN", "ONDERHOUD_TERREIN", "ONDERHOUD_INSTALLATIES"] as const;
@@ -120,4 +157,54 @@ export function berekenWerkelijkOnderhoud(boekingen: readonly WerkelijkOnderhoud
     nietGeclassificeerdTotaal: som(nietGeclassificeerd.map((r) => r.saldo)),
     nietGeclassificeerdAantalBoekingen: nietGeclassificeerd.length,
   };
+}
+
+// ── Estimated (FASE GAT-008B, 2026-09-17) ───────────────────────────────────
+
+function isGeldigDecimal(waarde: Decimal | null): waarde is Decimal {
+  return waarde !== null && !waarde.isNaN();
+}
+
+export interface EstimatedOnderhoudCategorieResultaat {
+  categorie: OnderhoudWerkelijkCategorie;
+  werkelijkTotaal: Decimal;
+  /** `false` zodra Werkelijk-dekking niet expliciet bevestigd is of `nietGeclassificeerdTotaal` niet nul is — zie moduledoc. */
+  werkelijkVoldoendeBekend: boolean;
+  /** Handmatige, expliciet aangeleverde/overridable aanname PER CATEGORIE — `null` = nog niet ingevuld. GEEN historisch gemiddelde, GEEN lineaire extrapolatie, GEEN kunstmatige verdeling van Gepland/Correctief-bedragen over deze categorie (zie moduledoc). */
+  verwachtingResterendJaar: Decimal | null;
+  /** `werkelijkTotaal + verwachtingResterendJaar`, uitsluitend wanneer zowel Werkelijk-dekking als de verwachting bekend zijn. */
+  estimatedTotaal: Decimal | null;
+}
+
+export interface EstimatedOnderhoudResultaat {
+  /** Vaste volgorde: `ONDERHOUD_WERKELIJK_CATEGORIEEN`. */
+  perCategorie: EstimatedOnderhoudCategorieResultaat[];
+  moduleWerkelijkTotaal: Decimal;
+  /** `null` zodra één van de drie categorieën `estimatedTotaal === null` heeft. */
+  moduleEstimatedTotaal: Decimal | null;
+}
+
+/**
+ * `estimatedTotaal = werkelijkTotaal + verwachtingResterendJaar` per
+ * Werkelijk-categorie — zie moduledoc voor waarom hier bewust GEEN
+ * Begroting-parameter bestaat (Gepland/Correctief kennen een andere
+ * dimensie, geen bewezen verdeelsleutel naar Gebouwen/Terrein/Installaties).
+ */
+export function berekenEstimatedOnderhoud(
+  werkelijk: WerkelijkOnderhoudResultaat,
+  werkelijkDekkingBevestigd: boolean,
+  verwachtingPerCategorie: Record<OnderhoudWerkelijkCategorie, Decimal | null>,
+): EstimatedOnderhoudResultaat {
+  const werkelijkVoldoendeBekend = werkelijkDekkingBevestigd && werkelijk.nietGeclassificeerdTotaal.isZero();
+
+  const perCategorie: EstimatedOnderhoudCategorieResultaat[] = ONDERHOUD_WERKELIJK_CATEGORIEEN.map((categorie) => {
+    const werkelijkTotaal = werkelijk.perCategorie.find((c) => c.categorie === categorie)!.categorieTotaal;
+    const verwachting = verwachtingPerCategorie[categorie];
+    const estimatedTotaal = werkelijkVoldoendeBekend && isGeldigDecimal(verwachting) ? werkelijkTotaal.plus(verwachting) : null;
+    return { categorie, werkelijkTotaal, werkelijkVoldoendeBekend, verwachtingResterendJaar: verwachting, estimatedTotaal };
+  });
+
+  const moduleEstimatedTotaal = perCategorie.every((c) => c.estimatedTotaal !== null) ? som(perCategorie.map((c) => c.estimatedTotaal!)) : null;
+
+  return { perCategorie, moduleWerkelijkTotaal: werkelijk.moduleTotaal, moduleEstimatedTotaal };
 }

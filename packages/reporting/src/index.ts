@@ -67,6 +67,7 @@ export * from "./begroting/algemeneKostenWerkelijkPnLAdapter.js";
 export * from "./begroting/verzekeringEstimatedPnLAdapter.js";
 export * from "./begroting/gemeentelijkeLastenEstimatedPnLAdapter.js";
 export * from "./begroting/algemeneKostenEstimatedPnLAdapter.js";
+export * from "./begroting/onderhoudEstimatedPnLAdapter.js";
 export * from "./begroting/begroteGeplandOnderhoud.js";
 export * from "./begroting/begroteCorrectiefDagelijksOnderhoud.js";
 export * from "./begroting/begroteVerzekeringen.js";
