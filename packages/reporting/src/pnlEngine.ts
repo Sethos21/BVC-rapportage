@@ -100,6 +100,19 @@ import Decimal from "decimal.js";
  * onmogelijk om een onder-EBITDA-regel per ongeluk in de boven-EBITDA-som
  * te krijgen, want de twee lijsten worden al bij binnenkomst gescheiden op
  * basis van het discriminerende `boomPositie`-veld van de regel zelf.
+ *
+ * ADDENDUM — ZONNESTROOM, DEFINITIEVE CANON-CORRECTIE (FASE GAT-013,
+ * 2026-09-17): Zonnestroom/bijzondere-opbrengst-regels horen STRUCTUREEL
+ * `boomPositie: "ONDER_EBITDA"` te dragen — GEEN exploitatie-opbrengst,
+ * dus NOOIT in de `OPBRENGSTEN`-groep boven EBITDA. De legacy-rapportage
+ * toont Zonnestroom nog tussen de opbrengsten; dat is uitdrukkelijk NIET de
+ * canon. Voor 070_Rooise_Zoom is dit empirisch bevestigd (GAT-013-
+ * acceptatie, boekjaar 2026 t/m periode 08): GL8815 bevat GEEN boekingen —
+ * een bevestigde afwezigheid, geen aanname — waardoor deze correctie voor
+ * die administratie/periode geen eurogevolg voor EBITDA heeft. Zodra een
+ * administratie wél Zonnestroom-omzet boekt, moet exact dit mechanisme
+ * (een `PurePnLOnderEbitdaRegel`, nooit een boven-EBITDA-regel) bewijzen
+ * dat het bedrag toch buiten EBITDA blijft.
  */
 
 // ── Canon (portefeuillebreed, GEEN administratie-specifieke waarden) ───────
