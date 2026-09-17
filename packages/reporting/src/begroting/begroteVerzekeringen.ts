@@ -437,12 +437,30 @@ export function berekenBegroteVerzekeringen(regelsInvoer: readonly BgVerzekering
  * uit (zie `verzekeringCentraleMapping.ts` voor de daadwerkelijke
  * bron-naar-categorie-vertaling).
  *
- * GEEN ESTIMATED IN DEZE FASE (M7-opdracht §8/§2): OB-032 heeft nooit een
- * eenduidige Estimated-formule vastgelegd (de Begroting-moduledoc noemt
- * "Estimated" expliciet BUITEN SCOPE) — geen bestaande logica om op voort te
- * bouwen, dus wordt hier NIET gegokt. Uitsluitend Werkelijk wordt gebouwd;
- * Estimated blijft een expliciet BRONGAT voor een latere, aparte
- * businessbeslissing (zie de M7-rapportage).
+ * ESTIMATED (FASE GAT-008A, 2026-09-17, `berekenEstimatedVerzekeringen`
+ * hieronder) — volgt LETTERLIJK het bewezen OB-030/031-patroon van
+ * `berekenEstimatedRente`/`berekenEstimatedLeegstand`: `estimatedTotaal =
+ * werkelijkTotaal + verwachtingResterendJaar`, waarbij `verwachtingResterendJaar`
+ * een EXPLICIETE, handmatig aanpasbare/overridable aanname blijft (`Decimal |
+ * null`) — GEEN automatische afleiding uit `berekenJaarpremie`'s eigen
+ * maandlogica. Dat is een BEWUSTE keuze (GAT-008A-opdracht: "mag worden
+ * gebaseerd op ... maar moet handmatig aanpasbaar/overridable blijven"): een
+ * bekende premiewijziging gedurende het jaar werkt periodecorrect door omdat
+ * de AANROEPER (die de vastgestelde polisregels al kent) haar eigen
+ * `verwachtingResterendJaar` op basis daarvan bepaalt — deze calculator zelf
+ * herberekent de polisregels niet nogmaals, om geen tweede, parallelle
+ * jaarpremie-rekenlaag te introduceren naast `berekenJaarpremie` hierboven.
+ * `begrotingTotaal` (`totaalEffectiefBegroot`) wordt ONGEWIJZIGD doorgegeven
+ * — Estimated berekent of muteert de Begroting nooit.
+ *
+ * WERKELIJK-DEKKING ALS AANVULLENDE, EXPLICIETE VOORWAARDE (GAT-008A-opdracht,
+ * GAT-001B §5-invariant toegepast op Estimated — een uitbreiding t.o.v. het
+ * oorspronkelijke Rente/Leegstand-Estimated-patroon, dat deze check nog niet
+ * kende): `estimatedTotaal` is UITSLUITEND niet-`null` wanneer zowel (a)
+ * `werkelijkDekkingBevestigd` waar is ÉN `werkelijk.nietGeclassificeerdTotaal`
+ * nul is (Werkelijk-dekking "voldoende bekend"), ALS (b) `verwachtingResterendJaar`
+ * een geldige Decimal is. Ontbreekt één van beide, dan blijft `estimatedTotaal`
+ * expliciet `null` — nooit een stilzwijgende €0 of een gedeeltelijke som.
  */
 export const VERZEKERING_WERKELIJK_CATEGORIEEN = ["BRAND_OPSTALVERZEKERING"] as const;
 export type BgVerzekeringWerkelijkCategorie = (typeof VERZEKERING_WERKELIJK_CATEGORIEEN)[number];
@@ -517,5 +535,73 @@ export function berekenWerkelijkVerzekeringen(boekingen: readonly WerkelijkVerze
     moduleTotaal: som(perCategorie.map((c) => c.categorieTotaal)),
     nietGeclassificeerdTotaal: som(nietGeclassificeerd.map((r) => r.saldo)),
     nietGeclassificeerdAantalBoekingen: nietGeclassificeerd.length,
+  };
+}
+
+// ── Estimated (FASE GAT-008A, 2026-09-17) ───────────────────────────────────
+
+export interface EstimatedVerzekeringCategorieResultaat {
+  categorie: BgVerzekeringWerkelijkCategorie;
+  /** Ongewijzigde doorgifte van de Begroting — Estimated berekent/muteert de Begroting nooit. */
+  begrotingTotaal: Decimal;
+  werkelijkTotaal: Decimal;
+  /** `false` zodra Werkelijk-dekking voor de afgesloten periode niet expliciet bevestigd is, of `nietGeclassificeerdTotaal` niet nul is — zie moduledoc. */
+  werkelijkVoldoendeBekend: boolean;
+  /** Handmatige, expliciet aangeleverde/overridable aanname — `null` = nog niet ingevuld, NOOIT een default naar 0. */
+  verwachtingResterendJaar: Decimal | null;
+  /** `werkelijkTotaal + verwachtingResterendJaar`, uitsluitend wanneer zowel Werkelijk-dekking als de verwachting bekend zijn — anders expliciet `null` (zie moduledoc). */
+  estimatedTotaal: Decimal | null;
+  afwijking: Decimal | null;
+}
+
+export interface EstimatedVerzekeringResultaat {
+  /** Vaste volgorde: `VERZEKERING_WERKELIJK_CATEGORIEEN` (momenteel één element). */
+  perCategorie: EstimatedVerzekeringCategorieResultaat[];
+  moduleBegrotingTotaal: Decimal;
+  moduleWerkelijkTotaal: Decimal;
+  /** `null` zodra één van de categorieën `estimatedTotaal === null` heeft — nooit een gedeeltelijke som die onvolledigheid verbergt. */
+  moduleEstimatedTotaal: Decimal | null;
+}
+
+/**
+ * `estimatedTotaal = werkelijkTotaal + verwachtingResterendJaar`, exact het
+ * bewezen OB-030/031-patroon (`berekenEstimatedRente`/`berekenEstimatedLeegstand`),
+ * hier uitgebreid met een expliciete Werkelijk-dekkingsvoorwaarde (zie
+ * moduledoc). `werkelijkDekkingBevestigd` is een module-brede vlag (deze
+ * module kent één categorie) — de aanroepende laag bevestigt hiermee dat de
+ * Werkelijk-boekingen voor de afgesloten periode daadwerkelijk volledig en
+ * betrouwbaar zijn opgehaald (bv. geen bekende ontbrekende periode), los van
+ * het reeds aanwezige `nietGeclassificeerdTotaal`-signaal.
+ */
+export function berekenEstimatedVerzekeringen(
+  begroting: BgVerzekeringResultaat,
+  werkelijk: WerkelijkVerzekeringResultaat,
+  werkelijkDekkingBevestigd: boolean,
+  verwachtingPerCategorie: Record<BgVerzekeringWerkelijkCategorie, Decimal | null>,
+): EstimatedVerzekeringResultaat {
+  const werkelijkVoldoendeBekend = werkelijkDekkingBevestigd && werkelijk.nietGeclassificeerdTotaal.isZero();
+
+  const perCategorie: EstimatedVerzekeringCategorieResultaat[] = VERZEKERING_WERKELIJK_CATEGORIEEN.map((categorie) => {
+    const werkelijkTotaal = werkelijk.perCategorie.find((c) => c.categorie === categorie)!.categorieTotaal;
+    const verwachting = verwachtingPerCategorie[categorie];
+    const estimatedTotaal = werkelijkVoldoendeBekend && isGeldigDecimal(verwachting) ? werkelijkTotaal.plus(verwachting) : null;
+    return {
+      categorie,
+      begrotingTotaal: begroting.totaalEffectiefBegroot,
+      werkelijkTotaal,
+      werkelijkVoldoendeBekend,
+      verwachtingResterendJaar: verwachting,
+      estimatedTotaal,
+      afwijking: estimatedTotaal !== null ? estimatedTotaal.minus(begroting.totaalEffectiefBegroot) : null,
+    };
+  });
+
+  const moduleEstimatedTotaal = perCategorie.every((c) => c.estimatedTotaal !== null) ? som(perCategorie.map((c) => c.estimatedTotaal!)) : null;
+
+  return {
+    perCategorie,
+    moduleBegrotingTotaal: begroting.totaalEffectiefBegroot,
+    moduleWerkelijkTotaal: werkelijk.moduleTotaal,
+    moduleEstimatedTotaal,
   };
 }

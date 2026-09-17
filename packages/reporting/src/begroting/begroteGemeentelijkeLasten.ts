@@ -409,11 +409,26 @@ export function berekenBegroteGemeentelijkeLasten(
  * aanname gebruiken — dat is een latere, aparte keuze, geen onderdeel van
  * deze fase).
  *
- * GEEN ESTIMATED IN DEZE FASE (M7-opdracht §8/§2, zelfde afweging als
- * Verzekeringen): OB-033 heeft nooit een eenduidige Estimated-formule
- * vastgelegd ("BUITEN SCOPE: ... Estimated" in de Begroting-moduledoc) —
- * geen bestaande logica om op voort te bouwen. Uitsluitend Werkelijk wordt
- * gebouwd; Estimated blijft een expliciet BRONGAT (zie de M7-rapportage).
+ * ESTIMATED (FASE GAT-008A, 2026-09-17, `berekenEstimatedGemeentelijkeLasten`
+ * hieronder) — volgt hetzelfde bewezen OB-030/031-patroon als Rente/Leegstand/
+ * Verzekeringen: `estimatedTotaal = werkelijkTotaal + verwachtingResterendJaar`.
+ * ANDERS DAN VERZEKERINGEN heeft de Begroting hier GEEN maand-voor-maand
+ * interne structuur (`begroteGemeentelijkeLasten` is een vlak jaarbedrag,
+ * uitsluitend WOZ × percentage — geen periodiciteit om aan te ontlenen) — en
+ * gemeentelijke lasten worden bovendien bewezen NIET gelijkmatig maandelijks
+ * geboekt (GAT-008A-opdracht, expliciet). Een lineaire Werkelijk-extrapolatie
+ * of een automatische "ontbrekende maand = €0"-aanname is daarom UITGESLOTEN
+ * — `verwachtingResterendJaar` blijft daarom, nog sterker dan bij
+ * Verzekeringen, een PUUR handmatige, expliciete businessaanname (`Decimal |
+ * null`), zonder enige interne afleidingslogica in deze module.
+ * `begroteGemeentelijkeLasten` wordt ONGEWIJZIGD doorgegeven — Estimated
+ * berekent of muteert de Begroting nooit.
+ *
+ * WERKELIJK-DEKKING ALS AANVULLENDE, EXPLICIETE VOORWAARDE (zelfde
+ * GAT-001B-§5-toepassing als Verzekeringen): `estimatedTotaal` is
+ * uitsluitend niet-`null` wanneer zowel Werkelijk-dekking bevestigd is
+ * (`werkelijkDekkingBevestigd` én `nietGeclassificeerdTotaal === 0`) als
+ * `verwachtingResterendJaar` een geldige Decimal is.
  */
 export const GEMEENTELIJKE_LASTEN_WERKELIJK_CATEGORIEEN = ["GEMEENTELIJKE_LASTEN"] as const;
 export type BgGemeentelijkeLastenWerkelijkCategorie = (typeof GEMEENTELIJKE_LASTEN_WERKELIJK_CATEGORIEEN)[number];
@@ -484,5 +499,67 @@ export function berekenWerkelijkGemeentelijkeLasten(boekingen: readonly Werkelij
     moduleTotaal: som(perCategorie.map((c) => c.categorieTotaal)),
     nietGeclassificeerdTotaal: som(nietGeclassificeerd.map((r) => r.saldo)),
     nietGeclassificeerdAantalBoekingen: nietGeclassificeerd.length,
+  };
+}
+
+// ── Estimated (FASE GAT-008A, 2026-09-17) ───────────────────────────────────
+
+export interface EstimatedGemeentelijkeLastenCategorieResultaat {
+  categorie: BgGemeentelijkeLastenWerkelijkCategorie;
+  /** Ongewijzigde doorgifte van de Begroting — Estimated berekent/muteert de Begroting nooit. */
+  begrotingTotaal: Decimal;
+  werkelijkTotaal: Decimal;
+  /** `false` zodra Werkelijk-dekking voor de afgesloten periode niet expliciet bevestigd is, of `nietGeclassificeerdTotaal` niet nul is — zie moduledoc. */
+  werkelijkVoldoendeBekend: boolean;
+  /** Handmatige, expliciet aangeleverde/overridable aanname — `null` = nog niet ingevuld. GEEN lineaire extrapolatie, GEEN aanname dat een ontbrekende boeking €0 betekent (zie moduledoc). */
+  verwachtingResterendJaar: Decimal | null;
+  estimatedTotaal: Decimal | null;
+  afwijking: Decimal | null;
+}
+
+export interface EstimatedGemeentelijkeLastenResultaat {
+  /** Vaste volgorde: `GEMEENTELIJKE_LASTEN_WERKELIJK_CATEGORIEEN` (momenteel één element). */
+  perCategorie: EstimatedGemeentelijkeLastenCategorieResultaat[];
+  moduleBegrotingTotaal: Decimal;
+  moduleWerkelijkTotaal: Decimal;
+  /** `null` zodra één van de categorieën `estimatedTotaal === null` heeft. */
+  moduleEstimatedTotaal: Decimal | null;
+}
+
+/**
+ * `estimatedTotaal = werkelijkTotaal + verwachtingResterendJaar` — zie
+ * moduledoc voor waarom hier, anders dan Verzekeringen, GEEN enkele interne
+ * afleiding van `verwachtingResterendJaar` bestaat.
+ */
+export function berekenEstimatedGemeentelijkeLasten(
+  begroting: BgGemeentelijkeLastenResultaat,
+  werkelijk: WerkelijkGemeentelijkeLastenResultaat,
+  werkelijkDekkingBevestigd: boolean,
+  verwachtingPerCategorie: Record<BgGemeentelijkeLastenWerkelijkCategorie, Decimal | null>,
+): EstimatedGemeentelijkeLastenResultaat {
+  const werkelijkVoldoendeBekend = werkelijkDekkingBevestigd && werkelijk.nietGeclassificeerdTotaal.isZero();
+
+  const perCategorie: EstimatedGemeentelijkeLastenCategorieResultaat[] = GEMEENTELIJKE_LASTEN_WERKELIJK_CATEGORIEEN.map((categorie) => {
+    const werkelijkTotaal = werkelijk.perCategorie.find((c) => c.categorie === categorie)!.categorieTotaal;
+    const verwachting = verwachtingPerCategorie[categorie];
+    const estimatedTotaal = werkelijkVoldoendeBekend && isGeldigDecimal(verwachting) ? werkelijkTotaal.plus(verwachting) : null;
+    return {
+      categorie,
+      begrotingTotaal: begroting.begroteGemeentelijkeLasten,
+      werkelijkTotaal,
+      werkelijkVoldoendeBekend,
+      verwachtingResterendJaar: verwachting,
+      estimatedTotaal,
+      afwijking: estimatedTotaal !== null ? estimatedTotaal.minus(begroting.begroteGemeentelijkeLasten) : null,
+    };
+  });
+
+  const moduleEstimatedTotaal = perCategorie.every((c) => c.estimatedTotaal !== null) ? som(perCategorie.map((c) => c.estimatedTotaal!)) : null;
+
+  return {
+    perCategorie,
+    moduleBegrotingTotaal: begroting.begroteGemeentelijkeLasten,
+    moduleWerkelijkTotaal: werkelijk.moduleTotaal,
+    moduleEstimatedTotaal,
   };
 }

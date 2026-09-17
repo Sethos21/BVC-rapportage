@@ -1,5 +1,5 @@
 import Decimal from "decimal.js";
-import { ALGEMENE_KOSTEN_CATEGORIEEN, type BgAlgemeneKostenCategorie } from "./begroteAlgemeneKosten.js";
+import { ALGEMENE_KOSTEN_CATEGORIEEN, type BgAlgemeneKostenCategorie, type BgAlgemeneKostenResultaat } from "./begroteAlgemeneKosten.js";
 
 /**
  * Werkelijk Algemene Kosten — FASE GAT-009 (2026-09-16): de EERSTE
@@ -38,8 +38,29 @@ import { ALGEMENE_KOSTEN_CATEGORIEEN, type BgAlgemeneKostenCategorie } from "./b
  * ONGEWIJZIGD gesommeerd. Eventuele normalisatie naar de Pure P&L Engine
  * gebeurt uitsluitend in `algemeneKostenWerkelijkPnLAdapter.ts`.
  *
- * GEEN ESTIMATED IN DEZE FASE (expliciet buiten scope, GAT-009-opdracht —
- * dat hoort bij GAT-008): uitsluitend Werkelijk wordt gebouwd.
+ * ESTIMATED (FASE GAT-008A, 2026-09-17, `berekenEstimatedAlgemeneKosten`
+ * hieronder) — zelfde bewezen OB-030/031-patroon als Rente/Leegstand/
+ * Verzekeringen/Gemeentelijke Lasten, hier per categorie (alle vijf
+ * bestaande, ongewijzigde `ALGEMENE_KOSTEN_CATEGORIEEN`):
+ * `estimatedTotaal = werkelijkTotaal + verwachtingResterendJaar`.
+ * `begroteAlgemeneKosten.ts`'s `berekendVoorstel`-rekenhulp (vorigJaarBedrag ×
+ * (1 + verwachteVerhogingPercentage)) is EEN mogelijke, geen verplichte, bron
+ * voor de handmatige `verwachtingResterendJaar`-aanname per categorie — deze
+ * module herberekent die rekenhulp niet zelf, om geen tweede rekenpad naast
+ * `berekenBegroteAlgemeneKosten` te introduceren. `begrotingTotaal`
+ * (`categorieTotaal` uit de Begroting) wordt ONGEWIJZIGD doorgegeven.
+ *
+ * WERKELIJK-DEKKING ALS AANVULLENDE, EXPLICIETE VOORWAARDE (GAT-001B
+ * §5-invariant, zoals ook toegepast op Verzekeringen/Gemeentelijke Lasten):
+ * `estimatedTotaal` is uitsluitend niet-`null` wanneer zowel Werkelijk-
+ * dekking bevestigd is (`werkelijkDekkingBevestigd` én
+ * `nietGeclassificeerdTotaal === 0`, MODULEBREED — één en dezelfde
+ * boekingenbron voedt alle vijf categorieën tegelijk) als
+ * `verwachtingResterendJaar` voor DIE categorie een geldige Decimal is. Elke
+ * categorie behoudt haar EIGEN verwachting/estimatedTotaal — "Taxatie/
+ * Verhuurbemiddeling" blijft uitsluitend een presentatielabel binnen
+ * MAKELAARSKOSTEN, geen eigen regel (zelfde grens als
+ * `algemeneKostenWerkelijkPnLAdapter.ts`).
  */
 
 /** Eén reeds economisch geclassificeerde boeking — GEEN grootboekrekening/OGB, zie moduledoc. */
@@ -94,5 +115,73 @@ export function berekenWerkelijkAlgemeneKosten(boekingen: readonly WerkelijkAlge
     moduleTotaal: som(perCategorie.map((c) => c.categorieTotaal)),
     nietGeclassificeerdTotaal: som(nietGeclassificeerd.map((r) => r.saldo)),
     nietGeclassificeerdAantalBoekingen: nietGeclassificeerd.length,
+  };
+}
+
+// ── Estimated (FASE GAT-008A, 2026-09-17) ───────────────────────────────────
+
+function isGeldigDecimal(waarde: Decimal | null): waarde is Decimal {
+  return waarde !== null && !waarde.isNaN();
+}
+
+export interface EstimatedAlgemeneKostenCategorieResultaat {
+  categorie: BgAlgemeneKostenCategorie;
+  /** Ongewijzigde doorgifte van de Begroting-categorie — Estimated berekent/muteert de Begroting nooit. */
+  begrotingTotaal: Decimal;
+  werkelijkTotaal: Decimal;
+  /** Modulebreed (zie moduledoc) — `false` zodra Werkelijk-dekking niet expliciet bevestigd is of `nietGeclassificeerdTotaal` niet nul is. */
+  werkelijkVoldoendeBekend: boolean;
+  /** Handmatige, expliciet aangeleverde/overridable aanname PER CATEGORIE — `null` = nog niet ingevuld. */
+  verwachtingResterendJaar: Decimal | null;
+  estimatedTotaal: Decimal | null;
+  afwijking: Decimal | null;
+}
+
+export interface EstimatedAlgemeneKostenResultaat {
+  /** Vaste volgorde: `ALGEMENE_KOSTEN_CATEGORIEEN`. */
+  perCategorie: EstimatedAlgemeneKostenCategorieResultaat[];
+  moduleBegrotingTotaal: Decimal;
+  moduleWerkelijkTotaal: Decimal;
+  /** `null` zodra één van de vijf categorieën `estimatedTotaal === null` heeft. */
+  moduleEstimatedTotaal: Decimal | null;
+}
+
+/**
+ * `estimatedTotaal = werkelijkTotaal + verwachtingResterendJaar` per
+ * categorie — zie moduledoc. `werkelijkDekkingBevestigd` is modulebreed (één
+ * Boekingen-bron voedt alle vijf categorieën), `verwachtingPerCategorie`
+ * blijft per categorie afzonderlijk instelbaar.
+ */
+export function berekenEstimatedAlgemeneKosten(
+  begroting: BgAlgemeneKostenResultaat,
+  werkelijk: WerkelijkAlgemeneKostenResultaat,
+  werkelijkDekkingBevestigd: boolean,
+  verwachtingPerCategorie: Record<BgAlgemeneKostenCategorie, Decimal | null>,
+): EstimatedAlgemeneKostenResultaat {
+  const werkelijkVoldoendeBekend = werkelijkDekkingBevestigd && werkelijk.nietGeclassificeerdTotaal.isZero();
+
+  const perCategorie: EstimatedAlgemeneKostenCategorieResultaat[] = ALGEMENE_KOSTEN_CATEGORIEEN.map((categorie) => {
+    const begrotingTotaal = begroting.perCategorie.find((c) => c.categorie === categorie)!.categorieTotaal;
+    const werkelijkTotaal = werkelijk.perCategorie.find((c) => c.categorie === categorie)!.categorieTotaal;
+    const verwachting = verwachtingPerCategorie[categorie];
+    const estimatedTotaal = werkelijkVoldoendeBekend && isGeldigDecimal(verwachting) ? werkelijkTotaal.plus(verwachting) : null;
+    return {
+      categorie,
+      begrotingTotaal,
+      werkelijkTotaal,
+      werkelijkVoldoendeBekend,
+      verwachtingResterendJaar: verwachting,
+      estimatedTotaal,
+      afwijking: estimatedTotaal !== null ? estimatedTotaal.minus(begrotingTotaal) : null,
+    };
+  });
+
+  const moduleEstimatedTotaal = perCategorie.every((c) => c.estimatedTotaal !== null) ? som(perCategorie.map((c) => c.estimatedTotaal!)) : null;
+
+  return {
+    perCategorie,
+    moduleBegrotingTotaal: begroting.moduleTotaal,
+    moduleWerkelijkTotaal: werkelijk.moduleTotaal,
+    moduleEstimatedTotaal,
   };
 }
