@@ -3,14 +3,18 @@ import { describe, expect, it } from "vitest";
 import { berekenWerkelijkBeheerViaCentraleMapping, type BeheerRuweBoekingRegel } from "./beheerCentraleMapping.js";
 import { beheerWerkelijkNaarPnLBovenEbitdaRegels } from "./beheerWerkelijkPnLAdapter.js";
 import { berekenWerkelijkOnderhoudViaCentraleMapping, type OnderhoudRuweBoekingRegel } from "./onderhoudCentraleMapping.js";
+import { onderhoudWerkelijkNaarPnLBovenEbitdaRegels } from "./onderhoudWerkelijkPnLAdapter.js";
 import { berekenWerkelijkVerzekeringenViaCentraleMapping, type VerzekeringRuweBoekingRegel } from "./verzekeringCentraleMapping.js";
+import { verzekeringWerkelijkNaarPnLBovenEbitdaRegels } from "./verzekeringWerkelijkPnLAdapter.js";
 import { berekenWerkelijkGemeentelijkeLastenViaCentraleMapping, type GemeentelijkeLastenRuweBoekingRegel } from "./gemeentelijkeLastenCentraleMapping.js";
+import { gemeentelijkeLastenWerkelijkNaarPnLBovenEbitdaRegels } from "./gemeentelijkeLastenWerkelijkPnLAdapter.js";
 import { berekenWerkelijkAlgemeneKostenViaCentraleMapping, type AlgemeneKostenRuweBoekingRegel } from "./algemeneKostenCentraleMapping.js";
+import { algemeneKostenWerkelijkNaarPnLBovenEbitdaRegels } from "./algemeneKostenWerkelijkPnLAdapter.js";
 import { berekenWerkelijkHuurViaCentraleMapping, type HuurRuweBoekingRegel } from "./huurCentraleMapping.js";
 import { huurWerkelijkNaarPnLBovenEbitdaRegels } from "./huurWerkelijkPnLAdapter.js";
 import { berekenWerkelijkServicekostenEigenaarViaCentraleMapping, type ServicekostenEigenaarRuweBoekingRegel } from "./servicekostenEigenaarCentraleMapping.js";
 import { servicekostenEigenaarWerkelijkNaarPnLBovenEbitdaRegels } from "./servicekostenEigenaarWerkelijkPnLAdapter.js";
-import { berekenPnLBoom, type PurePnLBovenEbitdaRegel, type PurePnLBronRegel, type PurePnLOnderEbitdaRegel } from "../pnlEngine.js";
+import { berekenPnLBoom, type PurePnLBronRegel, type PurePnLOnderEbitdaRegel } from "../pnlEngine.js";
 import type { PnLBronmappingRegel } from "../pnlBronmapping.js";
 
 /**
@@ -30,14 +34,18 @@ import type { PnLBronmappingRegel } from "../pnlBronmapping.js";
  * (canon-correctie, zie `pnlEngine.ts`-addendum).
  *
  * GEEN NIEUWE ARCHITECTUUR: alle centrale mapping/calculators/adapters
- * hieronder zijn de BESTAANDE, ongewijzigde productiefuncties. Voor
- * Onderhoud/Verzekeringen/Gemeentelijke Lasten bestaat nog GEEN productie-
- * Werkelijk-P&L-adapter (alleen hun Estimated-adapters zijn gebouwd,
- * GAT-008A/B) — `*NaarPnLRegelsBewijs` hieronder zijn daarom TEST-LOKALE
- * bewijs-adapters, exact volgens dezelfde regelSleutel/groep/contributieAard-
- * conventie als hun reeds bestaande Estimated-adapter. Dit blijft een
- * afzonderlijke, gerapporteerde TECHNICAL GAP (productie-integratiefase),
- * geen blokkade voor deze financiële acceptatie.
+ * hieronder zijn de BESTAANDE, ongewijzigde productiefuncties. DELTA BUILD
+ * (2026-09-17): de eerder test-lokale bewijs-adapters voor Onderhoud/
+ * Verzekeringen/Gemeentelijke Lasten zijn vervangen door hun nieuwe, echte
+ * productie-Werkelijk-P&L-adapters (`onderhoudWerkelijkPnLAdapter.ts`/
+ * `verzekeringWerkelijkPnLAdapter.ts`/`gemeentelijkeLastenWerkelijkPnLAdapter.ts`).
+ * Daarbij is ook geconstateerd en gecorrigeerd dat Algemene Kosten hier ten
+ * onrechte nog een test-lokale bewijs-adapter gebruikte, terwijl de echte
+ * productie-adapter (`algemeneKostenWerkelijkPnLAdapter.ts`, GAT-009) al
+ * bestond — deze harness gebruikt nu voor GEEN van de zeven modules meer een
+ * test-lokale bewijs-adapter; uitsluitend Zonnestroom (GL8815, structureel
+ * NIET_VAN_TOEPASSING, geen module met een productieketen) behoudt zijn
+ * bewijsregel.
  */
 
 const AANGEMAAKT = new Date("2026-09-17T00:00:00.000Z");
@@ -209,23 +217,6 @@ function inBereik(periode: string, vanaf: string, tot: string): boolean {
   return periode >= vanaf && periode <= tot;
 }
 
-/** Test-lokale bewijs-adapters voor modules zonder productie-Werkelijk-P&L-adapter (zie moduledoc). */
-function bewezenBekend(bedrag: Decimal): { status: "BEKEND"; bedrag: Decimal } {
-  return { status: "BEKEND", bedrag };
-}
-function onderhoudNaarPnLRegelsBewijs(werkelijk: ReturnType<typeof berekenWerkelijkOnderhoudViaCentraleMapping>["werkelijk"]): PurePnLBovenEbitdaRegel[] {
-  return werkelijk.perCategorie.map((c) => ({ regelSleutel: c.categorie, boomPositie: "BOVEN_EBITDA", groep: "EXPLOITATIE_LASTEN", contributieAard: "KOSTEN", waarde: bewezenBekend(c.categorieTotaal) }));
-}
-function verzekeringNaarPnLRegelsBewijs(werkelijk: ReturnType<typeof berekenWerkelijkVerzekeringenViaCentraleMapping>["werkelijk"]): PurePnLBovenEbitdaRegel[] {
-  return werkelijk.perCategorie.map((c) => ({ regelSleutel: c.categorie, boomPositie: "BOVEN_EBITDA", groep: "EXPLOITATIE_LASTEN", contributieAard: "KOSTEN", waarde: bewezenBekend(c.categorieTotaal) }));
-}
-function gemeentelijkeLastenNaarPnLRegelsBewijs(werkelijk: ReturnType<typeof berekenWerkelijkGemeentelijkeLastenViaCentraleMapping>["werkelijk"]): PurePnLBovenEbitdaRegel[] {
-  return werkelijk.perCategorie.map((c) => ({ regelSleutel: c.categorie, boomPositie: "BOVEN_EBITDA", groep: "EXPLOITATIE_LASTEN", contributieAard: "KOSTEN", waarde: bewezenBekend(c.categorieTotaal) }));
-}
-function algemeneKostenNaarPnLRegelsBewijs(werkelijk: ReturnType<typeof berekenWerkelijkAlgemeneKostenViaCentraleMapping>["werkelijk"]): PurePnLBovenEbitdaRegel[] {
-  return werkelijk.perCategorie.map((c) => ({ regelSleutel: c.categorie, boomPositie: "BOVEN_EBITDA", groep: "ALGEMENE_KOSTEN", contributieAard: "KOSTEN", waarde: bewezenBekend(c.categorieTotaal) }));
-}
-
 /**
  * Zonnestroom (GL8815) — CANON-CORRECTIE (GAT-013-vervolg, vastgelegd in
  * `pnlEngine.ts`-addendum): GEEN exploitatie-opbrengst, ONDER EBITDA, als
@@ -277,10 +268,10 @@ function run070Acceptance(vanafPeriode: string, totPeriode: string) {
   const regels: PurePnLBronRegel[] = [
     ...huurWerkelijkNaarPnLBovenEbitdaRegels(huur.werkelijk, true),
     ...beheerWerkelijkNaarPnLBovenEbitdaRegels(beheer.werkelijk, true),
-    ...onderhoudNaarPnLRegelsBewijs(onderhoud.werkelijk),
-    ...verzekeringNaarPnLRegelsBewijs(verzekering.werkelijk),
-    ...gemeentelijkeLastenNaarPnLRegelsBewijs(gemLasten.werkelijk),
-    ...algemeneKostenNaarPnLRegelsBewijs(algemeneKosten.werkelijk),
+    ...onderhoudWerkelijkNaarPnLBovenEbitdaRegels(onderhoud.werkelijk, true),
+    ...verzekeringWerkelijkNaarPnLBovenEbitdaRegels(verzekering.werkelijk, true),
+    ...gemeentelijkeLastenWerkelijkNaarPnLBovenEbitdaRegels(gemLasten.werkelijk, true),
+    ...algemeneKostenWerkelijkNaarPnLBovenEbitdaRegels(algemeneKosten.werkelijk, true),
     ...servicekostenEigenaarWerkelijkNaarPnLBovenEbitdaRegels(ske.werkelijk, true),
     zonnestroomRegelBewijs(),
   ];
