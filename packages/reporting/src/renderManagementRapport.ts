@@ -2,13 +2,14 @@ import type Decimal from "decimal.js";
 import { formatEUR, type OnbekendOf } from "@bvc/domain";
 import { escapeHtml, formatBedragHtml, formatM2Html, formatOnbekendOfHtml, formatPercentageHtml, renderRapportDocument } from "./huisstijl.js";
 import type { ManagementRapportControleItem, ManagementRapportResultaat } from "./managementRapport.js";
-import type { HuurComplexKpi } from "./huurKerncijfers.js";
+import type { HuurComplexKpi, HuurKerncijfersResultaat } from "./huurKerncijfers.js";
 import type { VastgoedComplexKpi, VastgoedKerncijfersResultaat } from "./vastgoedKerncijfers.js";
 import type {
   ServicekostenActuelePositieStatus,
   ServicekostenActueleComplexTotaal,
   ServicekostenAfrekeningComplexTotaal,
   ServicekostenAfrekeningContractHuurderTotaal,
+  ServicekostenPositieResultaat,
 } from "./servicekostenPositie.js";
 
 /**
@@ -161,8 +162,20 @@ function formatEurPerM2(waarde: Decimal): string {
   return `${formatBedragHtml(waarde)} /m²`;
 }
 
-function renderHuur(resultaat: ManagementRapportResultaat): string {
-  const h = resultaat.huur;
+/**
+ * DELTA BUILD (2026-09-18) — "Samengestelde rapportgenerator V3": apart
+ * geëxporteerd, ontkoppeld van `ManagementRapportResultaat` (neemt nu
+ * rechtstreeks het eigen `HuurKerncijfersResultaat` van de module) — het
+ * register onder deze samengestelde rapportgenerator gebruikt dit als de
+ * "RENTROLL/huuranalyse"-sectie: `genereerHuurKerncijfers.ts`/
+ * `huurKerncijfers.ts` zijn de daadwerkelijk productie-aangesloten
+ * generator/resultaatroute voor huur-KPI's uit de rentroll-bron (Vorderingsoort
+ * 01/13) — NIET `rentrollDiagnose.ts` (een TIJDELIJK, alleen-lezen
+ * diagnose-commando zonder resultaatmodel/renderer, zie de moduledoc van
+ * dat bestand). Zelfde `Body`-extractiepatroon als `renderVastgoedKerncijfersBody`
+ * hierboven — puur een signatuurwijziging, byte-identieke HTML-uitkomst.
+ */
+export function renderHuurKerncijfersBody(h: HuurKerncijfersResultaat): string {
   const p = h.portefeuille;
   return `
     <h2>3. Huur</h2>
@@ -287,8 +300,13 @@ function renderServicekostenAfrekeningContractHuurderTabel(regels: readonly Serv
     </table>`;
 }
 
-function renderServicekosten(resultaat: ManagementRapportResultaat): string {
-  const sk = resultaat.servicekosten;
+/**
+ * DELTA BUILD (2026-09-18) — "Samengestelde rapportgenerator V3": apart
+ * geëxporteerd, ontkoppeld van `ManagementRapportResultaat` (neemt nu
+ * rechtstreeks het eigen `ServicekostenPositieResultaat` van de module) —
+ * zelfde extractiepatroon als hierboven bij Vastgoed/Huur.
+ */
+export function renderServicekostenBody(sk: ServicekostenPositieResultaat): string {
   const a = sk.actuelePositie;
   const b = sk.afrekeningVoorgaandJaar;
   return `
@@ -359,9 +377,9 @@ export function renderManagementRapportBody(resultaat: ManagementRapportResultaa
   return `
     ${renderManagementsamenvatting(resultaat)}
     ${renderVastgoedKerncijfersBody(resultaat.vastgoed)}
-    ${renderHuur(resultaat)}
+    ${renderHuurKerncijfersBody(resultaat.huur)}
     ${renderKasstroom(resultaat)}
-    ${renderServicekosten(resultaat)}
+    ${renderServicekostenBody(resultaat.servicekosten)}
     ${renderControleVereist(resultaat)}`;
 }
 

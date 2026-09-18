@@ -3,12 +3,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openOrCreateDatabase, voegPnLBronmappingMutatieToe, type PnLBronmappingMutatieInvoer } from "@bvc/begroting-data";
-import { renderBalansPeriodeBody, renderControlerapportBody, renderHuurdersoverzichtBody, renderKasstroomManagementoverzichtBody, renderVastgoedKerncijfersBody, type PnLEconomischeModule } from "@bvc/reporting";
+import { renderBalansPeriodeBody, renderControlerapportBody, renderHuurdersoverzichtBody, renderHuurKerncijfersBody, renderKasstroomManagementoverzichtBody, renderServicekostenBody, renderVastgoedKerncijfersBody, type PnLEconomischeModule } from "@bvc/reporting";
 import { genereerSamengesteldRapport } from "./genereerSamengesteldRapport.js";
 import { genereerBalansPeriode } from "./genereerBalansPeriode.js";
 import { haalControlerapportInvoerOp } from "./genereerControlerapport.js";
+import { genereerHuurKerncijfers } from "./genereerHuurKerncijfers.js";
 import { haalKasstroomManagementoverzichtResultaatOp } from "./genereerKasstroomManagementoverzicht.js";
 import { genereerHuurdersoverzicht } from "./genereerHuurdersoverzicht.js";
+import { genereerServicekostenPositie } from "./genereerServicekostenPositie.js";
 import { genereerVastgoedKerncijfers } from "./genereerVastgoedKerncijfers.js";
 import { rebuildCache } from "./rebuildCache.js";
 import { leesAdministratieConfig, nieuweAdministratieConfig, schrijfAdministratieConfig } from "./administratie.js";
@@ -126,14 +128,22 @@ beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), "bvc-rapport-samengesteld-"));
   mkdirSync(bronGedeeldDir(root), { recursive: true });
   mkdirSync(administratieDir(root, ADMINISTRATIE_ID), { recursive: true });
-  schrijfAdministratieConfig(root, ADMINISTRATIE_ID, nieuweAdministratieConfig(BEDRIJFSNR, "Rooise Zoom"));
+  // servicekostenRekeningen: exact de bewezen 070_Rooise_Zoom-waarden (kostenrekening 1712, voorschottenrekening 1711) — zie administratie.ts's moduledoc.
+  schrijfAdministratieConfig(root, ADMINISTRATIE_ID, { ...nieuweAdministratieConfig(BEDRIJFSNR, "Rooise Zoom"), servicekostenRekeningen: { kostenrekening: "1712", voorschottenrekening: "1711" } });
 
   schrijfXlsxFixture(join(bronGedeeldDir(root), "boekingen.xlsx"), schrijfEchteH1PnLBoekingen());
   // Balans: zelfde schematische aanpak als genereerBalansPeriode.test.ts — beginbalans op GL1010, geen extra 2026-mutaties op die rekening (voorkomt vermenging met de echte P&L-GL's hierboven).
   schrijfXlsxFixture(join(bronGedeeldDir(root), "balans_per_jaar.xlsx"), [
     { Bedrijfsnr: BEDRIJFSNR, Jaar: 2026, Grootboekrekeningnr: "1010", Beginbalans_debet: 1000, Beginbalans_credit: 0, Saldo_debet: 0, Saldo_credit: 0, Eindsaldo: 0, Rekening_omschrijving: "Bank", Balans_vw: "Balans" },
   ]);
-  schrijfXlsxFixture(join(bronGedeeldDir(root), "servicekosten.xlsx"), []);
+  // Servicekosten: minimale, reële actuele-positie-fixture (complex 002, kostensoort 0101, kosten "Kosten").
+  schrijfXlsxFixture(join(bronGedeeldDir(root), "servicekosten.xlsx"), [
+    {
+      Bedrijfsnr: BEDRIJFSNR, Service_BK_Boekjaar: "2026", Service_BK_Boekperiode: "03", Service_BK_Dagboeknummer: "50",
+      Service_BK_Boekstuknummer: "500", Service_BK_Volgnummer: "1", Service_BK_Kostensoort: "0101", Service_BK_Complexnummer: "002",
+      Service_BK_Bedrag_debet: "1250.00", Service_BK_Bedrag_credit: "0", Kostensoort_Soort: "Kosten",
+    },
+  ]);
   // Vastgoed-KPI: zelfde complex/unit als het Huurdersoverzicht-contract hieronder (002/0001) — reële, samenhangende fixture.
   schrijfXlsxFixture(join(bronGedeeldDir(root), "units.xlsx"), [{ Bedrijfsnr: BEDRIJFSNR, Complexnummer: "002", Unitnummer: "0001", Unitomschrijving: "Villa II", Unit_vvo: "320" }]);
   schrijfXlsxFixture(join(bronGedeeldDir(root), "complex_totalen.xlsx"), []);
@@ -210,7 +220,7 @@ describe("genereerSamengesteldRapport — meerdere modules (criterium B)", () =>
     expect(geselecteerdeSecties).toHaveLength(3); // exact de drie opgegeven module-id's, "pnl" dubbel geselecteerd telt niet dubbel
     expect(geselecteerdeSecties.map((s) => s.id)).toEqual(["PNL", "BALANS", "HUURDERS"]); // vaste registervolgorde, ongeacht opgaafvolgorde
     // De overige (V2-)modules zijn hier bewust niet geselecteerd.
-    expect(rapport.secties.filter((s) => s.resultaat.status === "NIET_GESELECTEERD").map((s) => s.id)).toEqual(["KASSTROOM", "VASTGOED_KPI", "CONTROLES"]);
+    expect(rapport.secties.filter((s) => s.resultaat.status === "NIET_GESELECTEERD").map((s) => s.id)).toEqual(["KASSTROOM", "VASTGOED_KPI", "CONTROLES", "RENTROLL", "SERVICEKOSTEN"]);
     // "PNL,PNL" mag niet tot twee keer dezelfde inhoud leiden.
     expect((html.match(/Winst- en verliesrekening/g) ?? []).length).toBeLessThanOrEqual(2); // cover-titel + eventueel 1x sectiekop, nooit verdubbeld door de dubbele selectie
   });
@@ -350,12 +360,12 @@ describe("genereerSamengesteldRapport V2 — CONTROLES (criteria C/G)", () => {
 });
 
 describe("genereerSamengesteldRapport V2 — combinatie oud + nieuw (criteria D/E/H/I)", () => {
-  it("alle zes modules samen: elk selecteerbaar, geen dubbele HTML-documentstructuur, statusisolatie blijft werken", () => {
+  it("de zes V1/V2-modules samen: elk selecteerbaar, geen dubbele HTML-documentstructuur, statusisolatie blijft werken", () => {
     const { rapport, html } = genereerSamengesteldRapport(root, ADMINISTRATIE_ID, { ...CONTEXT_ALLE_MODULES, modules: ["pnl", "balans", "huurders", "kasstroom", "vastgoed_kpi", "controles"] });
 
-    expect(rapport.secties).toHaveLength(6);
-    expect(rapport.secties.every((s) => s.resultaat.status !== "NIET_GESELECTEERD")).toBe(true);
-    expect(rapport.secties.map((s) => s.id)).toEqual(["PNL", "BALANS", "HUURDERS", "KASSTROOM", "VASTGOED_KPI", "CONTROLES"]);
+    const geselecteerd = rapport.secties.filter((s) => s.resultaat.status !== "NIET_GESELECTEERD");
+    expect(geselecteerd.map((s) => s.id)).toEqual(["PNL", "BALANS", "HUURDERS", "KASSTROOM", "VASTGOED_KPI", "CONTROLES"]);
+    expect(rapport.secties.filter((s) => s.resultaat.status === "NIET_GESELECTEERD").map((s) => s.id)).toEqual(["RENTROLL", "SERVICEKOSTEN"]);
 
     // D: geen dubbele documentstructuur, ondanks zes secties.
     expect((html.match(/<html/g) ?? []).length).toBe(1);
@@ -379,5 +389,76 @@ describe("genereerSamengesteldRapport V2 — combinatie oud + nieuw (criteria D/
     const controles = rapport.secties.find((s) => s.id === "CONTROLES")!.resultaat;
     expect(controles.status === "OPGENOMEN" || controles.status === "ONVOLLEDIG").toBe(true);
     expect(html).toContain("Grootboek-totalen");
+  });
+});
+
+/**
+ * DELTA BUILD V3 (2026-09-18) — "RentRoll + Servicekosten": bewijst
+ * uitsluitend het NIEUWE risico van de twee toegevoegde modules
+ * (selecteerbaar, hergebruiken hun bestaande, ongewijzigde generator/
+ * Body-renderer) — GEEN herbewijs van RentRoll-/Servicekosten-
+ * businesslogica zelf (die blijft in hun eigen, ongewijzigde tests).
+ */
+describe("genereerSamengesteldRapport V3 — RENTROLL (criteria A/D)", () => {
+  it("is selecteerbaar en gebruikt uitsluitend het bestaande HuurKerncijfersResultaat (byte-identiek aan rechtstreeks aangeroepen genereerHuurKerncijfers + renderHuurKerncijfersBody)", () => {
+    const { rapport } = genereerSamengesteldRapport(root, ADMINISTRATIE_ID, { modules: ["rentroll"] }); // momentopname: geen boekjaar/periode nodig
+    const sectie = rapport.secties.find((s) => s.id === "RENTROLL")!.resultaat as { status: "OPGENOMEN" | "ONVOLLEDIG"; html: string };
+
+    const resultaat = genereerHuurKerncijfers(root, ADMINISTRATIE_ID);
+    const verwachteHtml = renderHuurKerncijfersBody(resultaat);
+
+    expect(sectie.html).toBe(verwachteHtml);
+    expect(sectie.html).toContain("37.318,80"); // de bruto jaarhuur uit de rentroll-fixture (contract 0000000028)
+  });
+});
+
+describe("genereerSamengesteldRapport V3 — SERVICEKOSTEN (criteria B/E)", () => {
+  it("is selecteerbaar en gebruikt uitsluitend het bestaande ServicekostenPositieResultaat (byte-identiek aan rechtstreeks aangeroepen genereerServicekostenPositie + renderServicekostenBody)", () => {
+    const { rapport } = genereerSamengesteldRapport(root, ADMINISTRATIE_ID, { ...CONTEXT_ALLE_MODULES, modules: ["servicekosten"] });
+    const sectie = rapport.secties.find((s) => s.id === "SERVICEKOSTEN")!.resultaat as { status: "OPGENOMEN" | "ONVOLLEDIG"; html: string };
+
+    const resultaat = genereerServicekostenPositie(root, ADMINISTRATIE_ID, { boekjaar: 2026, boekperiodeTotEnMet: "06", doelrekeningen: ["1712", "1711"] });
+    const verwachteHtml = renderServicekostenBody(resultaat);
+
+    expect(sectie.html).toBe(verwachteHtml);
+    expect(sectie.html).toContain("1.250,00"); // de kosten-boeking uit de servicekosten-fixture
+  });
+
+  it("wordt ONBESCHIKBAAR wanneer administratie.json geen servicekostenRekeningen kent (geen stilzwijgende 1711/1712-aanname), zonder andere modules te blokkeren", () => {
+    // Overschrijft de config van déze test met een variant zonder servicekostenRekeningen.
+    schrijfAdministratieConfig(root, ADMINISTRATIE_ID, nieuweAdministratieConfig(BEDRIJFSNR, "Rooise Zoom"));
+
+    const { rapport, html } = genereerSamengesteldRapport(root, ADMINISTRATIE_ID, { ...CONTEXT_ALLE_MODULES, modules: ["servicekosten", "controles"] });
+
+    const servicekosten = rapport.secties.find((s) => s.id === "SERVICEKOSTEN")!.resultaat;
+    expect(servicekosten.status).toBe("ONBESCHIKBAAR");
+    const controles = rapport.secties.find((s) => s.id === "CONTROLES")!.resultaat;
+    expect(controles.status === "OPGENOMEN" || controles.status === "ONVOLLEDIG").toBe(true);
+    expect(html).toContain("Grootboek-totalen");
+  });
+});
+
+describe("genereerSamengesteldRapport V3 — combinatie alle acht modules (criteria G/H/I/J)", () => {
+  it("alle acht modules samen: elk selecteerbaar, geen dubbele HTML-documentstructuur, bestaande V1/V2-modules blijven intact", () => {
+    const { rapport, html } = genereerSamengesteldRapport(root, ADMINISTRATIE_ID, {
+      ...CONTEXT_ALLE_MODULES,
+      modules: ["pnl", "balans", "huurders", "kasstroom", "vastgoed_kpi", "controles", "rentroll", "servicekosten"],
+    });
+
+    expect(rapport.secties).toHaveLength(8);
+    expect(rapport.secties.every((s) => s.resultaat.status !== "NIET_GESELECTEERD")).toBe(true);
+    expect(rapport.secties.map((s) => s.id)).toEqual(["PNL", "BALANS", "HUURDERS", "KASSTROOM", "VASTGOED_KPI", "CONTROLES", "RENTROLL", "SERVICEKOSTEN"]);
+
+    // I: geen dubbele documentstructuur, ondanks acht secties.
+    expect((html.match(/<html/g) ?? []).length).toBe(1);
+    expect((html.match(/class="cover"/g) ?? []).length).toBe(1);
+  });
+
+  it("een niet-geselecteerde RENTROLL/SERVICEKOSTEN wordt niet uitgevoerd/gerenderd", () => {
+    const { rapport, html } = genereerSamengesteldRapport(root, ADMINISTRATIE_ID, { ...CONTEXT_ALLE_MODULES, modules: ["pnl"] });
+
+    expect(rapport.secties.find((s) => s.id === "RENTROLL")!.resultaat).toEqual({ status: "NIET_GESELECTEERD" });
+    expect(rapport.secties.find((s) => s.id === "SERVICEKOSTEN")!.resultaat).toEqual({ status: "NIET_GESELECTEERD" });
+    expect(html).not.toContain("Actueel saldo"); // Servicekosten-KPI-label, mag niet verschijnen
   });
 });

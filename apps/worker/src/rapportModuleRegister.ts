@@ -1,10 +1,12 @@
-import { renderBalansPeriodeBody, renderControlerapportBody, renderHuurdersoverzichtBody, renderKasstroomManagementoverzichtBody, renderPnLPeriodeBody, renderVastgoedKerncijfersBody, type RapportModuleId } from "@bvc/reporting";
+import { renderBalansPeriodeBody, renderControlerapportBody, renderHuurdersoverzichtBody, renderHuurKerncijfersBody, renderKasstroomManagementoverzichtBody, renderPnLPeriodeBody, renderServicekostenBody, renderVastgoedKerncijfersBody, type RapportModuleId } from "@bvc/reporting";
 import { leesAdministratieConfig } from "./administratie.js";
 import { genereerBalansPeriode } from "./genereerBalansPeriode.js";
 import { haalControlerapportInvoerOp } from "./genereerControlerapport.js";
+import { genereerHuurKerncijfers } from "./genereerHuurKerncijfers.js";
 import { haalKasstroomManagementoverzichtResultaatOp } from "./genereerKasstroomManagementoverzicht.js";
 import { genereerHuurdersoverzicht } from "./genereerHuurdersoverzicht.js";
 import { haalPnLPeriodeResultaatOp } from "./genereerPnLPeriode.js";
+import { genereerServicekostenPositie } from "./genereerServicekostenPositie.js";
 import { genereerVastgoedKerncijfers } from "./genereerVastgoedKerncijfers.js";
 
 /**
@@ -190,6 +192,53 @@ function genereerControlesSectie(root: string, administratieId: string): Rapport
   return { status: "OK", html, onvolledig: false };
 }
 
+/**
+ * DELTA BUILD (2026-09-18) — "Samengestelde rapportgenerator V3": RENTROLL.
+ * Zelfde soort keuze als eerder bij VASTGOED_KPI: "RentRoll/huuranalyse"
+ * wijst hier naar de daadwerkelijk productie-aangesloten
+ * `genereerHuurKerncijfers.ts`/`huurKerncijfers.ts` (bruto/netto jaarhuur,
+ * huurkortingen, €/m² — reeds hergebruikt in de bestaande Managementrapportage),
+ * NIET naar `rentrollDiagnose.ts` (TIJDELIJK, alleen-lezen, geen
+ * resultaatmodel/renderer — zie die moduledoc). Momentopname, GEEN
+ * boekjaar/periode nodig — exact zoals het standalone
+ * `huur-kerncijfers`-commando.
+ */
+function genereerRentrollSectie(root: string, administratieId: string): RapportModuleGenereerResultaat {
+  const resultaat = genereerHuurKerncijfers(root, administratieId);
+  const html = renderHuurKerncijfersBody(resultaat);
+  const onvolledig = resultaat.controleVereist.some((c) => c.ernst === "KRITIEK");
+  return onvolledig
+    ? { status: "OK", html, onvolledig, toelichting: "Een of meer kritieke controlemeldingen — zie Per complex in de sectie hierboven." }
+    : { status: "OK", html, onvolledig };
+}
+
+/**
+ * DELTA BUILD (2026-09-18) — SERVICEKOSTEN: zelfde ONGEWIJZIGDE productieketen
+ * als het standalone `servicekosten-positie`-commando
+ * (`genereerServicekostenPositie`/`renderServicekostenBody`, beide nu
+ * hergebruikt zonder wijziging — alleen de renderer is hierboven ontkoppeld
+ * van `ManagementRapportResultaat`). De doelrekeningen (bv. 1711/1712 bij
+ * 070) komen, exact zoals in `genereerManagementRapport.ts`, uit
+ * `AdministratieConfig.servicekostenRekeningen` — ontbreekt die config, dan
+ * is de sectie ONBESCHIKBAAR (geen stilzwijgende 1711/1712-aanname).
+ */
+function genereerServicekostenSectie(root: string, administratieId: string, context: RapportGenereerContext): RapportModuleGenereerResultaat {
+  if (context.boekjaar === undefined || context.boekperiodeTotEnMet === undefined) {
+    return { status: "ONBESCHIKBAAR", reden: "boekjaar en periodeTotEnMet zijn verplicht voor de servicekostenpositie." };
+  }
+  const config = leesAdministratieConfig(root, administratieId);
+  if (!config.servicekostenRekeningen) {
+    return { status: "ONBESCHIKBAAR", reden: "administratie.json mist servicekostenRekeningen (kostenrekening/voorschottenrekening) — geen stilzwijgende 1711/1712-aanname." };
+  }
+  const doelrekeningen = [config.servicekostenRekeningen.kostenrekening, config.servicekostenRekeningen.voorschottenrekening];
+  const resultaat = genereerServicekostenPositie(root, administratieId, { boekjaar: context.boekjaar, boekperiodeVan: context.boekperiodeVan, boekperiodeTotEnMet: context.boekperiodeTotEnMet, doelrekeningen });
+  const html = renderServicekostenBody(resultaat);
+  const onvolledig = resultaat.controleVereist.some((c) => c.ernst === "KRITIEK");
+  return onvolledig
+    ? { status: "OK", html, onvolledig, toelichting: "Een of meer kritieke controlemeldingen — zie details in de sectie hierboven." }
+    : { status: "OK", html, onvolledig };
+}
+
 export const RAPPORT_MODULE_REGISTER: Record<RapportModuleId, RapportModuleDefinitie> = {
   PNL: { id: "PNL", naam: "Winst- en verliesrekening", genereer: genereerPnLSectie },
   BALANS: { id: "BALANS", naam: "Balans", genereer: genereerBalansSectie },
@@ -197,4 +246,6 @@ export const RAPPORT_MODULE_REGISTER: Record<RapportModuleId, RapportModuleDefin
   KASSTROOM: { id: "KASSTROOM", naam: "Kasstroom-managementoverzicht", genereer: genereerKasstroomSectie },
   VASTGOED_KPI: { id: "VASTGOED_KPI", naam: "Vastgoed-KPI's", genereer: genereerVastgoedKpiSectie },
   CONTROLES: { id: "CONTROLES", naam: "Controlerapport", genereer: genereerControlesSectie },
+  RENTROLL: { id: "RENTROLL", naam: "RentRoll/huuranalyse", genereer: genereerRentrollSectie },
+  SERVICEKOSTEN: { id: "SERVICEKOSTEN", naam: "Servicekosten", genereer: genereerServicekostenSectie },
 };
