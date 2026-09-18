@@ -73,7 +73,18 @@ function naarPnLRuweBoekingRegel(row: Record<string, unknown>): PnLRuweBoekingRe
   };
 }
 
-export function genereerPnLPeriode(root: string, administratieId: string, opties: GenereerPnLPeriodeOpties): GenereerPnLPeriodeResultaat {
+/**
+ * DELTA BUILD (2026-09-18) — "Selecteerbare samengestelde rapportgenerator
+ * V1": UITSLUITEND de bron-/mapping-ophaal- en rekenstap, ZONDER renderen/
+ * wegschrijven — geëxtraheerd zodat de nieuwe samengestelde
+ * rapportgenerator (`genereerSamengesteldRapport.ts`) exact dezelfde
+ * productieketen kan aanroepen als het standalone `pnl-periode`-commando,
+ * zonder een los HTML-bestand te forceren en zonder de kleinste kans op een
+ * tweede, afwijkende implementatie van dezelfde ophaal-/rekenlogica.
+ * `genereerPnLPeriode` hieronder is ONGEWIJZIGD in gedrag — roept deze
+ * functie nu uitsluitend intern aan.
+ */
+export function haalPnLPeriodeResultaatOp(root: string, administratieId: string, opties: GenereerPnLPeriodeOpties): PnLPeriodeOrchestratieResultaat {
   const config = leesAdministratieConfig(root, administratieId);
   const boekperiodeVan = opties.boekperiodeVan ?? "01";
 
@@ -101,7 +112,12 @@ export function genereerPnLPeriode(root: string, administratieId: string, opties
   }
 
   const context = { bedrijfsnr: config.bedrijfsnr, boekjaar: opties.boekjaar, boekperiode: opties.boekperiodeTotEnMet, opSysteemtijdstip: new Date() };
-  const { resultaat, nietMeegenomen } = berekenPnLPeriode(context, boekingen, mappingregels);
+  return berekenPnLPeriode(context, boekingen, mappingregels);
+}
+
+export function genereerPnLPeriode(root: string, administratieId: string, opties: GenereerPnLPeriodeOpties): GenereerPnLPeriodeResultaat {
+  const config = leesAdministratieConfig(root, administratieId);
+  const { resultaat, nietMeegenomen } = haalPnLPeriodeResultaatOp(root, administratieId, opties);
 
   const html = renderPnLPeriodeHtml({
     administratieNaam: config.weergavenaam,

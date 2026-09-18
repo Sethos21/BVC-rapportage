@@ -47,6 +47,7 @@ export * from "./pnlBronmappingClassificatie.js";
 export * from "./pnlEngine.js";
 export * from "./pnlPeriodeOrchestratie.js";
 export * from "./renderPnLPeriode.js";
+export * from "./rapportModule.js";
 export * from "./begroting/algemeneKostenCentraleMapping.js";
 export * from "./begroting/renteCentraleMapping.js";
 export * from "./begroting/leegstandCentraleMapping.js";

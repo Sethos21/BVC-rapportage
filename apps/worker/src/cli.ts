@@ -8,6 +8,7 @@ import { genereerPlPeriode } from "./genereerPlPeriode.js";
 import { genereerBalansPeriode } from "./genereerBalansPeriode.js";
 import { genereerRapportPeriode } from "./genereerRapportPeriode.js";
 import { genereerPnLPeriode } from "./genereerPnLPeriode.js";
+import { genereerSamengesteldRapport } from "./genereerSamengesteldRapport.js";
 import { genereerKerncijfers } from "./genereerKerncijfers.js";
 import { genereerVastgoedKerncijfers } from "./genereerVastgoedKerncijfers.js";
 import { genereerRentrollDiagnose } from "./genereerRentrollDiagnose.js";
@@ -52,6 +53,8 @@ function printGebruik(): never {
       "      (Resultatenrekening + balans van dezelfde periode in één HTML-rapport, geschreven naar rapporten/ — zelfde berekeningen als pl-periode/balans-periode)",
       "  pnl-periode <administratieId> --boekjaar N [--periodeVan P] --periodeTotEnMet P",
       "      (DELTA BUILD 2026-09-18: Winst- en verliesrekening via de Pure P&L Engine — leest de RUWE boekingenbron rechtstreeks (net als boekingen-onderhoud-diagnose, want de cache kent nog geen OGB-kostensoort), partitioneert per economischeModule via de centrale P&L-bronmapping (@bvc/begroting-data, eerste productie-aanroep), en voedt de acht bestaande Werkelijk-productieketens (Huur/Beheer/Management/Onderhoud/Servicekosten Eigenaar/Verzekeringen/Gemeentelijke Lasten/Algemene Kosten) + berekenPnLBoom. HTML naar rapporten/. Boekingen die niet in een van de acht ketens vallen (niet gemapt, of een wel bestaand maar nog niet aangesloten hoofddomein zoals Rente/BTW) komen zichtbaar in een aparte 'Niet meegenomen'-sectie, nooit stilzwijgend weggelaten. Dit is NIET hetzelfde pad als pl-periode/rapport-periode (het oudere berekenPlPeriode, dat bewust geen EBITDA berekent) — beide commando's blijven voorlopig naast elkaar bestaan)",
+      "  rapport-samengesteld <administratieId> --modules <lijst> [--boekjaar N] [--periodeVan P] [--periodeTotEnMet P] [--huurdersPeildatum JJJJ-MM-DD]",
+      "      (DELTA BUILD 2026-09-18: eerste SELECTEERBARE samengestelde rapportgenerator V1 — combineert de bestaande, ONGEWIJZIGDE productieketens van Pure P&L (pnl-periode), Balans (balans-periode) en Huurdersoverzicht (huurdersoverzicht) in ÉÉN HTML-document, uitsluitend voor de modules opgegeven in --modules (komma-gescheiden, bv. pnl,balans,huurders — hoofdletterongevoelig). Een niet-geselecteerde module wordt niet uitgevoerd en niet gerenderd. Een geselecteerde maar niet-leverbare module (bv. P&L/Balans zonder --boekjaar/--periodeTotEnMet) wordt zichtbaar ONBESCHIKBAAR, blokkeert de andere geselecteerde modules niet. Berekent zelf niets — elke sectie is de ongewijzigde Body-renderer van de bestaande module. Nieuwe toekomstige modules (bv. Liquiditeitsbegroting) sluiten aan via rapportModuleRegister.ts, geen wijziging aan dit commando nodig. HTML naar rapporten/)",
       "  kerncijfers <administratieId> --boekjaar N --periodeTotEnMet P [--tolerantie N]",
       "      (TIJDELIJK, v1: compact Management-KPI-overzicht dat uitsluitend al-bewezen berekeningen samenstelt — totale opbrengsten/kosten + resultaat huidig boekjaar (pl-periode), bankstand einde periode/netto kasstroom/eigenaaronttrekkingen (kasstroom-managementoverzicht) en balansSluitBinnenTolerantie als datakwaliteitsindicator (balans-periode) — plus een aparte 'vastgoed'-sectie (totale/verhuurde/leegstand VVO, bezettingsgraad, leegstandspercentage, bronPeildatum, controleVereist) van vastgoed-kerncijfers: een ONAFHANKELIJKE, actuele momentopname, GEEN periodegebonden cijfer en nooit meegeteld in de financiële velden — geen renderer/HTML, alleen JSON op stdout, geen nieuwe financiële of vastgoed-rekenlogica)",
       "  vastgoed-kerncijfers <administratieId>",
@@ -257,6 +260,27 @@ async function main() {
     });
     console.log(`Rapport geschreven: ${resultaat.pad}`);
     if (resultaat.resultaat.ebitda.volledigheid.status === "ONVOLLEDIG" || resultaat.nietMeegenomen.length > 0) {
+      process.exitCode = 1;
+    }
+    return;
+  }
+
+  if (command === "rapport-samengesteld") {
+    const [administratieId] = rest;
+    const modulesStr = parseFlag(rest, "modules");
+    if (!administratieId || !modulesStr) printGebruik();
+    const boekjaarStr = parseFlag(rest, "boekjaar");
+    const boekperiodeTotEnMet = parseFlag(rest, "periodeTotEnMet");
+    const huurdersPeildatumStr = parseFlag(rest, "huurdersPeildatum");
+    const resultaat = genereerSamengesteldRapport(root, administratieId, {
+      modules: modulesStr.split(",").map((m) => m.trim()).filter((m) => m.length > 0),
+      boekjaar: boekjaarStr ? Number(boekjaarStr) : undefined,
+      boekperiodeVan: parseFlag(rest, "periodeVan"),
+      boekperiodeTotEnMet,
+      huurdersPeildatum: huurdersPeildatumStr ? new Date(huurdersPeildatumStr) : undefined,
+    });
+    console.log(`Rapport geschreven: ${resultaat.pad}`);
+    if (resultaat.rapport.secties.some((s) => s.resultaat.status === "ONBESCHIKBAAR" || s.resultaat.status === "FOUT")) {
       process.exitCode = 1;
     }
     return;
