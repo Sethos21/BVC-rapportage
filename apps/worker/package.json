@@ -12,6 +12,7 @@
     "build:exe": "node scripts/build-exe.mjs"
   },
   "dependencies": {
+    "@bvc/begroting-data": "workspace:*",
     "@bvc/cache": "workspace:*",
     "@bvc/config": "workspace:*",
     "@bvc/data-contracts": "workspace:*",

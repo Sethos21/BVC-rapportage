@@ -45,6 +45,9 @@ importers:
 
   apps/worker:
     dependencies:
+      '@bvc/begroting-data':
+        specifier: workspace:*
+        version: link:../../packages/begroting-data
       '@bvc/cache':
         specifier: workspace:*
         version: link:../../packages/cache

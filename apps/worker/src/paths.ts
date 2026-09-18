@@ -123,6 +123,18 @@ export function administratieCachePad(root: string, administratieId: string): st
   return join(administratieCacheDir(root, administratieId), "cache.sqlite");
 }
 
+/**
+ * FASE DELTA (2026-09-18, "Pure P&L → Worker + Renderer") — de centrale
+ * P&L-bronmapping-database (`@bvc/begroting-data`'s `openOrCreateDatabase`/
+ * `leesPnLBronmappingRegels`, migratie 24/25) is administratie-gescheiden,
+ * net als de boekingencache — geen portefeuillebreed bestand. Dit is de
+ * EERSTE plek waar `apps/worker` dit bestand daadwerkelijk opent; ervoor
+ * bestond er geen productiepad naartoe (zie `genereerPnLPeriode.ts`).
+ */
+export function pnlBronmappingDatabasePad(root: string, administratieId: string): string {
+  return join(administratieDir(root, administratieId), "begroting", "pnl-bronmapping.sqlite");
+}
+
 export function administratieRapportenDir(root: string, administratieId: string): string {
   return join(administratieDir(root, administratieId), "rapporten");
 }

@@ -7,6 +7,7 @@ import { genereerControlerapport } from "./genereerControlerapport.js";
 import { genereerPlPeriode } from "./genereerPlPeriode.js";
 import { genereerBalansPeriode } from "./genereerBalansPeriode.js";
 import { genereerRapportPeriode } from "./genereerRapportPeriode.js";
+import { genereerPnLPeriode } from "./genereerPnLPeriode.js";
 import { genereerKerncijfers } from "./genereerKerncijfers.js";
 import { genereerVastgoedKerncijfers } from "./genereerVastgoedKerncijfers.js";
 import { genereerRentrollDiagnose } from "./genereerRentrollDiagnose.js";
@@ -49,6 +50,8 @@ function printGebruik(): never {
       "      (Balans op een expliciete boekjaar+boekperiode-peildatum: beginbalans + boekingen t/m die periode, incl. aansluitingscontrole activa/passiva/resultaat)",
       "  rapport-periode <administratieId> --boekjaar N --periodeTotEnMet P [--tolerantie N]",
       "      (Resultatenrekening + balans van dezelfde periode in één HTML-rapport, geschreven naar rapporten/ — zelfde berekeningen als pl-periode/balans-periode)",
+      "  pnl-periode <administratieId> --boekjaar N [--periodeVan P] --periodeTotEnMet P",
+      "      (DELTA BUILD 2026-09-18: Winst- en verliesrekening via de Pure P&L Engine — leest de RUWE boekingenbron rechtstreeks (net als boekingen-onderhoud-diagnose, want de cache kent nog geen OGB-kostensoort), partitioneert per economischeModule via de centrale P&L-bronmapping (@bvc/begroting-data, eerste productie-aanroep), en voedt de acht bestaande Werkelijk-productieketens (Huur/Beheer/Management/Onderhoud/Servicekosten Eigenaar/Verzekeringen/Gemeentelijke Lasten/Algemene Kosten) + berekenPnLBoom. HTML naar rapporten/. Boekingen die niet in een van de acht ketens vallen (niet gemapt, of een wel bestaand maar nog niet aangesloten hoofddomein zoals Rente/BTW) komen zichtbaar in een aparte 'Niet meegenomen'-sectie, nooit stilzwijgend weggelaten. Dit is NIET hetzelfde pad als pl-periode/rapport-periode (het oudere berekenPlPeriode, dat bewust geen EBITDA berekent) — beide commando's blijven voorlopig naast elkaar bestaan)",
       "  kerncijfers <administratieId> --boekjaar N --periodeTotEnMet P [--tolerantie N]",
       "      (TIJDELIJK, v1: compact Management-KPI-overzicht dat uitsluitend al-bewezen berekeningen samenstelt — totale opbrengsten/kosten + resultaat huidig boekjaar (pl-periode), bankstand einde periode/netto kasstroom/eigenaaronttrekkingen (kasstroom-managementoverzicht) en balansSluitBinnenTolerantie als datakwaliteitsindicator (balans-periode) — plus een aparte 'vastgoed'-sectie (totale/verhuurde/leegstand VVO, bezettingsgraad, leegstandspercentage, bronPeildatum, controleVereist) van vastgoed-kerncijfers: een ONAFHANKELIJKE, actuele momentopname, GEEN periodegebonden cijfer en nooit meegeteld in de financiële velden — geen renderer/HTML, alleen JSON op stdout, geen nieuwe financiële of vastgoed-rekenlogica)",
       "  vastgoed-kerncijfers <administratieId>",
@@ -237,6 +240,23 @@ async function main() {
     });
     console.log(`Rapport geschreven: ${resultaat.pad}`);
     if (resultaat.plResultaat.controleVereist.length > 0 || resultaat.balansResultaat.controleVereist.length > 0 || !resultaat.balansResultaat.aansluiting.sluitBinnenTolerantie) {
+      process.exitCode = 1;
+    }
+    return;
+  }
+
+  if (command === "pnl-periode") {
+    const [administratieId] = rest;
+    const boekjaarStr = parseFlag(rest, "boekjaar");
+    const boekperiodeTotEnMet = parseFlag(rest, "periodeTotEnMet");
+    if (!administratieId || !boekjaarStr || !boekperiodeTotEnMet) printGebruik();
+    const resultaat = genereerPnLPeriode(root, administratieId, {
+      boekjaar: Number(boekjaarStr),
+      boekperiodeVan: parseFlag(rest, "periodeVan"),
+      boekperiodeTotEnMet,
+    });
+    console.log(`Rapport geschreven: ${resultaat.pad}`);
+    if (resultaat.resultaat.ebitda.volledigheid.status === "ONVOLLEDIG" || resultaat.nietMeegenomen.length > 0) {
       process.exitCode = 1;
     }
     return;
