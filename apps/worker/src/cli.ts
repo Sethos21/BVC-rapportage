@@ -14,6 +14,7 @@ import { genereerVastgoedKerncijfers } from "./genereerVastgoedKerncijfers.js";
 import { genereerRentrollDiagnose } from "./genereerRentrollDiagnose.js";
 import { genereerServicekostenBronKolommenDiagnose } from "./genereerServicekostenBronKolommenDiagnose.js";
 import { genereerContractenBronKolommenDiagnose } from "./genereerContractenBronKolommenDiagnose.js";
+import { genereerVorderingenBronKolommenDiagnose } from "./genereerVorderingenBronKolommenDiagnose.js";
 import { genereerBoekingenBronKolommenDiagnose } from "./genereerBoekingenBronKolommenDiagnose.js";
 import { genereerOnderhoudBoekingenDiagnose } from "./genereerOnderhoudBoekingenDiagnose.js";
 import { genereerBoekingenJarenDiagnose } from "./genereerBoekingenJarenDiagnose.js";
@@ -65,6 +66,8 @@ function printGebruik(): never {
       "      (TIJDELIJK, alleen-lezen: leest het RUWE servicekosten-bronbestand rechtstreeks (niet de cache, niet het geparste schema) en toont ELKE kolomnaam die erin voorkomt — inclusief kolommen die nog niet in ServicekostenregelBronSchema staan — met aantal niet-lege waarden en max. 5 voorbeeldwaarden per kolom. Bouwstap om te bepalen of de bron een apart grootboekrekening/rekeningnummer-veld bevat vóórdat daar iets structureels mee gebouwd wordt. Geen KPI, geen classificatie, alleen JSON op stdout)",
       "  contracten-bronkolommen <administratieId>",
       "      (TIJDELIJK, alleen-lezen: leest het RUWE contracten_huidig-bronbestand rechtstreeks (niet de cache, niet het geparste schema, dat 12 van de 170 bronkolommen dekt) en toont ELKE kolomnaam die erin voorkomt, met aantal niet-lege waarden en max. 5 voorbeeldwaarden per kolom. Bouwstap om een huurdernaam-achtig veld (bv. Naam_1) te bevestigen vóórdat dat structureel aan het schema/de cache wordt toegevoegd. Geen KPI, geen classificatie, alleen JSON op stdout)",
+      "  vorderingen-bronkolommen <administratieId>",
+      "      (TIJDELIJK, alleen-lezen, BRONGATE 2026-09-18 'Historische Ouderdomsanalyse': leest het RUWE vorderingen_met_afboekingen-bronbestand rechtstreeks (niet de cache, niet het geparste schema, dat 14 van de ~189 bronkolommen dekt) en toont ELKE kolomnaam die erin voorkomt, met aantal niet-lege waarden, max. 5 voorbeeldwaarden per kolom, een puur op de voorbeeldwaarden afgeleid waargenomenFormaat (datum/numeriek/tekst/leeg — GEEN interpretatie van de betekenis) en een aandachtKolommen-lijst (trefwoordfilter op de kolomnaam: vervaldatum/betaaldatum/afboekingsdatum/.../VS_01../afgeboekt/component — puur een filter, GEEN classificatie). Bouwstap om vast te stellen of de bron een gedateerde afboekings-/betalingshistorie per vordering bevat, vóórdat een historische ouderdomsanalyse wordt ontworpen. Geen KPI, geen classificatie, geen schema/cache-wijziging, alleen JSON op stdout)",
       "  boekingen-bronkolommen <administratieId>",
       "      (TIJDELIJK, alleen-lezen: leest het RUWE boekingen-bronbestand rechtstreeks (niet de cache, niet het geparste schema, dat 20 van de 168 bronkolommen dekt) en toont ELKE kolomnaam die erin voorkomt, met aantal niet-lege waarden en max. 5 voorbeeldwaarden per kolom. Bouwstap om vast te stellen of de bron een exploitatiekostensoort-/kostenplaats-/complex-achtig veld bevat dat nog niet in BoekingsregelBronSchema staat, vóórdat daar iets structureels mee gebouwd wordt. Geen KPI, geen classificatie, alleen JSON op stdout)",
       "  boekingen-onderhoud-diagnose <administratieId> --boekjaar N --periodeTotEnMet P [--periodeVan P] --rekeningen <lijst>",
@@ -331,6 +334,14 @@ async function main() {
     const [administratieId] = rest;
     if (!administratieId) printGebruik();
     const resultaat = genereerContractenBronKolommenDiagnose(root, administratieId);
+    console.log(JSON.stringify(resultaat, null, 2));
+    return;
+  }
+
+  if (command === "vorderingen-bronkolommen") {
+    const [administratieId] = rest;
+    if (!administratieId) printGebruik();
+    const resultaat = genereerVorderingenBronKolommenDiagnose(root, administratieId);
     console.log(JSON.stringify(resultaat, null, 2));
     return;
   }
