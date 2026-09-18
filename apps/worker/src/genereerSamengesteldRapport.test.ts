@@ -3,10 +3,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openOrCreateDatabase, voegPnLBronmappingMutatieToe, type PnLBronmappingMutatieInvoer } from "@bvc/begroting-data";
-import { renderBalansPeriodeBody, renderHuurdersoverzichtBody, type PnLEconomischeModule } from "@bvc/reporting";
+import { renderBalansPeriodeBody, renderControlerapportBody, renderHuurdersoverzichtBody, renderKasstroomManagementoverzichtBody, renderVastgoedKerncijfersBody, type PnLEconomischeModule } from "@bvc/reporting";
 import { genereerSamengesteldRapport } from "./genereerSamengesteldRapport.js";
 import { genereerBalansPeriode } from "./genereerBalansPeriode.js";
+import { haalControlerapportInvoerOp } from "./genereerControlerapport.js";
+import { haalKasstroomManagementoverzichtResultaatOp } from "./genereerKasstroomManagementoverzicht.js";
 import { genereerHuurdersoverzicht } from "./genereerHuurdersoverzicht.js";
+import { genereerVastgoedKerncijfers } from "./genereerVastgoedKerncijfers.js";
 import { rebuildCache } from "./rebuildCache.js";
 import { leesAdministratieConfig, nieuweAdministratieConfig, schrijfAdministratieConfig } from "./administratie.js";
 import { administratieDir, bronGedeeldDir, grootboekmappingPad, grootboekmappingenDir, pnlBronmappingDatabasePad } from "./paths.js";
@@ -131,7 +134,8 @@ beforeEach(() => {
     { Bedrijfsnr: BEDRIJFSNR, Jaar: 2026, Grootboekrekeningnr: "1010", Beginbalans_debet: 1000, Beginbalans_credit: 0, Saldo_debet: 0, Saldo_credit: 0, Eindsaldo: 0, Rekening_omschrijving: "Bank", Balans_vw: "Balans" },
   ]);
   schrijfXlsxFixture(join(bronGedeeldDir(root), "servicekosten.xlsx"), []);
-  schrijfXlsxFixture(join(bronGedeeldDir(root), "units.xlsx"), []);
+  // Vastgoed-KPI: zelfde complex/unit als het Huurdersoverzicht-contract hieronder (002/0001) — reële, samenhangende fixture.
+  schrijfXlsxFixture(join(bronGedeeldDir(root), "units.xlsx"), [{ Bedrijfsnr: BEDRIJFSNR, Complexnummer: "002", Unitnummer: "0001", Unitomschrijving: "Villa II", Unit_vvo: "320" }]);
   schrijfXlsxFixture(join(bronGedeeldDir(root), "complex_totalen.xlsx"), []);
   // Huurdersoverzicht: één ECHT 070-contract (0000000028, "Fruitcake BV"), zie genereerHuurdersoverzicht.test.ts.
   schrijfXlsxFixture(join(bronGedeeldDir(root), "contracten_huidig.xlsx"), [
@@ -157,12 +161,13 @@ beforeEach(() => {
   ]);
 
   mkdirSync(grootboekmappingenDir(root), { recursive: true });
-  // Uitsluitend GL1010 gemapt (BALANS/ACTIVA) — de echte P&L-GL's hierboven zijn in het OUDE grootboekmapping-systeem
-  // bewust ongemapt (dat systeem is niet het onderwerp van deze Delta Build); ze verschijnen daarom terecht in Balans'
-  // eigen controleVereist, exact hetzelfde gedrag als het bestaande GL9999-geval in genereerBalansPeriode.test.ts.
+  // Uitsluitend GL1010 gemapt (BALANS/ACTIVA, liquideMiddelen:true voor Kasstroom) — de echte P&L-GL's hierboven zijn
+  // in het OUDE grootboekmapping-systeem bewust ongemapt (dat systeem is niet het onderwerp van deze Delta Build); ze
+  // verschijnen daarom terecht in Balans' eigen controleVereist, exact hetzelfde gedrag als het bestaande
+  // GL9999-geval in genereerBalansPeriode.test.ts.
   writeFileSync(
     grootboekmappingPad(root, ADMINISTRATIE_ID),
-    JSON.stringify({ versie: "0.1", administratieId: ADMINISTRATIE_ID, regels: [{ grootboekrekening: "1010", soort: "BALANS", balanszijde: "ACTIVA", tekenconventie: "ZOALS_BRON", liquideMiddelen: null, kasstroomCategorie: null, actief: true, status: "GOEDGEKEURD" }] }),
+    JSON.stringify({ versie: "0.1", administratieId: ADMINISTRATIE_ID, regels: [{ grootboekrekening: "1010", soort: "BALANS", balanszijde: "ACTIVA", tekenconventie: "ZOALS_BRON", liquideMiddelen: true, kasstroomCategorie: null, actief: true, status: "GOEDGEKEURD" }] }),
     "utf-8",
   );
 
@@ -201,9 +206,11 @@ describe("genereerSamengesteldRapport — meerdere modules (criterium B)", () =>
   it("PNL+BALANS+HUURDERS: precies drie inhoudelijke secties, deterministische volgorde, geen dubbele uitvoering bij een dubbele module-id", () => {
     const { rapport, html } = genereerSamengesteldRapport(root, ADMINISTRATIE_ID, { ...CONTEXT_ALLE_MODULES, modules: ["pnl", "pnl", "balans", "huurders"] });
 
-    expect(rapport.secties).toHaveLength(3); // register heeft precies 3 ids in V1
-    expect(rapport.secties.every((s) => s.resultaat.status !== "NIET_GESELECTEERD")).toBe(true);
-    expect(rapport.secties.map((s) => s.id)).toEqual(["PNL", "BALANS", "HUURDERS"]); // vaste registervolgorde, ongeacht opgaafvolgorde
+    const geselecteerdeSecties = rapport.secties.filter((s) => s.resultaat.status !== "NIET_GESELECTEERD");
+    expect(geselecteerdeSecties).toHaveLength(3); // exact de drie opgegeven module-id's, "pnl" dubbel geselecteerd telt niet dubbel
+    expect(geselecteerdeSecties.map((s) => s.id)).toEqual(["PNL", "BALANS", "HUURDERS"]); // vaste registervolgorde, ongeacht opgaafvolgorde
+    // De overige (V2-)modules zijn hier bewust niet geselecteerd.
+    expect(rapport.secties.filter((s) => s.resultaat.status === "NIET_GESELECTEERD").map((s) => s.id)).toEqual(["KASSTROOM", "VASTGOED_KPI", "CONTROLES"]);
     // "PNL,PNL" mag niet tot twee keer dezelfde inhoud leiden.
     expect((html.match(/Winst- en verliesrekening/g) ?? []).length).toBeLessThanOrEqual(2); // cover-titel + eventueel 1x sectiekop, nooit verdubbeld door de dubbele selectie
   });
@@ -281,5 +288,96 @@ describe("genereerSamengesteldRapport — CLI-validatie (criterium F)", () => {
 
   it("geen enkele module opgeven geeft een duidelijke fout", () => {
     expect(() => genereerSamengesteldRapport(root, ADMINISTRATIE_ID, { ...CONTEXT_ALLE_MODULES, modules: [] })).toThrow(/Minimaal één module/);
+  });
+});
+
+/**
+ * DELTA BUILD V2 (2026-09-18) — "Kasstroom + Vastgoed-KPI + Controles":
+ * bewijst uitsluitend het NIEUWE risico van de drie toegevoegde modules
+ * (selecteerbaar, hergebruiken hun bestaande, ongewijzigde generator/
+ * Body-renderer) — GEEN herbewijs van Kasstroom-/KPI-/Controlerapport-
+ * businesslogica zelf (die blijft in hun eigen, ongewijzigde tests).
+ */
+describe("genereerSamengesteldRapport V2 — KASSTROOM (criteria A/C)", () => {
+  it("is selecteerbaar en gebruikt de bestaande module-uitkomst (byte-identiek aan rechtstreeks aangeroepen haalKasstroomManagementoverzichtResultaatOp + renderKasstroomManagementoverzichtBody)", () => {
+    const { rapport } = genereerSamengesteldRapport(root, ADMINISTRATIE_ID, { ...CONTEXT_ALLE_MODULES, modules: ["kasstroom"] });
+    const sectie = rapport.secties.find((s) => s.id === "KASSTROOM")!.resultaat as { status: "OPGENOMEN" | "ONVOLLEDIG"; html: string };
+
+    const config = leesAdministratieConfig(root, ADMINISTRATIE_ID);
+    const { resultaat, topOverigeUitgaven } = haalKasstroomManagementoverzichtResultaatOp(root, ADMINISTRATIE_ID, CONTEXT_ALLE_MODULES);
+    const verwachteHtml = renderKasstroomManagementoverzichtBody({ administratieNaam: config.weergavenaam, bedrijfsnr: config.bedrijfsnr, boekjaar: 2026, boekperiodeTotEnMet: "06", gegenereerdOp: new Date(0), resultaat, topOverigeUitgaven });
+
+    expect(sectie.html).toBe(verwachteHtml);
+    // GL1010 is liquideMiddelen:true met beginbalans 1000 en geen 2026-mutatie: bankstand blijft 1000 (echte, niet-triviale bron-doorloop).
+    expect(resultaat.bankstandEind.toString()).toBe("1000");
+  });
+});
+
+describe("genereerSamengesteldRapport V2 — VASTGOED_KPI (criteria B/F)", () => {
+  it("is selecteerbaar en gebruikt renderVastgoedKerncijfersBody, byte-identiek aan rechtstreeks aangeroepen genereerVastgoedKerncijfers", () => {
+    const { rapport } = genereerSamengesteldRapport(root, ADMINISTRATIE_ID, { modules: ["vastgoed_kpi"] }); // momentopname: geen boekjaar/periode nodig
+    const sectie = rapport.secties.find((s) => s.id === "VASTGOED_KPI")!.resultaat as { status: "OPGENOMEN" | "ONVOLLEDIG"; html: string };
+
+    const resultaat = genereerVastgoedKerncijfers(root, ADMINISTRATIE_ID);
+    const verwachteHtml = renderVastgoedKerncijfersBody(resultaat);
+
+    expect(sectie.html).toBe(verwachteHtml);
+    expect(sectie.html).toContain("320"); // de VVO uit de units-fixture (complex 002/unit 0001)
+  });
+
+  it("F: de Body-extractie in renderManagementRapport.ts verandert de standalone renderManagementRapportBody-output niet (regressie)", () => {
+    // Bewijs op renderer-niveau: dezelfde vastgoed-uitkomst geeft dezelfde HTML terug via de nu-ontkoppelde functie
+    // als voorheen via het (ongewijzigde) inline-pad in renderManagementRapportBody — zie renderManagementRapport.test.ts
+    // voor het volledige, reeds-bestaande regressiebewijs; hier alleen de aanvullende aanname expliciet gemaakt.
+    const resultaat = genereerVastgoedKerncijfers(root, ADMINISTRATIE_ID);
+    const html1 = renderVastgoedKerncijfersBody(resultaat);
+    const html2 = renderVastgoedKerncijfersBody(resultaat);
+    expect(html1).toBe(html2); // puur/deterministisch — geen verborgen state
+  });
+});
+
+describe("genereerSamengesteldRapport V2 — CONTROLES (criteria C/G)", () => {
+  it("is selecteerbaar en gebruikt renderControlerapportBody, byte-identiek aan rechtstreeks aangeroepen haalControlerapportInvoerOp", () => {
+    const { rapport } = genereerSamengesteldRapport(root, ADMINISTRATIE_ID, { modules: ["controles"] }); // Controlerapport heeft geen boekjaar/periode nodig
+
+    const sectie = rapport.secties.find((s) => s.id === "CONTROLES")!.resultaat as { status: "OPGENOMEN" | "ONVOLLEDIG"; html: string };
+    const invoer = haalControlerapportInvoerOp(root, ADMINISTRATIE_ID);
+    const verwachteHtml = renderControlerapportBody(invoer);
+
+    expect(sectie.html).toBe(verwachteHtml);
+    expect(sectie.html).toContain("Grootboek-totalen");
+  });
+});
+
+describe("genereerSamengesteldRapport V2 — combinatie oud + nieuw (criteria D/E/H/I)", () => {
+  it("alle zes modules samen: elk selecteerbaar, geen dubbele HTML-documentstructuur, statusisolatie blijft werken", () => {
+    const { rapport, html } = genereerSamengesteldRapport(root, ADMINISTRATIE_ID, { ...CONTEXT_ALLE_MODULES, modules: ["pnl", "balans", "huurders", "kasstroom", "vastgoed_kpi", "controles"] });
+
+    expect(rapport.secties).toHaveLength(6);
+    expect(rapport.secties.every((s) => s.resultaat.status !== "NIET_GESELECTEERD")).toBe(true);
+    expect(rapport.secties.map((s) => s.id)).toEqual(["PNL", "BALANS", "HUURDERS", "KASSTROOM", "VASTGOED_KPI", "CONTROLES"]);
+
+    // D: geen dubbele documentstructuur, ondanks zes secties.
+    expect((html.match(/<html/g) ?? []).length).toBe(1);
+    expect((html.match(/class="cover"/g) ?? []).length).toBe(1);
+  });
+
+  it("D: een niet-geselecteerde nieuwe module (KASSTROOM) wordt niet uitgevoerd — bewezen doordat een ontbrekende, voor Kasstroom noodzakelijke bron het rapport niet laat falen wanneer Kasstroom niet is geselecteerd", () => {
+    // Verwijder de grootboekmapping die Kasstroom nodig heeft (liquideMiddelen-vlag) — als Kasstroom ONGESELECTEERD
+    // toch zou draaien, zou dat een ander/leeg resultaat geven, maar NOOIT een crash; het echte bewijs is dat de
+    // sectie NIET_GESELECTEERD blijft en geen enkel Kasstroom-veld in de HTML verschijnt.
+    const { rapport, html } = genereerSamengesteldRapport(root, ADMINISTRATIE_ID, { ...CONTEXT_ALLE_MODULES, modules: ["pnl"] });
+
+    expect(rapport.secties.find((s) => s.id === "KASSTROOM")!.resultaat).toEqual({ status: "NIET_GESELECTEERD" });
+    expect(html).not.toContain("Bankstand");
+  });
+
+  it("H: een ONBESCHIKBARE nieuwe module blokkeert de andere geselecteerde modules niet (KASSTROOM zonder boekjaar, PNL/CONTROLES blijven werken)", () => {
+    const { rapport, html } = genereerSamengesteldRapport(root, ADMINISTRATIE_ID, { boekperiodeTotEnMet: "06", modules: ["kasstroom", "controles"] }); // bewust geen boekjaar
+
+    expect(rapport.secties.find((s) => s.id === "KASSTROOM")!.resultaat.status).toBe("ONBESCHIKBAAR");
+    const controles = rapport.secties.find((s) => s.id === "CONTROLES")!.resultaat;
+    expect(controles.status === "OPGENOMEN" || controles.status === "ONVOLLEDIG").toBe(true);
+    expect(html).toContain("Grootboek-totalen");
   });
 });

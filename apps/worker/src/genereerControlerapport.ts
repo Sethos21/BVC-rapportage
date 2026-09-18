@@ -21,7 +21,15 @@ export interface GenereerControlerapportResultaat {
  * al-herbouwde cache van één administratie, en schrijft het weg naar
  * `rapporten/`. Leest de cache read-only — draai eerst `rebuild-cache`.
  */
-export function genereerControlerapport(root: string, administratieId: string): GenereerControlerapportResultaat {
+/**
+ * DELTA BUILD (2026-09-18) — "Samengestelde rapportgenerator V2": UITSLUITEND
+ * de cache-ophaal-/samenstelstap, ZONDER renderen/wegschrijven — geëxtraheerd
+ * zodat de samengestelde rapportgenerator exact dezelfde productieketen kan
+ * aanroepen als het standalone `controlerapport`-commando. `genereerControlerapport`
+ * hieronder is ONGEWIJZIGD in gedrag — roept deze functie nu uitsluitend
+ * intern aan (zelfde patroon als `genereerPnLPeriode.ts`'s `haalPnLPeriodeResultaatOp`).
+ */
+export function haalControlerapportInvoerOp(root: string, administratieId: string): ControlerapportInvoer {
   const config = leesAdministratieConfig(root, administratieId);
   const db = openCacheReadonly(administratieCachePad(root, administratieId));
 
@@ -82,16 +90,21 @@ export function genereerControlerapport(root: string, administratieId: string): 
       ouderdomsanalyseGeladen: ouderdomsanalyseAantal > 0,
       begrotingGeladen: false,
     };
-
-    const html = renderControlerapportHtml(invoer);
-    const rapportenDir = administratieRapportenDir(root, administratieId);
-    mkdirSync(rapportenDir, { recursive: true });
-    const tijdstempel = new Date().toISOString().replace(/[:.]/g, "-");
-    const pad = join(rapportenDir, `controlerapport-${tijdstempel}.html`);
-    writeFileSync(pad, html, "utf-8");
-
-    return { html, pad };
+    return invoer;
   } finally {
     db.close();
   }
+}
+
+export function genereerControlerapport(root: string, administratieId: string): GenereerControlerapportResultaat {
+  const invoer = haalControlerapportInvoerOp(root, administratieId);
+
+  const html = renderControlerapportHtml(invoer);
+  const rapportenDir = administratieRapportenDir(root, administratieId);
+  mkdirSync(rapportenDir, { recursive: true });
+  const tijdstempel = new Date().toISOString().replace(/[:.]/g, "-");
+  const pad = join(rapportenDir, `controlerapport-${tijdstempel}.html`);
+  writeFileSync(pad, html, "utf-8");
+
+  return { html, pad };
 }

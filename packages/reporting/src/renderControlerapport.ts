@@ -124,16 +124,17 @@ function renderStatusbanner(invoer: ControlerapportInvoer): string {
   return `<div class="toelichting" style="margin-top:0 0 24px">${meldingen.map((m) => `<p>${escapeHtml(m)}</p>`).join("")}</div>`;
 }
 
-export function renderControlerapportHtml(invoer: ControlerapportInvoer): string {
-  const cover = `
-    <div class="cover">
-      <div class="eyebrow">BVC Vastgoed Consultants</div>
-      <h1 class="serif">Controlerapport</h1>
-      <div class="object">${escapeHtml(invoer.administratieNaam)} (Bedrijfsnr ${escapeHtml(invoer.bedrijfsnr)})</div>
-      <div class="periode">Gegenereerd op ${escapeHtml(invoer.gegenereerdOp.toISOString().slice(0, 19).replace("T", " "))}</div>
-    </div>`;
-
-  const body = `
+/**
+ * DELTA BUILD (2026-09-18) — "Samengestelde rapportgenerator V2": de
+ * sectie-HTML zonder document-skelet (geen `<html>`/cover) — apart
+ * geëxporteerd zodat de samengestelde rapportgenerator deze sectie kan
+ * hergebruiken zonder de opmaaklogica te dupliceren, zelfde patroon als
+ * `renderPlPeriodeBody`/`renderBalansPeriodeBody`. `renderControlerapportHtml`
+ * hieronder is ONGEWIJZIGD in gedrag — roept deze functie nu uitsluitend
+ * intern aan.
+ */
+export function renderControlerapportBody(invoer: ControlerapportInvoer): string {
+  return `
     <div class="toelichting" style="margin-bottom:24px">
       Rauw brondata-overzicht rechtstreeks uit de cache — <strong>geen grootboekmapping toegepast</strong>
       (die is nog niet goedgekeurd/beschikbaar). Bedoeld om regel voor regel te vergelijken met een bestaande
@@ -145,6 +146,16 @@ export function renderControlerapportHtml(invoer: ControlerapportInvoer): string
     ${renderServicekosten(invoer)}
     ${renderContractenUnitsRentroll(invoer)}
     ${renderComplexTotalen(invoer)}`;
+}
 
-  return renderRapportDocument(`Controlerapport — ${invoer.administratieNaam}`, cover, body);
+export function renderControlerapportHtml(invoer: ControlerapportInvoer): string {
+  const cover = `
+    <div class="cover">
+      <div class="eyebrow">BVC Vastgoed Consultants</div>
+      <h1 class="serif">Controlerapport</h1>
+      <div class="object">${escapeHtml(invoer.administratieNaam)} (Bedrijfsnr ${escapeHtml(invoer.bedrijfsnr)})</div>
+      <div class="periode">Gegenereerd op ${escapeHtml(invoer.gegenereerdOp.toISOString().slice(0, 19).replace("T", " "))}</div>
+    </div>`;
+
+  return renderRapportDocument(`Controlerapport — ${invoer.administratieNaam}`, cover, renderControlerapportBody(invoer));
 }

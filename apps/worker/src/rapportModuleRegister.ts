@@ -1,8 +1,11 @@
-import { renderBalansPeriodeBody, renderHuurdersoverzichtBody, renderPnLPeriodeBody, type RapportModuleId } from "@bvc/reporting";
+import { renderBalansPeriodeBody, renderControlerapportBody, renderHuurdersoverzichtBody, renderKasstroomManagementoverzichtBody, renderPnLPeriodeBody, renderVastgoedKerncijfersBody, type RapportModuleId } from "@bvc/reporting";
 import { leesAdministratieConfig } from "./administratie.js";
 import { genereerBalansPeriode } from "./genereerBalansPeriode.js";
+import { haalControlerapportInvoerOp } from "./genereerControlerapport.js";
+import { haalKasstroomManagementoverzichtResultaatOp } from "./genereerKasstroomManagementoverzicht.js";
 import { genereerHuurdersoverzicht } from "./genereerHuurdersoverzicht.js";
 import { haalPnLPeriodeResultaatOp } from "./genereerPnLPeriode.js";
+import { genereerVastgoedKerncijfers } from "./genereerVastgoedKerncijfers.js";
 
 /**
  * DELTA BUILD (2026-09-18) — "Selecteerbare samengestelde rapportgenerator
@@ -110,8 +113,88 @@ function genereerHuurdersSectie(root: string, administratieId: string, context: 
     : { status: "OK", html, onvolledig };
 }
 
+/**
+ * DELTA BUILD (2026-09-18) — "Samengestelde rapportgenerator V2": zelfde
+ * ONGEWIJZIGDE productieketen als het standalone `kasstroom-managementoverzicht`-
+ * commando (`haalKasstroomManagementoverzichtResultaatOp`/
+ * `renderKasstroomManagementoverzichtBody`, beide nu apart geëxtraheerd/
+ * geëxporteerd — zie die bestanden).
+ */
+function genereerKasstroomSectie(root: string, administratieId: string, context: RapportGenereerContext): RapportModuleGenereerResultaat {
+  if (context.boekjaar === undefined || context.boekperiodeTotEnMet === undefined) {
+    return { status: "ONBESCHIKBAAR", reden: "boekjaar en periodeTotEnMet zijn verplicht voor het kasstroom-managementoverzicht." };
+  }
+  const config = leesAdministratieConfig(root, administratieId);
+  const { resultaat, topOverigeUitgaven } = haalKasstroomManagementoverzichtResultaatOp(root, administratieId, { boekjaar: context.boekjaar, boekperiodeTotEnMet: context.boekperiodeTotEnMet });
+  const html = renderKasstroomManagementoverzichtBody({
+    administratieNaam: config.weergavenaam,
+    bedrijfsnr: config.bedrijfsnr,
+    boekjaar: context.boekjaar,
+    boekperiodeTotEnMet: context.boekperiodeTotEnMet,
+    gegenereerdOp: new Date(),
+    resultaat,
+    topOverigeUitgaven,
+  });
+  const onvolledig = resultaat.controleVereist.length > 0;
+  return onvolledig
+    ? { status: "OK", html, onvolledig, toelichting: "Controle vereist — zie details in de sectie hierboven." }
+    : { status: "OK", html, onvolledig };
+}
+
+/**
+ * DELTA BUILD (2026-09-18) — VASTGOED_KPI. CONCRETE INCOMPATIBILITEIT
+ * GEVONDEN (zie sectie 1 van de opdracht: "architectuur niet wijzigen tenzij
+ * een concrete incompatibiliteit wordt gevonden"): de eerder aangewezen
+ * `renderKerncijfersHtml`/`KerncijfersInvoer` (`renderKerncijfers.ts`) heeft
+ * GEEN enkele productie-aanroeper — geen enkel bestand in `apps/worker`
+ * bouwt ooit een `KerncijfersInvoer`, en het bestaande, WEL productie-
+ * aangesloten `genereerKerncijfers.ts` levert een ANDER type
+ * (`KerncijfersManagementResultaat`, financieel-KPI-gericht) dat niet
+ * compatibel is met `KerncijfersInvoer` (huurinkomen/EBITDA/uitbetalings-
+ * ratio-kaarten). Een Body-extractie van `renderKerncijfersHtml` zou dus
+ * een module registreren die NOOIT écht data kan tonen — dat zou "ontbrekende
+ * KPI's invullen"/een nieuwe koppeling verzinnen zijn, expliciet buiten scope.
+ *
+ * IN PLAATS DAARVAN: hergebruikt de WEL volledig productie-aangesloten,
+ * 070-bewezen `genereerVastgoedKerncijfers.ts` (bezettingsgraad/leegstand per
+ * complex + portefeuille) — dit resultaat werd al gerenderd, maar uitsluitend
+ * intern in `renderManagementRapport.ts`'s `renderVastgoed`, hard gekoppeld
+ * aan het volledige `ManagementRapportResultaat`. Die functie is nu ontkoppeld
+ * en geëxporteerd als `renderVastgoedKerncijfersBody(resultaat: VastgoedKerncijfersResultaat)`
+ * — exact dezelfde mechanische Body-extractie als bij Kasstroom/Controles,
+ * alleen op de daadwerkelijk werkende vastgoed-KPI-keten toegepast.
+ * `renderKerncijfers.ts`/`KerncijfersInvoer` blijven ongewijzigd, orphaned,
+ * geen onderdeel van deze Delta Build.
+ */
+function genereerVastgoedKpiSectie(root: string, administratieId: string): RapportModuleGenereerResultaat {
+  const resultaat = genereerVastgoedKerncijfers(root, administratieId);
+  const html = renderVastgoedKerncijfersBody(resultaat);
+  const onvolledig = resultaat.controleVereist.some((c) => c.ernst === "KRITIEK");
+  return onvolledig
+    ? { status: "OK", html, onvolledig, toelichting: "Een of meer kritieke controlemeldingen — zie Per complex in de sectie hierboven." }
+    : { status: "OK", html, onvolledig };
+}
+
+/**
+ * DELTA BUILD (2026-09-18) — zelfde ONGEWIJZIGDE productieketen als het
+ * standalone `controlerapport`-commando (`haalControlerapportInvoerOp`/
+ * `renderControlerapportBody`, beide nu apart geëxtraheerd/geëxporteerd).
+ * Het Controlerapport kent zelf geen "onvolledig"-completeness-begrip (het
+ * IS per ontwerp een rauw brondata-overzicht, geen KPI-uitkomst) — daarom
+ * altijd `onvolledig: false`; de bestaande statusbanner/meldingen in de
+ * sectie-inhoud zelf blijven ongewijzigd zichtbaar.
+ */
+function genereerControlesSectie(root: string, administratieId: string): RapportModuleGenereerResultaat {
+  const invoer = haalControlerapportInvoerOp(root, administratieId);
+  const html = renderControlerapportBody(invoer);
+  return { status: "OK", html, onvolledig: false };
+}
+
 export const RAPPORT_MODULE_REGISTER: Record<RapportModuleId, RapportModuleDefinitie> = {
   PNL: { id: "PNL", naam: "Winst- en verliesrekening", genereer: genereerPnLSectie },
   BALANS: { id: "BALANS", naam: "Balans", genereer: genereerBalansSectie },
   HUURDERS: { id: "HUURDERS", naam: "Huurdersoverzicht", genereer: genereerHuurdersSectie },
+  KASSTROOM: { id: "KASSTROOM", naam: "Kasstroom-managementoverzicht", genereer: genereerKasstroomSectie },
+  VASTGOED_KPI: { id: "VASTGOED_KPI", naam: "Vastgoed-KPI's", genereer: genereerVastgoedKpiSectie },
+  CONTROLES: { id: "CONTROLES", naam: "Controlerapport", genereer: genereerControlesSectie },
 };

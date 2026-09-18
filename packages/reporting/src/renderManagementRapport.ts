@@ -3,7 +3,7 @@ import { formatEUR, type OnbekendOf } from "@bvc/domain";
 import { escapeHtml, formatBedragHtml, formatM2Html, formatOnbekendOfHtml, formatPercentageHtml, renderRapportDocument } from "./huisstijl.js";
 import type { ManagementRapportControleItem, ManagementRapportResultaat } from "./managementRapport.js";
 import type { HuurComplexKpi } from "./huurKerncijfers.js";
-import type { VastgoedComplexKpi } from "./vastgoedKerncijfers.js";
+import type { VastgoedComplexKpi, VastgoedKerncijfersResultaat } from "./vastgoedKerncijfers.js";
 import type {
   ServicekostenActuelePositieStatus,
   ServicekostenActueleComplexTotaal,
@@ -99,8 +99,18 @@ function renderVastgoedComplexTabel(regels: readonly VastgoedComplexKpi[]): stri
     </table>`;
 }
 
-function renderVastgoed(resultaat: ManagementRapportResultaat): string {
-  const v = resultaat.vastgoed;
+/**
+ * DELTA BUILD (2026-09-18) — "Samengestelde rapportgenerator V2": apart
+ * geëxporteerd, en ontkoppeld van `ManagementRapportResultaat` (neemt nu
+ * rechtstreeks het eigen `VastgoedKerncijfersResultaat` van de module),
+ * zodat de samengestelde rapportgenerator deze sectie kan hergebruiken —
+ * zelfde `Body`-extractiepatroon als `renderPlPeriodeBody`/
+ * `renderBalansPeriodeBody`/`renderHuurdersoverzichtBody`. Puur een
+ * signatuurwijziging: de HTML-uitkomst is byte-identiek, alleen het
+ * ENIGE aanroeppunt hieronder (`renderManagementRapportBody`) geeft nu
+ * `resultaat.vastgoed` door in plaats van het hele `resultaat`.
+ */
+export function renderVastgoedKerncijfersBody(v: VastgoedKerncijfersResultaat): string {
   const p = v.portefeuille;
   return `
     <h2>2. Vastgoed</h2>
@@ -348,7 +358,7 @@ function renderControleVereist(resultaat: ManagementRapportResultaat): string {
 export function renderManagementRapportBody(resultaat: ManagementRapportResultaat): string {
   return `
     ${renderManagementsamenvatting(resultaat)}
-    ${renderVastgoed(resultaat)}
+    ${renderVastgoedKerncijfersBody(resultaat.vastgoed)}
     ${renderHuur(resultaat)}
     ${renderKasstroom(resultaat)}
     ${renderServicekosten(resultaat)}

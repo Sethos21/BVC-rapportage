@@ -46,11 +46,21 @@ export interface GenereerKasstroomManagementoverzichtResultaat {
   vergelijking?: KasstroomManagementoverzichtVergelijkingsResultaat;
 }
 
-export function genereerKasstroomManagementoverzicht(
-  root: string,
-  administratieId: string,
-  opties: GenereerKasstroomManagementoverzichtOpties,
-): GenereerKasstroomManagementoverzichtResultaat {
+export interface KasstroomManagementoverzichtBerekening {
+  resultaat: KasstroomManagementoverzichtResultaat;
+  topOverigeUitgaven: readonly KasstroomTopUitgaveRegel[];
+}
+
+/**
+ * DELTA BUILD (2026-09-18) — "Samengestelde rapportgenerator V2": UITSLUITEND
+ * de bron-/mapping-ophaal- en rekenstap, ZONDER renderen/wegschrijven —
+ * geëxtraheerd zodat de samengestelde rapportgenerator exact dezelfde
+ * productieketen kan aanroepen als het standalone `kasstroom-managementoverzicht`-
+ * commando, zonder een los HTML-bestand te forceren. `genereerKasstroomManagementoverzicht`
+ * hieronder is ONGEWIJZIGD in gedrag — roept deze functie nu uitsluitend
+ * intern aan (zelfde patroon als `genereerPnLPeriode.ts`'s `haalPnLPeriodeResultaatOp`).
+ */
+export function haalKasstroomManagementoverzichtResultaatOp(root: string, administratieId: string, opties: Pick<GenereerKasstroomManagementoverzichtOpties, "boekjaar" | "boekperiodeTotEnMet">): KasstroomManagementoverzichtBerekening {
   const config = leesAdministratieConfig(root, administratieId);
   const mapping = leesGrootboekMapping(root, administratieId);
   const db = openCacheReadonly(administratieCachePad(root, administratieId));
@@ -73,34 +83,44 @@ export function genereerKasstroomManagementoverzicht(
 
     const resultaat = berekenKasstroomManagementoverzicht(balansstanden, boekingsregels, mapping.regels);
     const topOverigeUitgaven = berekenTopOverigeUitgaven(boekingsregels, mapping.regels);
-
-    const invoer: KasstroomManagementoverzichtInvoer = {
-      administratieNaam: config.weergavenaam,
-      bedrijfsnr: config.bedrijfsnr,
-      boekjaar: opties.boekjaar,
-      boekperiodeTotEnMet: opties.boekperiodeTotEnMet,
-      gegenereerdOp: new Date(),
-      resultaat,
-      topOverigeUitgaven,
-    };
-
-    const html = renderKasstroomManagementoverzichtHtml(invoer);
-    const rapportenDir = administratieRapportenDir(root, administratieId);
-    mkdirSync(rapportenDir, { recursive: true });
-    const tijdstempel = new Date().toISOString().replace(/[:.]/g, "-");
-    const pad = join(rapportenDir, `kasstroom-managementoverzicht-${opties.boekjaar}-${opties.boekperiodeTotEnMet}-${tijdstempel}.html`);
-    writeFileSync(pad, html, "utf-8");
-
-    if (!opties.verwachtePad) {
-      return { html, pad, resultaat, topOverigeUitgaven };
-    }
-
-    const verwacht = leesKasstroomManagementoverzichtVerwacht(opties.verwachtePad);
-    const vergelijking = vergelijkKasstroomManagementoverzichtMetVerwacht(resultaat, verwacht, opties.toleranceEuro ?? new Decimal("0.01"));
-    return { html, pad, resultaat, topOverigeUitgaven, vergelijking };
+    return { resultaat, topOverigeUitgaven };
   } finally {
     db.close();
   }
+}
+
+export function genereerKasstroomManagementoverzicht(
+  root: string,
+  administratieId: string,
+  opties: GenereerKasstroomManagementoverzichtOpties,
+): GenereerKasstroomManagementoverzichtResultaat {
+  const config = leesAdministratieConfig(root, administratieId);
+  const { resultaat, topOverigeUitgaven } = haalKasstroomManagementoverzichtResultaatOp(root, administratieId, opties);
+
+  const invoer: KasstroomManagementoverzichtInvoer = {
+    administratieNaam: config.weergavenaam,
+    bedrijfsnr: config.bedrijfsnr,
+    boekjaar: opties.boekjaar,
+    boekperiodeTotEnMet: opties.boekperiodeTotEnMet,
+    gegenereerdOp: new Date(),
+    resultaat,
+    topOverigeUitgaven,
+  };
+
+  const html = renderKasstroomManagementoverzichtHtml(invoer);
+  const rapportenDir = administratieRapportenDir(root, administratieId);
+  mkdirSync(rapportenDir, { recursive: true });
+  const tijdstempel = new Date().toISOString().replace(/[:.]/g, "-");
+  const pad = join(rapportenDir, `kasstroom-managementoverzicht-${opties.boekjaar}-${opties.boekperiodeTotEnMet}-${tijdstempel}.html`);
+  writeFileSync(pad, html, "utf-8");
+
+  if (!opties.verwachtePad) {
+    return { html, pad, resultaat, topOverigeUitgaven };
+  }
+
+  const verwacht = leesKasstroomManagementoverzichtVerwacht(opties.verwachtePad);
+  const vergelijking = vergelijkKasstroomManagementoverzichtMetVerwacht(resultaat, verwacht, opties.toleranceEuro ?? new Decimal("0.01"));
+  return { html, pad, resultaat, topOverigeUitgaven, vergelijking };
 }
 
 /**
