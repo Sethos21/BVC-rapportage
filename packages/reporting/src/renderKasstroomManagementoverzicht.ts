@@ -5,11 +5,15 @@ import type { KasstroomManagementoverzichtInvoer } from "./types.js";
 /**
  * HTML-renderer voor het (vereenvoudigde) Kasstroom-managementoverzicht.
  * Rendert uitsluitend de al-berekende `KasstroomManagementoverzichtResultaat`
- * (kasstroomManagementoverzicht.ts) — geen eigen berekening. Bewust nog
- * NIET pixel-perfect gelijk aan het aangeleverde voorbeeldontwerp (op
- * expliciet verzoek van de gebruiker) — hergebruikt de bestaande
- * `.card`/`.kpi-*`-huisstijl (huisstijl.ts) zodat de outputstructuur al
- * wel alle gevraagde KPI's en kwartaalregels ondersteunt.
+ * (kasstroomManagementoverzicht.ts) — geen eigen berekening. Hergebruikt
+ * dezelfde gedeelde huisstijl (`renderRapportDocument`/`.card`/`.kpi-*`/
+ * `.toelichting`, huisstijl.ts) als elke andere composed-report-module
+ * (PNL/Balans/Huurdersoverzicht/Vastgoed-KPI/RentRoll/Controlerapport/
+ * Servicekosten/Debiteuren) — DEFINITIEF AFGEROND (2026-09-23, zie
+ * packages/reporting/README.md's sectie "Kasstroom — definitief
+ * afgerond"). De eerdere "nog niet pixel-perfect"-opmerking dateerde van
+ * vóór de huisstijl-consolidatie over alle modules; er bestaat geen
+ * apart, toegankelijk mockup-bestand om nog verder tegen te vergelijken.
  */
 
 function renderKpiKaart(label: string, waardeTekst: string): string {

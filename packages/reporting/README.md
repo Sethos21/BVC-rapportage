@@ -499,6 +499,76 @@ lopen — zie de eerdere toelichting hierboven over dat scenario). Vormgeving
 dat gebeurt later gezamenlijk met P&L en balans, zodat huisstijlwerk niet
 drie keer apart gebeurt.
 
+### Kasstroom — definitief afgerond (2026-09-23)
+
+**Vervolgopdracht "Kasstroommodule afronden" — smalle inventarisatie
+(GEEN nieuw brononderzoek, GEEN nieuwe architectuurreview):** de
+huisstijlwerk-afspraak hierboven ("gezamenlijk met P&L en balans") is
+inmiddels ingelost — `renderKasstroomManagementoverzicht.ts` gebruikt
+exact dezelfde gedeelde huisstijl (`renderRapportDocument`/`.card`/
+`.kpi-*`/`.toelichting`, `huisstijl.ts`) als elke andere, inmiddels
+afgeronde composed-report-module (PNL/Balans/Huurdersoverzicht/
+Vastgoed-KPI/RentRoll/Controlerapport/Servicekosten/Debiteuren). Er is
+geen apart, toegankelijk mockup-bestand in deze repository om nog verder
+1-op-1 tegen te vergelijken — de oorspronkelijke "nog niet
+pixel-perfect"-opmerking was een moduledoc-restant van vóór die
+consolidatie, geen actuele functionele beperking.
+
+**`kasstroomCategorie`-dekking voor 070_Rooise_Zoom (representatieve
+fixture, `packages/tests/src/fixtures.ts`'s `rooiseZoomGrootboekMapping`):**
+van de 15 BALANS-rekeningen hebben er 2 een bevestigde
+`kasstroomCategorie` — `1310` (Huurdebiteuren) → `HUURONTVANGST` en `0840`
+(Ontrekkingen - Uitkeringen) → `EIGENAARONTTREKKING`. De overige 12
+(`0850`/`0901`/`0902`/`0903`/`1010`/`1400`/`1410`/`1506`/`1600`/`1700`/
+`1711`/`1712`/`1790`) hebben `kasstroomCategorie: null`. Dit is GEEN
+BRONGAT en vereist GEEN nieuwe businessbeslissing: de huidige,
+vereenvoudigde `berekenKasstroomManagementoverzicht` (bewust vastgesteld
+2026-08-24, zie hierboven) gebruikt uitsluitend `liquideMiddelen` (alleen
+`1010`, al volledig bevestigd) en `kasstroomCategorie:
+"EIGENAARONTTREKKING"` (alleen `0840`, al bevestigd) — beide al
+100% gedekt. De overige 12 nulls zijn uitsluitend relevant voor de
+BREDERE HUURONTVANGST/EXPLOITATIE_UITGAVE-KPI-indeling die al op
+2026-08-24 bewust is losgelaten uit de scope ("Bewust losgelaten uit de
+eerste, bredere opzet" hierboven) — geen openstaande blokkade voor de
+huidige, geleverde functionaliteit. Mocht die bredere indeling ooit
+opnieuw worden opgepakt, dan blijft de EXPLOITATIE_UITGAVE-verdeling
+(rechtstreeks Kosten vs. Crediteuren/Te betalen kosten) een expliciete,
+nog niet genomen businessbeslissing (zie `fixtures.ts`) — NIET vooruit
+gegokt.
+
+**Financiële aansluiting (al bewezen, geen nieuwe controle nodig):**
+`ontvangsten - uitgaven = nettoKasstroom` en `eigenaarOnttrekkingen +
+overigeUitgaven = uitgaven` zijn wiskundig gegarandeerd door de
+constructie zelf (`kasstroomManagementoverzicht.test.ts`); een
+onbevestigde `liquideMiddelen` of een niet-gemapte rekening met een
+niet-nul mutatie wordt zichtbaar in `controleVereist`, nooit stilzwijgend
+als €0 behandeld (`kasstroomBerekening.test.ts`); een onbeschikbare
+Kasstroom-sectie blokkeert de overige geselecteerde composed-report-
+modules nooit (`genereerSamengesteldRapport.test.ts`, criterium H). Geen
+enkele van deze eisen vereiste een codewijziging — allemaal al bewezen
+door bestaande, ongewijzigde tests.
+
+**Projectstatus (ONTWORPEN → BRON BEWEZEN → REKENLOGICA BEWEZEN → ECHTE
+070-PROEF → COMMIT → PRODUCTIE AANGESLOTEN → RENDERER/ACCEPTATIE) —
+ALLE STAPPEN AFGEROND, met bewijs:**
+
+| Stap | Status | Bewijs |
+|---|---|---|
+| ONTWORPEN | ✅ | Twee bewust gescheiden bouwstappen (mutatie bankstand + managementoverzicht), zie hierboven |
+| BRON BEWEZEN | ✅ | `liquideMiddelen`/`kasstroomCategorie` bevestigd voor de rekeningen die de module daadwerkelijk gebruikt (`1010`, `0840`) |
+| REKENLOGICA BEWEZEN | ✅ | `kasstroomBerekening.test.ts` + `kasstroomManagementoverzicht.test.ts`, incl. de twee structurele aansluitingen |
+| ECHTE 070-PROEF | ✅ | Productierun 2026-08-25, persoonlijk geverifieerd door de gebruiker (tabel hierboven), vastgelegd via `--verwacht` |
+| COMMIT | ✅ | Reeds gecommit (2026-08-22 t/m 2026-08-25-reeks) |
+| PRODUCTIE AANGESLOTEN | ✅ | `genereerKasstroomManagementoverzicht.ts` + CLI `kasstroom-managementoverzicht`, en als `KASSTROOM`-module in `rapportModuleRegister.ts`/`genereerSamengesteldRapport.ts` |
+| RENDERER/ACCEPTATIE | ✅ | `renderKasstroomManagementoverzicht.ts` op de gedeelde huisstijl, structureel gelijk aan elke andere afgeronde modulerenderer; geen apart mockup-bestand beschikbaar om verder tegen te toetsen |
+
+**Let op — extern statusregister:** het centrale Google Drive-
+projectdossier (overdrachtsdossier **Vastgoed-AI_Architectuur_v2.0**, zie
+README.md-hoofdmap) is vanuit deze omgeving NIET schrijfbaar/toegankelijk.
+Deze afronding is uitsluitend in de repository-projectadministratie
+(dit bestand) vastgelegd — de externe Drive-status is NIET bijgewerkt en
+moet apart, handmatig, door de gebruiker gesynchroniseerd worden.
+
 ### Aanvullend: Top overige uitgaven (`kasstroomTopUitgaven.ts`, 2026-08-25)
 
 Puur informatieve uitsplitsing BOVENOP het (vastgelegde) managementoverzicht
@@ -1477,7 +1547,7 @@ Nog te porten secties (met bronregels in `legacy/index.html`):
 |---|---|---|---|---|
 | 01 | Kerncijfers (KPI-dashboard: huurinkomen, EBITDA, uitbetalingsratio, bankstand, debiteuren, servicekosten-saldo + bezettingsgraad) | `renderOverzicht` | ~1502 | ✅ gebouwd (`kerncijfers.ts` + `renderKerncijfers.ts`) |
 | 02 | Resultaat P&L per kwartaal | `renderPnl` | ~1580 | deels gebouwd — `plRapport.ts`/`renderHtml.ts` (jaarcijfers, ander datamodel/CSS dan kwartaal+begroting) én sinds 2026-08-21 `renderPlPeriode.ts` (mapping-gedreven periodecijfers, nu ook onderdeel van het gecombineerde `rapport-periode`-document hieronder) — nog geen kwartaal+begroting-vergelijking in de renderer zelf |
-| 03 | Kasstroom | `renderCashflow` | ~1647 | deels gebouwd — `kasstroomBerekening.ts` (mutatie bankstand) + `kasstroomManagementoverzicht.ts` (huurontvangsten/exploitatie-uitgaven/eigenaaronttrekkingen/kwartalen/uitbetalingsratio, zie sectie hierboven); renderer nog niet pixel-perfect gelijk aan het voorbeeldontwerp, en `kasstroomCategorie` nog niet bevestigd voor 070 |
+| 03 | Kasstroom | `renderCashflow` | ~1647 | ✅ gebouwd (`kasstroomBerekening.ts` + `kasstroomManagementoverzicht.ts` + `renderKasstroomManagementoverzicht.ts`) — DEFINITIEF AFGEROND 2026-09-23, zie sectie "Kasstroom — definitief afgerond" hierboven |
 | 04 | Balans | `renderBalans` | ~1725 | ✅ gebouwd (`balansPeriodeBerekening.ts` + `renderBalansPeriode.ts`) — zie sectie hieronder |
 | 05 | Servicekosten (incl. stijgers/dalers, signaalbadges) | `renderServicekosten` | ~1859 | rekenlaag gebouwd (`servicekostenPositie.ts`, zie sectie hierboven — actuele positie/afrekening voorgaand jaar/grootboekreconciliatie, regressiepunt 070 bevestigd) — renderer en koppeling aan management-rapport nog te bouwen |
 | 06 | Verhuur / huuroverzicht (contracttabel, statusbadges op resterende looptijd) | `renderRentroll` | ~1897 | nog te bouwen |
