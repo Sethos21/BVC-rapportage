@@ -500,6 +500,8 @@ function naarPureGeplandOnderhoudInvoer(activiteit: GeplandOnderhoudActiviteit):
   return {
     complexnummer: activiteit.complexnummer,
     omschrijving: activiteit.omschrijving,
+    grootboekrekening: activiteit.grootboekrekening,
+    ogbKostensoort: activiteit.ogbKostensoort,
     aanleidingType: alsPureAanleidingType(activiteit.aanleidingType),
     aanleidingToelichting: activiteit.aanleidingToelichting,
     q1: activiteit.q1,
@@ -558,6 +560,8 @@ function naarPureCorrectiefDagelijksInvoer(regel: CorrectiefDagelijksOnderhoudRe
   return {
     omschrijving: regel.omschrijving,
     complexnummer: regel.complexnummer,
+    grootboekrekening: regel.grootboekrekening,
+    ogbKostensoort: regel.ogbKostensoort,
     jaarbedrag: regel.jaarbedrag,
   };
 }

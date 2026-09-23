@@ -68,6 +68,8 @@ interface RegelRow {
   regel_id: number;
   omschrijving: string;
   complexnummer: string | null;
+  grootboekrekening: string;
+  ogb_kostensoort: string | null;
   jaarbedrag: string;
 }
 
@@ -118,12 +120,12 @@ export function schrijfFrozenCorrectiefDagelijksOnderhoudResultaatZonderTransact
 
   const insertRegel = db.prepare(
     `INSERT INTO begroting_frozen_correctief_dagelijks_onderhoud_regel
-       (begroting_versie_id, regel_id, omschrijving, complexnummer, jaarbedrag)
-     VALUES (?, ?, ?, ?, ?)`,
+       (begroting_versie_id, regel_id, omschrijving, complexnummer, grootboekrekening, ogb_kostensoort, jaarbedrag)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
   );
   for (const { persistentieId, regel } of resultaat.regels) {
     const invoer = regel.invoer;
-    insertRegel.run(versieId, persistentieId, invoer.omschrijving, invoer.complexnummer, regel.jaarbedrag.toString());
+    insertRegel.run(versieId, persistentieId, invoer.omschrijving, invoer.complexnummer, invoer.grootboekrekening, invoer.ogbKostensoort ?? null, regel.jaarbedrag.toString());
   }
 
   const insertControl = db.prepare(
@@ -191,7 +193,7 @@ export function leesFrozenCorrectiefDagelijksOnderhoudResultaat(db: DatabaseSync
 
   const regelRijen = db
     .prepare(
-      `SELECT regel_id, omschrijving, complexnummer, jaarbedrag
+      `SELECT regel_id, omschrijving, complexnummer, grootboekrekening, ogb_kostensoort, jaarbedrag
        FROM begroting_frozen_correctief_dagelijks_onderhoud_regel
        WHERE begroting_versie_id = ?
        ORDER BY regel_id`,
@@ -202,6 +204,8 @@ export function leesFrozenCorrectiefDagelijksOnderhoudResultaat(db: DatabaseSync
     const invoer: BgCorrectiefDagelijksRegelInvoer = {
       omschrijving: rij.omschrijving,
       complexnummer: rij.complexnummer,
+      grootboekrekening: rij.grootboekrekening,
+      ogbKostensoort: rij.ogb_kostensoort,
       jaarbedrag: new Decimal(rij.jaarbedrag),
     };
     const regel: BgCorrectiefDagelijksRegelUitkomst = {

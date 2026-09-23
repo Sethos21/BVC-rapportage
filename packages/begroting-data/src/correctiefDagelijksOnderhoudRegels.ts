@@ -46,11 +46,18 @@ function withTransaction<T>(db: DatabaseSync, fn: () => T): T {
   }
 }
 
+/**
+ * DELTA BUILD 1 (2026-09-23, FO/UX-conformering): `grootboekrekening`
+ * (verplicht) en `ogb_kostensoort` (optioneel, `NULL` toegestaan) — zelfde
+ * additieve patroon als `geplandOnderhoudActiviteiten.ts` (migratie 26).
+ */
 /** `id: null` = nieuwe regel (SQLite kent een verse rowid toe). `id: number` = een bestaande regel die aantoonbaar bij DEZE begrotingsversie moet horen. */
 export interface CorrectiefDagelijksOnderhoudRegelInvoer {
   id: number | null;
   omschrijving: string;
   complexnummer: string | null;
+  grootboekrekening: string;
+  ogbKostensoort: string | null;
   jaarbedrag: Decimal | null;
 }
 
@@ -58,6 +65,8 @@ export interface CorrectiefDagelijksOnderhoudRegel {
   id: number;
   omschrijving: string;
   complexnummer: string | null;
+  grootboekrekening: string;
+  ogbKostensoort: string | null;
   jaarbedrag: Decimal | null;
 }
 
@@ -65,6 +74,8 @@ interface RegelRow {
   id: number;
   omschrijving: string;
   complexnummer: string | null;
+  grootboekrekening: string;
+  ogb_kostensoort: string | null;
   jaarbedrag: string | null;
 }
 
@@ -73,6 +84,8 @@ function rowToRegel(row: RegelRow): CorrectiefDagelijksOnderhoudRegel {
     id: row.id,
     omschrijving: row.omschrijving,
     complexnummer: row.complexnummer,
+    grootboekrekening: row.grootboekrekening,
+    ogbKostensoort: row.ogb_kostensoort,
     jaarbedrag: row.jaarbedrag !== null ? new Decimal(row.jaarbedrag) : null,
   };
 }
@@ -81,7 +94,7 @@ function rowToRegel(row: RegelRow): CorrectiefDagelijksOnderhoudRegel {
 export function leesCorrectiefDagelijksOnderhoudRegels(db: DatabaseSync, versieId: string): readonly CorrectiefDagelijksOnderhoudRegel[] {
   const rijen = db
     .prepare(
-      `SELECT id, omschrijving, complexnummer, jaarbedrag
+      `SELECT id, omschrijving, complexnummer, grootboekrekening, ogb_kostensoort, jaarbedrag
        FROM begroting_correctief_dagelijks_onderhoud_regel
        WHERE begroting_versie_id = ?
        ORDER BY id`,
@@ -160,26 +173,26 @@ export function schrijfCorrectiefDagelijksOnderhoudRegels(
 
     const updateStmt = db.prepare(
       `UPDATE begroting_correctief_dagelijks_onderhoud_regel
-       SET omschrijving = ?, complexnummer = ?, jaarbedrag = ?
+       SET omschrijving = ?, complexnummer = ?, grootboekrekening = ?, ogb_kostensoort = ?, jaarbedrag = ?
        WHERE id = ? AND begroting_versie_id = ?`,
     );
     const insertStmt = db.prepare(
       `INSERT INTO begroting_correctief_dagelijks_onderhoud_regel
-         (begroting_versie_id, omschrijving, complexnummer, jaarbedrag)
-       VALUES (?, ?, ?, ?)`,
+         (begroting_versie_id, omschrijving, complexnummer, grootboekrekening, ogb_kostensoort, jaarbedrag)
+       VALUES (?, ?, ?, ?, ?, ?)`,
     );
 
     for (const regel of regels) {
       const jaarbedrag = regel.jaarbedrag !== null ? regel.jaarbedrag.toString() : null;
 
       if (regel.id === null) {
-        insertStmt.run(versieId, regel.omschrijving, regel.complexnummer, jaarbedrag);
+        insertStmt.run(versieId, regel.omschrijving, regel.complexnummer, regel.grootboekrekening, regel.ogbKostensoort, jaarbedrag);
         continue;
       }
 
       // Versiegebonden update: de WHERE-clausule bewijst de versie-isolatie opnieuw, onafhankelijk van de
       // vooraf-ownership-check hierboven (zie moduledoc — twee beschermingslagen, zelfde patroon als GO-P1).
-      const info = updateStmt.run(regel.omschrijving, regel.complexnummer, jaarbedrag, regel.id, versieId);
+      const info = updateStmt.run(regel.omschrijving, regel.complexnummer, regel.grootboekrekening, regel.ogbKostensoort, jaarbedrag, regel.id, versieId);
       if (Number(info.changes) !== 1) {
         throw new Error(
           `Begrotingsversie ${versieId}: regel-id ${regel.id} kon niet worden bijgewerkt (0 rijen geraakt bij id+versie-gebonden UPDATE) — operatie geweigerd, transactie wordt teruggedraaid.`,

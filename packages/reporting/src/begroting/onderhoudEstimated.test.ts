@@ -18,6 +18,7 @@ function activiteit(overrides: Partial<BgGeplandOnderhoudActiviteitInvoer> = {})
   return {
     complexnummer: "003",
     omschrijving: "Vervangen dakbedekking",
+    grootboekrekening: "4300",
     aanleidingType: "MJOP",
     aanleidingToelichting: "MJOP 2027 regel 14",
     q1: new Decimal(25000),
@@ -29,7 +30,7 @@ function activiteit(overrides: Partial<BgGeplandOnderhoudActiviteitInvoer> = {})
   };
 }
 function correctiefRegel(overrides: Partial<BgCorrectiefDagelijksRegelInvoer> = {}): BgCorrectiefDagelijksRegelInvoer {
-  return { omschrijving: "Dagelijks onderhoud", complexnummer: "003", jaarbedrag: new Decimal(8000), ...overrides };
+  return { omschrijving: "Dagelijks onderhoud", complexnummer: "003", grootboekrekening: "4300", jaarbedrag: new Decimal(8000), ...overrides };
 }
 function boeking(overrides: Partial<WerkelijkOnderhoudBoekingRegel> = {}): WerkelijkOnderhoudBoekingRegel {
   return { economischeCategorie: "ONDERHOUD_GEBOUWEN", complexnummer: "003", saldo: new Decimal(0), ...overrides };
@@ -96,7 +97,7 @@ describe("4. wijzigingen/uitstel/vervallen en Estimated-only activiteiten beïnv
     const estimatedVersieGepland = berekenBegroteGeplandOnderhoud(
       [
         activiteit({ omschrijving: "Vervangen dakbedekking", q3: new Decimal(0), q1: new Decimal(0), status: "UITGESTELD" }),
-        activiteit({ omschrijving: "Lekkage reparatie dak (onvoorzien)", q1: new Decimal(0), q3: new Decimal(0), q4: new Decimal(4000), status: "ONVOORZIEN", aanleidingType: "ERVARING_BEHEERDER" }),
+        activiteit({ omschrijving: "Lekkage reparatie dak (onvoorzien)", q1: new Decimal(0), q3: new Decimal(0), q4: new Decimal(4000), status: "ONVOORZIEN", aanleidingType: "OVERIG" }),
       ],
       { begrotingsjaar: 2027, beoordeeld: true },
     );

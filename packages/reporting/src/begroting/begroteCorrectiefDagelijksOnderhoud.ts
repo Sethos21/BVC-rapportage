@@ -56,10 +56,13 @@ import type { BgControleErnst } from "./begroteHuuropbrengsten.js";
  *
  * BUITEN SCOPE (fase CD-P0, expliciet niet gebouwd — geen aanname):
  * persistence/SQLite, renderer/UI, CLI, historische realisatie/drilldown,
- * exploitatiekostensoort/OGB, grootboekmapping, mappingwijziging,
- * automatische kwartaalverdeling (geen kwartaalvelden bestaan hier
- * uberhaupt), boeking-naar-regel-koppeling, gepland/correctief-afleiding,
- * overschrijdingswaarschuwing, VASTSTELLEN-/lifecyclelogica, Estimated.
+ * mappingwijziging, automatische kwartaalverdeling (geen kwartaalvelden
+ * bestaan hier uberhaupt), boeking-naar-regel-koppeling, gepland/correctief-
+ * afleiding, overschrijdingswaarschuwing, VASTSTELLEN-/lifecyclelogica,
+ * Estimated. `grootboekrekening`/`ogbKostensoort` zijn per DELTA BUILD 1
+ * (2026-09-23, FO/UX-conformering) alsnog toegevoegd als pure invoervelden
+ * (verplicht resp. optioneel) — GEEN nieuwe P&L-mappinglogica, uitsluitend
+ * de velden zelf plus validatie op ontbrekende `grootboekrekening`.
  */
 
 export type BgCorrectiefDagelijksControleErnst = BgControleErnst;
@@ -75,6 +78,14 @@ export interface BgCorrectiefDagelijksRegelInvoer {
   omschrijving: string;
   /** `null` = NTB (nader te bepalen) — structureel geldig, geen control (OB028-003). */
   complexnummer: string | null;
+  /**
+   * DELTA BUILD 1 (2026-09-23, FO/UX-conformering): verplicht, exact één
+   * grootboekrekening per regel — code/sleutel leidend, nooit gekoppeld op
+   * omschrijving. Geen nieuwe P&L-mappinglogica.
+   */
+  grootboekrekening: string;
+  /** Optioneel, onafhankelijk van `grootboekrekening` — ontbreken maakt een regel niet ongeldig (DELTA BUILD 1). */
+  ogbKostensoort?: string | null;
   /** `null` = nog niet ingevoerd (OB028-004) — GEEN default naar 0, zie moduledoc. */
   jaarbedrag: Decimal | null;
 }
@@ -130,6 +141,9 @@ function valideerRegel(invoer: BgCorrectiefDagelijksRegelInvoer, index: number):
 
   if (leeg(invoer.omschrijving)) {
     meld(`Regel ${index}: omschrijving ontbreekt — verplicht voor vaststellen; bedrag blijft financieel meetellen.`);
+  }
+  if (leeg(invoer.grootboekrekening)) {
+    meld(`Regel ${index}: grootboekrekening ontbreekt — verplicht voor vaststellen; bedrag blijft financieel meetellen.`);
   }
   // complexnummer === null (NTB) is structureel geldig — bewust GEEN control (OB028-003).
 

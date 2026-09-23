@@ -38,7 +38,7 @@ describe("runMigrations", () => {
     // Sinds 1D.4 bevat de volledige migratielijst ook migratie 4 — een open vanaf schema-v1 upgradet dus
     // in één stap door tot en met v4. Migratie 2's eigen tabel (begrotingsversies) is hier het bewijs dat
     // die stap daadwerkelijk is doorlopen; zie test "1D.3-1"/"1D.4-1" voor de losstaande transities.
-    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]);
+    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]);
     expect(tabelNaUpgrade).toBeDefined();
   });
 
@@ -61,7 +61,7 @@ describe("runMigrations", () => {
     // tijdstempels (bewijst dat geen enkele migratie opnieuw is uitgevoerd, niet alleen dat het
     // eindresultaat toevallig gelijk is).
     expect(rijenNaTweedeOpen).toEqual(eersteRijen);
-    expect(rijenNaTweedeOpen.map((r) => r.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]);
+    expect(rijenNaTweedeOpen.map((r) => r.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]);
   });
 
   it("1D.3-1. migratie 2 → 3 wordt correct toegepast op een bestaande schema-v2-database", () => {
@@ -87,7 +87,7 @@ describe("runMigrations", () => {
 
     // Sinds 1D.4 bevat de volledige migratielijst ook migratie 4 — deze test blijft gericht op het bewijs
     // dat migratie 3's eigen tabellen bestaan; zie test "1D.4-1" voor de losstaande 3→4-transitie.
-    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]);
+    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]);
     expect(tabellenNaUpgrade.map((t) => t.name).sort()).toEqual([
       "begroting_contract_kortingswijziging",
       "begroting_contract_rentroll_component",
@@ -111,7 +111,7 @@ describe("runMigrations", () => {
     db2.close();
 
     expect(rijenNaTweedeOpen).toEqual(eersteRijen);
-    expect(rijenNaTweedeOpen.map((r) => r.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]);
+    expect(rijenNaTweedeOpen.map((r) => r.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]);
   });
 
   it("1D.4-1. migratie 3 → 4 wordt correct toegepast op een bestaande schema-v3-database", () => {
@@ -135,7 +135,7 @@ describe("runMigrations", () => {
       .all() as { name: string }[];
     db.close();
 
-    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]);
+    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]);
     expect(tabellenNaUpgrade.map((t) => t.name).sort()).toEqual([
       "begroting_aannames",
       "begroting_complex_config",
@@ -159,7 +159,7 @@ describe("runMigrations", () => {
     db2.close();
 
     expect(rijenNaTweedeOpen).toEqual(eersteRijen);
-    expect(rijenNaTweedeOpen.map((r) => r.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]);
+    expect(rijenNaTweedeOpen.map((r) => r.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]);
   });
 
   it("1D.6a-1. migratie 4 → 5 wordt correct toegepast op een bestaande schema-v4-database", () => {
@@ -191,7 +191,7 @@ describe("runMigrations", () => {
       .all() as { name: string }[];
     db.close();
 
-    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]);
+    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]);
     expect(tabellenNaUpgrade.map((t) => t.name).sort()).toEqual([
       "begroting_frozen_module1_contract",
       "begroting_frozen_module1_control",
@@ -303,7 +303,7 @@ describe("runMigrations", () => {
     db2.close();
 
     expect(rijenNaTweedeOpen).toEqual(eersteRijen);
-    expect(rijenNaTweedeOpen.map((r) => r.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]);
+    expect(rijenNaTweedeOpen.map((r) => r.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]);
   });
 
   it("2C.2-1. migratie 5 → 6 wordt correct toegepast op een bestaande schema-v5-database", () => {
@@ -325,7 +325,7 @@ describe("runMigrations", () => {
       .all() as { name: string }[];
     db.close();
 
-    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]);
+    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]);
     expect(tabelNaUpgrade).toBeDefined();
     // 1 tabel × 3 triggers (INSERT/UPDATE/DELETE).
     expect(triggersNaUpgrade).toHaveLength(3);
@@ -355,7 +355,7 @@ describe("runMigrations", () => {
       .all() as { name: string }[];
     db.close();
 
-    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]);
+    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]);
     expect(tabellenNaUpgrade.map((t) => t.name).sort()).toEqual([
       "begroting_frozen_module3_control",
       "begroting_frozen_module3_maandregel",
@@ -397,7 +397,7 @@ describe("runMigrations", () => {
       .all() as { name: string }[];
     db.close();
 
-    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]);
+    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]);
     expect(tabellenNaUpgrade.map((t) => t.name).sort()).toEqual(["begroting_gepland_onderhoud_activiteit", "begroting_gepland_onderhoud_module"]);
     // 2 tabellen × 3 triggers (INSERT/UPDATE/DELETE) = 6.
     expect(triggersNaUpgrade).toHaveLength(6);
@@ -445,7 +445,7 @@ describe("runMigrations", () => {
       .all() as { name: string }[];
     db.close();
 
-    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]);
+    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]);
     expect(tabellenNaUpgrade.map((t) => t.name).sort()).toEqual([
       "begroting_frozen_gepland_onderhoud_activiteit",
       "begroting_frozen_gepland_onderhoud_complex",
@@ -502,7 +502,7 @@ describe("runMigrations", () => {
       .all() as { name: string }[];
     db.close();
 
-    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]);
+    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]);
     expect(tabellenNaUpgrade.map((t) => t.name).sort()).toEqual([
       "begroting_frozen_correctief_dagelijks_onderhoud_control",
       "begroting_frozen_correctief_dagelijks_onderhoud_regel",
@@ -553,7 +553,7 @@ describe("runMigrations", () => {
       .all() as { name: string }[];
     db.close();
 
-    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]);
+    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]);
     expect(tabellenNaUpgrade.map((t) => t.name).sort()).toEqual(["begroting_verzekering_module", "begroting_verzekering_regel"]);
     // 2 tabellen × 3 triggers (INSERT/UPDATE/DELETE) = 6.
     expect(triggersNaUpgrade).toHaveLength(6);
@@ -646,7 +646,7 @@ describe("runMigrations", () => {
       .all() as { name: string }[];
     db.close();
 
-    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]);
+    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]);
     expect(tabellenNaUpgrade.map((t) => t.name).sort()).toEqual(["begroting_gemeentelijke_lasten_module", "begroting_woz_object"]);
     // 2 tabellen × 3 triggers (INSERT/UPDATE/DELETE) = 6.
     expect(triggersNaUpgrade).toHaveLength(6);
@@ -708,7 +708,7 @@ describe("runMigrations", () => {
       .all() as { name: string }[];
     db.close();
 
-    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]);
+    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]);
     expect(tabellenNaUpgrade.map((t) => t.name).sort()).toEqual(
       [
         "begroting_frozen_gemeentelijke_lasten_complex",
@@ -769,7 +769,7 @@ describe("runMigrations", () => {
       .all() as { name: string }[];
     db.close();
 
-    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]);
+    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]);
     expect(tabellenNaUpgrade.map((t) => t.name).sort()).toEqual(
       ["begroting_algemene_kosten_classificatie", "begroting_algemene_kosten_categorie_state", "begroting_algemene_kosten_regel"].sort(),
     );
@@ -835,7 +835,7 @@ describe("runMigrations", () => {
       .all() as { name: string }[];
     db.close();
 
-    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]);
+    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]);
     expect(tabellenNaUpgrade.map((t) => t.name).sort()).toEqual(
       [
         "begroting_frozen_algemene_kosten_classificatie",
@@ -898,7 +898,7 @@ describe("runMigrations", () => {
       .all() as { name: string }[];
     db.close();
 
-    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]);
+    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]);
     expect(tabellenNaUpgrade.map((t) => t.name).sort()).toEqual(
       ["begroting_leegstand_classificatie", "begroting_leegstand_categorie_state", "begroting_leegstand_regel"].sort(),
     );
@@ -960,7 +960,7 @@ describe("runMigrations", () => {
       .all() as { name: string }[];
     db.close();
 
-    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]);
+    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]);
     expect(tabellenNaUpgrade.map((t) => t.name).sort()).toEqual(
       ["begroting_frozen_leegstand_categorie", "begroting_frozen_leegstand_regel", "begroting_frozen_leegstand_control"].sort(),
     );
@@ -1020,7 +1020,7 @@ describe("runMigrations", () => {
       .all() as { name: string }[];
     db.close();
 
-    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]);
+    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]);
     expect(tabellenNaUpgrade.map((t) => t.name).sort()).toEqual(
       ["begroting_rente_classificatie", "begroting_rente_categorie_state", "begroting_rente_regel"].sort(),
     );
@@ -1084,7 +1084,7 @@ describe("runMigrations", () => {
       .all() as { name: string }[];
     db.close();
 
-    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]);
+    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]);
     expect(tabellenNaUpgrade.map((t) => t.name).sort()).toEqual(
       ["begroting_frozen_rente_categorie", "begroting_frozen_rente_regel", "begroting_frozen_rente_control"].sort(),
     );
@@ -1148,7 +1148,7 @@ describe("runMigrations", () => {
       .all() as { name: string }[];
     db.close();
 
-    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]);
+    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]);
     expect(tabellenNaUpgrade.map((t) => t.name).sort()).toEqual(
       [
         "begroting_geplande_verkoop_classificatie",
@@ -1220,7 +1220,7 @@ describe("runMigrations", () => {
       .all() as { name: string }[];
     db.close();
 
-    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]);
+    expect(versies.map((v) => v.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]);
     expect(tabellenNaUpgrade.map((t) => t.name).sort()).toEqual(
       ["begroting_frozen_geplande_verkoop_resultaat", "begroting_frozen_geplande_verkoop_regel", "begroting_frozen_geplande_verkoop_control"].sort(),
     );
@@ -1229,10 +1229,10 @@ describe("runMigrations", () => {
   });
 
   it("8. een geforceerde migratiefout laat geen half toegepaste migratie achter", () => {
-    const db = openOrCreateDatabase(dbPad); // past migraties 1 t/m 25 normaal toe
+    const db = openOrCreateDatabase(dbPad); // past migraties 1 t/m 26 normaal toe
 
     const kapotteMigratie: Migration = {
-      version: 26, // versie 26: de eerstvolgende, nog niet bestaande versie na de huidige (1 t/m 25) migraties.
+      version: 27, // versie 27: de eerstvolgende, nog niet bestaande versie na de huidige (1 t/m 26) migraties.
       description: "geforceerde testfout",
       ddl: [
         "CREATE TABLE test_fail_tabel (id INTEGER)", // deze DDL-statement slaagt op zichzelf...
@@ -1240,13 +1240,13 @@ describe("runMigrations", () => {
       ],
     };
 
-    expect(() => runMigrations(db, [...MIGRATIONS, kapotteMigratie])).toThrow(/Migratie 26/);
+    expect(() => runMigrations(db, [...MIGRATIONS, kapotteMigratie])).toThrow(/Migratie 27/);
 
-    // Geen dubbele/kapotte registratie: nog steeds uitsluitend schema_version 1 t/m 25 geregistreerd.
+    // Geen dubbele/kapotte registratie: nog steeds uitsluitend schema_version 1 t/m 26 geregistreerd.
     const rijen = db.prepare(`SELECT schema_version FROM begroting_schema_meta ORDER BY schema_version`).all() as {
       schema_version: number;
     }[];
-    expect(rijen.map((r) => r.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]);
+    expect(rijen.map((r) => r.schema_version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]);
 
     // De eerste (op zichzelf geslaagde) DDL-statement van de kapotte migratie is volledig teruggedraaid —
     // de tabel bestaat niet, want hij hoorde bij dezelfde transactie als de daaropvolgende foutieve statement.
@@ -1254,5 +1254,110 @@ describe("runMigrations", () => {
     expect(kapotteTabel).toBeUndefined();
 
     db.close();
+  });
+
+  it("9. migratie 26: bestaande ERVARING_BEHEERDER-legacywaarde (live concept-tabel) wordt veilig naar OVERIG omgezet, nieuwe kolommen krijgen een eerlijke lege/afwezige default", () => {
+    const dbOud = new DatabaseSync(dbPad);
+    runMigrations(dbOud, MIGRATIONS.filter((m) => m.version <= 25));
+    dbOud.exec(`INSERT INTO begrotingsversies (id, bedrijfsnr, begrotingsjaar, bron_peildatum, status, created_at, based_on_version_id, origin_type)
+                VALUES ('v1', '070', 2027, '2026-07-31', 'CONCEPT', '2026-01-01T00:00:00.000Z', NULL, 'NIEUW')`);
+    // Pre-migratie-26 schema: geen grootboekrekening/ogb_kostensoort-kolommen, ERVARING_BEHEERDER was toen nog geldig.
+    dbOud
+      .prepare(
+        `INSERT INTO begroting_gepland_onderhoud_activiteit
+           (begroting_versie_id, complexnummer, omschrijving, aanleiding_type, aanleiding_toelichting, q1, q2, q3, q4, status, leverancier, offertebedrag, notitie)
+         VALUES ('v1', '003', 'Terrasherstel', 'ERVARING_BEHEERDER', 'Ervaring beheerder; terugkerend herstel buitenterrein.', '500', '0', '0', '0', 'GEPLAND', NULL, NULL, NULL)`,
+      )
+      .run();
+    dbOud.close();
+
+    const db = openOrCreateDatabase(dbPad); // upgradet in één keer door tot en met migratie 26
+    const rij = db.prepare(`SELECT complexnummer, omschrijving, grootboekrekening, ogb_kostensoort, aanleiding_type, q1 FROM begroting_gepland_onderhoud_activiteit WHERE begroting_versie_id = 'v1'`).get() as {
+      complexnummer: string;
+      omschrijving: string;
+      grootboekrekening: string;
+      ogb_kostensoort: string | null;
+      aanleiding_type: string;
+      q1: string;
+    };
+    db.close();
+
+    // De legacywaarde is veilig gemigreerd — geen enkel ander veld van de rij is verloren gegaan.
+    expect(rij.aanleiding_type).toBe("OVERIG");
+    expect(rij.complexnummer).toBe("003");
+    expect(rij.omschrijving).toBe("Terrasherstel");
+    expect(rij.q1).toBe("500");
+    // Nieuwe kolommen: eerlijke "nog niet ingevuld"-default voor een rij die vóór deze migratie al bestond.
+    expect(rij.grootboekrekening).toBe("");
+    expect(rij.ogb_kostensoort).toBeNull();
+  });
+
+  it("10. migratie 26: frozen Gepland-Onderhoud-activiteit met ERVARING_BEHEERDER wordt veilig gemigreerd, en de CHECK staat de legacywaarde niet langer toe", () => {
+    const dbOud = new DatabaseSync(dbPad);
+    runMigrations(dbOud, MIGRATIONS.filter((m) => m.version <= 25));
+    dbOud.exec(`INSERT INTO begrotingsversies (id, bedrijfsnr, begrotingsjaar, bron_peildatum, status, created_at, based_on_version_id, origin_type)
+                VALUES ('v1', '070', 2027, '2026-07-31', 'CONCEPT', '2026-01-01T00:00:00.000Z', NULL, 'NIEUW')`);
+    dbOud.exec(`INSERT INTO begroting_frozen_gepland_onderhoud_resultaat
+                (begroting_versie_id, totaal_q1, totaal_q2, totaal_q3, totaal_q4, totaal_jaar, totaal_zonder_geldig_complex, beoordeeld, review_status)
+                VALUES ('v1', '500', '0', '0', '0', '500', '0', 1, 'REVIEWED_WITH_ACTIVITIES')`);
+    // Pre-migratie-26 schema: geen grootboekrekening/ogb_kostensoort, ERVARING_BEHEERDER was toen nog een geldige CHECK-waarde.
+    dbOud
+      .prepare(
+        `INSERT INTO begroting_frozen_gepland_onderhoud_activiteit
+           (begroting_versie_id, activiteit_id, complexnummer, omschrijving, aanleiding_type, aanleiding_toelichting, q1, q2, q3, q4, jaartotaal, status)
+         VALUES ('v1', 1, '003', 'Terrasherstel', 'ERVARING_BEHEERDER', 'Ervaring beheerder; terugkerend herstel buitenterrein.', '500', '0', '0', '0', '500', 'GEPLAND')`,
+      )
+      .run();
+    dbOud.close();
+
+    const db = openOrCreateDatabase(dbPad);
+    const rij = db
+      .prepare(`SELECT complexnummer, grootboekrekening, ogb_kostensoort, aanleiding_type, jaartotaal FROM begroting_frozen_gepland_onderhoud_activiteit WHERE begroting_versie_id = 'v1'`)
+      .get() as { complexnummer: string; grootboekrekening: string; ogb_kostensoort: string | null; aanleiding_type: string; jaartotaal: string };
+
+    expect(rij.aanleiding_type).toBe("OVERIG");
+    expect(rij.complexnummer).toBe("003");
+    expect(rij.jaartotaal).toBe("500");
+    expect(rij.grootboekrekening).toBe("");
+    expect(rij.ogb_kostensoort).toBeNull();
+
+    // De herbouwde tabel staat ERVARING_BEHEERDER niet meer toe als geldige CHECK-waarde.
+    expect(() =>
+      db
+        .prepare(
+          `INSERT INTO begroting_frozen_gepland_onderhoud_activiteit
+             (begroting_versie_id, activiteit_id, complexnummer, omschrijving, grootboekrekening, aanleiding_type, aanleiding_toelichting, q1, q2, q3, q4, jaartotaal, status)
+           VALUES ('v1', 2, '003', 'x', '4300', 'ERVARING_BEHEERDER', 'x', '0', '0', '0', '0', '0', 'GEPLAND')`,
+        )
+        .run(),
+    ).toThrow(/CHECK constraint failed/);
+
+    db.close();
+  });
+
+  it("11. migratie 26: Correctief/Dagelijks-Onderhoud (live + frozen) krijgt grootboekrekening/ogb_kostensoort additief, bestaande rij blijft intact", () => {
+    const dbOud = new DatabaseSync(dbPad);
+    runMigrations(dbOud, MIGRATIONS.filter((m) => m.version <= 25));
+    dbOud.exec(`INSERT INTO begrotingsversies (id, bedrijfsnr, begrotingsjaar, bron_peildatum, status, created_at, based_on_version_id, origin_type)
+                VALUES ('v1', '070', 2027, '2026-07-31', 'CONCEPT', '2026-01-01T00:00:00.000Z', NULL, 'NIEUW')`);
+    dbOud
+      .prepare(
+        `INSERT INTO begroting_correctief_dagelijks_onderhoud_regel (begroting_versie_id, omschrijving, complexnummer, jaarbedrag)
+         VALUES ('v1', 'Reparatie CV-installatie', '003', '1200')`,
+      )
+      .run();
+    dbOud.close();
+
+    const db = openOrCreateDatabase(dbPad);
+    const rij = db
+      .prepare(`SELECT omschrijving, complexnummer, grootboekrekening, ogb_kostensoort, jaarbedrag FROM begroting_correctief_dagelijks_onderhoud_regel WHERE begroting_versie_id = 'v1'`)
+      .get() as { omschrijving: string; complexnummer: string; grootboekrekening: string; ogb_kostensoort: string | null; jaarbedrag: string };
+    db.close();
+
+    expect(rij.omschrijving).toBe("Reparatie CV-installatie");
+    expect(rij.complexnummer).toBe("003");
+    expect(rij.jaarbedrag).toBe("1200");
+    expect(rij.grootboekrekening).toBe("");
+    expect(rij.ogb_kostensoort).toBeNull();
   });
 });

@@ -621,6 +621,8 @@ describe("herberekenBegroting — Gepland Onderhoud (GO-P2)", () => {
       id: null,
       complexnummer: "003",
       omschrijving: "Vervangen dakbedekking",
+      grootboekrekening: "4300",
+      ogbKostensoort: null,
       aanleidingType: "MJOP",
       aanleidingToelichting: "MJOP 2027 regel 14",
       q1: new Decimal(25000),
@@ -640,6 +642,8 @@ describe("herberekenBegroting — Gepland Onderhoud (GO-P2)", () => {
     return {
       complexnummer: a.complexnummer,
       omschrijving: a.omschrijving,
+      grootboekrekening: a.grootboekrekening,
+      ogbKostensoort: a.ogbKostensoort,
       aanleidingType: (a.aanleidingType ?? "") as BgGeplandOnderhoudActiviteitInvoer["aanleidingType"],
       aanleidingToelichting: a.aanleidingToelichting,
       q1: a.q1,
@@ -883,6 +887,8 @@ describe("herberekenBegroting — Correctief/Dagelijks Onderhoud (CD-P2)", () =>
       id: null,
       omschrijving: "Reparatie CV-installatie",
       complexnummer: "003",
+      grootboekrekening: "4300",
+      ogbKostensoort: null,
       jaarbedrag: new Decimal(1200),
       ...overrides,
     };
@@ -890,7 +896,7 @@ describe("herberekenBegroting — Correctief/Dagelijks Onderhoud (CD-P2)", () =>
 
   /** Zelfde type-boundary-conversie als de productiecode (`naarPureCorrectiefDagelijksInvoer` in `herberekenen.ts`) — bewust GEEN `id` in de pure vorm. */
   function alsPureInvoer(r: CorrectiefDagelijksOnderhoudRegelInvoer): BgCorrectiefDagelijksRegelInvoer {
-    return { omschrijving: r.omschrijving, complexnummer: r.complexnummer, jaarbedrag: r.jaarbedrag };
+    return { omschrijving: r.omschrijving, complexnummer: r.complexnummer, grootboekrekening: r.grootboekrekening, ogbKostensoort: r.ogbKostensoort, jaarbedrag: r.jaarbedrag };
   }
 
   it("1. nul regels + geen beoordeeld-rij: resultaat aanwezig, beoordeeld=false, NOT_REVIEWED, totaal 0", () => {
@@ -1073,6 +1079,8 @@ describe("herberekenBegroting — Correctief/Dagelijks Onderhoud (CD-P2)", () =>
         id: null,
         complexnummer: "003",
         omschrijving: "Vervangen dakbedekking",
+        grootboekrekening: "4300",
+        ogbKostensoort: null,
         aanleidingType: "MJOP",
         aanleidingToelichting: "MJOP 2027 regel 14",
         q1: new Decimal(25000),

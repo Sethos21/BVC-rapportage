@@ -12,6 +12,7 @@ function activiteit(overrides: Partial<BgGeplandOnderhoudActiviteitInvoer> = {})
   return {
     complexnummer: "003",
     omschrijving: "Vervangen dakbedekking",
+    grootboekrekening: "4300",
     aanleidingType: "MJOP",
     aanleidingToelichting: "MJOP 2027 regel 14",
     q1: new Decimal(25000),
@@ -244,6 +245,62 @@ describe("berekenBegroteGeplandOnderhoud", () => {
     const r = berekenBegroteGeplandOnderhoud([activiteit({ omschrijving: "", q1: new Decimal(1000) })], aannames({ beoordeeld: true }));
     expect(r.reviewStatus).toBe("REVIEWED_WITH_ACTIVITIES");
     expect(kritiekeMeldingen(r.controleVereist, 0).length).toBeGreaterThan(0);
+  });
+
+  // ── DELTA BUILD 1 (2026-09-23, FO/UX-conformering: grootboekrekening/OGB-kostensoort) ──────────────
+
+  it("22. geldige activiteit met grootboekrekening en zonder OGB -> geen control", () => {
+    const invoer = activiteit({ grootboekrekening: "4300" });
+    delete invoer.ogbKostensoort;
+    const r = berekenBegroteGeplandOnderhoud([invoer], aannames());
+    expect(r.activiteiten[0]?.invoer.grootboekrekening).toBe("4300");
+    expect(r.activiteiten[0]?.invoer.ogbKostensoort).toBeUndefined();
+    expect(kritiekeMeldingen(r.controleVereist, 0)).toHaveLength(0);
+  });
+
+  it("23. geldige activiteit met grootboekrekening + OGB-kostensoort -> beide correct doorgegeven, geen control", () => {
+    const r = berekenBegroteGeplandOnderhoud([activiteit({ grootboekrekening: "4300", ogbKostensoort: "4313" })], aannames());
+    expect(r.activiteiten[0]?.invoer.grootboekrekening).toBe("4300");
+    expect(r.activiteiten[0]?.invoer.ogbKostensoort).toBe("4313");
+    expect(kritiekeMeldingen(r.controleVereist, 0)).toHaveLength(0);
+  });
+
+  it("24. ontbrekende grootboekrekening -> KRITIEK, blokkeert beoordeling; financieel totaal blijft ongewijzigd", () => {
+    const r = berekenBegroteGeplandOnderhoud([activiteit({ grootboekrekening: "", q1: new Decimal(10000) })], aannames());
+    expect(r.activiteiten[0]?.jaartotaal.toString()).toBe("10000");
+    expect(r.totaalJaar.toString()).toBe("10000");
+    expect(kritiekeMeldingen(r.controleVereist, 0).some((c) => c.bericht.includes("grootboekrekening"))).toBe(true);
+  });
+
+  it("25. ontbrekende OGB-kostensoort blokkeert NIET (optioneel, onafhankelijk van grootboek)", () => {
+    const r = berekenBegroteGeplandOnderhoud([activiteit({ grootboekrekening: "4300", ogbKostensoort: null })], aannames());
+    expect(kritiekeMeldingen(r.controleVereist, 0)).toHaveLength(0);
+    expect(r.totaalJaar.toString()).not.toBe("0");
+  });
+
+  it("26. de vier toegestane bronwaarden (MJOP, INSPECTIE, OFFERTE, OVERIG) leveren geen control op", () => {
+    const bronnen = ["MJOP", "INSPECTIE", "OFFERTE", "OVERIG"] as const;
+    for (const aanleidingType of bronnen) {
+      const r = berekenBegroteGeplandOnderhoud([activiteit({ aanleidingType, q1: new Decimal(1) })], aannames());
+      expect(kritiekeMeldingen(r.controleVereist, 0)).toHaveLength(0);
+    }
+  });
+
+  it("27. ERVARING_BEHEERDER is geen geldige bronwaarde meer -> KRITIEK, exact zoals elke andere ongeldige waarde", () => {
+    const r = berekenBegroteGeplandOnderhoud(
+      [activiteit({ aanleidingType: "ERVARING_BEHEERDER" as unknown as "OVERIG", q1: new Decimal(10000) })],
+      aannames(),
+    );
+    expect(r.activiteiten[0]?.jaartotaal.toString()).toBe("10000");
+    expect(kritiekeMeldingen(r.controleVereist, 0).some((c) => c.bericht.includes("aanleidingType"))).toBe(true);
+  });
+
+  it("28. een eerdere ERVARING_BEHEERDER-legacywaarde die als OVERIG wordt aangeleverd (veilige migratie op aanroepniveau) is gewoon geldig", () => {
+    const r = berekenBegroteGeplandOnderhoud(
+      [activiteit({ aanleidingType: "OVERIG", aanleidingToelichting: "Ervaring beheerder; terugkerend herstel buitenterrein." })],
+      aannames(),
+    );
+    expect(kritiekeMeldingen(r.controleVereist, 0)).toHaveLength(0);
   });
 });
 

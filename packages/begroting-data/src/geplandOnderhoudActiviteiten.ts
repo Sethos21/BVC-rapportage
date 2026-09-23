@@ -56,11 +56,21 @@ function withTransaction<T>(db: DatabaseSync, fn: () => T): T {
   }
 }
 
+/**
+ * DELTA BUILD 1 (2026-09-23, FO/UX-conformering): `grootboekrekening`
+ * (verplicht per het vastgestelde contract, hier als eerlijk `string`
+ * opgeslagen — validatie of de waarde ontbreekt gebeurt in de pure
+ * calculator, niet via een DB-CHECK, zelfde precedent als `status`/
+ * `aanleiding_type`) en `ogb_kostensoort` (optioneel, `NULL` toegestaan).
+ * Migratie 26 voegt beide kolommen additief toe aan de bestaande tabel.
+ */
 /** `id: null` = nieuwe activiteit (SQLite kent een verse rowid toe). `id: number` = een bestaande activiteit die aantoonbaar bij DEZE begrotingsversie moet horen. */
 export interface GeplandOnderhoudActiviteitInvoer {
   id: number | null;
   complexnummer: string;
   omschrijving: string;
+  grootboekrekening: string;
+  ogbKostensoort: string | null;
   aanleidingType: string | null;
   aanleidingToelichting: string;
   q1: Decimal;
@@ -77,6 +87,8 @@ export interface GeplandOnderhoudActiviteit {
   id: number;
   complexnummer: string;
   omschrijving: string;
+  grootboekrekening: string;
+  ogbKostensoort: string | null;
   aanleidingType: string | null;
   aanleidingToelichting: string;
   q1: Decimal;
@@ -93,6 +105,8 @@ interface ActiviteitRow {
   id: number;
   complexnummer: string;
   omschrijving: string;
+  grootboekrekening: string;
+  ogb_kostensoort: string | null;
   aanleiding_type: string | null;
   aanleiding_toelichting: string;
   q1: string;
@@ -110,6 +124,8 @@ function rowToActiviteit(row: ActiviteitRow): GeplandOnderhoudActiviteit {
     id: row.id,
     complexnummer: row.complexnummer,
     omschrijving: row.omschrijving,
+    grootboekrekening: row.grootboekrekening,
+    ogbKostensoort: row.ogb_kostensoort,
     aanleidingType: row.aanleiding_type,
     aanleidingToelichting: row.aanleiding_toelichting,
     q1: new Decimal(row.q1),
@@ -127,7 +143,7 @@ function rowToActiviteit(row: ActiviteitRow): GeplandOnderhoudActiviteit {
 export function leesGeplandOnderhoudActiviteiten(db: DatabaseSync, versieId: string): readonly GeplandOnderhoudActiviteit[] {
   const rijen = db
     .prepare(
-      `SELECT id, complexnummer, omschrijving, aanleiding_type, aanleiding_toelichting, q1, q2, q3, q4, status, leverancier, offertebedrag, notitie
+      `SELECT id, complexnummer, omschrijving, grootboekrekening, ogb_kostensoort, aanleiding_type, aanleiding_toelichting, q1, q2, q3, q4, status, leverancier, offertebedrag, notitie
        FROM begroting_gepland_onderhoud_activiteit
        WHERE begroting_versie_id = ?
        ORDER BY id`,
@@ -206,14 +222,14 @@ export function schrijfGeplandOnderhoudActiviteiten(
 
     const updateStmt = db.prepare(
       `UPDATE begroting_gepland_onderhoud_activiteit
-       SET complexnummer = ?, omschrijving = ?, aanleiding_type = ?, aanleiding_toelichting = ?,
+       SET complexnummer = ?, omschrijving = ?, grootboekrekening = ?, ogb_kostensoort = ?, aanleiding_type = ?, aanleiding_toelichting = ?,
            q1 = ?, q2 = ?, q3 = ?, q4 = ?, status = ?, leverancier = ?, offertebedrag = ?, notitie = ?
        WHERE id = ? AND begroting_versie_id = ?`,
     );
     const insertStmt = db.prepare(
       `INSERT INTO begroting_gepland_onderhoud_activiteit
-         (begroting_versie_id, complexnummer, omschrijving, aanleiding_type, aanleiding_toelichting, q1, q2, q3, q4, status, leverancier, offertebedrag, notitie)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (begroting_versie_id, complexnummer, omschrijving, grootboekrekening, ogb_kostensoort, aanleiding_type, aanleiding_toelichting, q1, q2, q3, q4, status, leverancier, offertebedrag, notitie)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
 
     for (const activiteit of activiteiten) {
@@ -224,6 +240,8 @@ export function schrijfGeplandOnderhoudActiviteiten(
           versieId,
           activiteit.complexnummer,
           activiteit.omschrijving,
+          activiteit.grootboekrekening,
+          activiteit.ogbKostensoort,
           activiteit.aanleidingType,
           activiteit.aanleidingToelichting,
           activiteit.q1.toString(),
@@ -243,6 +261,8 @@ export function schrijfGeplandOnderhoudActiviteiten(
       const info = updateStmt.run(
         activiteit.complexnummer,
         activiteit.omschrijving,
+        activiteit.grootboekrekening,
+        activiteit.ogbKostensoort,
         activiteit.aanleidingType,
         activiteit.aanleidingToelichting,
         activiteit.q1.toString(),

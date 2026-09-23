@@ -91,10 +91,22 @@ import type { BgControleErnst } from "./begroteHuuropbrengsten.js";
 
 export type BgGeplandOnderhoudStatus = "GEPLAND" | "IN_UITVOERING" | "UITGESTELD" | "VERVALLEN" | "AFGEROND" | "ONVOORZIEN";
 
-export type BgGeplandOnderhoudAanleidingType = "MJOP" | "INSPECTIE" | "OFFERTE" | "ERVARING_BEHEERDER" | "OVERIG";
+/**
+ * DELTA BUILD 1 (2026-09-23, FO/UX-conformering): `ERVARING_BEHEERDER` is
+ * VERVALLEN als zelfstandige broncategorie (businessbesluit — het
+ * vastgestelde FO/UX-contract kent uitsluitend MJOP/INSPECTIE/OFFERTE/
+ * OVERIG). Een activiteit op basis van ervaring/inzicht van de beheerder
+ * valt voortaan onder `OVERIG`, met de reden vastgelegd in de al bestaande
+ * verplichte `aanleidingToelichting` (bv. "Ervaring beheerder; terugkerend
+ * herstel buitenterrein."). Bestaande opgeslagen `ERVARING_BEHEERDER`-
+ * waarden worden door migratie 26 (`@bvc/begroting-data`'s `migrations.ts`)
+ * veilig naar `OVERIG` omgezet — hier is uitsluitend de toegestane
+ * waardenverzameling aangepast, geen migratielogica.
+ */
+export type BgGeplandOnderhoudAanleidingType = "MJOP" | "INSPECTIE" | "OFFERTE" | "OVERIG";
 
 const GELDIGE_STATUSSEN: readonly BgGeplandOnderhoudStatus[] = ["GEPLAND", "IN_UITVOERING", "UITGESTELD", "VERVALLEN", "AFGEROND", "ONVOORZIEN"];
-const GELDIGE_AANLEIDING_TYPES: readonly BgGeplandOnderhoudAanleidingType[] = ["MJOP", "INSPECTIE", "OFFERTE", "ERVARING_BEHEERDER", "OVERIG"];
+const GELDIGE_AANLEIDING_TYPES: readonly BgGeplandOnderhoudAanleidingType[] = ["MJOP", "INSPECTIE", "OFFERTE", "OVERIG"];
 
 /** Hergebruik van het gedeelde, neutrale controlevocabulaire (Module 1/3) — geen eigen ernst-schaal. */
 export type BgGeplandOnderhoudControleErnst = BgControleErnst;
@@ -109,6 +121,15 @@ export interface BgGeplandOnderhoudControleItem {
 export interface BgGeplandOnderhoudActiviteitInvoer {
   complexnummer: string;
   omschrijving: string;
+  /**
+   * DELTA BUILD 1 (2026-09-23, FO/UX-conformering): verplicht, exact één
+   * grootboekrekening per activiteit — financiële/P&L-dimensie, code/sleutel
+   * leidend, nooit gekoppeld op omschrijving. Geen nieuwe P&L-mappinglogica:
+   * dit is uitsluitend het invoerveld zelf, geen classificatie/resolutie.
+   */
+  grootboekrekening: string;
+  /** Optioneel, onafhankelijk van `grootboekrekening` — ontbreken maakt een activiteit niet ongeldig (DELTA BUILD 1). */
+  ogbKostensoort?: string | null;
   aanleidingType: BgGeplandOnderhoudAanleidingType;
   aanleidingToelichting: string;
   q1: Decimal;
@@ -200,6 +221,9 @@ function valideerActiviteit(invoer: BgGeplandOnderhoudActiviteitInvoer, index: n
   }
   if (leeg(invoer.omschrijving)) {
     meld(`Activiteit ${index}: omschrijving ontbreekt — verplicht voor vaststellen.`);
+  }
+  if (leeg(invoer.grootboekrekening)) {
+    meld(`Activiteit ${index}: grootboekrekening ontbreekt — verplicht voor vaststellen; bedrag blijft financieel meetellen.`);
   }
   if (!GELDIGE_AANLEIDING_TYPES.includes(invoer.aanleidingType)) {
     meld(`Activiteit ${index}: aanleidingType "${String(invoer.aanleidingType)}" is geen geldige waarde — verplicht voor vaststellen.`);

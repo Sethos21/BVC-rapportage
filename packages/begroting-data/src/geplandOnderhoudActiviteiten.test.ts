@@ -41,6 +41,8 @@ function activiteitInvoer(overrides: Partial<GeplandOnderhoudActiviteitInvoer> =
     id: null,
     complexnummer: "003",
     omschrijving: "Vervangen dakbedekking",
+    grootboekrekening: "4300",
+    ogbKostensoort: null,
     aanleidingType: "MJOP",
     aanleidingToelichting: "MJOP 2027 regel 14",
     q1: new Decimal(25000),
@@ -129,6 +131,28 @@ describe("schrijfGeplandOnderhoudActiviteiten / leesGeplandOnderhoudActiviteiten
     expect(gelezen.offertebedrag?.toString()).toBe("24500");
     expect(gelezen.leverancier).toBe("Weerts van de Zanden");
     expect(gelezen.notitie).toBe("offerte ontvangen");
+  });
+
+  // ── DELTA BUILD 1 (2026-09-23, FO/UX-conformering: grootboekrekening/OGB-kostensoort) ──────────────
+
+  it("27. grootboekrekening round-trip", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    schrijfGeplandOnderhoudActiviteiten(db, versie.id, [activiteitInvoer({ grootboekrekening: "4330" })]);
+    expect(leesGeplandOnderhoudActiviteiten(db, versie.id)[0]?.grootboekrekening).toBe("4330");
+  });
+
+  it("28. ogbKostensoort gevuld round-trip", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    schrijfGeplandOnderhoudActiviteiten(db, versie.id, [activiteitInvoer({ grootboekrekening: "4300", ogbKostensoort: "4313" })]);
+    const gelezen = leesGeplandOnderhoudActiviteiten(db, versie.id)[0]!;
+    expect(gelezen.grootboekrekening).toBe("4300");
+    expect(gelezen.ogbKostensoort).toBe("4313");
+  });
+
+  it("29. ogbKostensoort null/afwezig round-trip — blijft null, geen fout, geen aanname", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    schrijfGeplandOnderhoudActiviteiten(db, versie.id, [activiteitInvoer({ ogbKostensoort: null })]);
+    expect(leesGeplandOnderhoudActiviteiten(db, versie.id)[0]?.ogbKostensoort).toBeNull();
   });
 
   it("8. nieuwe activiteit krijgt persistente ID", () => {

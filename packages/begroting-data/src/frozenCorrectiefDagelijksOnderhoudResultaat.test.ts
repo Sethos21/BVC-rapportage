@@ -43,6 +43,8 @@ function regelInvoer(overrides: Partial<BgCorrectiefDagelijksRegelInvoer> = {}):
   return {
     omschrijving: "Reparatie CV-installatie",
     complexnummer: "003",
+    grootboekrekening: "4300",
+    ogbKostensoort: null,
     jaarbedrag: new Decimal(0),
     ...overrides,
   };

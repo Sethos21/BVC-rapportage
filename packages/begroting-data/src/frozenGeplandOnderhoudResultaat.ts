@@ -74,6 +74,8 @@ interface ActiviteitRow {
   activiteit_id: number;
   complexnummer: string;
   omschrijving: string;
+  grootboekrekening: string;
+  ogb_kostensoort: string | null;
   aanleiding_type: string;
   aanleiding_toelichting: string;
   q1: string;
@@ -155,9 +157,9 @@ export function schrijfFrozenGeplandOnderhoudResultaatZonderTransactie(
 
   const insertActiviteit = db.prepare(
     `INSERT INTO begroting_frozen_gepland_onderhoud_activiteit
-       (begroting_versie_id, activiteit_id, complexnummer, omschrijving, aanleiding_type, aanleiding_toelichting,
+       (begroting_versie_id, activiteit_id, complexnummer, omschrijving, grootboekrekening, ogb_kostensoort, aanleiding_type, aanleiding_toelichting,
         q1, q2, q3, q4, jaartotaal, status, leverancier, offertebedrag, notitie)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   for (const { persistentieId, activiteit } of resultaat.activiteiten) {
     const invoer = activiteit.invoer;
@@ -166,6 +168,8 @@ export function schrijfFrozenGeplandOnderhoudResultaatZonderTransactie(
       persistentieId,
       invoer.complexnummer,
       invoer.omschrijving,
+      invoer.grootboekrekening,
+      invoer.ogbKostensoort ?? null,
       invoer.aanleidingType,
       invoer.aanleidingToelichting,
       activiteit.q1.toString(),
@@ -256,7 +260,7 @@ export function leesFrozenGeplandOnderhoudResultaat(db: DatabaseSync, versieId: 
 
   const activiteitRijen = db
     .prepare(
-      `SELECT activiteit_id, complexnummer, omschrijving, aanleiding_type, aanleiding_toelichting, q1, q2, q3, q4, jaartotaal, status, leverancier, offertebedrag, notitie
+      `SELECT activiteit_id, complexnummer, omschrijving, grootboekrekening, ogb_kostensoort, aanleiding_type, aanleiding_toelichting, q1, q2, q3, q4, jaartotaal, status, leverancier, offertebedrag, notitie
        FROM begroting_frozen_gepland_onderhoud_activiteit
        WHERE begroting_versie_id = ?
        ORDER BY activiteit_id`,
@@ -267,6 +271,8 @@ export function leesFrozenGeplandOnderhoudResultaat(db: DatabaseSync, versieId: 
     const invoer: BgGeplandOnderhoudActiviteitInvoer = {
       complexnummer: rij.complexnummer,
       omschrijving: rij.omschrijving,
+      grootboekrekening: rij.grootboekrekening,
+      ogbKostensoort: rij.ogb_kostensoort,
       aanleidingType: rij.aanleiding_type as BgGeplandOnderhoudAanleidingType,
       aanleidingToelichting: rij.aanleiding_toelichting,
       q1: new Decimal(rij.q1),

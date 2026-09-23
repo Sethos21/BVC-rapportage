@@ -3580,6 +3580,123 @@ export const MIGRATIONS: readonly Migration[] = [
        END`,
     ],
   },
+  /**
+   * Migratie 26 — DELTA BUILD 1 (2026-09-23, FO/UX-conformering Begroting
+   * Onderhoud): brengt Gepland Onderhoud (GO) en Correctief/Dagelijks
+   * Onderhoud (CD) alsnog op het vastgestelde FO/UX-contract voor twee
+   * ontbrekende velden per activiteit/regel: `grootboekrekening` (verplicht)
+   * en `ogb_kostensoort` (optioneel). Puur additief — geen bestaande kolom
+   * verwijderd, geen bestaande rij verloren.
+   *
+   * LIVE CONCEPT-TABELLEN (`begroting_gepland_onderhoud_activiteit`/
+   * `begroting_correctief_dagelijks_onderhoud_regel`): kennen GEEN CHECK op
+   * `aanleiding_type` (zie migratie 8/10), dus een gewone
+   * `ALTER TABLE ... ADD COLUMN` volstaat — geen tabelrebuild nodig.
+   * `grootboekrekening TEXT NOT NULL DEFAULT ''`: zelfde precedent als
+   * `complexnummer`/`omschrijving` (verplicht per business, maar geen
+   * DB-CHECK — de pure calculator markeert een lege string als KRITIEK, niet
+   * de database); een bestaande rij (vóór deze migratie kon dit veld niet
+   * ingevuld worden) krijgt zo een eerlijke "leeg" i.p.v. een verzonnen
+   * waarde. `ogb_kostensoort TEXT NULL`: optioneel, geen DEFAULT nodig.
+   *
+   * BUSINESSBESLUIT — `ERVARING_BEHEERDER` VERVALT: het vastgestelde FO/UX-
+   * contract kent uitsluitend MJOP/INSPECTIE/OFFERTE/OVERIG als bron/
+   * aanleiding. Een bestaande `aanleiding_type = 'ERVARING_BEHEERDER'`-rij
+   * in de live conceptactiviteitentabel wordt hier veilig naar `'OVERIG'`
+   * omgezet (geen CHECK-constraint aanwezig op deze tabel, dus een simpele
+   * UPDATE volstaat — geen tabelrebuild). Alle overige velden van die rij
+   * blijven ongewijzigd.
+   *
+   * FROZEN GEPLAND-ONDERHOUD-ACTIVITEITENTABEL
+   * (`begroting_frozen_gepland_onderhoud_activiteit`) IS WEL EEN REBUILD:
+   * migratie 9 gaf deze tabel een structurele
+   * `CHECK (aanleiding_type IN ('MJOP', 'INSPECTIE', 'OFFERTE',
+   * 'ERVARING_BEHEERDER', 'OVERIG'))` — SQLite ondersteunt geen
+   * `ALTER TABLE ... ADD/DROP CHECK` (zelfde beperking als migratie 25),
+   * dus de standaard rename→create→copy→drop-procedure. De copy-stap past
+   * dezelfde `ERVARING_BEHEERDER → OVERIG`-omzetting toe (CASE-expressie) en
+   * vult `grootboekrekening`/`ogb_kostensoort` voor bestaande (vóór deze
+   * migratie bevroren) rijen met `''`/`NULL` — er bestaat vandaag geen
+   * productiedata in deze tabel (zelfde situatie als migratie 25: geen
+   * enkele Worker-/CLI-aanroeper roept `stelBegrotingVast` voor Onderhoud
+   * ooit buiten testbestanden aan). Na de rebuild worden de drie
+   * immutability-triggers (INSERT/UPDATE/DELETE) opnieuw aangemaakt — die
+   * gaan bij het hernoemen van de tabel niet automatisch mee (zelfde
+   * precedent als migratie 25's `pnl_bronmapping`-triggers). Niets anders
+   * aan deze tabel (PK/FK/overige kolommen) verandert.
+   *
+   * FROZEN CORRECTIEF/DAGELIJKS-REGELTABEL
+   * (`begroting_frozen_correctief_dagelijks_onderhoud_regel`): kent GEEN
+   * `aanleiding_type`/CHECK-constraint (Correctief/Dagelijks heeft per OB-028
+   * geen bron/aanleiding-concept) — een gewone `ADD COLUMN` volstaat hier
+   * ook, geen rebuild nodig.
+   */
+  {
+    version: 26,
+    description: "Gepland/Correctief Onderhoud: grootboekrekening (verplicht) + ogb_kostensoort (optioneel); ERVARING_BEHEERDER vervalt naar OVERIG",
+    ddl: [
+      `ALTER TABLE begroting_gepland_onderhoud_activiteit ADD COLUMN grootboekrekening TEXT NOT NULL DEFAULT ''`,
+      `ALTER TABLE begroting_gepland_onderhoud_activiteit ADD COLUMN ogb_kostensoort TEXT NULL`,
+      `UPDATE begroting_gepland_onderhoud_activiteit SET aanleiding_type = 'OVERIG' WHERE aanleiding_type = 'ERVARING_BEHEERDER'`,
+
+      `ALTER TABLE begroting_frozen_gepland_onderhoud_activiteit RENAME TO begroting_frozen_gepland_onderhoud_activiteit_v25`,
+      `CREATE TABLE begroting_frozen_gepland_onderhoud_activiteit (
+        begroting_versie_id TEXT NOT NULL,
+        activiteit_id INTEGER NOT NULL,
+        complexnummer TEXT NOT NULL,
+        omschrijving TEXT NOT NULL,
+        grootboekrekening TEXT NOT NULL,
+        ogb_kostensoort TEXT NULL,
+        aanleiding_type TEXT NOT NULL CHECK (aanleiding_type IN ('MJOP', 'INSPECTIE', 'OFFERTE', 'OVERIG')),
+        aanleiding_toelichting TEXT NOT NULL,
+        q1 TEXT NOT NULL,
+        q2 TEXT NOT NULL,
+        q3 TEXT NOT NULL,
+        q4 TEXT NOT NULL,
+        jaartotaal TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('GEPLAND', 'IN_UITVOERING', 'UITGESTELD', 'VERVALLEN', 'AFGEROND', 'ONVOORZIEN')),
+        leverancier TEXT NULL,
+        offertebedrag TEXT NULL,
+        notitie TEXT NULL,
+        PRIMARY KEY (begroting_versie_id, activiteit_id),
+        FOREIGN KEY (begroting_versie_id) REFERENCES begroting_frozen_gepland_onderhoud_resultaat(begroting_versie_id) ON DELETE CASCADE
+      )`,
+      `INSERT INTO begroting_frozen_gepland_onderhoud_activiteit
+         (begroting_versie_id, activiteit_id, complexnummer, omschrijving, grootboekrekening, ogb_kostensoort, aanleiding_type, aanleiding_toelichting, q1, q2, q3, q4, jaartotaal, status, leverancier, offertebedrag, notitie)
+       SELECT
+         begroting_versie_id, activiteit_id, complexnummer, omschrijving, '', NULL,
+         CASE WHEN aanleiding_type = 'ERVARING_BEHEERDER' THEN 'OVERIG' ELSE aanleiding_type END,
+         aanleiding_toelichting, q1, q2, q3, q4, jaartotaal, status, leverancier, offertebedrag, notitie
+       FROM begroting_frozen_gepland_onderhoud_activiteit_v25`,
+      `DROP TABLE begroting_frozen_gepland_onderhoud_activiteit_v25`,
+      `CREATE TRIGGER trg_begroting_frozen_gepland_onderhoud_activiteit_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_frozen_gepland_onderhoud_activiteit
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_gepland_onderhoud_activiteit: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_gepland_onderhoud_activiteit_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_frozen_gepland_onderhoud_activiteit
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_gepland_onderhoud_activiteit: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_gepland_onderhoud_activiteit_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_frozen_gepland_onderhoud_activiteit
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_gepland_onderhoud_activiteit: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+
+      `ALTER TABLE begroting_correctief_dagelijks_onderhoud_regel ADD COLUMN grootboekrekening TEXT NOT NULL DEFAULT ''`,
+      `ALTER TABLE begroting_correctief_dagelijks_onderhoud_regel ADD COLUMN ogb_kostensoort TEXT NULL`,
+      `ALTER TABLE begroting_frozen_correctief_dagelijks_onderhoud_regel ADD COLUMN grootboekrekening TEXT NOT NULL DEFAULT ''`,
+      `ALTER TABLE begroting_frozen_correctief_dagelijks_onderhoud_regel ADD COLUMN ogb_kostensoort TEXT NULL`,
+    ],
+  },
 ];
 
 function schemaMetaTableExists(db: DatabaseSync): boolean {

@@ -40,6 +40,8 @@ function activiteitInvoer(overrides: Partial<BgGeplandOnderhoudActiviteitInvoer>
   return {
     complexnummer: "003",
     omschrijving: "Vervangen dakbedekking",
+    grootboekrekening: "4300",
+    ogbKostensoort: null,
     aanleidingType: "MJOP",
     aanleidingToelichting: "MJOP 2027 regel 14",
     q1: new Decimal(0),
@@ -429,8 +431,8 @@ describe("frozen CHECKs — tweede beschermingslaag (migratie 9)", () => {
       db
         .prepare(
           `INSERT INTO begroting_frozen_gepland_onderhoud_activiteit
-             (begroting_versie_id, activiteit_id, complexnummer, omschrijving, aanleiding_type, aanleiding_toelichting, q1, q2, q3, q4, jaartotaal, status)
-           VALUES (?, 1, '001', 'x', 'ONGELDIG', 'x', '0','0','0','0','0', 'GEPLAND')`,
+             (begroting_versie_id, activiteit_id, complexnummer, omschrijving, grootboekrekening, aanleiding_type, aanleiding_toelichting, q1, q2, q3, q4, jaartotaal, status)
+           VALUES (?, 1, '001', 'x', '4300', 'ONGELDIG', 'x', '0','0','0','0','0', 'GEPLAND')`,
         )
         .run(versie.id),
     ).toThrow(/CHECK constraint failed/);
@@ -447,8 +449,8 @@ describe("frozen CHECKs — tweede beschermingslaag (migratie 9)", () => {
       db
         .prepare(
           `INSERT INTO begroting_frozen_gepland_onderhoud_activiteit
-             (begroting_versie_id, activiteit_id, complexnummer, omschrijving, aanleiding_type, aanleiding_toelichting, q1, q2, q3, q4, jaartotaal, status)
-           VALUES (?, 1, '001', 'x', 'MJOP', 'x', '0','0','0','0','0', 'ONGELDIG')`,
+             (begroting_versie_id, activiteit_id, complexnummer, omschrijving, grootboekrekening, aanleiding_type, aanleiding_toelichting, q1, q2, q3, q4, jaartotaal, status)
+           VALUES (?, 1, '001', 'x', '4300', 'MJOP', 'x', '0','0','0','0','0', 'ONGELDIG')`,
         )
         .run(versie.id),
     ).toThrow(/CHECK constraint failed/);

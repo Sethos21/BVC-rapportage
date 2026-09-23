@@ -16,6 +16,7 @@ function regel(overrides: Partial<BgCorrectiefDagelijksRegelInvoer> = {}): BgCor
   return {
     omschrijving: "Reparatie CV-installatie",
     complexnummer: "003",
+    grootboekrekening: "4300",
     jaarbedrag: new Decimal(1200),
     ...overrides,
   };
@@ -138,5 +139,36 @@ describe("berekenBegroteCorrectiefDagelijksOnderhoud", () => {
       aannames(),
     );
     expect(r.totaalJaar.toString()).toBe("300.3");
+  });
+
+  // ── DELTA BUILD 1 (2026-09-23, FO/UX-conformering: grootboekrekening/OGB-kostensoort) ──────────────
+
+  it("17. geldige regel met grootboekrekening en zonder OGB -> geen control", () => {
+    const invoer = regel({ grootboekrekening: "4300" });
+    delete invoer.ogbKostensoort;
+    const r = berekenBegroteCorrectiefDagelijksOnderhoud([invoer], aannames());
+    expect(r.regels[0]?.invoer.grootboekrekening).toBe("4300");
+    expect(r.regels[0]?.invoer.ogbKostensoort).toBeUndefined();
+    expect(kritiekeMeldingen(r.controleVereist)).toHaveLength(0);
+  });
+
+  it("18. geldige regel met grootboekrekening + OGB-kostensoort -> beide correct doorgegeven, geen control", () => {
+    const r = berekenBegroteCorrectiefDagelijksOnderhoud([regel({ grootboekrekening: "4300", ogbKostensoort: "4310" })], aannames());
+    expect(r.regels[0]?.invoer.grootboekrekening).toBe("4300");
+    expect(r.regels[0]?.invoer.ogbKostensoort).toBe("4310");
+    expect(kritiekeMeldingen(r.controleVereist)).toHaveLength(0);
+  });
+
+  it("19. ontbrekende grootboekrekening -> KRITIEK, blokkeert beoordeling; bedrag blijft in het concepttotaal", () => {
+    const r = berekenBegroteCorrectiefDagelijksOnderhoud([regel({ grootboekrekening: "", jaarbedrag: new Decimal(900) })], aannames());
+    expect(r.regels[0]?.jaarbedrag.toString()).toBe("900");
+    expect(r.totaalJaar.toString()).toBe("900");
+    expect(kritiekeMeldingen(r.controleVereist, 0)).toHaveLength(1);
+    expect(r.controleVereist[0]?.bericht).toContain("grootboekrekening");
+  });
+
+  it("20. ontbrekende OGB-kostensoort blokkeert NIET (optioneel, onafhankelijk van grootboek)", () => {
+    const r = berekenBegroteCorrectiefDagelijksOnderhoud([regel({ grootboekrekening: "4300", ogbKostensoort: null })], aannames());
+    expect(kritiekeMeldingen(r.controleVereist)).toHaveLength(0);
   });
 });

@@ -44,6 +44,8 @@ function regelInvoer(overrides: Partial<CorrectiefDagelijksOnderhoudRegelInvoer>
     id: null,
     omschrijving: "Reparatie CV-installatie",
     complexnummer: "003",
+    grootboekrekening: "4300",
+    ogbKostensoort: null,
     jaarbedrag: new Decimal(1200),
     ...overrides,
   };
@@ -120,6 +122,28 @@ describe("schrijfCorrectiefDagelijksOnderhoudRegels / leesCorrectiefDagelijksOnd
     const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
     schrijfCorrectiefDagelijksOnderhoudRegels(db, versie.id, [regelInvoer({ complexnummer: null })]);
     expect(leesCorrectiefDagelijksOnderhoudRegels(db, versie.id)[0]?.complexnummer).toBeNull();
+  });
+
+  // ── DELTA BUILD 1 (2026-09-23, FO/UX-conformering: grootboekrekening/OGB-kostensoort) ──────────────
+
+  it("30. grootboekrekening round-trip", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    schrijfCorrectiefDagelijksOnderhoudRegels(db, versie.id, [regelInvoer({ grootboekrekening: "4330" })]);
+    expect(leesCorrectiefDagelijksOnderhoudRegels(db, versie.id)[0]?.grootboekrekening).toBe("4330");
+  });
+
+  it("31. ogbKostensoort gevuld round-trip", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    schrijfCorrectiefDagelijksOnderhoudRegels(db, versie.id, [regelInvoer({ grootboekrekening: "4300", ogbKostensoort: "4310" })]);
+    const gelezen = leesCorrectiefDagelijksOnderhoudRegels(db, versie.id)[0]!;
+    expect(gelezen.grootboekrekening).toBe("4300");
+    expect(gelezen.ogbKostensoort).toBe("4310");
+  });
+
+  it("32. ogbKostensoort null/afwezig round-trip — blijft null, geen fout, geen aanname", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    schrijfCorrectiefDagelijksOnderhoudRegels(db, versie.id, [regelInvoer({ ogbKostensoort: null })]);
+    expect(leesCorrectiefDagelijksOnderhoudRegels(db, versie.id)[0]?.ogbKostensoort).toBeNull();
   });
 
   it("8. nieuwe regel krijgt persistente ID", () => {
