@@ -122,17 +122,18 @@ export function selecteerVorderingenRijdiagnose(
     })
     .slice(0, maxC);
 
-  const naPeildatumAlle = regels.filter((r) => {
-    const afgehandeld = parseDatum(r.vorderingAfgehandeldDatum);
-    return afgehandeld !== null && afgehandeld.getTime() > peildatum.getTime();
-  });
-  const naPeildatumMetVoorkeur = naPeildatumAlle.filter((r) => {
-    const vorderingDatum = parseDatum(r.datumVordering);
-    return vorderingDatum !== null && vorderingDatum.getTime() <= peildatum.getTime();
-  });
-  const metVoorkeurSet = new Set(naPeildatumMetVoorkeur);
-  const naPeildatumOverig = naPeildatumAlle.filter((r) => !metVoorkeurSet.has(r));
-  const afgehandeldNaPeildatumKandidaten = [...naPeildatumMetVoorkeur, ...naPeildatumOverig].slice(0, maxD);
+  const afgehandeldNaPeildatumKandidaten = regels
+    .filter((r) => {
+      const vorderingDatum = parseDatum(r.datumVordering);
+      const afgehandeld = parseDatum(r.vorderingAfgehandeldDatum);
+      return (
+        vorderingDatum !== null &&
+        vorderingDatum.getTime() <= peildatum.getTime() &&
+        afgehandeld !== null &&
+        afgehandeld.getTime() > peildatum.getTime()
+      );
+    })
+    .slice(0, maxD);
 
   return {
     aantalOnderzochteRijen: regels.length,

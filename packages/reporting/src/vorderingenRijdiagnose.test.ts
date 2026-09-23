@@ -64,16 +64,26 @@ describe("selecteerVorderingenRijdiagnose", () => {
     expect(namen).not.toContain("VolledigMaarSluit");
   });
 
-  it("groep D: afgehandeld NA de peildatum (default 30-06-2026), zet 'Datum_Vordering <= peildatum' vooraan", () => {
-    const naPeildatumOudeVordering = regel({ factuurnummer: "OudMaarLaatAfgehandeld", datumVordering: "01-01-2026", vorderingAfgehandeldDatum: "15-07-2026" });
-    const naPeildatumNieuweVordering = regel({ factuurnummer: "NieuwEnLaatAfgehandeld", datumVordering: "15-07-2026", vorderingAfgehandeldDatum: "20-07-2026" });
-    const voorPeildatum = regel({ factuurnummer: "VoorPeildatum", datumVordering: "01-01-2026", vorderingAfgehandeldDatum: "01-06-2026" });
-    const resultaat = selecteerVorderingenRijdiagnose([naPeildatumNieuweVordering, voorPeildatum, naPeildatumOudeVordering]);
-    expect(resultaat.groepen.afgehandeldNaPeildatumKandidaten.map((r) => r.factuurnummer)).toEqual(["OudMaarLaatAfgehandeld", "NieuwEnLaatAfgehandeld"]);
+  it("groep D, scenario 1: vordering vóór/op peildatum EN afhandeling ná peildatum → WEL opgenomen", () => {
+    const r = regel({ factuurnummer: "VoorOpPeildatumNaAfgehandeld", datumVordering: "30-06-2026", vorderingAfgehandeldDatum: "01-07-2026" });
+    const resultaat = selecteerVorderingenRijdiagnose([r]);
+    expect(resultaat.groepen.afgehandeldNaPeildatumKandidaten.map((x) => x.factuurnummer)).toEqual(["VoorOpPeildatumNaAfgehandeld"]);
+  });
+
+  it("groep D, scenario 2: vordering ná peildatum EN afhandeling ná peildatum → NIET opgenomen", () => {
+    const r = regel({ factuurnummer: "NaPeildatumNaAfgehandeld", datumVordering: "15-07-2026", vorderingAfgehandeldDatum: "20-07-2026" });
+    const resultaat = selecteerVorderingenRijdiagnose([r]);
+    expect(resultaat.groepen.afgehandeldNaPeildatumKandidaten).toHaveLength(0);
+  });
+
+  it("groep D, scenario 3: vordering vóór/op peildatum EN afhandeling vóór/op peildatum → NIET opgenomen", () => {
+    const r = regel({ factuurnummer: "VoorOpPeildatumVoorOpAfgehandeld", datumVordering: "01-01-2026", vorderingAfgehandeldDatum: "30-06-2026" });
+    const resultaat = selecteerVorderingenRijdiagnose([r]);
+    expect(resultaat.groepen.afgehandeldNaPeildatumKandidaten).toHaveLength(0);
   });
 
   it("respecteert een aangepaste peildatum-optie", () => {
-    const r = regel({ factuurnummer: "X", vorderingAfgehandeldDatum: "15-01-2025" });
+    const r = regel({ factuurnummer: "X", datumVordering: "01-12-2024", vorderingAfgehandeldDatum: "15-01-2025" });
     const resultaat = selecteerVorderingenRijdiagnose([r], { peildatum: new Date(2025, 0, 1) });
     expect(resultaat.groepen.afgehandeldNaPeildatumKandidaten).toHaveLength(1);
     expect(resultaat.peildatum).toBe("01-01-2025");
