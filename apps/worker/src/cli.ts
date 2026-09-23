@@ -15,6 +15,7 @@ import { genereerRentrollDiagnose } from "./genereerRentrollDiagnose.js";
 import { genereerServicekostenBronKolommenDiagnose } from "./genereerServicekostenBronKolommenDiagnose.js";
 import { genereerContractenBronKolommenDiagnose } from "./genereerContractenBronKolommenDiagnose.js";
 import { genereerVorderingenBronKolommenDiagnose } from "./genereerVorderingenBronKolommenDiagnose.js";
+import { genereerVorderingenRijdiagnose } from "./genereerVorderingenRijdiagnose.js";
 import { genereerBoekingenBronKolommenDiagnose } from "./genereerBoekingenBronKolommenDiagnose.js";
 import { genereerOnderhoudBoekingenDiagnose } from "./genereerOnderhoudBoekingenDiagnose.js";
 import { genereerBoekingenJarenDiagnose } from "./genereerBoekingenJarenDiagnose.js";
@@ -68,6 +69,8 @@ function printGebruik(): never {
       "      (TIJDELIJK, alleen-lezen: leest het RUWE contracten_huidig-bronbestand rechtstreeks (niet de cache, niet het geparste schema, dat 12 van de 170 bronkolommen dekt) en toont ELKE kolomnaam die erin voorkomt, met aantal niet-lege waarden en max. 5 voorbeeldwaarden per kolom. Bouwstap om een huurdernaam-achtig veld (bv. Naam_1) te bevestigen vóórdat dat structureel aan het schema/de cache wordt toegevoegd. Geen KPI, geen classificatie, alleen JSON op stdout)",
       "  vorderingen-bronkolommen <administratieId>",
       "      (TIJDELIJK, alleen-lezen, BRONGATE 2026-09-18 'Historische Ouderdomsanalyse': leest het RUWE vorderingen_met_afboekingen-bronbestand rechtstreeks (niet de cache, niet het geparste schema, dat 14 van de ~189 bronkolommen dekt) en toont ELKE kolomnaam die erin voorkomt, met aantal niet-lege waarden, max. 5 voorbeeldwaarden per kolom, een puur op de voorbeeldwaarden afgeleid waargenomenFormaat (datum/numeriek/tekst/leeg — GEEN interpretatie van de betekenis) en een aandachtKolommen-lijst (trefwoordfilter op de kolomnaam: vervaldatum/betaaldatum/afboekingsdatum/.../VS_01../afgeboekt/component — puur een filter, GEEN classificatie). Bouwstap om vast te stellen of de bron een gedateerde afboekings-/betalingshistorie per vordering bevat, vóórdat een historische ouderdomsanalyse wordt ontworpen. Geen KPI, geen classificatie, geen schema/cache-wijziging, alleen JSON op stdout)",
+      "  vorderingen-rijdiagnose <administratieId>",
+      "      (TIJDELIJK, alleen-lezen, BRONGATE 2026-09-23 'Historische Ouderdomsanalyse' vervolg op vorderingen-bronkolommen: leest het RUWE vorderingen_met_afboekingen-bronbestand (niet de cache) en toont per geselecteerde vordering ALLE relevante velden SAMEN (rijverband, geen kolomstatistiek) — Bedrijfsnr/Huurdernr/Contractnr/Complexnummer/Unitnummer/Factuurnummer/Datum_Vordering/Vordering_Boekjaar/_Boekperiode/Omschrijving_Vordering/Vordering_Totaalbedrag/Bedrag_afgeboekt/Vordering_openstaand/Vordering_afgehandeld_datum/_jaar/_periode plus de aanwezige Afgeb_bedrag_vsN/Vordering_bedrag_vsN als pure, ongeïnterpreteerde bronwaarden. Selecteert max. ~25 echte rijen in 4 observationele groepen: volledig open (Bedrag_afgeboekt=0, max 5), volledig afgehandeld (Vordering_openstaand=0, bij voorkeur met afgehandeld_datum, max 5), gedeeltelijk afgeboekt (0<|Bedrag_afgeboekt|<|Vordering_Totaalbedrag| en openstaand!=0, max 10), afgehandeld na 30-06-2026 (max 5). Geen aging, geen vervaldatum-/betaaldatum-berekening, geen historische reconstructie, geen persoonsgegevens (geen naam/adres/e-mail/telefoon) — alleen JSON op stdout)",
       "  boekingen-bronkolommen <administratieId>",
       "      (TIJDELIJK, alleen-lezen: leest het RUWE boekingen-bronbestand rechtstreeks (niet de cache, niet het geparste schema, dat 20 van de 168 bronkolommen dekt) en toont ELKE kolomnaam die erin voorkomt, met aantal niet-lege waarden en max. 5 voorbeeldwaarden per kolom. Bouwstap om vast te stellen of de bron een exploitatiekostensoort-/kostenplaats-/complex-achtig veld bevat dat nog niet in BoekingsregelBronSchema staat, vóórdat daar iets structureels mee gebouwd wordt. Geen KPI, geen classificatie, alleen JSON op stdout)",
       "  boekingen-onderhoud-diagnose <administratieId> --boekjaar N --periodeTotEnMet P [--periodeVan P] --rekeningen <lijst>",
@@ -342,6 +345,14 @@ async function main() {
     const [administratieId] = rest;
     if (!administratieId) printGebruik();
     const resultaat = genereerVorderingenBronKolommenDiagnose(root, administratieId);
+    console.log(JSON.stringify(resultaat, null, 2));
+    return;
+  }
+
+  if (command === "vorderingen-rijdiagnose") {
+    const [administratieId] = rest;
+    if (!administratieId) printGebruik();
+    const resultaat = genereerVorderingenRijdiagnose(root, administratieId);
     console.log(JSON.stringify(resultaat, null, 2));
     return;
   }
