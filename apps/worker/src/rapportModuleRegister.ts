@@ -1,10 +1,10 @@
-import { renderBalansPeriodeBody, renderControlerapportBody, renderHuurdersoverzichtBody, renderHuurKerncijfersBody, renderKasstroomManagementoverzichtBody, renderPnLPeriodeBody, renderServicekostenBody, renderVastgoedKerncijfersBody, type RapportModuleId } from "@bvc/reporting";
+import { berekenDebiteurenAansluiting, berekenOpenstaandePosten, renderBalansPeriodeBody, renderControlerapportBody, renderDebiteurenAansluitingBody, renderHuurdersoverzichtBody, renderHuurKerncijfersBody, renderKasstroomManagementoverzichtBody, renderPnLPeriodeBody, renderServicekostenBody, renderVastgoedKerncijfersBody, type RapportModuleId } from "@bvc/reporting";
 import { leesAdministratieConfig } from "./administratie.js";
 import { genereerBalansPeriode } from "./genereerBalansPeriode.js";
 import { haalControlerapportInvoerOp } from "./genereerControlerapport.js";
 import { genereerHuurKerncijfers } from "./genereerHuurKerncijfers.js";
 import { haalKasstroomManagementoverzichtResultaatOp } from "./genereerKasstroomManagementoverzicht.js";
-import { genereerHuurdersoverzicht } from "./genereerHuurdersoverzicht.js";
+import { genereerHuurdersoverzicht, haalVorderingenEnSaldoHuurdersOp } from "./genereerHuurdersoverzicht.js";
 import { haalPnLPeriodeResultaatOp } from "./genereerPnLPeriode.js";
 import { genereerServicekostenPositie } from "./genereerServicekostenPositie.js";
 import { genereerVastgoedKerncijfers } from "./genereerVastgoedKerncijfers.js";
@@ -239,6 +239,51 @@ function genereerServicekostenSectie(root: string, administratieId: string, cont
     : { status: "OK", html, onvolledig };
 }
 
+/**
+ * AFRONDOPDRACHT (2026-09-23) — Debiteuren/Ouderdomsanalyse, DEFINITIEF
+ * FUNCTIONEEL BESLUIT (zie packages/reporting/src/debiteurenAansluiting.ts's
+ * moduledoc en packages/reporting/README.md): GEEN eigen historische
+ * reconstructie (bewust afgesloten BRONGATE) — de bestaande, bewezen
+ * Ouderdomsanalyse (saldo_huurders) wordt uitsluitend getoond wanneer haar
+ * totaal aansluit op de balanspost Debiteuren. Sluit de aansluiting niet
+ * (of ontbreekt de noodzakelijke bron/config), dan wordt de sectie
+ * ONBESCHIKBAAR — exact dezelfde statussemantiek als SERVICEKOSTEN
+ * hierboven (WEL geselecteerd, kon niet geleverd worden), nooit een
+ * fictief bedrag en nooit de andere geselecteerde modules blokkerend.
+ * `config.debiteurenGrootboekrekeningen` bepaalt welke rekening(en) de
+ * balanspost Debiteuren vormen (zie administratie.ts) — ontbreekt die
+ * config, dan is er geen stilzwijgende aanname mogelijk.
+ */
+function genereerDebiteurenSectie(root: string, administratieId: string, context: RapportGenereerContext): RapportModuleGenereerResultaat {
+  if (context.boekjaar === undefined || context.boekperiodeTotEnMet === undefined) {
+    return { status: "ONBESCHIKBAAR", reden: "boekjaar en periodeTotEnMet zijn verplicht voor de debiteuren-aansluiting." };
+  }
+  const config = leesAdministratieConfig(root, administratieId);
+  if (!config.debiteurenGrootboekrekeningen || config.debiteurenGrootboekrekeningen.length === 0) {
+    return { status: "ONBESCHIKBAAR", reden: "administratie.json mist debiteurenGrootboekrekeningen — geen stilzwijgende aanname over welke grootboekrekening(en) de balanspost Debiteuren vormen." };
+  }
+
+  const { vorderingen, saldoHuurders } = haalVorderingenEnSaldoHuurdersOp(root, administratieId);
+  if (saldoHuurders.length === 0) {
+    return { status: "ONBESCHIKBAAR", reden: "Geen ouderdomsanalyse (saldo_huurders) beschikbaar in de cache — geen fictieve Ouderdomsanalyse getoond." };
+  }
+
+  const { resultaat: balans } = genereerBalansPeriode(root, administratieId, { boekjaar: context.boekjaar, boekperiodeTotEnMet: context.boekperiodeTotEnMet });
+  const debiteurenbeheer = config.debiteurenbeheer?.bankAfletteringDoorOns ?? "onbekend";
+  const opResultaat = berekenOpenstaandePosten(vorderingen, saldoHuurders, debiteurenbeheer);
+  const aansluiting = berekenDebiteurenAansluiting(balans.posten, config.debiteurenGrootboekrekeningen, opResultaat);
+
+  if (!aansluiting.sluitBinnenTolerantie) {
+    return {
+      status: "ONBESCHIKBAAR",
+      reden: `Aansluiting debiteuren niet akkoord — balans ${aansluiting.balansBedrag.toString()}, ouderdomsanalyse ${aansluiting.ouderdomsanalyseBedrag.toString()}, verschil ${aansluiting.verschil.toString()}.`,
+    };
+  }
+
+  const html = renderDebiteurenAansluitingBody(aansluiting);
+  return { status: "OK", html, onvolledig: false };
+}
+
 export const RAPPORT_MODULE_REGISTER: Record<RapportModuleId, RapportModuleDefinitie> = {
   PNL: { id: "PNL", naam: "Winst- en verliesrekening", genereer: genereerPnLSectie },
   BALANS: { id: "BALANS", naam: "Balans", genereer: genereerBalansSectie },
@@ -248,4 +293,5 @@ export const RAPPORT_MODULE_REGISTER: Record<RapportModuleId, RapportModuleDefin
   CONTROLES: { id: "CONTROLES", naam: "Controlerapport", genereer: genereerControlesSectie },
   RENTROLL: { id: "RENTROLL", naam: "RentRoll/huuranalyse", genereer: genereerRentrollSectie },
   SERVICEKOSTEN: { id: "SERVICEKOSTEN", naam: "Servicekosten", genereer: genereerServicekostenSectie },
+  DEBITEUREN: { id: "DEBITEUREN", naam: "Debiteuren / Ouderdomsanalyse", genereer: genereerDebiteurenSectie },
 };

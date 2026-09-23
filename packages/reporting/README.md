@@ -1365,6 +1365,64 @@ contract 052 blijft `null`), `renderHuurdersoverzicht.test.ts` (compacte
 weergave + "niet beschikbaar"-fallback). Alle drie GROEN tegen echte
 070-cijfers.
 
+## Debiteuren / Ouderdomsanalyse — definitief afgerond (2026-09-23)
+
+**DEFINITIEVE ONTWERPBESLISSING — dit onderzoek is bewust afgesloten.** Een
+toekomstige sessie mag dit NIET opnieuw openen (geen nieuw brononderzoek,
+geen historische reconstructie, geen nieuwe diagnose) zonder een
+expliciete nieuwe opdracht van de gebruiker.
+
+**Modulestatus:**
+
+| Aspect | Status |
+|---|---|
+| Brononderzoek (`vorderingen_met_afboekingen`/`saldo_huurders`, 070) | **AFGEROND** |
+| Historische openstaand-op-peildatum-reconstructie | **BEWUST NIET GEÏMPLEMENTEERD** |
+| Vervaldatum | bekend **BRONGAT**, niet-blokkerend |
+| Financiële waarheid | de **Balans** is altijd leidend |
+| Ouderdomsanalyse (saldo_huurders) | een **conditionele specificatie**, nooit een zelfstandige waarheid |
+| Opnamevoorwaarde | aansluiting van het ouderdomsanalyse-totaal met de balanspost Debiteuren, binnen de bestaande tolerantie |
+| Geen aansluiting | module wordt niet getoond + interne controlemelding (balansbedrag/ouderdomsanalysebedrag/verschil) |
+| Overige rapportmodules | blijven altijd beschikbaar, nooit geblokkeerd door Debiteuren |
+| Verdere bronanalyse | **NIET NODIG / AFGESLOTEN** |
+
+**Herkomst van het besluit** — de echte 070-diagnose
+(`vorderingen-bronkolommen`/`vorderingen-rijdiagnose`, 678 onderzochte
+070-vorderingsregels) toonde: bedragen sluiten rekenkundig
+(`Vordering_Totaalbedrag - Bedrag_afgeboekt = Vordering_openstaand`), maar
+geen enkele gedeeltelijk-afgeboekte kandidaat en geen kandidaat die op
+30-06-2026 al bestond en pas daarna volledig werd afgehandeld kon in de
+echte data worden aangetoond — waardoor een historische openstaand-op-
+peildatum-reconstructie niet bronmatig bewezen kan worden. Een expliciete
+vervaldatum/betaaldatum/afboekingsdatum ontbreekt in alle 189 ruwe
+bronkolommen. In plaats van hierop verder te onderzoeken (dat vereist een
+mutatieregister met datum+bedrag per afboeking, of een expliciete
+vervaldatum — beide alleen mogelijk via een toekomstige Informant/ODBC-
+bron, zie CLAUDE.md §4b), is gekozen voor de pragmatische afronding
+hierboven: de BESTAANDE, bewezen Ouderdomsanalyse (saldo_huurders) wordt
+uitsluitend getoond wanneer haar totaal aansluit op de balanspost
+Debiteuren.
+
+**Implementatie:**
+`packages/reporting/src/debiteurenAansluiting.ts`'s
+`berekenDebiteurenAansluiting` (pure aansluitcontrole: som van
+`BalansPeriodePost.saldo` voor een expliciet aangeleverde rekeningenlijst
+tegenover `berekenOpenstaandePosten`'s `totaalSaldoHuurders`, tolerantie
+€0,01 — dezelfde conventie als `berekenBalansPeriode`) +
+`renderDebiteurenAansluiting.ts`'s `renderDebiteurenAansluitingBody`.
+Geregistreerd als negende samengestelde-rapportmodule `DEBITEUREN` in
+`apps/worker/src/rapportModuleRegister.ts`'s `genereerDebiteurenSectie` —
+ONBESCHIKBAAR (nooit een fictief bedrag) zonder `--boekjaar`/
+`--periodeTotEnMet`, zonder `AdministratieConfig.debiteurenGrootboekrekeningen`
+(exact hetzelfde patroon als `servicekostenRekeningen` — geen stilzwijgende
+rekeningaanname), zonder ouderdomsanalysedata in de cache, of bij een
+aansluitingsverschil buiten tolerantie. Getest (2026-09-23):
+`debiteurenAansluiting.test.ts` (pure aansluitlogica, scenario's
+akkoord/niet-akkoord/leeg) en `genereerSamengesteldRapport.test.ts`
+(module-registratieniveau, scenario's A/B/C uit de afrondopdracht — een
+niet-getoonde/onbeschikbare Debiteuren-sectie blokkeert de overige
+geselecteerde modules nooit).
+
 ## Kerncijfers (sectie 01 — KPI-dashboard)
 
 `renderKerncijfersHtml` rendert het portefeuille-KPI-dashboard: 6

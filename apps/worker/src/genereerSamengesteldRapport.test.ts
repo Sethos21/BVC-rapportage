@@ -220,7 +220,7 @@ describe("genereerSamengesteldRapport — meerdere modules (criterium B)", () =>
     expect(geselecteerdeSecties).toHaveLength(3); // exact de drie opgegeven module-id's, "pnl" dubbel geselecteerd telt niet dubbel
     expect(geselecteerdeSecties.map((s) => s.id)).toEqual(["PNL", "BALANS", "HUURDERS"]); // vaste registervolgorde, ongeacht opgaafvolgorde
     // De overige (V2-)modules zijn hier bewust niet geselecteerd.
-    expect(rapport.secties.filter((s) => s.resultaat.status === "NIET_GESELECTEERD").map((s) => s.id)).toEqual(["KASSTROOM", "VASTGOED_KPI", "CONTROLES", "RENTROLL", "SERVICEKOSTEN"]);
+    expect(rapport.secties.filter((s) => s.resultaat.status === "NIET_GESELECTEERD").map((s) => s.id)).toEqual(["KASSTROOM", "VASTGOED_KPI", "CONTROLES", "RENTROLL", "SERVICEKOSTEN", "DEBITEUREN"]);
     // "PNL,PNL" mag niet tot twee keer dezelfde inhoud leiden.
     expect((html.match(/Winst- en verliesrekening/g) ?? []).length).toBeLessThanOrEqual(2); // cover-titel + eventueel 1x sectiekop, nooit verdubbeld door de dubbele selectie
   });
@@ -365,7 +365,7 @@ describe("genereerSamengesteldRapport V2 — combinatie oud + nieuw (criteria D/
 
     const geselecteerd = rapport.secties.filter((s) => s.resultaat.status !== "NIET_GESELECTEERD");
     expect(geselecteerd.map((s) => s.id)).toEqual(["PNL", "BALANS", "HUURDERS", "KASSTROOM", "VASTGOED_KPI", "CONTROLES"]);
-    expect(rapport.secties.filter((s) => s.resultaat.status === "NIET_GESELECTEERD").map((s) => s.id)).toEqual(["RENTROLL", "SERVICEKOSTEN"]);
+    expect(rapport.secties.filter((s) => s.resultaat.status === "NIET_GESELECTEERD").map((s) => s.id)).toEqual(["RENTROLL", "SERVICEKOSTEN", "DEBITEUREN"]);
 
     // D: geen dubbele documentstructuur, ondanks zes secties.
     expect((html.match(/<html/g) ?? []).length).toBe(1);
@@ -445,9 +445,12 @@ describe("genereerSamengesteldRapport V3 — combinatie alle acht modules (crite
       modules: ["pnl", "balans", "huurders", "kasstroom", "vastgoed_kpi", "controles", "rentroll", "servicekosten"],
     });
 
-    expect(rapport.secties).toHaveLength(8);
-    expect(rapport.secties.every((s) => s.resultaat.status !== "NIET_GESELECTEERD")).toBe(true);
-    expect(rapport.secties.map((s) => s.id)).toEqual(["PNL", "BALANS", "HUURDERS", "KASSTROOM", "VASTGOED_KPI", "CONTROLES", "RENTROLL", "SERVICEKOSTEN"]);
+    // rapport.secties bevat altijd ÉÉN entry per geregistreerde module (negen sinds DEBITEUREN) — DEBITEUREN is
+    // bewust niet in deze --modules-lijst opgenomen (zie de aparte DEBITEUREN-tests hieronder), dus blijft NIET_GESELECTEERD.
+    expect(rapport.secties).toHaveLength(9);
+    expect(rapport.secties.filter((s) => s.resultaat.status !== "NIET_GESELECTEERD")).toHaveLength(8);
+    expect(rapport.secties.map((s) => s.id)).toEqual(["PNL", "BALANS", "HUURDERS", "KASSTROOM", "VASTGOED_KPI", "CONTROLES", "RENTROLL", "SERVICEKOSTEN", "DEBITEUREN"]);
+    expect(rapport.secties.find((s) => s.id === "DEBITEUREN")!.resultaat).toEqual({ status: "NIET_GESELECTEERD" });
 
     // I: geen dubbele documentstructuur, ondanks acht secties.
     expect((html.match(/<html/g) ?? []).length).toBe(1);
@@ -460,5 +463,141 @@ describe("genereerSamengesteldRapport V3 — combinatie alle acht modules (crite
     expect(rapport.secties.find((s) => s.id === "RENTROLL")!.resultaat).toEqual({ status: "NIET_GESELECTEERD" });
     expect(rapport.secties.find((s) => s.id === "SERVICEKOSTEN")!.resultaat).toEqual({ status: "NIET_GESELECTEERD" });
     expect(html).not.toContain("Actueel saldo"); // Servicekosten-KPI-label, mag niet verschijnen
+  });
+});
+
+/**
+ * AFRONDOPDRACHT (2026-09-23) — Debiteuren/Ouderdomsanalyse: bewijst
+ * uitsluitend de DEFINITIEVE functionele regel (balans leidend, Ouderdoms-
+ * analyse uitsluitend getoond bij aansluiting) — GEEN herbewijs van
+ * `berekenOpenstaandePosten`/`berekenBalansPeriode` zelf (die blijven in
+ * hun eigen, ongewijzigde tests). Hergebruikt dezelfde echte, reeds
+ * bronbewezen 070-Ouderdomsanalysefixture als `genereerHuurdersoverzicht.test.ts`
+ * (14 saldo_huurders-regels, totaal exact € 65.811,57).
+ */
+const SALDO_HUURDERS_070_TOTAAL_65811_57: Record<string, unknown>[] = [
+  { Bedrijfsnr: BEDRIJFSNR, Huurdernr: "00000021", Naam_1: "Fruitcake BV", Achterstand: 5940.98, Achterstand_tm_30_dagen: 5940.98, Achterstand_tm_60_dagen: 0, Achterstand_tm_90_dagen: 0, Achterstand_90plus_dagen: 0, Vooruitbetaling: 0, Saldo: 5940.98 },
+  { Bedrijfsnr: BEDRIJFSNR, Huurdernr: "00000028", Naam_1: "Destiny B.V.", Achterstand: 15384.74, Achterstand_tm_30_dagen: 15384.74, Achterstand_tm_60_dagen: 0, Achterstand_tm_90_dagen: 0, Achterstand_90plus_dagen: 0, Vooruitbetaling: 0, Saldo: 15384.74 },
+  { Bedrijfsnr: BEDRIJFSNR, Huurdernr: "00000031", Naam_1: "Basic Fit Nederland B.V.", Achterstand: 13970.47, Achterstand_tm_30_dagen: 13970.47, Achterstand_tm_60_dagen: 0, Achterstand_tm_90_dagen: 0, Achterstand_90plus_dagen: 0, Vooruitbetaling: 0, Saldo: 13970.47 },
+  { Bedrijfsnr: BEDRIJFSNR, Huurdernr: "00000032", Naam_1: "Kinderopvang 't Kroontje Veghel", Achterstand: 14174.36, Achterstand_tm_30_dagen: 14174.36, Achterstand_tm_60_dagen: 0, Achterstand_tm_90_dagen: 0, Achterstand_90plus_dagen: 0, Vooruitbetaling: 0, Saldo: 14174.36 },
+  { Bedrijfsnr: BEDRIJFSNR, Huurdernr: "00000034", Naam_1: "TEUN Marketing", Achterstand: 4331.65, Achterstand_tm_30_dagen: 4331.65, Achterstand_tm_60_dagen: 0, Achterstand_tm_90_dagen: 0, Achterstand_90plus_dagen: 0, Vooruitbetaling: 0, Saldo: 4331.65 },
+  { Bedrijfsnr: BEDRIJFSNR, Huurdernr: "00000033", Naam_1: "Bright Accountants en Adviseurs B.V.", Achterstand: -146.9, Achterstand_tm_30_dagen: 0, Achterstand_tm_60_dagen: 0, Achterstand_tm_90_dagen: 0, Achterstand_90plus_dagen: -146.9, Vooruitbetaling: 0, Saldo: -146.9 },
+  { Bedrijfsnr: BEDRIJFSNR, Huurdernr: "00000022", Naam_1: "JOB Personeelsmakelaar BV", Achterstand: 2388.39, Achterstand_tm_30_dagen: 2388.39, Achterstand_tm_60_dagen: 0, Achterstand_tm_90_dagen: 0, Achterstand_90plus_dagen: 0, Vooruitbetaling: 0, Saldo: 2388.39 },
+  { Bedrijfsnr: BEDRIJFSNR, Huurdernr: "00000024", Naam_1: "Meierij Accountancy & Advies B.V.", Achterstand: 4814.17, Achterstand_tm_30_dagen: 4814.17, Achterstand_tm_60_dagen: 0, Achterstand_tm_90_dagen: 0, Achterstand_90plus_dagen: 0, Vooruitbetaling: 0, Saldo: 4814.17 },
+  { Bedrijfsnr: BEDRIJFSNR, Huurdernr: "00000030", Naam_1: "iTapToo Drinks B.V.", Achterstand: 4953.71, Achterstand_tm_30_dagen: 4953.71, Achterstand_tm_60_dagen: 0, Achterstand_tm_90_dagen: 0, Achterstand_90plus_dagen: 0, Vooruitbetaling: 0, Saldo: 4953.71 },
+];
+
+function schrijfVorderingenEnSaldoHuurdersFixture(): void {
+  // Vorderingen zijn voor deze DEBITEUREN-tests niet inhoudelijk relevant (alleen saldo_huurders-totaal telt mee
+  // in berekenOpenstaandePosten.totaalSaldoHuurders) — één minimale, echte 070-regel volstaat.
+  schrijfXlsxFixture(join(bronGedeeldDir(root), "vorderingen_met_afboekingen.xlsx"), [
+    { Bedrijfsnr: BEDRIJFSNR, Contractnr: "0000000028", Vordering_Volgnr: "00000093", Huurdernr: "00000021", Complexnummer: "002", Unitnummer: "0001", Datum_Vordering: "01-09-2026", Omschrijving_Vordering: "Periode september 2026", Factuurnummer: "2670000108", Vordering_Totaalbedrag: 5940.98, Bedrag_afgeboekt: 0, Vordering_openstaand: 5940.98 },
+  ]);
+  schrijfXlsxFixture(join(bronGedeeldDir(root), "saldo_huurders.xlsx"), SALDO_HUURDERS_070_TOTAAL_65811_57);
+}
+
+describe("genereerSamengesteldRapport — DEBITEUREN (scenario A: aansluiting akkoord)", () => {
+  it("OPGENOMEN wanneer de balanspost Debiteuren aansluit op het ouderdomsanalyse-totaal — rest van het rapport blijft ook beschikbaar", () => {
+    schrijfVorderingenEnSaldoHuurdersFixture();
+    schrijfAdministratieConfig(root, ADMINISTRATIE_ID, { ...nieuweAdministratieConfig(BEDRIJFSNR, "Rooise Zoom"), debiteurenGrootboekrekeningen: ["1310"] });
+    writeFileSync(
+      grootboekmappingPad(root, ADMINISTRATIE_ID),
+      JSON.stringify({
+        versie: "0.1",
+        administratieId: ADMINISTRATIE_ID,
+        regels: [
+          { grootboekrekening: "1010", soort: "BALANS", balanszijde: "ACTIVA", tekenconventie: "ZOALS_BRON", liquideMiddelen: true, kasstroomCategorie: null, actief: true, status: "GOEDGEKEURD" },
+          { grootboekrekening: "1310", soort: "BALANS", balanszijde: "ACTIVA", tekenconventie: "ZOALS_BRON", liquideMiddelen: false, kasstroomCategorie: "HUURONTVANGST", actief: true, status: "GOEDGEKEURD" },
+        ],
+      }),
+      "utf-8",
+    );
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "balans_per_jaar.xlsx"), [
+      { Bedrijfsnr: BEDRIJFSNR, Jaar: 2026, Grootboekrekeningnr: "1010", Beginbalans_debet: 1000, Beginbalans_credit: 0, Saldo_debet: 0, Saldo_credit: 0, Eindsaldo: 0, Rekening_omschrijving: "Bank", Balans_vw: "Balans" },
+      { Bedrijfsnr: BEDRIJFSNR, Jaar: 2026, Grootboekrekeningnr: "1310", Beginbalans_debet: 65811.57, Beginbalans_credit: 0, Saldo_debet: 0, Saldo_credit: 0, Eindsaldo: 0, Rekening_omschrijving: "Huurdebiteuren", Balans_vw: "Balans" },
+    ]);
+    rebuildCache({ root, administratieId: ADMINISTRATIE_ID, onVoortgang: () => {}, ouderdomsanalyseMetadata: { boekjaar: 2026, boekperiode: "06", peildatum: new Date(Date.UTC(2026, 5, 30)) } });
+    // zaaiPnLMapping() is al door de globale beforeEach gedaan (aparte, door rebuildCache ongewijzigde database) — niet opnieuw nodig.
+
+    const { rapport, html } = genereerSamengesteldRapport(root, ADMINISTRATIE_ID, { ...CONTEXT_ALLE_MODULES, modules: ["debiteuren", "pnl"] });
+
+    const debiteuren = rapport.secties.find((s) => s.id === "DEBITEUREN")!.resultaat;
+    expect(debiteuren.status === "OPGENOMEN" || debiteuren.status === "ONVOLLEDIG").toBe(true);
+    if (debiteuren.status === "OPGENOMEN") {
+      expect(debiteuren.html).toContain("65.811,57");
+    }
+    // Rest van het rapport blijft beschikbaar.
+    const pnl = rapport.secties.find((s) => s.id === "PNL")!.resultaat;
+    expect(pnl.status === "OPGENOMEN" || pnl.status === "ONVOLLEDIG").toBe(true);
+    expect(html).toContain("Winst- en verliesrekening");
+  });
+});
+
+describe("genereerSamengesteldRapport — DEBITEUREN (scenario B: aansluiting niet akkoord)", () => {
+  it("ONBESCHIKBAAR met een controlemelding (balans/ouderdomsanalyse/verschil) wanneer het niet aansluit — rest van het rapport blijft beschikbaar", () => {
+    schrijfVorderingenEnSaldoHuurdersFixture();
+    schrijfAdministratieConfig(root, ADMINISTRATIE_ID, { ...nieuweAdministratieConfig(BEDRIJFSNR, "Rooise Zoom"), debiteurenGrootboekrekeningen: ["1310"] });
+    writeFileSync(
+      grootboekmappingPad(root, ADMINISTRATIE_ID),
+      JSON.stringify({
+        versie: "0.1",
+        administratieId: ADMINISTRATIE_ID,
+        regels: [{ grootboekrekening: "1310", soort: "BALANS", balanszijde: "ACTIVA", tekenconventie: "ZOALS_BRON", liquideMiddelen: false, kasstroomCategorie: "HUURONTVANGST", actief: true, status: "GOEDGEKEURD" }],
+      }),
+      "utf-8",
+    );
+    // Balans Debiteuren = 50.000, ouderdomsanalyse = 65.811,57 — verschil ruim buiten de €0,01-tolerantie.
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "balans_per_jaar.xlsx"), [
+      { Bedrijfsnr: BEDRIJFSNR, Jaar: 2026, Grootboekrekeningnr: "1310", Beginbalans_debet: 50000, Beginbalans_credit: 0, Saldo_debet: 0, Saldo_credit: 0, Eindsaldo: 0, Rekening_omschrijving: "Huurdebiteuren", Balans_vw: "Balans" },
+    ]);
+    rebuildCache({ root, administratieId: ADMINISTRATIE_ID, onVoortgang: () => {}, ouderdomsanalyseMetadata: { boekjaar: 2026, boekperiode: "06", peildatum: new Date(Date.UTC(2026, 5, 30)) } });
+
+    const { rapport, html } = genereerSamengesteldRapport(root, ADMINISTRATIE_ID, { ...CONTEXT_ALLE_MODULES, modules: ["debiteuren", "controles"] });
+
+    const debiteuren = rapport.secties.find((s) => s.id === "DEBITEUREN")!.resultaat;
+    expect(debiteuren.status).toBe("ONBESCHIKBAAR");
+    if (debiteuren.status === "ONBESCHIKBAAR") {
+      expect(debiteuren.reden).toContain("50000");
+      expect(debiteuren.reden).toContain("65811.57");
+      expect(debiteuren.reden).toContain("niet akkoord");
+    }
+    // Ouderdomsanalyse wordt NIET getoond (geen fictief/verkeerd bedrag zichtbaar).
+    expect(html).not.toContain("Ouderdomsopbouw");
+    // Rest van het rapport blijft beschikbaar.
+    const controles = rapport.secties.find((s) => s.id === "CONTROLES")!.resultaat;
+    expect(controles.status === "OPGENOMEN" || controles.status === "ONVOLLEDIG").toBe(true);
+    expect(html).toContain("Grootboek-totalen");
+  });
+});
+
+describe("genereerSamengesteldRapport — DEBITEUREN (scenario C: ontbrekende ouderdomsanalyse)", () => {
+  it("ONBESCHIKBAAR zonder saldo_huurders-data, geen fictieve bedragen, rest van het rapport blijft beschikbaar", () => {
+    // Bewust GEEN saldo_huurders.xlsx / ouderdomsanalyseMetadata — de ouderdomsanalyse-cache blijft leeg.
+    schrijfAdministratieConfig(root, ADMINISTRATIE_ID, { ...nieuweAdministratieConfig(BEDRIJFSNR, "Rooise Zoom"), debiteurenGrootboekrekeningen: ["1310"] });
+
+    const { rapport, html } = genereerSamengesteldRapport(root, ADMINISTRATIE_ID, { ...CONTEXT_ALLE_MODULES, modules: ["debiteuren", "pnl"] });
+
+    const debiteuren = rapport.secties.find((s) => s.id === "DEBITEUREN")!.resultaat;
+    expect(debiteuren.status).toBe("ONBESCHIKBAAR");
+    if (debiteuren.status === "ONBESCHIKBAAR") {
+      expect(debiteuren.reden).toContain("ouderdomsanalyse");
+    }
+    expect(html).not.toContain("Ouderdomsopbouw");
+    const pnl = rapport.secties.find((s) => s.id === "PNL")!.resultaat;
+    expect(pnl.status === "OPGENOMEN" || pnl.status === "ONVOLLEDIG").toBe(true);
+  });
+
+  it("ONBESCHIKBAAR zonder debiteurenGrootboekrekeningen-config (geen stilzwijgende rekeningaanname)", () => {
+    schrijfVorderingenEnSaldoHuurdersFixture();
+    // Standaardconfig, GEEN debiteurenGrootboekrekeningen.
+    rebuildCache({ root, administratieId: ADMINISTRATIE_ID, onVoortgang: () => {}, ouderdomsanalyseMetadata: { boekjaar: 2026, boekperiode: "06", peildatum: new Date(Date.UTC(2026, 5, 30)) } });
+
+    const { rapport } = genereerSamengesteldRapport(root, ADMINISTRATIE_ID, { ...CONTEXT_ALLE_MODULES, modules: ["debiteuren"] });
+
+    const debiteuren = rapport.secties.find((s) => s.id === "DEBITEUREN")!.resultaat;
+    expect(debiteuren.status).toBe("ONBESCHIKBAAR");
+    if (debiteuren.status === "ONBESCHIKBAAR") {
+      expect(debiteuren.reden).toContain("debiteurenGrootboekrekeningen");
+    }
   });
 });

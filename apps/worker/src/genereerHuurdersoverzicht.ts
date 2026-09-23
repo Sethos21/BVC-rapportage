@@ -35,6 +35,52 @@ const dec = (v: string | null): Decimal | null => (v === null ? null : new Decim
 const datum = (v: string | null): Date | null => (v === null ? null : new Date(v));
 const nietLeeg = (v: string | null): string | null => (v === null || v === "" ? null : v);
 
+/**
+ * Extractie (2026-09-23, Debiteuren/Ouderdomsanalyse-aansluiting): dezelfde
+ * vorderingen_met_afboekingen-/ouderdomsanalyse-cache-uitlezing die
+ * `genereerHuurdersoverzicht` hieronder al gebruikte, nu herbruikbaar voor
+ * elke andere aanroeper die dezelfde ruwe `OpVorderingRegel`/
+ * `OpSaldoHuurderRegel`-lijsten nodig heeft (bv. `genereerDebiteurenSectie`
+ * in `rapportModuleRegister.ts`) zonder de cache-mapping te dupliceren.
+ * Puur lezen, geen berekening.
+ */
+export function haalVorderingenEnSaldoHuurdersOp(root: string, administratieId: string): { vorderingen: OpVorderingRegel[]; saldoHuurders: OpSaldoHuurderRegel[] } {
+  const db = openCacheReadonly(administratieCachePad(root, administratieId));
+  try {
+    const vorderingRows = db.prepare("SELECT * FROM vorderingen_met_afboekingen").all() as unknown as VorderingMetAfboekingRow[];
+    const vorderingen: OpVorderingRegel[] = vorderingRows.map((r) => ({
+      bedrijfsnr: r.bedrijfsnr,
+      contractnummer: r.contractnr,
+      vorderingVolgnummer: r.vordering_volgnr,
+      huurdernummer: r.huurdernr,
+      complexnummer: r.complexnummer,
+      unitnummer: r.unitnummer,
+      factuurnummer: r.factuurnummer,
+      datumVordering: new Date(r.datum_vordering),
+      omschrijving: r.omschrijving_vordering,
+      totaalbedrag: new Decimal(r.totaalbedrag),
+      bedragAfgeboekt: new Decimal(r.bedrag_afgeboekt),
+      openstaand: new Decimal(r.openstaand),
+    }));
+
+    const saldoRows = db.prepare("SELECT * FROM ouderdomsanalyse").all() as unknown as OuderdomsanalyseRow[];
+    const saldoHuurders: OpSaldoHuurderRegel[] = saldoRows.map((r) => ({
+      huurdernummer: r.huurdernr,
+      achterstand: new Decimal(r.achterstand),
+      achterstandTm30Dagen: new Decimal(r.achterstand_tm_30_dagen),
+      achterstandTm60Dagen: new Decimal(r.achterstand_tm_60_dagen),
+      achterstandTm90Dagen: new Decimal(r.achterstand_tm_90_dagen),
+      achterstand90PlusDagen: new Decimal(r.achterstand_90plus_dagen),
+      vooruitbetaling: new Decimal(r.vooruitbetaling),
+      saldo: new Decimal(r.saldo),
+    }));
+
+    return { vorderingen, saldoHuurders };
+  } finally {
+    db.close();
+  }
+}
+
 export function genereerHuurdersoverzicht(root: string, administratieId: string, peildatum: Date = new Date()): HuurdersoverzichtResultaat {
   const config = leesAdministratieConfig(root, administratieId);
   const db = openCacheReadonly(administratieCachePad(root, administratieId));

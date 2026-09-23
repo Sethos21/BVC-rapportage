@@ -58,6 +58,17 @@ export interface AdministratieConfig {
   servicekostenRekeningen?: { kostenrekening: string; voorschottenrekening: string } | undefined;
   /** Zie DebiteurenbeheerStatus. Ontbreekt dit veld (legacy-config), dan leest leesAdministratieConfig het in-memory aan als "onbekend" — nooit true. */
   debiteurenbeheer?: DebiteurenbeheerConfig | undefined;
+  /**
+   * Grootboekrekening(en) die samen de balanspost Debiteuren vormen, voor
+   * de Debiteuren/Ouderdomsanalyse-aansluiting (`@bvc/reporting`'s
+   * `berekenDebiteurenAansluiting`) — exact hetzelfde patroon als
+   * `servicekostenRekeningen`: een expliciete, per-administratie
+   * geconfigureerde lijst, NOOIT een hardcoded/geraden rekeningnummer in
+   * code (CLAUDE.md §6). Optioneel: ontbreekt dit veld, dan is de
+   * Debiteuren-module ONBESCHIKBAAR (geen stilzwijgende aanname over welke
+   * rekening "Debiteuren" is).
+   */
+  debiteurenGrootboekrekeningen?: string[] | undefined;
 }
 
 /**

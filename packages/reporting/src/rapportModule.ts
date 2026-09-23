@@ -44,7 +44,7 @@ import { escapeHtml, renderRapportDocument } from "./huisstijl.js";
  * zijn onderling onafhankelijk, zie de architectuurinvariant).
  */
 
-export const RAPPORT_MODULE_IDS = ["PNL", "BALANS", "HUURDERS", "KASSTROOM", "VASTGOED_KPI", "CONTROLES", "RENTROLL", "SERVICEKOSTEN"] as const;
+export const RAPPORT_MODULE_IDS = ["PNL", "BALANS", "HUURDERS", "KASSTROOM", "VASTGOED_KPI", "CONTROLES", "RENTROLL", "SERVICEKOSTEN", "DEBITEUREN"] as const;
 export type RapportModuleId = (typeof RAPPORT_MODULE_IDS)[number];
 
 export type RapportSectieStatus =

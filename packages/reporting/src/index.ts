@@ -31,6 +31,8 @@ export * from "./contractVerhogingenDiagnose.js";
 export * from "./servicekostenBronKolommenDiagnose.js";
 export * from "./vorderingenBronKolommenDiagnose.js";
 export * from "./vorderingenRijdiagnose.js";
+export * from "./debiteurenAansluiting.js";
+export * from "./renderDebiteurenAansluiting.js";
 export * from "./servicekostenDiagnose.js";
 export * from "./servicekostenAfrekeningDiagnose.js";
 export * from "./servicekostenGrootboekReconciliatieDiagnose.js";
