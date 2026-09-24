@@ -272,6 +272,22 @@ export {
   type CorrectiefDagelijksOnderhoudEstimatedOnlyRegelInvoer,
 } from "./correctiefDagelijksOnderhoudEstimated.js";
 
+// DELTA BUILD 3 (2026-09-24) — Onderhoud-brede orchestratie: Begroting
+// (Gepland + Correctief/Dagelijks) + Werkelijk (exact éénmaal, op
+// Onderhoud-totaalniveau) + resterende verwachting → Estimated Onderhoud.
+// Afgeleid resultaat, schrijft nooit — zie `onderhoudOrchestratie.ts`'s moduledoc.
+export {
+  combineerOnderhoudTotaal,
+  leesOnderhoudTotaalResultaat,
+  type OnderhoudTotaalResultaat,
+  type OnderhoudOrchestratieInvoer,
+  type OnderhoudGeplandResultaat,
+  type OnderhoudGeplandActiviteitCombinatie,
+  type OnderhoudCorrectiefDagelijksResultaat,
+  type OnderhoudCorrectiefDagelijksRegelCombinatie,
+  type OnderhoudWerkelijkTotaal,
+} from "./onderhoudOrchestratie.js";
+
 // Verzekeringen (OB-032) — UITSLUITEND concept-persistence (geen
 // pure-calculator-integratie in dit bestand zelf; herberekening/frozen
 // output zitten in herberekenen.js/frozenVerzekeringResultaat.js). Bewust

@@ -173,11 +173,41 @@ function berekenEstimatedOnlyRegel(
   return { uitkomst: { index, invoer, bedrag }, controleVereist };
 }
 
-export function berekenEstimatedCorrectiefDagelijksOnderhoud(
+/**
+ * DELTA BUILD 3 (2026-09-24, Onderhoud-brede orchestratie): resultaat van
+ * UITSLUITEND de resterende-verwachtingscomponent — bewust geen aparte
+ * aannames-parameter nodig (anders dan Gepland Onderhoud: Correctief/
+ * Dagelijks kent geen kwartalen, dus geen `resterendeKwartalen`-invoer, zie
+ * `begroteCorrectiefDagelijksOnderhoud.ts`'s moduledoc "BEWUST GEEN KLOON").
+ */
+export interface BgCorrectiefDagelijksResterendeVerwachtingResultaat {
+  resterendeVerwachtingen: readonly BgCorrectiefDagelijksResterendeVerwachtingUitkomst[];
+  estimatedOnlyRegels: readonly BgCorrectiefDagelijksEstimatedOnlyRegelUitkomst[];
+  somResterendBestaandeRegels: Decimal;
+  somResterendEstimatedOnly: Decimal;
+  /** = somResterendBestaandeRegels + somResterendEstimatedOnly. GEEN Werkelijk hierin — deze functie kent structureel geen Werkelijk-parameter (zie moduledoc). */
+  totaal: Decimal;
+  controleVereist: readonly BgCorrectiefDagelijksEstimatedControleItem[];
+}
+
+/**
+ * DELTA BUILD 3 (2026-09-24, Onderhoud-brede orchestratie): de resterende-
+ * verwachtingsberekening van `berekenEstimatedCorrectiefDagelijksOnderhoud`,
+ * UITGELICHT als eigen, herbruikbare functie — bewust ZONDER Werkelijk-
+ * parameter, zie `berekenResterendeVerwachtingGeplandOnderhoud`'s moduledoc
+ * (`begroteGeplandOnderhoudEstimated.ts`) voor de volledige onderbouwing
+ * (Werkelijk Onderhoud kan niet naar Gepland/Correctief worden gesplitst —
+ * een "Werkelijk Correctief/Dagelijks" bestaat domeinkundig niet). De
+ * Onderhoud-brede orchestratielaag telt Werkelijk exact ÉÉNMAAL op
+ * Onderhoud-totaalniveau op, NA deze functie, nooit hier.
+ *
+ * `berekenEstimatedCorrectiefDagelijksOnderhoud` hieronder blijft 100%
+ * backward compatible — deze functie is puur een interne extractie.
+ */
+export function berekenResterendeVerwachtingCorrectiefDagelijksOnderhoud(
   resterendeVerwachtingenInvoer: readonly BgCorrectiefDagelijksResterendeVerwachtingInvoer[],
   estimatedOnlyRegelsInvoer: readonly BgCorrectiefDagelijksEstimatedOnlyRegelInvoer[],
-  aannames: BgCorrectiefDagelijksEstimatedAannames,
-): BgCorrectiefDagelijksEstimatedResultaat {
+): BgCorrectiefDagelijksResterendeVerwachtingResultaat {
   const controleVereist: BgCorrectiefDagelijksEstimatedControleItem[] = [];
 
   const resterendeVerwachtingen: BgCorrectiefDagelijksResterendeVerwachtingUitkomst[] = resterendeVerwachtingenInvoer.map((invoer, index) => {
@@ -194,17 +224,35 @@ export function berekenEstimatedCorrectiefDagelijksOnderhoud(
 
   const somResterendBestaandeRegels = som(resterendeVerwachtingen.map((r) => r.bedrag));
   const somResterendEstimatedOnly = som(estimatedOnlyRegels.map((r) => r.bedrag));
-  const werkelijkTotaalTotAfgeslotenPeriode = veiligBedrag(aannames.werkelijkTotaalTotAfgeslotenPeriode);
-  const estimatedTotaal = som([werkelijkTotaalTotAfgeslotenPeriode, somResterendBestaandeRegels, somResterendEstimatedOnly]);
 
   return {
-    begrotingsjaar: aannames.begrotingsjaar,
-    werkelijkTotaalTotAfgeslotenPeriode,
     resterendeVerwachtingen,
     estimatedOnlyRegels,
     somResterendBestaandeRegels,
     somResterendEstimatedOnly,
-    estimatedTotaal,
+    totaal: som([somResterendBestaandeRegels, somResterendEstimatedOnly]),
     controleVereist,
+  };
+}
+
+export function berekenEstimatedCorrectiefDagelijksOnderhoud(
+  resterendeVerwachtingenInvoer: readonly BgCorrectiefDagelijksResterendeVerwachtingInvoer[],
+  estimatedOnlyRegelsInvoer: readonly BgCorrectiefDagelijksEstimatedOnlyRegelInvoer[],
+  aannames: BgCorrectiefDagelijksEstimatedAannames,
+): BgCorrectiefDagelijksEstimatedResultaat {
+  const resterend = berekenResterendeVerwachtingCorrectiefDagelijksOnderhoud(resterendeVerwachtingenInvoer, estimatedOnlyRegelsInvoer);
+
+  const werkelijkTotaalTotAfgeslotenPeriode = veiligBedrag(aannames.werkelijkTotaalTotAfgeslotenPeriode);
+  const estimatedTotaal = som([werkelijkTotaalTotAfgeslotenPeriode, resterend.somResterendBestaandeRegels, resterend.somResterendEstimatedOnly]);
+
+  return {
+    begrotingsjaar: aannames.begrotingsjaar,
+    werkelijkTotaalTotAfgeslotenPeriode,
+    resterendeVerwachtingen: resterend.resterendeVerwachtingen,
+    estimatedOnlyRegels: resterend.estimatedOnlyRegels,
+    somResterendBestaandeRegels: resterend.somResterendBestaandeRegels,
+    somResterendEstimatedOnly: resterend.somResterendEstimatedOnly,
+    estimatedTotaal,
+    controleVereist: resterend.controleVereist,
   };
 }

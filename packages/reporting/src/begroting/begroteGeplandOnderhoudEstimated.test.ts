@@ -2,6 +2,7 @@ import Decimal from "decimal.js";
 import { describe, expect, it } from "vitest";
 import {
   berekenEstimatedGeplandOnderhoud,
+  berekenResterendeVerwachtingGeplandOnderhoud,
   type BgGeplandOnderhoudEstimatedAannames,
   type BgGeplandOnderhoudEstimatedOnlyActiviteitInvoer,
   type BgGeplandOnderhoudResterendeVerwachtingInvoer,
@@ -160,5 +161,22 @@ describe("Periodefilter (§5B): een bedrag buiten resterendeKwartalen telt niet 
     expect(resultaat.resterendeVerwachtingen[0]!.q1.toString()).toBe("0");
     expect(resultaat.estimatedTotaal.toString()).toBe("0");
     expect(resultaat.controleVereist.some((c) => c.ernst === "WAARSCHUWING" && c.bericht.includes("Q1"))).toBe(true);
+  });
+});
+
+describe("Delta Build 3: berekenResterendeVerwachtingGeplandOnderhoud (extractie, backward compatible)", () => {
+  it("kent structureel geen Werkelijk-parameter en levert exact de resterende componenten van berekenEstimatedGeplandOnderhoud", () => {
+    const resterendeVerwachtingen = [verwachting({ q1: new Decimal(30) }), verwachting({ activiteitIndex: 1, q2: new Decimal(20) })];
+    const onlyActiviteiten = [estimatedOnly({ q3: new Decimal(10) })];
+    const alleen = berekenResterendeVerwachtingGeplandOnderhoud(resterendeVerwachtingen, onlyActiviteiten, { resterendeKwartalen: ["Q1", "Q2", "Q3", "Q4"] });
+    const volledig = berekenEstimatedGeplandOnderhoud(resterendeVerwachtingen, onlyActiviteiten, AANNAMES_ALLE_KWARTALEN_RESTEND);
+
+    expect(berekenResterendeVerwachtingGeplandOnderhoud.length).toBe(3);
+    expect(alleen).not.toHaveProperty("werkelijkTotaalTotAfgeslotenPeriode");
+    expect(alleen).not.toHaveProperty("estimatedTotaal");
+    expect(alleen.totaal.toString()).toBe("60");
+    expect(volledig.estimatedTotaal.toString()).toBe("160"); // 100 werkelijk + 60, ongewijzigd gedrag
+    expect(volledig.somResterendBestaandeActiviteiten.toString()).toBe(alleen.somResterendBestaandeActiviteiten.toString());
+    expect(volledig.somResterendEstimatedOnly.toString()).toBe(alleen.somResterendEstimatedOnly.toString());
   });
 });

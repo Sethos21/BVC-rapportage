@@ -2,6 +2,7 @@ import Decimal from "decimal.js";
 import { describe, expect, it } from "vitest";
 import {
   berekenEstimatedCorrectiefDagelijksOnderhoud,
+  berekenResterendeVerwachtingCorrectiefDagelijksOnderhoud,
   type BgCorrectiefDagelijksEstimatedAannames,
   type BgCorrectiefDagelijksEstimatedOnlyRegelInvoer,
   type BgCorrectiefDagelijksResterendeVerwachtingInvoer,
@@ -134,5 +135,20 @@ describe("12. Grootboek blijft verplicht waar een complete Estimated-only regel 
     const resultaat = berekenEstimatedCorrectiefDagelijksOnderhoud([], [estimatedOnly({ resterendBedrag: null })], AANNAMES);
     expect(resultaat.controleVereist.some((c) => c.ernst === "KRITIEK" && c.bericht.includes("resterend bedrag"))).toBe(true);
     expect(resultaat.estimatedOnlyRegels[0]!.bedrag.toString()).toBe("0");
+  });
+});
+
+describe("Delta Build 3: berekenResterendeVerwachtingCorrectiefDagelijksOnderhoud (extractie, backward compatible)", () => {
+  it("kent structureel geen Werkelijk-parameter en levert exact de resterende componenten van berekenEstimatedCorrectiefDagelijksOnderhoud", () => {
+    const verwachtingen = [verwachting({ resterendBedrag: new Decimal(30) }), verwachting({ regelIndex: 1, resterendBedrag: new Decimal(20) })];
+    const only = [estimatedOnly({ resterendBedrag: new Decimal(10) })];
+    const alleen = berekenResterendeVerwachtingCorrectiefDagelijksOnderhoud(verwachtingen, only);
+    const volledig = berekenEstimatedCorrectiefDagelijksOnderhoud(verwachtingen, only, AANNAMES);
+
+    expect(berekenResterendeVerwachtingCorrectiefDagelijksOnderhoud.length).toBe(2);
+    expect(alleen).not.toHaveProperty("werkelijkTotaalTotAfgeslotenPeriode");
+    expect(alleen).not.toHaveProperty("estimatedTotaal");
+    expect(alleen.totaal.toString()).toBe("60");
+    expect(volledig.estimatedTotaal.toString()).toBe("160");
   });
 });

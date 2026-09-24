@@ -524,8 +524,15 @@ function naarPureGeplandOnderhoudInvoer(activiteit: GeplandOnderhoudActiviteit):
  * businessregel) — `berekenBegroteGeplandOnderhoud` zelf garandeert al een
  * 1-op-1 output-array (zie de pure module se eigen testsuite), dus dit pad is
  * in de praktijk onbereikbaar.
+ *
+ * DELTA BUILD 3 (2026-09-24): bewust `export` (was intern) zodat
+ * `onderhoudOrchestratie.ts` deze exact dezelfde Begroting-berekening kan
+ * hergebruiken zonder de volledige, Module-1-afhankelijke
+ * `leesHerberekenInvoerZonderTransactie`/`herberekenBegroting`-pijplijn nodig
+ * te hebben — Onderhoud staat functioneel los van Module 1/2/3 en hoeft dus
+ * niet van hun aannames af te hangen. Geen gedragswijziging.
  */
-function berekenGeplandOnderhoudUitInvoer(
+export function berekenGeplandOnderhoudUitInvoer(
   versieId: string,
   begrotingsjaar: number,
   activiteiten: readonly GeplandOnderhoudActiviteit[],
@@ -571,8 +578,11 @@ function naarPureCorrectiefDagelijksInvoer(regel: CorrectiefDagelijksOnderhoudRe
  * uitsluitend persistentie-ID's terug aan de resulterende regel-uitkomsten —
  * positioneel (`invoer[i] ↔ resultaat.regels[i]`), zelfde principe en
  * defensieve lengte-controle als `berekenGeplandOnderhoudUitInvoer`.
+ *
+ * DELTA BUILD 3 (2026-09-24): bewust `export`, zelfde reden als
+ * `berekenGeplandOnderhoudUitInvoer` hierboven.
  */
-function berekenCorrectiefDagelijksUitInvoer(
+export function berekenCorrectiefDagelijksUitInvoer(
   versieId: string,
   begrotingsjaar: number,
   regels: readonly CorrectiefDagelijksOnderhoudRegel[],

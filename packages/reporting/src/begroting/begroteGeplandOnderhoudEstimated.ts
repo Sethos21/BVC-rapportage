@@ -244,11 +244,50 @@ function berekenEstimatedOnlyActiviteit(
   return { uitkomst: { index, invoer, q1, q2, q3, q4, totaal: som([q1, q2, q3, q4]) }, controleVereist };
 }
 
-export function berekenEstimatedGeplandOnderhoud(
+/**
+ * DELTA BUILD 3 (2026-09-24, Onderhoud-brede orchestratie): aannames voor
+ * UITSLUITEND de resterende-verwachtingscomponent — bewust GEEN
+ * `werkelijkTotaalTotAfgeslotenPeriode`/`begrotingsjaar` (die horen bij het
+ * VOLLEDIGE Estimated-perspectief, niet bij de resterende verwachting op
+ * zich). Zie `berekenResterendeVerwachtingGeplandOnderhoud`'s moduledoc.
+ */
+export interface BgGeplandOnderhoudResterendeVerwachtingAannames {
+  resterendeKwartalen: readonly BgOnderhoudKwartaal[];
+}
+
+export interface BgGeplandOnderhoudResterendeVerwachtingResultaat {
+  resterendeVerwachtingen: readonly BgGeplandOnderhoudResterendeVerwachtingUitkomst[];
+  estimatedOnlyActiviteiten: readonly BgGeplandOnderhoudEstimatedOnlyActiviteitUitkomst[];
+  somResterendBestaandeActiviteiten: Decimal;
+  somResterendEstimatedOnly: Decimal;
+  /** = somResterendBestaandeActiviteiten + somResterendEstimatedOnly. GEEN Werkelijk hierin — deze functie kent structureel geen Werkelijk-parameter (zie moduledoc). */
+  totaal: Decimal;
+  controleVereist: readonly BgGeplandOnderhoudEstimatedControleItem[];
+}
+
+/**
+ * DELTA BUILD 3 (2026-09-24, Onderhoud-brede orchestratie): de resterende-
+ * verwachtingsberekening van `berekenEstimatedGeplandOnderhoud`, UITGELICHT
+ * als eigen, herbruikbare functie — bewust ZONDER Werkelijk-parameter, dus
+ * structureel onmogelijk om hier per ongeluk een "Estimated Gepland"-
+ * pseudototaal (Werkelijk + resterend) te construeren. Reden (vastgesteld
+ * business-/architectuurcontract na Delta Build 3's Gate 9): Werkelijk
+ * Onderhoud kan NIET betrouwbaar naar Gepland versus Correctief/Dagelijks
+ * worden gesplitst (zie `werkelijkOnderhoud.ts`'s moduledoc) — een
+ * "Werkelijk Gepland" bestaat domeinkundig niet. De Onderhoud-brede
+ * orchestratielaag (`@bvc/begroting-data`'s `onderhoudOrchestratie.ts`) telt
+ * Werkelijk daarom exact ÉÉNMAAL op Onderhoud-totaalniveau op, NA deze
+ * functie, nooit hier.
+ *
+ * `berekenEstimatedGeplandOnderhoud` hieronder blijft 100% backward
+ * compatible: exact dezelfde signatuur/output/gedrag als vóór Delta Build 3
+ * — deze functie is puur een interne extractie, geen nieuwe rekenregel.
+ */
+export function berekenResterendeVerwachtingGeplandOnderhoud(
   resterendeVerwachtingenInvoer: readonly BgGeplandOnderhoudResterendeVerwachtingInvoer[],
   estimatedOnlyActiviteitenInvoer: readonly BgGeplandOnderhoudEstimatedOnlyActiviteitInvoer[],
-  aannames: BgGeplandOnderhoudEstimatedAannames,
-): BgGeplandOnderhoudEstimatedResultaat {
+  aannames: BgGeplandOnderhoudResterendeVerwachtingAannames,
+): BgGeplandOnderhoudResterendeVerwachtingResultaat {
   const resterendeKwartalen = new Set<BgOnderhoudKwartaal>(
     aannames.resterendeKwartalen.filter((k) => ALLE_KWARTALEN.includes(k)),
   );
@@ -269,17 +308,37 @@ export function berekenEstimatedGeplandOnderhoud(
 
   const somResterendBestaandeActiviteiten = som(resterendeVerwachtingen.map((r) => r.totaal));
   const somResterendEstimatedOnly = som(estimatedOnlyActiviteiten.map((a) => a.totaal));
-  const werkelijkTotaalTotAfgeslotenPeriode = veiligBedrag(aannames.werkelijkTotaalTotAfgeslotenPeriode);
-  const estimatedTotaal = som([werkelijkTotaalTotAfgeslotenPeriode, somResterendBestaandeActiviteiten, somResterendEstimatedOnly]);
 
   return {
-    begrotingsjaar: aannames.begrotingsjaar,
-    werkelijkTotaalTotAfgeslotenPeriode,
     resterendeVerwachtingen,
     estimatedOnlyActiviteiten,
     somResterendBestaandeActiviteiten,
     somResterendEstimatedOnly,
-    estimatedTotaal,
+    totaal: som([somResterendBestaandeActiviteiten, somResterendEstimatedOnly]),
     controleVereist,
+  };
+}
+
+export function berekenEstimatedGeplandOnderhoud(
+  resterendeVerwachtingenInvoer: readonly BgGeplandOnderhoudResterendeVerwachtingInvoer[],
+  estimatedOnlyActiviteitenInvoer: readonly BgGeplandOnderhoudEstimatedOnlyActiviteitInvoer[],
+  aannames: BgGeplandOnderhoudEstimatedAannames,
+): BgGeplandOnderhoudEstimatedResultaat {
+  const resterend = berekenResterendeVerwachtingGeplandOnderhoud(resterendeVerwachtingenInvoer, estimatedOnlyActiviteitenInvoer, {
+    resterendeKwartalen: aannames.resterendeKwartalen,
+  });
+
+  const werkelijkTotaalTotAfgeslotenPeriode = veiligBedrag(aannames.werkelijkTotaalTotAfgeslotenPeriode);
+  const estimatedTotaal = som([werkelijkTotaalTotAfgeslotenPeriode, resterend.somResterendBestaandeActiviteiten, resterend.somResterendEstimatedOnly]);
+
+  return {
+    begrotingsjaar: aannames.begrotingsjaar,
+    werkelijkTotaalTotAfgeslotenPeriode,
+    resterendeVerwachtingen: resterend.resterendeVerwachtingen,
+    estimatedOnlyActiviteiten: resterend.estimatedOnlyActiviteiten,
+    somResterendBestaandeActiviteiten: resterend.somResterendBestaandeActiviteiten,
+    somResterendEstimatedOnly: resterend.somResterendEstimatedOnly,
+    estimatedTotaal,
+    controleVereist: resterend.controleVereist,
   };
 }
