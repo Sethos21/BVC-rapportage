@@ -76,6 +76,8 @@ export interface VerzekeringRegelInvoer {
   id: number | null;
   complexnummer: string | null;
   verzekeraar: string | null;
+  grootboekrekening: string;
+  ogbKostensoort: string | null;
   ingangsdatum: Date | null;
   looptijdMaanden: number | null;
   bedrag: Decimal | null;
@@ -87,6 +89,8 @@ export interface VerzekeringRegel {
   id: number;
   complexnummer: string | null;
   verzekeraar: string | null;
+  grootboekrekening: string;
+  ogbKostensoort: string | null;
   ingangsdatum: Date | null;
   looptijdMaanden: number | null;
   bedrag: Decimal | null;
@@ -98,6 +102,8 @@ interface RegelRow {
   id: number;
   complexnummer: string | null;
   verzekeraar: string | null;
+  grootboekrekening: string;
+  ogb_kostensoort: string | null;
   ingangsdatum: string | null;
   looptijd_maanden: number | null;
   bedrag: string | null;
@@ -110,6 +116,8 @@ function rowToRegel(row: RegelRow): VerzekeringRegel {
     id: row.id,
     complexnummer: row.complexnummer,
     verzekeraar: row.verzekeraar,
+    grootboekrekening: row.grootboekrekening,
+    ogbKostensoort: row.ogb_kostensoort,
     ingangsdatum: optioneleParsedBusinessDate(row.ingangsdatum),
     looptijdMaanden: row.looptijd_maanden,
     bedrag: row.bedrag !== null ? new Decimal(row.bedrag) : null,
@@ -122,7 +130,7 @@ function rowToRegel(row: RegelRow): VerzekeringRegel {
 export function leesVerzekeringRegels(db: DatabaseSync, versieId: string): readonly VerzekeringRegel[] {
   const rijen = db
     .prepare(
-      `SELECT id, complexnummer, verzekeraar, ingangsdatum, looptijd_maanden, bedrag, index_percentage, handmatig_begroot_override
+      `SELECT id, complexnummer, verzekeraar, grootboekrekening, ogb_kostensoort, ingangsdatum, looptijd_maanden, bedrag, index_percentage, handmatig_begroot_override
        FROM begroting_verzekering_regel
        WHERE begroting_versie_id = ?
        ORDER BY id`,
@@ -198,13 +206,13 @@ export function schrijfVerzekeringRegels(
 
     const updateStmt = db.prepare(
       `UPDATE begroting_verzekering_regel
-       SET complexnummer = ?, verzekeraar = ?, ingangsdatum = ?, looptijd_maanden = ?, bedrag = ?, index_percentage = ?, handmatig_begroot_override = ?
+       SET complexnummer = ?, verzekeraar = ?, grootboekrekening = ?, ogb_kostensoort = ?, ingangsdatum = ?, looptijd_maanden = ?, bedrag = ?, index_percentage = ?, handmatig_begroot_override = ?
        WHERE id = ? AND begroting_versie_id = ?`,
     );
     const insertStmt = db.prepare(
       `INSERT INTO begroting_verzekering_regel
-         (begroting_versie_id, complexnummer, verzekeraar, ingangsdatum, looptijd_maanden, bedrag, index_percentage, handmatig_begroot_override)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+         (begroting_versie_id, complexnummer, verzekeraar, grootboekrekening, ogb_kostensoort, ingangsdatum, looptijd_maanden, bedrag, index_percentage, handmatig_begroot_override)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
 
     for (const regel of regels) {
@@ -214,7 +222,7 @@ export function schrijfVerzekeringRegels(
       const handmatigBegrootOverride = regel.handmatigBegrootOverride !== null ? regel.handmatigBegrootOverride.toString() : null;
 
       if (regel.id === null) {
-        insertStmt.run(versieId, regel.complexnummer, regel.verzekeraar, ingangsdatum, regel.looptijdMaanden, bedrag, indexPercentage, handmatigBegrootOverride);
+        insertStmt.run(versieId, regel.complexnummer, regel.verzekeraar, regel.grootboekrekening, regel.ogbKostensoort, ingangsdatum, regel.looptijdMaanden, bedrag, indexPercentage, handmatigBegrootOverride);
         continue;
       }
 
@@ -223,6 +231,8 @@ export function schrijfVerzekeringRegels(
       const info = updateStmt.run(
         regel.complexnummer,
         regel.verzekeraar,
+        regel.grootboekrekening,
+        regel.ogbKostensoort,
         ingangsdatum,
         regel.looptijdMaanden,
         bedrag,

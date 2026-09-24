@@ -1113,6 +1113,8 @@ describe("herberekenBegroting — Verzekeringen (OB-032)", () => {
       id: null,
       complexnummer: "001",
       verzekeraar: "Assuradeuren Gilde B.V.",
+      grootboekrekening: "4130",
+      ogbKostensoort: null,
       ingangsdatum: new Date(Date.UTC(2020, 6, 1)),
       looptijdMaanden: 12,
       bedrag: new Decimal(12000),
@@ -1127,6 +1129,8 @@ describe("herberekenBegroting — Verzekeringen (OB-032)", () => {
     return {
       complexnummer: r.complexnummer,
       verzekeraar: r.verzekeraar,
+      grootboekrekening: r.grootboekrekening,
+      ogbKostensoort: r.ogbKostensoort,
       ingangsdatum: r.ingangsdatum,
       looptijdMaanden: r.looptijdMaanden,
       bedrag: r.bedrag,

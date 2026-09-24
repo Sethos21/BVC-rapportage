@@ -46,6 +46,8 @@ function regelInvoer(overrides: Partial<BgVerzekeringRegelInvoer> = {}): BgVerze
   return {
     complexnummer: "001",
     verzekeraar: "Assuradeuren Gilde B.V.",
+    grootboekrekening: "4130",
+    ogbKostensoort: null,
     ingangsdatum: new Date(Date.UTC(2020, 6, 1)),
     looptijdMaanden: 12,
     bedrag: new Decimal(12000),
@@ -443,5 +445,20 @@ describe("frozen CHECKs — tweede beschermingslaag (migratie 13)", () => {
     expect(() => schrijfFrozenVerzekeringResultaat(db, versie.id, resultaat)).not.toThrow();
     const gelezen = leesFrozenVerzekeringResultaat(db, versie.id)!;
     expect(gelezen.totaalBerekendBegroot.toString()).toBe(resultaat.totaalBerekendBegroot.toString());
+  });
+});
+
+describe("frozen Verzekeringen — grootboekrekening/OGB round-trip (Master Contract §6.7)", () => {
+  it("10. grootboekrekening en gevulde/null OGB round-trippen exact door de frozen laag", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    const resultaat = berekenMetIds(
+      [regelInvoer({ complexnummer: "001", grootboekrekening: "4130", ogbKostensoort: "4131" }), regelInvoer({ complexnummer: "002", grootboekrekening: "4135", ogbKostensoort: null })],
+      [10, 20],
+    );
+    schrijfFrozenVerzekeringResultaat(db, versie.id, resultaat);
+
+    const invoer = leesFrozenVerzekeringResultaat(db, versie.id)!.regels.map((r) => r.regel.invoer);
+    expect(invoer[0]).toMatchObject({ grootboekrekening: "4130", ogbKostensoort: "4131" });
+    expect(invoer[1]).toMatchObject({ grootboekrekening: "4135", ogbKostensoort: null });
   });
 });

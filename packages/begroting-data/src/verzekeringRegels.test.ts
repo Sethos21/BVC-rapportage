@@ -41,6 +41,8 @@ function regelInvoer(overrides: Partial<VerzekeringRegelInvoer> = {}): Verzekeri
     id: null,
     complexnummer: "001",
     verzekeraar: "Assuradeuren Gilde B.V.",
+    grootboekrekening: "4130",
+    ogbKostensoort: null,
     ingangsdatum: new Date(Date.UTC(2020, 6, 1)),
     looptijdMaanden: 12,
     bedrag: new Decimal(1200),
@@ -330,5 +332,18 @@ describe("schrijfVerzekeringRegels / leesVerzekeringRegels", () => {
       schrijfVerzekeringRegels(db, versie.id, []);
       expect(leesVerzekeringBeoordeeld(db, versie.id)).toBe(true);
     });
+  });
+});
+
+describe("Verzekering-regels — grootboekrekening/OGB (Master Contract §6.7)", () => {
+  it("grootboekrekening round-trip; OGB gevuld en null round-trippen zonder invloed op het bedrag", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    const [metOgb, zonderOgb] = schrijfVerzekeringRegels(db, versie.id, [
+      regelInvoer({ complexnummer: "001", grootboekrekening: "4130", ogbKostensoort: "4131" }),
+      regelInvoer({ complexnummer: "002", grootboekrekening: "4135", ogbKostensoort: null }),
+    ]);
+    expect(metOgb).toMatchObject({ grootboekrekening: "4130", ogbKostensoort: "4131" });
+    expect(zonderOgb).toMatchObject({ grootboekrekening: "4135", ogbKostensoort: null });
+    expect(metOgb!.bedrag!.toString()).toBe(zonderOgb!.bedrag!.toString());
   });
 });

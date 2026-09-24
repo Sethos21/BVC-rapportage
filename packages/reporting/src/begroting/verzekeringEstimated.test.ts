@@ -22,6 +22,7 @@ function regel(overrides: Partial<BgVerzekeringRegelInvoer> = {}): BgVerzekering
   return {
     complexnummer: "001",
     verzekeraar: "Assuradeuren Gilde B.V.",
+    grootboekrekening: "4130",
     ingangsdatum: new Date(Date.UTC(2020, 6, 1)),
     looptijdMaanden: 12,
     bedrag: new Decimal(12000),

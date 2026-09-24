@@ -3859,6 +3859,27 @@ export const MIGRATIONS: readonly Migration[] = [
        END`,
     ],
   },
+  /**
+   * Verzekeringen: `grootboekrekening` (verplicht) + `ogb_kostensoort`
+   * (optioneel) per polisregel (Master Contract §6.7 / UX §9.1) — additief,
+   * zelfde aanpak als migratie 26 voor Onderhoud. Geen enum-CHECK op enige
+   * bestaande kolom van deze tabellen, dus een gewone `ADD COLUMN` volstaat
+   * (geen tabelherbouw). Bestaande rijen krijgen de eerlijke "nog niet
+   * ingevuld"-waarde (`''` resp. `NULL`) — de pure calculator markeert een
+   * lege grootboekrekening als KRITIEK (blokkeert vaststellen), zonder het
+   * bedrag te wijzigen. Er bestaat geen productiedata in deze tabellen (geen
+   * Worker/CLI schrijft ze; alleen tests).
+   */
+  {
+    version: 29,
+    description: "Verzekeringen: grootboekrekening (verplicht) + ogb_kostensoort (optioneel) op concept- en frozen-regel",
+    ddl: [
+      `ALTER TABLE begroting_verzekering_regel ADD COLUMN grootboekrekening TEXT NOT NULL DEFAULT ''`,
+      `ALTER TABLE begroting_verzekering_regel ADD COLUMN ogb_kostensoort TEXT NULL`,
+      `ALTER TABLE begroting_frozen_verzekering_regel ADD COLUMN grootboekrekening TEXT NOT NULL DEFAULT ''`,
+      `ALTER TABLE begroting_frozen_verzekering_regel ADD COLUMN ogb_kostensoort TEXT NULL`,
+    ],
+  },
 ];
 
 function schemaMetaTableExists(db: DatabaseSync): boolean {

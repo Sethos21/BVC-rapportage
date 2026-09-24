@@ -98,6 +98,8 @@ interface RegelRow {
   regel_id: number;
   complexnummer: string;
   verzekeraar: string;
+  grootboekrekening: string;
+  ogb_kostensoort: string | null;
   ingangsdatum: string;
   looptijd_maanden: number;
   bedrag: string;
@@ -156,9 +158,9 @@ export function schrijfFrozenVerzekeringResultaatZonderTransactie(
 
   const insertRegel = db.prepare(
     `INSERT INTO begroting_frozen_verzekering_regel
-       (begroting_versie_id, regel_id, complexnummer, verzekeraar, ingangsdatum, looptijd_maanden, bedrag, index_percentage,
+       (begroting_versie_id, regel_id, complexnummer, verzekeraar, grootboekrekening, ogb_kostensoort, ingangsdatum, looptijd_maanden, bedrag, index_percentage,
         handmatig_begroot_override, berekend_begroot, effectief_begroot, eerste_relevante_verlengmoment, aantal_relevante_verlengmomenten)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   for (const { persistentieId, regel } of resultaat.regels) {
     const invoer = regel.invoer;
@@ -167,6 +169,8 @@ export function schrijfFrozenVerzekeringResultaatZonderTransactie(
       persistentieId,
       invoer.complexnummer,
       invoer.verzekeraar,
+      invoer.grootboekrekening,
+      invoer.ogbKostensoort ?? null,
       optioneleBusinessDate(invoer.ingangsdatum),
       invoer.looptijdMaanden,
       invoer.bedrag !== null ? invoer.bedrag.toString() : null,
@@ -239,7 +243,7 @@ export function leesFrozenVerzekeringResultaat(db: DatabaseSync, versieId: strin
 
   const regelRijen = db
     .prepare(
-      `SELECT regel_id, complexnummer, verzekeraar, ingangsdatum, looptijd_maanden, bedrag, index_percentage,
+      `SELECT regel_id, complexnummer, verzekeraar, grootboekrekening, ogb_kostensoort, ingangsdatum, looptijd_maanden, bedrag, index_percentage,
               handmatig_begroot_override, berekend_begroot, effectief_begroot, eerste_relevante_verlengmoment, aantal_relevante_verlengmomenten
        FROM begroting_frozen_verzekering_regel
        WHERE begroting_versie_id = ?
@@ -254,6 +258,8 @@ export function leesFrozenVerzekeringResultaat(db: DatabaseSync, versieId: strin
       invoer: {
         complexnummer: rij.complexnummer,
         verzekeraar: rij.verzekeraar,
+        grootboekrekening: rij.grootboekrekening,
+        ogbKostensoort: rij.ogb_kostensoort,
         ingangsdatum: parseBusinessDate(rij.ingangsdatum),
         looptijdMaanden: rij.looptijd_maanden,
         bedrag: new Decimal(rij.bedrag),

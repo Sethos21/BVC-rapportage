@@ -617,6 +617,8 @@ function naarPureVerzekeringInvoer(regel: VerzekeringRegel): BgVerzekeringRegelI
   return {
     complexnummer: regel.complexnummer,
     verzekeraar: regel.verzekeraar,
+    grootboekrekening: regel.grootboekrekening,
+    ogbKostensoort: regel.ogbKostensoort,
     ingangsdatum: regel.ingangsdatum,
     looptijdMaanden: regel.looptijdMaanden,
     bedrag: regel.bedrag,

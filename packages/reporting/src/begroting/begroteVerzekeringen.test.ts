@@ -3,6 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   bepaalRelevanteVerlengmomenten,
   berekenBegroteVerzekeringen,
+  berekenEstimatedVerzekeringen,
+  berekenResterendePremieVoorstel,
+  berekenVerzekeringMaandverloop,
   berekenWerkelijkVerzekeringen,
   type BgVerzekeringAannames,
   type BgVerzekeringRegelInvoer,
@@ -111,6 +114,7 @@ describe("berekenBegroteVerzekeringen", () => {
     return {
       complexnummer: "001",
       verzekeraar: "Assuradeuren Gilde B.V.",
+      grootboekrekening: "4130",
       ingangsdatum: new Date(Date.UTC(2020, 6, 1)),
       looptijdMaanden: 12,
       bedrag: new Decimal(12000),
@@ -391,5 +395,98 @@ describe("berekenWerkelijkVerzekeringen — FASE M7 (nieuw patroon: reeds geclas
     expect(r.moduleTotaal.toString()).toBe("0");
     expect(r.perCategorie).toHaveLength(1);
     expect(r.nietGeclassificeerdAantalBoekingen).toBe(0);
+  });
+});
+
+describe("berekenBegroteVerzekeringen — grootboekrekening/OGB (Master Contract §6.7)", () => {
+  const AANNAMES: BgVerzekeringAannames = { begrotingsjaar: 2027, beoordeeld: true };
+  function regel(overrides: Partial<BgVerzekeringRegelInvoer> = {}): BgVerzekeringRegelInvoer {
+    return {
+      complexnummer: "001",
+      verzekeraar: "Assuradeuren Gilde B.V.",
+      grootboekrekening: "4130",
+      ingangsdatum: new Date(Date.UTC(2020, 6, 1)),
+      looptijdMaanden: 12,
+      bedrag: new Decimal(12000),
+      indexPercentage: new Decimal(3),
+      handmatigBegrootOverride: null,
+      ...overrides,
+    };
+  }
+
+  it("ontbrekende grootboekrekening: KRITIEK, bedrag blijft financieel meetellen (zoals complex/verzekeraar)", () => {
+    const metGl = berekenBegroteVerzekeringen([regel()], AANNAMES);
+    const zonderGl = berekenBegroteVerzekeringen([regel({ grootboekrekening: "  " })], AANNAMES);
+    expect(zonderGl.controleVereist.filter((c) => c.ernst === "KRITIEK" && c.bericht.includes("grootboekrekening"))).toHaveLength(1);
+    expect(zonderGl.totaalEffectiefBegroot.toString()).toBe(metGl.totaalEffectiefBegroot.toString());
+    expect(metGl.controleVereist.filter((c) => c.bericht.includes("grootboekrekening"))).toHaveLength(0);
+  });
+
+  it("OGB is optioneel en beïnvloedt noch validatie noch bedrag", () => {
+    const zonder = berekenBegroteVerzekeringen([regel()], AANNAMES);
+    const met = berekenBegroteVerzekeringen([regel({ ogbKostensoort: "4131" })], AANNAMES);
+    expect(met.totaalEffectiefBegroot.toString()).toBe(zonder.totaalEffectiefBegroot.toString());
+    expect(met.controleVereist).toEqual(zonder.controleVereist);
+  });
+});
+
+describe("Verzekeringen — maandverloop, kwartalen en resterende-premievoorstel (Master Contract §6.7)", () => {
+  const JAAR = 2027;
+  function polis(overrides: Partial<BgVerzekeringRegelInvoer> = {}): BgVerzekeringRegelInvoer {
+    return {
+      complexnummer: "001",
+      verzekeraar: "Gilde",
+      grootboekrekening: "4130",
+      ingangsdatum: new Date(Date.UTC(2020, 6, 1)),
+      looptijdMaanden: 12,
+      bedrag: new Decimal(12000),
+      indexPercentage: new Decimal(3),
+      handmatigBegrootOverride: null,
+      ...overrides,
+    };
+  }
+
+  it("maandverloop jan-dec: basis vóór, geïndexeerd vanaf de eerste verlengingsmaand (gemarkeerd); kwartalen kloppen met het jaarbedrag", () => {
+    const verloop = berekenVerzekeringMaandverloop(polis(), JAAR)!;
+    expect(verloop.maanden.map((m) => m.bedrag.toString())).toEqual(["1000", "1000", "1000", "1000", "1000", "1000", "1030", "1030", "1030", "1030", "1030", "1030"]);
+    expect(verloop.maanden.filter((m) => m.isEersteIndexatiemaand).map((m) => m.maand)).toEqual([7]);
+    expect(verloop.kwartalen.map((q) => q.toString())).toEqual(["3000", "3000", "3090", "3090"]);
+    const jaar = berekenBegroteVerzekeringen([polis()], { begrotingsjaar: JAAR, beoordeeld: true }).regels[0]!.berekendBegroot;
+    expect(verloop.kwartalen.reduce((a, q) => a.plus(q), new Decimal(0)).toString()).toBe(jaar.toString());
+  });
+
+  it("polis die later in het jaar start: maanden vóór de start zijn €0 (NIET_BESTAAND); polis na het jaar: alle maanden €0", () => {
+    const laat = berekenVerzekeringMaandverloop(polis({ ingangsdatum: new Date(Date.UTC(2027, 3, 1)) }), JAAR)!;
+    expect(laat.maanden.slice(0, 3).every((m) => m.status === "NIET_BESTAAND" && m.bedrag.isZero())).toBe(true);
+    expect(laat.maanden[3]!.bedrag.toString()).toBe("1000");
+    const later = berekenVerzekeringMaandverloop(polis({ ingangsdatum: new Date(Date.UTC(2028, 0, 1)) }), JAAR)!;
+    expect(later.kwartalen.every((q) => q.isZero())).toBe(true);
+  });
+
+  it("onrekenbare polis geeft null (onbekend), nooit een stille €0-reeks; een override verandert het verloop niet", () => {
+    expect(berekenVerzekeringMaandverloop(polis({ bedrag: null }), JAAR)).toBeNull();
+    const zonder = berekenVerzekeringMaandverloop(polis(), JAAR)!;
+    const met = berekenVerzekeringMaandverloop(polis({ handmatigBegrootOverride: new Decimal(99) }), JAAR)!;
+    expect(met.kwartalen.map((q) => q.toString())).toEqual(zonder.kwartalen.map((q) => q.toString()));
+  });
+
+  it("resterende premie (voorstel) = som van voorstel-maanden over de resterende maanden; Estimated = Werkelijk + voorstel, Begroting ongewijzigd", () => {
+    const regels = [polis(), polis({ complexnummer: "002", bedrag: new Decimal(6000), indexPercentage: new Decimal(0) })];
+    const voorstel = berekenResterendePremieVoorstel(regels, JAAR, [7, 8, 9, 10, 11, 12]);
+    expect(voorstel.voorstel!.toString()).toBe("9180"); // 6×1030 + 6×500
+    const begroting = berekenBegroteVerzekeringen(regels, { begrotingsjaar: JAAR, beoordeeld: true });
+    const werkelijk = berekenWerkelijkVerzekeringen([{ economischeCategorie: "BRAND_OPSTALVERZEKERING", complexnummer: "001", saldo: new Decimal(9000) }]);
+    const estimated = berekenEstimatedVerzekeringen(begroting, werkelijk, true, { BRAND_OPSTALVERZEKERING: voorstel.voorstel });
+    expect(estimated.moduleEstimatedTotaal!.toString()).toBe("18180");
+    expect(estimated.moduleBegrotingTotaal.toString()).toBe(begroting.totaalEffectiefBegroot.toString());
+  });
+
+  it("resterende premie: één onrekenbare polis maakt het voorstel null (onbekend ≠ €0); ongeldige maandinvoer wordt geweigerd", () => {
+    const r = berekenResterendePremieVoorstel([polis(), polis({ looptijdMaanden: null })], JAAR, [12]);
+    expect(r.voorstel).toBeNull();
+    expect(r.onrekenbareRegelIndices).toEqual([1]);
+    expect(() => berekenResterendePremieVoorstel([], JAAR, [13])).toThrow(RangeError);
+    expect(() => berekenResterendePremieVoorstel([], JAAR, [3, 3])).toThrow(RangeError);
+    expect(berekenResterendePremieVoorstel([], JAAR, [1, 2]).voorstel!.toString()).toBe("0");
   });
 });
