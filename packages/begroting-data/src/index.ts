@@ -241,6 +241,37 @@ export {
   leesCorrectiefDagelijksOnderhoudBeoordeeld,
 } from "./correctiefDagelijksOnderhoudBeoordeeld.js";
 
+// DELTA BUILD 2 (2026-09-24) — Estimated Gepland Onderhoud: resterende
+// verwachting per bestaande activiteit (UPSERT, 1-op-1) + Estimated-only
+// activiteiten (complete-list-save). Zelfde architectuurkeuze als
+// Geplande-Verkoop-Estimated: BEWUST GEEN CONCEPT-check, NOOIT bevroren, GEEN
+// pure-calculator-integratie in dit bestand — zie `geplandOnderhoudEstimated.ts`'s
+// moduledoc.
+export {
+  schrijfGeplandOnderhoudEstimatedVerwachtingen,
+  leesGeplandOnderhoudEstimatedVerwachtingen,
+  type GeplandOnderhoudEstimatedVerwachting,
+  type GeplandOnderhoudEstimatedVerwachtingInvoer,
+  schrijfGeplandOnderhoudEstimatedOnlyActiviteiten,
+  leesGeplandOnderhoudEstimatedOnlyActiviteiten,
+  type GeplandOnderhoudEstimatedOnlyActiviteit,
+  type GeplandOnderhoudEstimatedOnlyActiviteitInvoer,
+} from "./geplandOnderhoudEstimated.js";
+
+// DELTA BUILD 2 (2026-09-24) — Estimated Correctief/Dagelijks Onderhoud:
+// exact hetzelfde patroon als Estimated Gepland Onderhoud hierboven, zie
+// `correctiefDagelijksOnderhoudEstimated.ts`'s moduledoc.
+export {
+  schrijfCorrectiefDagelijksOnderhoudEstimatedVerwachtingen,
+  leesCorrectiefDagelijksOnderhoudEstimatedVerwachtingen,
+  type CorrectiefDagelijksOnderhoudEstimatedVerwachting,
+  type CorrectiefDagelijksOnderhoudEstimatedVerwachtingInvoer,
+  schrijfCorrectiefDagelijksOnderhoudEstimatedOnlyRegels,
+  leesCorrectiefDagelijksOnderhoudEstimatedOnlyRegels,
+  type CorrectiefDagelijksOnderhoudEstimatedOnlyRegel,
+  type CorrectiefDagelijksOnderhoudEstimatedOnlyRegelInvoer,
+} from "./correctiefDagelijksOnderhoudEstimated.js";
+
 // Verzekeringen (OB-032) — UITSLUITEND concept-persistence (geen
 // pure-calculator-integratie in dit bestand zelf; herberekening/frozen
 // output zitten in herberekenen.js/frozenVerzekeringResultaat.js). Bewust

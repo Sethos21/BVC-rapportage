@@ -3697,6 +3697,89 @@ export const MIGRATIONS: readonly Migration[] = [
       `ALTER TABLE begroting_frozen_correctief_dagelijks_onderhoud_regel ADD COLUMN ogb_kostensoort TEXT NULL`,
     ],
   },
+  /**
+   * DELTA BUILD 2 (2026-09-24, FO/UX-conformering): persistentie voor
+   * Estimated Gepland Onderhoud en Estimated Correctief/Dagelijks Onderhoud
+   * (`@bvc/reporting`'s `begroteGeplandOnderhoudEstimated.ts`/
+   * `begroteCorrectiefDagelijksOnderhoudEstimated.ts`) — vier nieuwe tabellen:
+   *
+   * 1. `begroting_gepland_onderhoud_estimated_verwachting` — resterende
+   *    kwartaalverwachting gekoppeld aan een BESTAANDE Gepland-activiteit.
+   *    `activiteit_id` is zowel PRIMARY KEY als FK (ON DELETE CASCADE) — een
+   *    activiteit heeft ten hoogste ÉÉN resterende-verwachtingsrij, geen
+   *    aparte surrogaatsleutel nodig (1-op-1-relatie, geen nieuwe
+   *    businessidentiteit geïntroduceerd, zie stopcriteria §19).
+   * 2. `begroting_gepland_onderhoud_estimated_only_activiteit` — losstaande
+   *    Estimated-only activiteiten (eigen surrogaat-`id`, geen koppeling naar
+   *    een bestaande activiteit).
+   * 3. `begroting_correctief_dagelijks_onderhoud_estimated_verwachting` —
+   *    zelfde 1-op-1-patroon als (1), maar gekoppeld aan
+   *    `begroting_correctief_dagelijks_onderhoud_regel` en met een enkel
+   *    `resterend_bedrag` (NULL toegestaan — "nog niet ingevuld" is een
+   *    eersteklas toestand, zie `begroteCorrectiefDagelijksOnderhoudEstimated.ts`'s
+   *    moduledoc).
+   * 4. `begroting_correctief_dagelijks_onderhoud_estimated_only_regel` —
+   *    losstaande Estimated-only regels (eigen surrogaat-`id`).
+   *
+   * BEWUST GEEN VASTGESTELD-IMMUTABILITY-TRIGGERS (architectuurprecedent:
+   * migratie 22's `begroting_geplande_verkoop_estimated_regel`, zie
+   * `geplandeVerkoopEstimatedRegels.ts`'s moduledoc voor de volledige
+   * onderbouwing): Estimated is een onafhankelijk bijgewerkte actuele
+   * verwachting die na vaststellen van de Begroting moet kunnen blijven
+   * bewegen. Alle vier tabellen blijven wel gebonden aan het bestaan van de
+   * begrotingsversie (FK ON DELETE CASCADE naar `begrotingsversies`) — alleen
+   * de CONCEPT/VASTGESTELD-statuscheck ontbreekt bewust, net als bij
+   * Geplande Verkoop.
+   *
+   * GEEN FROZEN-TABELLEN: Estimated wordt, exact zoals Geplande-Verkoop-
+   * Estimated, NOOIT bevroren — dat is een expliciet vastgestelde
+   * architectuurkeuze (§12 van de Delta-Build-2-opdracht), geen ontbrekende
+   * bouwstap.
+   */
+  {
+    version: 27,
+    description: "Gepland/Correctief Onderhoud: Estimated-persistentie (resterende verwachting per bestaande activiteit/regel + Estimated-only activiteiten/regels)",
+    ddl: [
+      `CREATE TABLE begroting_gepland_onderhoud_estimated_verwachting (
+        activiteit_id INTEGER PRIMARY KEY REFERENCES begroting_gepland_onderhoud_activiteit(id) ON DELETE CASCADE,
+        begroting_versie_id TEXT NOT NULL REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        q1 TEXT NOT NULL,
+        q2 TEXT NOT NULL,
+        q3 TEXT NOT NULL,
+        q4 TEXT NOT NULL
+      )`,
+      `CREATE INDEX idx_begroting_gepland_onderhoud_estimated_verwachting_versie ON begroting_gepland_onderhoud_estimated_verwachting(begroting_versie_id)`,
+      `CREATE TABLE begroting_gepland_onderhoud_estimated_only_activiteit (
+        id INTEGER PRIMARY KEY,
+        begroting_versie_id TEXT NOT NULL REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        complexnummer TEXT NOT NULL,
+        omschrijving TEXT NOT NULL,
+        grootboekrekening TEXT NOT NULL,
+        ogb_kostensoort TEXT NULL,
+        q1 TEXT NOT NULL,
+        q2 TEXT NOT NULL,
+        q3 TEXT NOT NULL,
+        q4 TEXT NOT NULL
+      )`,
+      `CREATE INDEX idx_begroting_gepland_onderhoud_estimated_only_activiteit_versie ON begroting_gepland_onderhoud_estimated_only_activiteit(begroting_versie_id)`,
+      `CREATE TABLE begroting_correctief_dagelijks_onderhoud_estimated_verwachting (
+        regel_id INTEGER PRIMARY KEY REFERENCES begroting_correctief_dagelijks_onderhoud_regel(id) ON DELETE CASCADE,
+        begroting_versie_id TEXT NOT NULL REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        resterend_bedrag TEXT NULL
+      )`,
+      `CREATE INDEX idx_begroting_cd_onderhoud_estimated_verwachting_versie ON begroting_correctief_dagelijks_onderhoud_estimated_verwachting(begroting_versie_id)`,
+      `CREATE TABLE begroting_correctief_dagelijks_onderhoud_estimated_only_regel (
+        id INTEGER PRIMARY KEY,
+        begroting_versie_id TEXT NOT NULL REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        omschrijving TEXT NOT NULL,
+        complexnummer TEXT NULL,
+        grootboekrekening TEXT NOT NULL,
+        ogb_kostensoort TEXT NULL,
+        resterend_bedrag TEXT NULL
+      )`,
+      `CREATE INDEX idx_begroting_cd_onderhoud_estimated_only_regel_versie ON begroting_correctief_dagelijks_onderhoud_estimated_only_regel(begroting_versie_id)`,
+    ],
+  },
 ];
 
 function schemaMetaTableExists(db: DatabaseSync): boolean {
