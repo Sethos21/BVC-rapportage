@@ -3780,6 +3780,85 @@ export const MIGRATIONS: readonly Migration[] = [
       `CREATE INDEX idx_begroting_cd_onderhoud_estimated_only_regel_versie ON begroting_correctief_dagelijks_onderhoud_estimated_only_regel(begroting_versie_id)`,
     ],
   },
+  /**
+   * Canon erfpacht (OB-034; Master Contract §6.9): concept-input — regels
+   * (één per bestaand complex) + module-brede beoordeeld-vlag. Exact het
+   * patroon van migratie 12 (Verzekeringen): beide tabellen krijgen de drie
+   * VASTGESTELD-immutability-triggers (INSERT/UPDATE/DELETE).
+   *
+   * `jaarcanon`/`index_percentage` zijn bewust NULL-toegestaan: `NULL` = "niet
+   * ingevuld" (blokkeert beoordeling in de pure calculator), expliciet `'0'` =
+   * bewust geen erfpacht — nooit stilzwijgend gelijkgesteld. Een functioneel
+   * onvolledig CONCEPT (leeg complexnummer/grootboekrekening) moet opslaanbaar
+   * blijven; daarom NOT NULL zonder CHECK op inhoud (validatie hoort in de
+   * calculator). Geen enum-CHECK nodig: dit model kent geen enumvelden.
+   *
+   * BEWUST NIET in deze migratie: frozen-tabellen en de "verborgen module per
+   * administratie"-registratie — beide hangen af van nog niet vastgestelde
+   * besluiten (zie oplevering).
+   */
+  {
+    version: 28,
+    description: "Canon erfpacht: concept-input (regels per complex + module-brede beoordeeld-vlag)",
+    ddl: [
+      `CREATE TABLE begroting_canon_erfpacht_regel (
+        id INTEGER PRIMARY KEY,
+        begroting_versie_id TEXT NOT NULL REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        complexnummer TEXT NOT NULL,
+        grootboekrekening TEXT NOT NULL,
+        ogb_kostensoort TEXT NULL,
+        jaarcanon TEXT NULL,
+        index_percentage TEXT NULL
+      )`,
+      `CREATE INDEX idx_begroting_canon_erfpacht_regel_versie ON begroting_canon_erfpacht_regel(begroting_versie_id)`,
+      `CREATE TABLE begroting_canon_erfpacht_module (
+        begroting_versie_id TEXT PRIMARY KEY REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        beoordeeld INTEGER NOT NULL CHECK (beoordeeld IN (0, 1))
+      )`,
+      `CREATE TRIGGER trg_begroting_canon_erfpacht_regel_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_canon_erfpacht_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_canon_erfpacht_regel: begrotingsversie is VASTGESTELD, regels zijn immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_canon_erfpacht_regel_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_canon_erfpacht_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_canon_erfpacht_regel: begrotingsversie is VASTGESTELD, regels zijn immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_canon_erfpacht_regel_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_canon_erfpacht_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_canon_erfpacht_regel: begrotingsversie is VASTGESTELD, regels zijn immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_canon_erfpacht_module_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_canon_erfpacht_module
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_canon_erfpacht_module: begrotingsversie is VASTGESTELD, beoordeeld-vlag is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_canon_erfpacht_module_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_canon_erfpacht_module
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_canon_erfpacht_module: begrotingsversie is VASTGESTELD, beoordeeld-vlag is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_canon_erfpacht_module_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_canon_erfpacht_module
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_canon_erfpacht_module: begrotingsversie is VASTGESTELD, beoordeeld-vlag is immutable');
+       END`,
+    ],
+  },
 ];
 
 function schemaMetaTableExists(db: DatabaseSync): boolean {

@@ -272,6 +272,17 @@ export {
   type CorrectiefDagelijksOnderhoudEstimatedOnlyRegelInvoer,
 } from "./correctiefDagelijksOnderhoudEstimated.js";
 
+// Canon erfpacht (OB-034) — UITSLUITEND concept-persistence (regels per complex +
+// beoordeeld-vlag). Geen integratie in herberekenen/vaststellen/frozen en geen
+// "verborgen module"-registratie — zie migratie 28 en de oplevering.
+export {
+  schrijfCanonErfpachtRegels,
+  leesCanonErfpachtRegels,
+  type CanonErfpachtRegel,
+  type CanonErfpachtRegelInvoer,
+} from "./canonErfpachtRegels.js";
+export { schrijfCanonErfpachtBeoordeeld, leesCanonErfpachtBeoordeeld } from "./canonErfpachtBeoordeeld.js";
+
 // DELTA BUILD 3 (2026-09-24) — Onderhoud-brede orchestratie: Begroting
 // (Gepland + Correctief/Dagelijks) + Werkelijk (exact éénmaal, op
 // Onderhoud-totaalniveau) + resterende verwachting → Estimated Onderhoud.
