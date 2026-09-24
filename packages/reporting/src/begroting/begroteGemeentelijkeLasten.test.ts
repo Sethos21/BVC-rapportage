@@ -4,6 +4,7 @@ import {
   berekenBegroteGemeentelijkeLasten,
   berekenWerkelijkGemeentelijkeLasten,
   type BgGemeentelijkeLastenAannames,
+  bepaalWozHistorie,
   type BgWozObjectInvoer,
   type WerkelijkGemeentelijkeLastenBoekingRegel,
 } from "./begroteGemeentelijkeLasten.js";
@@ -25,7 +26,8 @@ function aannames(overrides: Partial<BgGemeentelijkeLastenAannames> = {}): BgGem
 function wozObject(overrides: Partial<BgWozObjectInvoer> = {}): BgWozObjectInvoer {
   return {
     complexnummer: "001",
-    wozObjectAdres: "Prins Willem-Alexander Sportpark 2",
+    objectType: "GEHEEL_COMPLEX",
+    unitnummer: null,
     aanslagjaar: 2026,
     waardepeildatum: new Date(Date.UTC(2026, 0, 1)),
     werkelijkeWoz: new Decimal(1000000),
@@ -127,10 +129,10 @@ describe("berekenBegroteGemeentelijkeLasten", () => {
     expect(r.controleVereist.some((c) => c.ernst === "WAARSCHUWING" && c.bericht.includes("lastenPercentageStijging"))).toBe(true);
   });
 
-  it("J. negatieve werkelijke WOZ: WAARSCHUWING, rekenkundig verwerkt", () => {
+  it("J. niet-positieve werkelijke WOZ: KRITIEK (Master Contract §6.8: positieve WOZ verplicht), de waarde blijft rekenkundig verwerkt", () => {
     const r = berekenBegroteGemeentelijkeLasten([wozObject({ werkelijkeWoz: new Decimal(-500000) })], aannames());
     expect(r.totaleWerkelijkeWoz.toString()).toBe("-500000");
-    expect(r.controleVereist.some((c) => c.ernst === "WAARSCHUWING" && c.bericht.includes("werkelijkeWoz"))).toBe(true);
+    expect(r.controleVereist.some((c) => c.ernst === "KRITIEK" && c.bericht.includes("moet positief zijn"))).toBe(true);
   });
 
   it("K. één object aanwezig maar totale werkelijke WOZ = 0: geen deling door nul, KRITIEK, geen NaN/Infinity, REVIEWED_WITH_OBJECTS", () => {
@@ -167,7 +169,7 @@ describe("berekenBegroteGemeentelijkeLasten", () => {
 
   it("M. onvolledige WOZ-regel (ontbrekend complex/adres/datum/woz): KRITIEK per veld, veilige bijdrage, geen crash", () => {
     const r = berekenBegroteGemeentelijkeLasten(
-      [wozObject({ complexnummer: null, wozObjectAdres: null, aanslagjaar: null, waardepeildatum: null, werkelijkeWoz: null })],
+      [wozObject({ complexnummer: null, objectType: null, aanslagjaar: null, waardepeildatum: null, werkelijkeWoz: null })],
       aannames(),
     );
     expect(r.wozObjecten[0]?.effectiefVerwachteWoz.toString()).toBe("0");
@@ -297,5 +299,86 @@ describe("berekenWerkelijkGemeentelijkeLasten — FASE M7 (nieuw patroon: reeds 
     const somAlleBoekingen = boekingen.reduce((t, b) => t.plus(b.saldo), new Decimal(0));
     const somCategorieen = r.perCategorie.reduce((t, c) => t.plus(c.categorieTotaal), new Decimal(0));
     expect(somCategorieen.plus(r.nietGeclassificeerdTotaal).toString()).toBe(somAlleBoekingen.toString());
+  });
+});
+
+describe("WOZ-object = bestaand complex + geheel complex of bestaande unit (Master Contract §6.8)", () => {
+  const kritiek = (objecten: BgWozObjectInvoer[]) => berekenBegroteGemeentelijkeLasten(objecten, aannames()).controleVereist.filter((c) => c.ernst === "KRITIEK");
+
+  it("geldige objectkeuzes: geheel complex (zonder unitnummer) en unit (met unitnummer) geven geen KRITIEK", () => {
+    expect(kritiek([wozObject({ objectType: "GEHEEL_COMPLEX", unitnummer: null })])).toEqual([]);
+    expect(kritiek([wozObject({ objectType: "UNIT", unitnummer: "A-12" })])).toEqual([]);
+  });
+
+  it("geen objectkeuze, unit zonder unitnummer of geheel complex mét unitnummer: KRITIEK, bedrag blijft meetellen", () => {
+    for (const ongeldig of [wozObject({ objectType: null }), wozObject({ objectType: "UNIT", unitnummer: " " }), wozObject({ objectType: "GEHEEL_COMPLEX", unitnummer: "A-1" })]) {
+      const r = berekenBegroteGemeentelijkeLasten([ongeldig], aannames());
+      expect(r.controleVereist.filter((c) => c.ernst === "KRITIEK" && (c.bericht.includes("objectkeuze") || c.bericht.includes("unitnummer")))).toHaveLength(1);
+      expect(r.totaleEffectiefVerwachteWoz.toString()).toBe("1100000");
+    }
+  });
+
+  it("de objectkeuze beïnvloedt geen bedrag: unit en geheel complex met dezelfde WOZ geven identieke totalen", () => {
+    const unit = berekenBegroteGemeentelijkeLasten([wozObject({ objectType: "UNIT", unitnummer: "A-12" })], aannames());
+    const geheel = berekenBegroteGemeentelijkeLasten([wozObject()], aannames());
+    expect(unit.begroteGemeentelijkeLasten.toString()).toBe(geheel.begroteGemeentelijkeLasten.toString());
+  });
+
+  it("positieve WOZ: geen KRITIEK; €0 en negatief: KRITIEK", () => {
+    expect(kritiek([wozObject({ werkelijkeWoz: new Decimal(1) })])).toEqual([]);
+    expect(kritiek([wozObject({ werkelijkeWoz: new Decimal(0) })]).some((c) => c.bericht.includes("moet positief zijn"))).toBe(true);
+  });
+});
+
+describe("bepaalWozHistorie — ontwikkeling per complex/unit", () => {
+  const obj = (o: Partial<BgWozObjectInvoer>) => wozObject(o);
+  const objecten = [
+    obj({ complexnummer: "001", aanslagjaar: 2026, werkelijkeWoz: new Decimal(1100000) }),
+    obj({ complexnummer: "001", aanslagjaar: 2024, werkelijkeWoz: new Decimal(1000000) }),
+    obj({ complexnummer: "001", aanslagjaar: 2025, werkelijkeWoz: new Decimal(1050000) }),
+    obj({ complexnummer: "001", objectType: "UNIT", unitnummer: "A-12", aanslagjaar: 2025, werkelijkeWoz: new Decimal(200000) }),
+    obj({ complexnummer: "001", objectType: "UNIT", unitnummer: "A-12", aanslagjaar: 2026, werkelijkeWoz: new Decimal(190000) }),
+    obj({ complexnummer: "002", aanslagjaar: 2026, werkelijkeWoz: new Decimal(500000) }),
+  ];
+
+  it("per object per aanslagjaar oplopend, ontwikkeling in € en %; eerste jaar heeft geen ontwikkeling (null, geen 0)", () => {
+    const h = bepaalWozHistorie(objecten);
+    const geheel001 = h.regels.filter((r) => r.complexnummer === "001" && r.objectType === "GEHEEL_COMPLEX");
+    expect(geheel001.map((r) => r.aanslagjaar)).toEqual([2024, 2025, 2026]);
+    expect(geheel001[0]!.ontwikkelingBedrag).toBeNull();
+    expect(geheel001[0]!.ontwikkelingPercentage).toBeNull();
+    expect(geheel001[1]!.ontwikkelingBedrag!.toString()).toBe("50000");
+    expect(geheel001[1]!.ontwikkelingPercentage!.toString()).toBe("5");
+    expect(geheel001[2]!.ontwikkelingBedrag!.toString()).toBe("50000");
+  });
+
+  it("objecten (geheel complex, unit, ander complex) hebben elk hun eigen historie; een daling is een negatieve ontwikkeling", () => {
+    const h = bepaalWozHistorie(objecten);
+    const unit2026 = h.regels.find((r) => r.objectType === "UNIT" && r.aanslagjaar === 2026)!;
+    expect(unit2026.unitnummer).toBe("A-12");
+    expect(unit2026.ontwikkelingBedrag!.toString()).toBe("-10000");
+    expect(unit2026.ontwikkelingPercentage!.toString()).toBe("-5");
+    expect(h.regels.find((r) => r.complexnummer === "002")!.ontwikkelingBedrag).toBeNull();
+  });
+
+  it("filter op complex en periode; de ontwikkeling van het eerste gefilterde jaar blijft t.o.v. het jaar vóór het filter", () => {
+    const h = bepaalWozHistorie(objecten, { complexnummer: "001", aanslagjaarVan: 2026, aanslagjaarTot: 2026 });
+    expect(h.regels.every((r) => r.complexnummer === "001" && r.aanslagjaar === 2026)).toBe(true);
+    const geheel = h.regels.find((r) => r.objectType === "GEHEEL_COMPLEX")!;
+    expect(geheel.ontwikkelingBedrag!.toString()).toBe("50000");
+  });
+
+  it("invoervolgorde is niet van invloed op de uitkomst", () => {
+    const voor = bepaalWozHistorie(objecten).regels.map((r) => [r.complexnummer, r.objectType, r.unitnummer, r.aanslagjaar, r.ontwikkelingBedrag?.toString() ?? null]);
+    const achter = bepaalWozHistorie([...objecten].reverse()).regels.map((r) => [r.complexnummer, r.objectType, r.unitnummer, r.aanslagjaar, r.ontwikkelingBedrag?.toString() ?? null]);
+    expect(achter).toEqual(voor);
+  });
+
+  it("onvolledige objecten worden expliciet uitgesloten gemeld, nooit stil weggelaten; voorgaande waarde 0 geeft geen percentage", () => {
+    const h = bepaalWozHistorie([obj({ objectType: null }), obj({ aanslagjaar: null }), obj({ werkelijkeWoz: null }), obj({ aanslagjaar: 2025, werkelijkeWoz: new Decimal(0) }), obj({ aanslagjaar: 2026 })]);
+    expect(h.uitgeslotenObjectIndices).toEqual([0, 1, 2]);
+    const laatste = h.regels.find((r) => r.aanslagjaar === 2026)!;
+    expect(laatste.ontwikkelingBedrag!.toString()).toBe("1000000");
+    expect(laatste.ontwikkelingPercentage).toBeNull();
   });
 });

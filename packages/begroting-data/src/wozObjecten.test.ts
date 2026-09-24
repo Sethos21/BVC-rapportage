@@ -34,7 +34,8 @@ function objectInvoer(overrides: Partial<WozObjectInvoer> = {}): WozObjectInvoer
   return {
     id: null,
     complexnummer: "001",
-    wozObjectAdres: "Kerkstraat 1, Schijndel",
+    objectType: "UNIT",
+    unitnummer: "Kerkstraat 1, Schijndel",
     aanslagjaar: 2026,
     waardepeildatum: new Date(Date.UTC(2025, 0, 1)),
     werkelijkeWoz: new Decimal(1_000_000),
@@ -59,7 +60,7 @@ describe("schrijfWozObjecten / leesWozObjecten", () => {
     schrijfWozObjecten(db, versie.id, [objectInvoer()]);
     const gelezen = leesWozObjecten(db, versie.id);
     expect(gelezen).toHaveLength(1);
-    expect(gelezen[0]).toMatchObject({ complexnummer: "001", wozObjectAdres: "Kerkstraat 1, Schijndel", aanslagjaar: 2026 });
+    expect(gelezen[0]).toMatchObject({ complexnummer: "001", unitnummer: "Kerkstraat 1, Schijndel", aanslagjaar: 2026 });
     expect(gelezen[0]?.werkelijkeWoz?.toString()).toBe("1000000");
     expect(gelezen[0]?.waardepeildatum).toEqual(new Date(Date.UTC(2025, 0, 1)));
   });
@@ -67,12 +68,12 @@ describe("schrijfWozObjecten / leesWozObjecten", () => {
   it("3. meerdere objecten binnen hetzelfde complex schrijven/lezen", () => {
     const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
     schrijfWozObjecten(db, versie.id, [
-      objectInvoer({ wozObjectAdres: "Kerkstraat 1" }),
-      objectInvoer({ wozObjectAdres: "Kerkstraat 3" }),
+      objectInvoer({ unitnummer: "Kerkstraat 1" }),
+      objectInvoer({ unitnummer: "Kerkstraat 3" }),
     ]);
     const gelezen = leesWozObjecten(db, versie.id);
     expect(gelezen).toHaveLength(2);
-    expect(gelezen.map((o) => o.wozObjectAdres)).toEqual(["Kerkstraat 1", "Kerkstraat 3"]);
+    expect(gelezen.map((o) => o.unitnummer)).toEqual(["Kerkstraat 1", "Kerkstraat 3"]);
     expect(gelezen.every((o) => o.complexnummer === "001")).toBe(true);
   });
 
@@ -131,7 +132,8 @@ describe("schrijfWozObjecten / leesWozObjecten", () => {
     schrijfWozObjecten(db, versie.id, [
       objectInvoer({
         complexnummer: null,
-        wozObjectAdres: null,
+        objectType: null,
+        unitnummer: null,
         aanslagjaar: null,
         waardepeildatum: null,
         werkelijkeWoz: null,
@@ -140,7 +142,7 @@ describe("schrijfWozObjecten / leesWozObjecten", () => {
     ]);
     const gelezen = leesWozObjecten(db, versie.id)[0]!;
     expect(gelezen.complexnummer).toBeNull();
-    expect(gelezen.wozObjectAdres).toBeNull();
+    expect(gelezen.unitnummer).toBeNull();
     expect(gelezen.aanslagjaar).toBeNull();
     expect(gelezen.waardepeildatum).toBeNull();
     expect(gelezen.werkelijkeWoz).toBeNull();
@@ -169,25 +171,25 @@ describe("schrijfWozObjecten / leesWozObjecten", () => {
 
   it("11. bestaand object update behoudt ID", () => {
     const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
-    const [origineel] = schrijfWozObjecten(db, versie.id, [objectInvoer({ wozObjectAdres: "Origineel" })]);
+    const [origineel] = schrijfWozObjecten(db, versie.id, [objectInvoer({ unitnummer: "Origineel" })]);
 
-    const bijgewerkt = schrijfWozObjecten(db, versie.id, [{ ...naarInvoer(origineel!), wozObjectAdres: "Bijgewerkt" }]);
+    const bijgewerkt = schrijfWozObjecten(db, versie.id, [{ ...naarInvoer(origineel!), unitnummer: "Bijgewerkt" }]);
 
     expect(bijgewerkt).toHaveLength(1);
     expect(bijgewerkt[0]?.id).toBe(origineel!.id);
-    expect(bijgewerkt[0]?.wozObjectAdres).toBe("Bijgewerkt");
+    expect(bijgewerkt[0]?.unitnummer).toBe("Bijgewerkt");
   });
 
   it("11b. de onderliggende UPDATE is zelf id+begroting_versie_id-gebonden (SQL-mechanica, onafhankelijk van de vooraf-check)", () => {
     const versieA = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
     const versieB = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
-    const [objectA] = schrijfWozObjecten(db, versieA.id, [objectInvoer({ wozObjectAdres: "A" })]);
+    const [objectA] = schrijfWozObjecten(db, versieA.id, [objectInvoer({ unitnummer: "A" })]);
 
     const info = db
-      .prepare(`UPDATE begroting_woz_object SET woz_object_adres = 'Gekaapt' WHERE id = ? AND begroting_versie_id = ?`)
+      .prepare(`UPDATE begroting_woz_object SET unitnummer = 'Gekaapt' WHERE id = ? AND begroting_versie_id = ?`)
       .run(objectA!.id, versieB.id);
     expect(Number(info.changes)).toBe(0);
-    expect(leesWozObjecten(db, versieA.id)[0]?.wozObjectAdres).toBe("A");
+    expect(leesWozObjecten(db, versieA.id)[0]?.unitnummer).toBe("A");
   });
 
   it("12. verwijderen via complete-list save verwijdert juiste object", () => {
@@ -218,64 +220,64 @@ describe("schrijfWozObjecten / leesWozObjecten", () => {
   it("14. ID van andere begrotingsversie -> fail-fast + rollback, óók van de overige, op zichzelf geldige operaties in dezelfde save", () => {
     const versieA = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
     const versieB = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
-    const [objectA] = schrijfWozObjecten(db, versieA.id, [objectInvoer({ wozObjectAdres: "A-origineel" })]);
+    const [objectA] = schrijfWozObjecten(db, versieA.id, [objectInvoer({ unitnummer: "A-origineel" })]);
     const [objectB] = schrijfWozObjecten(db, versieB.id, [objectInvoer()]);
 
     expect(() =>
       schrijfWozObjecten(db, versieA.id, [
-        { ...naarInvoer(objectA!), wozObjectAdres: "A-zou-bijgewerkt-worden" },
-        objectInvoer({ complexnummer: "999", wozObjectAdres: "Zou-nieuw-worden" }),
-        { ...naarInvoer(objectB!), wozObjectAdres: "Gekaapt" },
+        { ...naarInvoer(objectA!), unitnummer: "A-zou-bijgewerkt-worden" },
+        objectInvoer({ complexnummer: "999", unitnummer: "Zou-nieuw-worden" }),
+        { ...naarInvoer(objectB!), unitnummer: "Gekaapt" },
       ]),
     ).toThrow(/behoort bij begrotingsversie/);
 
     const huidigA = leesWozObjecten(db, versieA.id);
     expect(huidigA).toHaveLength(1);
-    expect(huidigA[0]?.wozObjectAdres).toBe("A-origineel");
-    expect(leesWozObjecten(db, versieB.id)[0]?.wozObjectAdres).toBe(objectB!.wozObjectAdres);
+    expect(huidigA[0]?.unitnummer).toBe("A-origineel");
+    expect(leesWozObjecten(db, versieB.id)[0]?.unitnummer).toBe(objectB!.unitnummer);
   });
 
   it("15. onbekende bestaande ID -> fail-fast + rollback, óók van de overige, op zichzelf geldige operaties in dezelfde save", () => {
     const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
-    const [bestaand] = schrijfWozObjecten(db, versie.id, [objectInvoer({ wozObjectAdres: "Bestaat al" })]);
+    const [bestaand] = schrijfWozObjecten(db, versie.id, [objectInvoer({ unitnummer: "Bestaat al" })]);
 
     expect(() =>
       schrijfWozObjecten(db, versie.id, [
-        { ...naarInvoer(bestaand!), wozObjectAdres: "Zou-bijgewerkt-worden" },
-        objectInvoer({ id: 999999, wozObjectAdres: "Bestaat niet" }),
+        { ...naarInvoer(bestaand!), unitnummer: "Zou-bijgewerkt-worden" },
+        objectInvoer({ id: 999999, unitnummer: "Bestaat niet" }),
       ]),
     ).toThrow(/bestaat niet/);
 
     expect(leesWozObjecten(db, versie.id)).toHaveLength(1);
-    expect(leesWozObjecten(db, versie.id)[0]?.wozObjectAdres).toBe("Bestaat al");
+    expect(leesWozObjecten(db, versie.id)[0]?.unitnummer).toBe("Bestaat al");
   });
 
   it("16. duplicate bestaande ID in input -> fail-fast + rollback, óók van de overige, op zichzelf geldige operaties in dezelfde save", () => {
     const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
-    const [origineel] = schrijfWozObjecten(db, versie.id, [objectInvoer({ wozObjectAdres: "Origineel" })]);
+    const [origineel] = schrijfWozObjecten(db, versie.id, [objectInvoer({ unitnummer: "Origineel" })]);
 
     expect(() =>
       schrijfWozObjecten(db, versie.id, [
-        { ...naarInvoer(origineel!), wozObjectAdres: "Versie 1" },
-        { ...naarInvoer(origineel!), wozObjectAdres: "Versie 2" },
-        objectInvoer({ complexnummer: "999", wozObjectAdres: "Zou-nieuw-worden" }),
+        { ...naarInvoer(origineel!), unitnummer: "Versie 1" },
+        { ...naarInvoer(origineel!), unitnummer: "Versie 2" },
+        objectInvoer({ complexnummer: "999", unitnummer: "Zou-nieuw-worden" }),
       ]),
     ).toThrow(/meerdere keren voor in één save/);
 
     expect(leesWozObjecten(db, versie.id)).toHaveLength(1);
-    expect(leesWozObjecten(db, versie.id)[0]?.wozObjectAdres).toBe("Origineel");
+    expect(leesWozObjecten(db, versie.id)[0]?.unitnummer).toBe("Origineel");
   });
 
   it("17. save versie A wijzigt nooit versie B", () => {
     const versieA = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
     const versieB = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
-    schrijfWozObjecten(db, versieA.id, [objectInvoer({ wozObjectAdres: "A1" })]);
-    schrijfWozObjecten(db, versieB.id, [objectInvoer({ wozObjectAdres: "B1" })]);
+    schrijfWozObjecten(db, versieA.id, [objectInvoer({ unitnummer: "A1" })]);
+    schrijfWozObjecten(db, versieB.id, [objectInvoer({ unitnummer: "B1" })]);
 
-    schrijfWozObjecten(db, versieA.id, [objectInvoer({ wozObjectAdres: "A1-gewijzigd" }), objectInvoer({ wozObjectAdres: "A2-nieuw" })]);
+    schrijfWozObjecten(db, versieA.id, [objectInvoer({ unitnummer: "A1-gewijzigd" }), objectInvoer({ unitnummer: "A2-nieuw" })]);
 
     expect(leesWozObjecten(db, versieB.id)).toHaveLength(1);
-    expect(leesWozObjecten(db, versieB.id)[0]?.wozObjectAdres).toBe("B1");
+    expect(leesWozObjecten(db, versieB.id)[0]?.unitnummer).toBe("B1");
   });
 
   it("18. INSERT via de API wordt geweigerd op een VASTGESTELDE versie", () => {
@@ -294,7 +296,7 @@ describe("schrijfWozObjecten / leesWozObjecten", () => {
     expect(() => db.prepare(`INSERT INTO begroting_woz_object (begroting_versie_id, complexnummer) VALUES (?, '001')`).run(versie.id)).toThrow(
       /immutable/,
     );
-    expect(() => db.prepare(`UPDATE begroting_woz_object SET woz_object_adres = 'gewijzigd' WHERE id = ?`).run(object!.id)).toThrow(/immutable/);
+    expect(() => db.prepare(`UPDATE begroting_woz_object SET unitnummer = 'gewijzigd' WHERE id = ?`).run(object!.id)).toThrow(/immutable/);
     expect(() => db.prepare(`DELETE FROM begroting_woz_object WHERE id = ?`).run(object!.id)).toThrow(/immutable/);
   });
 
@@ -323,5 +325,38 @@ describe("schrijfWozObjecten / leesWozObjecten", () => {
     const huidig = leesWozObjecten(db, versie.id);
     expect(huidig).toHaveLength(1);
     expect(huidig[0]?.complexnummer).toBe("001");
+  });
+});
+describe("WOZ-objecten — objectkeuze complex + geheel complex/unit (Master Contract §6.8)", () => {
+  it("geheel complex (zonder unitnummer), unit (met unitnummer) en nog-niet-gekozen (NULL) round-trippen exact", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    const gelezen = schrijfWozObjecten(db, versie.id, [
+      objectInvoer({ objectType: "GEHEEL_COMPLEX", unitnummer: null }),
+      objectInvoer({ objectType: "UNIT", unitnummer: "A-12" }),
+      objectInvoer({ objectType: null, unitnummer: null }),
+    ]);
+    expect(gelezen.map((o) => [o.objectType, o.unitnummer])).toEqual([
+      ["GEHEEL_COMPLEX", null],
+      ["UNIT", "A-12"],
+      [null, null],
+    ]);
+  });
+
+  it("een ongeldige objectType-waarde (bv. een vrij adres) wordt door de enum-CHECK geweigerd", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    expect(() => schrijfWozObjecten(db, versie.id, [objectInvoer({ objectType: "Kerkstraat 1" })])).toThrow(/CHECK constraint failed/);
+    expect(leesWozObjecten(db, versie.id)).toEqual([]);
+  });
+
+  it("stabiele id: dezelfde unit-sleutel blijft aan dezelfde rij hangen na herschrijven in andere volgorde", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    const [a, b] = schrijfWozObjecten(db, versie.id, [objectInvoer({ objectType: "UNIT", unitnummer: "A" }), objectInvoer({ objectType: "UNIT", unitnummer: "B" })]);
+    const na = schrijfWozObjecten(db, versie.id, [
+      { ...naarInvoer(b!), werkelijkeWoz: new Decimal(2) },
+      { ...naarInvoer(a!), werkelijkeWoz: new Decimal(1) },
+    ]);
+    const perId = new Map(na.map((o) => [o.id, [o.unitnummer, o.werkelijkeWoz!.toString()]]));
+    expect(perId.get(a!.id)).toEqual(["A", "1"]);
+    expect(perId.get(b!.id)).toEqual(["B", "2"]);
   });
 });

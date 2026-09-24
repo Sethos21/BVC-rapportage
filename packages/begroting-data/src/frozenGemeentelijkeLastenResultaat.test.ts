@@ -49,7 +49,8 @@ function normaliseer<T>(value: T): unknown {
 function wozObject(overrides: Partial<BgWozObjectInvoer> = {}): BgWozObjectInvoer {
   return {
     complexnummer: "001",
-    wozObjectAdres: "Prins Willem-Alexander Sportpark 2",
+    objectType: "GEHEEL_COMPLEX",
+    unitnummer: null,
     aanslagjaar: 2026,
     waardepeildatum: new Date(Date.UTC(2026, 0, 1)),
     werkelijkeWoz: new Decimal(1000000),
@@ -143,10 +144,10 @@ describe("schrijfFrozenGemeentelijkeLastenResultaat / leesFrozenGemeentelijkeLas
     expect(gelezen.begroteGemeentelijkeLasten.toString()).toBe(resultaat.begroteGemeentelijkeLasten.toString());
   });
 
-  it("3. complexnummer/wozObjectAdres/aanslagjaar/waardepeildatum round-trip exact", () => {
+  it("3. complexnummer/objectkeuze (unit)/aanslagjaar/waardepeildatum round-trip exact", () => {
     const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
     const resultaat = berekenMetIds(
-      [wozObject({ complexnummer: "010", wozObjectAdres: "Kerkstraat 5", aanslagjaar: 2019, waardepeildatum: new Date(Date.UTC(2019, 0, 1)) })],
+      [wozObject({ complexnummer: "010", objectType: "UNIT", unitnummer: "A-12", aanslagjaar: 2019, waardepeildatum: new Date(Date.UTC(2019, 0, 1)) })],
       [7],
     );
     schrijf(versie.id, resultaat);
@@ -154,7 +155,8 @@ describe("schrijfFrozenGemeentelijkeLastenResultaat / leesFrozenGemeentelijkeLas
     const gelezen = leesFrozenGemeentelijkeLastenResultaat(db, versie.id)!;
     const invoer = gelezen.wozObjecten[0]!.wozObject.invoer;
     expect(invoer.complexnummer).toBe("010");
-    expect(invoer.wozObjectAdres).toBe("Kerkstraat 5");
+    expect(invoer.objectType).toBe("UNIT");
+    expect(invoer.unitnummer).toBe("A-12");
     expect(invoer.aanslagjaar).toBe(2019);
     expect(invoer.waardepeildatum).toEqual(new Date(Date.UTC(2019, 0, 1)));
   });
@@ -218,20 +220,20 @@ describe("schrijfFrozenGemeentelijkeLastenResultaat / leesFrozenGemeentelijkeLas
 
   it("8. controls exact behouden, objectIndex correct vertaald naar/van persistentieId", () => {
     const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
-    // Negatieve WOZ op het TWEEDE object -> WAARSCHUWING met objectIndex = 1 -> persistentieId 20.
+    // Niet-positieve WOZ op het TWEEDE object -> KRITIEK met objectIndex = 1 -> persistentieId 20.
     const resultaat = berekenMetIds([wozObject({ complexnummer: "001" }), wozObject({ complexnummer: "002", werkelijkeWoz: new Decimal(-500000) })], [10, 20]);
-    const relevanteControl = resultaat.controleVereist.find((c) => c.ernst === "WAARSCHUWING")!;
+    const relevanteControl = resultaat.controleVereist.find((c) => c.ernst === "KRITIEK" && c.objectIndex === 1)!;
     expect(relevanteControl.objectIndex).toBe(1);
 
     schrijf(versie.id, resultaat);
 
     const ruweControlRij = db
-      .prepare(`SELECT woz_object_id FROM begroting_frozen_gemeentelijke_lasten_control WHERE begroting_versie_id = ? AND ernst = 'WAARSCHUWING'`)
+      .prepare(`SELECT woz_object_id FROM begroting_frozen_gemeentelijke_lasten_control WHERE begroting_versie_id = ? AND ernst = 'KRITIEK' AND woz_object_id IS NOT NULL`)
       .get(versie.id) as { woz_object_id: number };
     expect(ruweControlRij.woz_object_id).toBe(20);
 
     const gelezen = leesFrozenGemeentelijkeLastenResultaat(db, versie.id)!;
-    const teruggelezenControl = gelezen.controleVereist.find((c) => c.ernst === "WAARSCHUWING")!;
+    const teruggelezenControl = gelezen.controleVereist.find((c) => c.ernst === "KRITIEK" && c.objectIndex === 1)!;
     expect(teruggelezenControl.objectIndex).toBe(1);
     expect(teruggelezenControl.bericht).toBe(relevanteControl.bericht);
   });

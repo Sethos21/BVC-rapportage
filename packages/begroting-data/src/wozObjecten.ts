@@ -14,11 +14,14 @@ import { leesBegrotingsversie } from "./begrotingsversies.js";
  * onderbouwing van de transactiegrens en de versie-isolatie; hier
  * uitsluitend de WOZ-specifieke verschillen.
  *
- * EEN WOZ-OBJECT IS GEEN UNIT/CONTRACT/BOEKINGSREGEL (OB033-003/004): alle
- * zes inhoudelijke velden zijn bewust NULL-toegestaan in CONCEPT — een
- * functioneel onvolledig WOZ-object moet opslaanbaar blijven. `wozObjectAdres`
- * is een vrij tekstveld (GEEN formeel WOZ-objectnummer, dat bestaat niet in
- * de bron — zie het OB-033-brononderzoek). `aanslagjaar`/`waardepeildatum`
+ * WOZ-OBJECT = BESTAAND COMPLEX + GEHEEL COMPLEX OF BESTAANDE UNIT (Master
+ * Contract §6.8, migratie 30; vervangt het eerdere vrije tekstveld
+ * `wozObjectAdres`): `objectType` ('GEHEEL_COMPLEX' | 'UNIT') + `unitnummer`
+ * (bronsleutel, alleen bij UNIT). Alle inhoudelijke velden zijn bewust
+ * NULL-toegestaan in CONCEPT — een functioneel onvolledig WOZ-object moet
+ * opslaanbaar blijven (de pure calculator markeert het als KRITIEK).
+ * `objectType` heeft wél een enum-CHECK (gesloten waardenverzameling of NULL =
+ * "nog niet gekozen"). `aanslagjaar`/`waardepeildatum`
  * zijn zuivere traceerbaarheidsvelden die geen enkele formule raken
  * (OB033-005) — ze worden hier alleen opgeslagen/teruggelezen, nooit
  * gebruikt om iets af te leiden.
@@ -68,7 +71,8 @@ function optioneleParsedBusinessDate(value: string | null): Date | null {
 export interface WozObjectInvoer {
   id: number | null;
   complexnummer: string | null;
-  wozObjectAdres: string | null;
+  objectType: string | null;
+  unitnummer: string | null;
   aanslagjaar: number | null;
   waardepeildatum: Date | null;
   werkelijkeWoz: Decimal | null;
@@ -78,7 +82,8 @@ export interface WozObjectInvoer {
 export interface WozObject {
   id: number;
   complexnummer: string | null;
-  wozObjectAdres: string | null;
+  objectType: string | null;
+  unitnummer: string | null;
   aanslagjaar: number | null;
   waardepeildatum: Date | null;
   werkelijkeWoz: Decimal | null;
@@ -88,7 +93,8 @@ export interface WozObject {
 interface WozObjectRow {
   id: number;
   complexnummer: string | null;
-  woz_object_adres: string | null;
+  object_type: string | null;
+  unitnummer: string | null;
   aanslagjaar: number | null;
   waardepeildatum: string | null;
   werkelijke_woz: string | null;
@@ -99,7 +105,8 @@ function rowToWozObject(row: WozObjectRow): WozObject {
   return {
     id: row.id,
     complexnummer: row.complexnummer,
-    wozObjectAdres: row.woz_object_adres,
+    objectType: row.object_type,
+    unitnummer: row.unitnummer,
     aanslagjaar: row.aanslagjaar,
     waardepeildatum: optioneleParsedBusinessDate(row.waardepeildatum),
     werkelijkeWoz: row.werkelijke_woz !== null ? new Decimal(row.werkelijke_woz) : null,
@@ -111,7 +118,7 @@ function rowToWozObject(row: WozObjectRow): WozObject {
 export function leesWozObjecten(db: DatabaseSync, versieId: string): readonly WozObject[] {
   const rijen = db
     .prepare(
-      `SELECT id, complexnummer, woz_object_adres, aanslagjaar, waardepeildatum, werkelijke_woz, verwachte_woz_override
+      `SELECT id, complexnummer, object_type, unitnummer, aanslagjaar, waardepeildatum, werkelijke_woz, verwachte_woz_override
        FROM begroting_woz_object
        WHERE begroting_versie_id = ?
        ORDER BY id`,
@@ -181,13 +188,13 @@ export function schrijfWozObjecten(db: DatabaseSync, versieId: string, wozObject
 
     const updateStmt = db.prepare(
       `UPDATE begroting_woz_object
-       SET complexnummer = ?, woz_object_adres = ?, aanslagjaar = ?, waardepeildatum = ?, werkelijke_woz = ?, verwachte_woz_override = ?
+       SET complexnummer = ?, object_type = ?, unitnummer = ?, aanslagjaar = ?, waardepeildatum = ?, werkelijke_woz = ?, verwachte_woz_override = ?
        WHERE id = ? AND begroting_versie_id = ?`,
     );
     const insertStmt = db.prepare(
       `INSERT INTO begroting_woz_object
-         (begroting_versie_id, complexnummer, woz_object_adres, aanslagjaar, waardepeildatum, werkelijke_woz, verwachte_woz_override)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+         (begroting_versie_id, complexnummer, object_type, unitnummer, aanslagjaar, waardepeildatum, werkelijke_woz, verwachte_woz_override)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     );
 
     for (const wozObject of wozObjecten) {
@@ -196,7 +203,7 @@ export function schrijfWozObjecten(db: DatabaseSync, versieId: string, wozObject
       const verwachteWozOverride = wozObject.verwachteWozOverride !== null ? wozObject.verwachteWozOverride.toString() : null;
 
       if (wozObject.id === null) {
-        insertStmt.run(versieId, wozObject.complexnummer, wozObject.wozObjectAdres, wozObject.aanslagjaar, waardepeildatum, werkelijkeWoz, verwachteWozOverride);
+        insertStmt.run(versieId, wozObject.complexnummer, wozObject.objectType, wozObject.unitnummer, wozObject.aanslagjaar, waardepeildatum, werkelijkeWoz, verwachteWozOverride);
         continue;
       }
 
@@ -204,7 +211,8 @@ export function schrijfWozObjecten(db: DatabaseSync, versieId: string, wozObject
       // vooraf-ownership-check hierboven (zie moduledoc — twee beschermingslagen, zelfde patroon als GO-P1/CD-P1/Verzekeringen).
       const info = updateStmt.run(
         wozObject.complexnummer,
-        wozObject.wozObjectAdres,
+        wozObject.objectType,
+        wozObject.unitnummer,
         wozObject.aanslagjaar,
         waardepeildatum,
         werkelijkeWoz,

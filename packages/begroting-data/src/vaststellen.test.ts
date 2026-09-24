@@ -2259,7 +2259,8 @@ describe("stelBegrotingVast — Gemeentelijke Lasten/WOZ lifecycle-blokkade (OB-
     return {
       id: null,
       complexnummer: "001",
-      wozObjectAdres: "Prins Willem-Alexander Sportpark 2",
+      objectType: "GEHEEL_COMPLEX",
+      unitnummer: null,
       aanslagjaar: 2026,
       waardepeildatum: new Date(Date.UTC(2026, 0, 1)),
       werkelijkeWoz: new Decimal(1000000),
@@ -2330,10 +2331,10 @@ describe("stelBegrotingVast — Gemeentelijke Lasten/WOZ lifecycle-blokkade (OB-
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
   });
 
-  it("4 (scenario Q). beoordeeld=true + uitsluitend WAARSCHUWING (negatieve werkelijkeWoz) mag vaststellen", () => {
+  it("4 (scenario Q). beoordeeld=true + uitsluitend WAARSCHUWING (negatieve verwachteWozOverride) mag vaststellen", () => {
     const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
     zetMinimaleBasisNeer(versie.id);
-    schrijfWozObjecten(db, versie.id, [wozObjectInvoer({ werkelijkeWoz: new Decimal(-500000) })]);
+    schrijfWozObjecten(db, versie.id, [wozObjectInvoer({ verwachteWozOverride: new Decimal(-500000) })]);
     schrijfGemeentelijkeLastenModule(db, versie.id, moduleInvoer());
 
     expect(() => stelBegrotingVast(db, versie.id)).not.toThrow();
@@ -2473,7 +2474,7 @@ describe("stelBegrotingVast — Gemeentelijke Lasten/WOZ lifecycle-blokkade (OB-
   it("14 (scenario L). controls exact frozen", () => {
     const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
     zetMinimaleBasisNeer(versie.id);
-    schrijfWozObjecten(db, versie.id, [wozObjectInvoer({ werkelijkeWoz: new Decimal(-500000) })]);
+    schrijfWozObjecten(db, versie.id, [wozObjectInvoer({ verwachteWozOverride: new Decimal(-500000) })]);
     schrijfGemeentelijkeLastenModule(db, versie.id, moduleInvoer());
     const resultaat = stelBegrotingVast(db, versie.id);
     const live = resultaat.gemeentelijkeLasten.controleVereist.find((c) => c.ernst === "WAARSCHUWING")!;
@@ -2501,7 +2502,8 @@ describe("stelBegrotingVast — Gemeentelijke Lasten/WOZ atomiciteit (OB-033, fa
     return {
       id: null,
       complexnummer: "001",
-      wozObjectAdres: "Prins Willem-Alexander Sportpark 2",
+      objectType: "GEHEEL_COMPLEX",
+      unitnummer: null,
       aanslagjaar: 2026,
       waardepeildatum: new Date(Date.UTC(2026, 0, 1)),
       werkelijkeWoz: new Decimal(1000000),
@@ -2590,7 +2592,8 @@ describe("stelBegrotingVast — Gemeentelijke Lasten/WOZ immutability (OB-033, f
     return {
       id: null,
       complexnummer: "001",
-      wozObjectAdres: "Prins Willem-Alexander Sportpark 2",
+      objectType: "GEHEEL_COMPLEX",
+      unitnummer: null,
       aanslagjaar: 2026,
       waardepeildatum: new Date(Date.UTC(2026, 0, 1)),
       werkelijkeWoz: new Decimal(1000000),
@@ -2607,9 +2610,9 @@ describe("stelBegrotingVast — Gemeentelijke Lasten/WOZ immutability (OB-033, f
     schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
     schrijfVerzekeringBeoordeeld(db, versie.id, true);
-    // Negatieve werkelijkeWoz geeft bewust een WAARSCHUWING-control, zodat de control-tabel niet leeg is —
+    // Een negatieve verwachteWozOverride geeft bewust een WAARSCHUWING-control, zodat de control-tabel niet leeg is —
     // anders zou de DELETE-trigger daarop nooit een matchende rij vinden (0 rijen = geen trigger-fire).
-    schrijfWozObjecten(db, versie.id, [wozObjectInvoer({ werkelijkeWoz: new Decimal(-500000) })]);
+    schrijfWozObjecten(db, versie.id, [wozObjectInvoer({ verwachteWozOverride: new Decimal(-500000) })]);
     schrijfGemeentelijkeLastenModule(db, versie.id, {
       werkelijkeGemeentelijkeLasten: new Decimal(9000),
       wozStijgingPercentage: new Decimal(10),
@@ -2697,7 +2700,8 @@ describe("stelBegrotingVast — Gemeentelijke Lasten/WOZ frozen-onafhankelijkhei
     return {
       id: null,
       complexnummer: "001",
-      wozObjectAdres: "Prins Willem-Alexander Sportpark 2",
+      objectType: "GEHEEL_COMPLEX",
+      unitnummer: null,
       aanslagjaar: 2026,
       waardepeildatum: new Date(Date.UTC(2026, 0, 1)),
       werkelijkeWoz: new Decimal(1000000),

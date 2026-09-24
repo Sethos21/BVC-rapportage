@@ -22,7 +22,8 @@ import { berekenPnLBoom, type PnLDekkingReden } from "../pnlEngine.js";
 function wozObject(overrides: Partial<BgWozObjectInvoer> = {}): BgWozObjectInvoer {
   return {
     complexnummer: "001",
-    wozObjectAdres: "Prins Willem-Alexander Sportpark 2",
+    objectType: "GEHEEL_COMPLEX",
+    unitnummer: null,
     aanslagjaar: 2026,
     waardepeildatum: new Date(Date.UTC(2026, 0, 1)),
     werkelijkeWoz: new Decimal(1000000),

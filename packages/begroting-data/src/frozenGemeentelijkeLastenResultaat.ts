@@ -120,7 +120,8 @@ interface ResultaatRow {
 interface WozObjectRow {
   woz_object_id: number;
   complexnummer: string;
-  woz_object_adres: string;
+  object_type: string | null;
+  unitnummer: string | null;
   aanslagjaar: number;
   waardepeildatum: string;
   werkelijke_woz: string;
@@ -203,9 +204,9 @@ export function schrijfFrozenGemeentelijkeLastenResultaatZonderTransactie(
 
   const insertWozObject = db.prepare(
     `INSERT INTO begroting_frozen_woz_object
-       (begroting_versie_id, woz_object_id, complexnummer, woz_object_adres, aanslagjaar, waardepeildatum,
+       (begroting_versie_id, woz_object_id, complexnummer, object_type, unitnummer, aanslagjaar, waardepeildatum,
         werkelijke_woz, verwachte_woz_override, automatisch_verwachte_woz, effectief_verwachte_woz)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   for (const { persistentieId, wozObject } of resultaat.wozObjecten) {
     const invoer = wozObject.invoer;
@@ -213,7 +214,8 @@ export function schrijfFrozenGemeentelijkeLastenResultaatZonderTransactie(
       versieId,
       persistentieId,
       invoer.complexnummer,
-      invoer.wozObjectAdres,
+      invoer.objectType,
+      invoer.unitnummer,
       invoer.aanslagjaar,
       invoer.waardepeildatum !== null ? formatBusinessDate(invoer.waardepeildatum) : null,
       invoer.werkelijkeWoz !== null ? invoer.werkelijkeWoz.toString() : null,
@@ -293,7 +295,7 @@ export function leesFrozenGemeentelijkeLastenResultaat(db: DatabaseSync, versieI
 
   const wozObjectRijen = db
     .prepare(
-      `SELECT woz_object_id, complexnummer, woz_object_adres, aanslagjaar, waardepeildatum, werkelijke_woz, verwachte_woz_override,
+      `SELECT woz_object_id, complexnummer, object_type, unitnummer, aanslagjaar, waardepeildatum, werkelijke_woz, verwachte_woz_override,
               automatisch_verwachte_woz, effectief_verwachte_woz
        FROM begroting_frozen_woz_object
        WHERE begroting_versie_id = ?
@@ -304,7 +306,8 @@ export function leesFrozenGemeentelijkeLastenResultaat(db: DatabaseSync, versieI
   const wozObjecten: WozObjectUitkomstMetId[] = wozObjectRijen.map((rij, index) => {
     const invoer: BgWozObjectInvoer = {
       complexnummer: rij.complexnummer,
-      wozObjectAdres: rij.woz_object_adres,
+      objectType: rij.object_type as BgWozObjectInvoer["objectType"],
+      unitnummer: rij.unitnummer,
       aanslagjaar: rij.aanslagjaar,
       waardepeildatum: parseBusinessDate(rij.waardepeildatum),
       werkelijkeWoz: new Decimal(rij.werkelijke_woz),

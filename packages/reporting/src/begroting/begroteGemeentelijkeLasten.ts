@@ -26,11 +26,15 @@ import type { BgControleErnst } from "./begroteHuuropbrengsten.js";
  * door de aanroeper aangeleverde invoer; deze module doet geen eigen
  * historieselectie en benadert geen enkele bron.
  *
- * WOZ-OBJECT ≠ UNIT/CONTRACT/BOEKINGSREGEL (OB033-003/004): een WOZ-object
- * is een zelfstandig, door de gebruiker vastgelegd concept, geïdentificeerd
- * via het vrije tekstveld `wozObjectAdres` (GEEN formeel WOZ-objectnummer —
- * dat bestaat niet in de bron, zie brononderzoek). Elke regel hoort bij
- * exact één `complexnummer`.
+ * WOZ-OBJECT = BESTAAND COMPLEX + "GEHEEL COMPLEX" OF BESTAANDE UNIT (Master
+ * Contract §6.8 / UX §9.2, vastgestelde correctie 2026-09-24 — vervangt de oudere
+ * FO-formulering "WOZ-object/adresniveau"): een WOZ-waarde wordt gekoppeld aan een
+ * bestaand complex (`complexnummer`, bronsleutel) en daarna aan `GEHEEL_COMPLEX`
+ * of aan een bestaande unit (`unitnummer`, bronsleutel binnen het complex; bron:
+ * Units-stam, natuurlijke sleutel Bedrijfsnr+Complexnummer+Unitnummer). GEEN vrij
+ * adres-/objectveld, nooit koppelen op een omschrijving. Deze pure module toetst
+ * NIET of een complex/unit in de bron bestaat (geen bronaccess) — alleen de
+ * structurele geldigheid van de keuze; de aanroepende laag levert bestaande sleutels.
  *
  * DRIE ONAFHANKELIJKE, NIET-CUMULATIEVE STAPPEN (OB033-008/009/011/012/013):
  * 1. per WOZ-object: `automatischVerwachteWoz = werkelijkeWoz × (1 +
@@ -119,11 +123,16 @@ export interface BgGemeentelijkeLastenControleItem {
   bericht: string;
 }
 
+export type BgWozObjectType = "GEHEEL_COMPLEX" | "UNIT";
+const GELDIGE_OBJECT_TYPES: readonly BgWozObjectType[] = ["GEHEEL_COMPLEX", "UNIT"];
+
 export interface BgWozObjectInvoer {
   /** `null` = nog niet ingevuld — KRITIEK, blokkeert de financiële bijdrage niet, wel de complexaggregatie (zie moduledoc). */
   complexnummer: string | null;
-  /** Vrij tekstveld, GEEN formeel WOZ-objectnummer (OB033-004). `null` = nog niet ingevuld — KRITIEK, blokkeert de berekening niet. */
-  wozObjectAdres: string | null;
+  /** `null` = nog niet gekozen — KRITIEK, blokkeert de berekening niet. */
+  objectType: BgWozObjectType | null;
+  /** Bronsleutel van de unit; verplicht bij `UNIT`, moet `null` zijn bij `GEHEEL_COMPLEX`. */
+  unitnummer: string | null;
   /** `null`/niet-geheel = ongeldig — KRITIEK, zuiver traceerbaarheidsveld, raakt geen enkele formule (OB033-005). */
   aanslagjaar: number | null;
   /** `null`/ongeldige datum = KRITIEK, zuiver traceerbaarheidsveld, raakt geen enkele formule (OB033-005). */
@@ -220,8 +229,12 @@ function valideerWozObject(invoer: BgWozObjectInvoer, index: number): BgGemeente
   if (leegOfNull(invoer.complexnummer)) {
     meld(`WOZ-object ${index}: complexnummer ontbreekt — verplicht voor vaststellen; bedrag blijft financieel meetellen (niet in perComplex).`);
   }
-  if (leegOfNull(invoer.wozObjectAdres)) {
-    meld(`WOZ-object ${index}: wozObjectAdres ontbreekt — verplicht voor vaststellen; bedrag blijft financieel meetellen.`);
+  if (invoer.objectType === null || !GELDIGE_OBJECT_TYPES.includes(invoer.objectType)) {
+    meld(`WOZ-object ${index}: objectkeuze ontbreekt of is ongeldig — kies "Geheel complex" of een bestaande unit; verplicht voor vaststellen; bedrag blijft financieel meetellen.`);
+  } else if (invoer.objectType === "UNIT" && leegOfNull(invoer.unitnummer)) {
+    meld(`WOZ-object ${index}: unitnummer ontbreekt bij objectkeuze unit — verplicht voor vaststellen; bedrag blijft financieel meetellen.`);
+  } else if (invoer.objectType === "GEHEEL_COMPLEX" && invoer.unitnummer !== null) {
+    meld(`WOZ-object ${index}: objectkeuze "Geheel complex" mag geen unitnummer hebben — verplicht voor vaststellen; bedrag blijft financieel meetellen.`);
   }
   if (!isGeldigAanslagjaar(invoer.aanslagjaar)) {
     meld(`WOZ-object ${index}: aanslagjaar ontbreekt of is ongeldig — verplicht voor vaststellen; raakt geen enkele berekening.`);
@@ -233,8 +246,8 @@ function valideerWozObject(invoer: BgWozObjectInvoer, index: number): BgGemeente
     meld(`WOZ-object ${index}: werkelijkeWoz ontbreekt — berekening niet mogelijk, veilige bijdrage 0 toegepast.`);
   } else if (invoer.werkelijkeWoz.isNaN()) {
     meld(`WOZ-object ${index}: werkelijkeWoz is geen geldig getal (NaN) — veilige bijdrage 0 toegepast.`);
-  } else if (invoer.werkelijkeWoz.isNegative()) {
-    meld(`WOZ-object ${index}: werkelijkeWoz is negatief (${invoer.werkelijkeWoz.toString()}) — ongebruikelijk, toegestaan, telt rekenkundig mee.`, "WAARSCHUWING");
+  } else if (invoer.werkelijkeWoz.lessThanOrEqualTo(0)) {
+    meld(`WOZ-object ${index}: werkelijkeWoz moet positief zijn (${invoer.werkelijkeWoz.toString()}) — verplicht voor vaststellen (Master Contract §6.8); de waarde blijft rekenkundig meetellen.`);
   }
   if (invoer.verwachteWozOverride !== null) {
     if (invoer.verwachteWozOverride.isNaN()) {
@@ -562,4 +575,112 @@ export function berekenEstimatedGemeentelijkeLasten(
     moduleWerkelijkTotaal: werkelijk.moduleTotaal,
     moduleEstimatedTotaal,
   };
+}
+
+// ── WOZ-historie: ontwikkeling per complex/unit (Master Contract §6.8, 2026-09-24) ──
+
+export interface BgWozHistorieRegel {
+  complexnummer: string;
+  objectType: BgWozObjectType;
+  unitnummer: string | null;
+  aanslagjaar: number;
+  waardepeildatum: Date;
+  werkelijkeWoz: Decimal;
+  /** Verschil met de WOZ-waarde van het voorgaande aanslagjaar van hetzelfde object. `null` voor het eerste jaar (geen voorgaande waarde). */
+  ontwikkelingBedrag: Decimal | null;
+  /** (huidig − voorgaand) / voorgaand × 100. `null` voor het eerste jaar, of wanneer de voorgaande waarde niet positief is (deling door nul voorkomen). */
+  ontwikkelingPercentage: Decimal | null;
+}
+
+export interface BgWozHistorieFilter {
+  complexnummer?: string;
+  aanslagjaarVan?: number;
+  aanslagjaarTot?: number;
+}
+
+export interface BgWozHistorieResultaat {
+  regels: BgWozHistorieRegel[];
+  /** Posities (in de aangeleverde lijst) van objecten die niet in de historie kunnen (onvolledige sleutel, ongeldig aanslagjaar/WOZ) — nooit stil weggelaten. */
+  uitgeslotenObjectIndices: number[];
+}
+
+function objectSleutel(complexnummer: string, objectType: BgWozObjectType, unitnummer: string | null): string {
+  return objectType === "UNIT" ? `${complexnummer}::UNIT::${unitnummer ?? ""}` : `${complexnummer}::GEHEEL_COMPLEX`;
+}
+
+/**
+ * WOZ-HISTORIE (UX §9.2: "De historie bewaart per complex/unit de jaarlijkse waarde en
+ * ontwikkeling in euro's en procenten"): één regel per object (complex + geheel complex/unit)
+ * per aanslagjaar, gesorteerd op complex, object en aanslagjaar. De ontwikkeling wordt
+ * berekend op de VOLLEDIGE historie van het object en pas daarna gefilterd — het eerste
+ * gefilterde jaar toont dus zijn ontwikkeling t.o.v. het (eventueel buiten het filter
+ * liggende) voorgaande jaar. `filter` (complex en/of aanslagjaarperiode, beide grenzen
+ * inclusief) levert de gefilterde rijen waaruit een export kan worden opgebouwd; deze
+ * functie legt GEEN exportformaat vast. Alleen objecten met complete sleutel, geldig
+ * aanslagjaar/waardepeildatum en een geldige WOZ-waarde doen mee; de rest wordt
+ * expliciet gerapporteerd. Twee waarden voor hetzelfde object én aanslagjaar zijn een
+ * data-invoerfout waarvoor geen besluit bestaat: beide rijen blijven, in invoervolgorde.
+ */
+export function bepaalWozHistorie(wozObjectenInvoer: readonly BgWozObjectInvoer[], filter: BgWozHistorieFilter = {}): BgWozHistorieResultaat {
+  const uitgeslotenObjectIndices: number[] = [];
+  const kandidaten: { index: number; regel: Omit<BgWozHistorieRegel, "ontwikkelingBedrag" | "ontwikkelingPercentage"> }[] = [];
+
+  wozObjectenInvoer.forEach((invoer, index) => {
+    const objectTypeGeldig = invoer.objectType !== null && GELDIGE_OBJECT_TYPES.includes(invoer.objectType);
+    const sleutelGeldig =
+      !leegOfNull(invoer.complexnummer) &&
+      objectTypeGeldig &&
+      (invoer.objectType === "UNIT" ? !leegOfNull(invoer.unitnummer) : invoer.unitnummer === null);
+    if (!sleutelGeldig || !isGeldigAanslagjaar(invoer.aanslagjaar) || !isGeldigeDatum(invoer.waardepeildatum) || !isGeldigDecimal(invoer.werkelijkeWoz)) {
+      uitgeslotenObjectIndices.push(index);
+      return;
+    }
+    kandidaten.push({
+      index,
+      regel: {
+        complexnummer: (invoer.complexnummer as string).trim(),
+        objectType: invoer.objectType as BgWozObjectType,
+        unitnummer: invoer.objectType === "UNIT" ? (invoer.unitnummer as string).trim() : null,
+        aanslagjaar: invoer.aanslagjaar,
+        waardepeildatum: invoer.waardepeildatum,
+        werkelijkeWoz: invoer.werkelijkeWoz,
+      },
+    });
+  });
+
+  const perObject = new Map<string, typeof kandidaten>();
+  for (const kandidaat of kandidaten) {
+    const sleutel = objectSleutel(kandidaat.regel.complexnummer, kandidaat.regel.objectType, kandidaat.regel.unitnummer);
+    const groep = perObject.get(sleutel) ?? [];
+    groep.push(kandidaat);
+    perObject.set(sleutel, groep);
+  }
+
+  const regels: BgWozHistorieRegel[] = [];
+  for (const groep of perObject.values()) {
+    const gesorteerd = [...groep].sort((a, b) => a.regel.aanslagjaar - b.regel.aanslagjaar || a.index - b.index);
+    gesorteerd.forEach((kandidaat, positie) => {
+      const vorige = positie > 0 ? gesorteerd[positie - 1]!.regel.werkelijkeWoz : null;
+      const ontwikkelingBedrag = vorige !== null ? kandidaat.regel.werkelijkeWoz.minus(vorige) : null;
+      const ontwikkelingPercentage = vorige !== null && vorige.greaterThan(0) ? kandidaat.regel.werkelijkeWoz.minus(vorige).dividedBy(vorige).times(100) : null;
+      regels.push({ ...kandidaat.regel, ontwikkelingBedrag, ontwikkelingPercentage });
+    });
+  }
+
+  regels.sort(
+    (a, b) =>
+      a.complexnummer.localeCompare(b.complexnummer) ||
+      (a.objectType === b.objectType ? 0 : a.objectType === "GEHEEL_COMPLEX" ? -1 : 1) ||
+      (a.unitnummer ?? "").localeCompare(b.unitnummer ?? "") ||
+      a.aanslagjaar - b.aanslagjaar,
+  );
+
+  const gefilterd = regels.filter(
+    (r) =>
+      (filter.complexnummer === undefined || r.complexnummer === filter.complexnummer) &&
+      (filter.aanslagjaarVan === undefined || r.aanslagjaar >= filter.aanslagjaarVan) &&
+      (filter.aanslagjaarTot === undefined || r.aanslagjaar <= filter.aanslagjaarTot),
+  );
+
+  return { regels: gefilterd, uitgeslotenObjectIndices };
 }

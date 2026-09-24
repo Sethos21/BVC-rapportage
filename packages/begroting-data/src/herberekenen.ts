@@ -57,6 +57,7 @@ import {
   type BgVerzekeringRegelUitkomst,
   type BgVerzekeringResultaat,
   type BgWozObjectInvoer,
+  type BgWozObjectType,
   type BgWozObjectUitkomst,
 } from "@bvc/reporting";
 import {
@@ -189,7 +190,7 @@ import { leesWozObjecten, type WozObject } from "./wozObjecten.js";
  * `berekenBegroteGemeentelijkeLasten` al volledig, zinvol berekenbaar (zie
  * `begroteGemeentelijkeLasten.ts`'s eigen testsuite). Bewust GEEN
  * type-boundary-castfunctie nodig: `WozObject`'s velden
- * (`complexnummer`/`wozObjectAdres`/`aanslagjaar`/`waardepeildatum`/
+ * (`complexnummer`/`objectType`/`unitnummer`/`aanslagjaar`/`waardepeildatum`/
  * `werkelijkeWoz`/`verwachteWozOverride`) mappen eerlijk 1-op-1 naar
  * `BgWozObjectInvoer` — zie `wozObjecten.ts`'s moduledoc. De module-brede
  * aannames (`werkelijkeGemeentelijkeLasten`/`wozStijgingPercentage`/
@@ -663,11 +664,22 @@ function berekenVerzekeringUitInvoer(
   return { ...resultaat, regels: regelsMetId };
 }
 
-/** Letterlijke veldkopie, GEEN transformatie/validatie — GEEN type-boundary-cast nodig (zie `HerberekendeBegroting`'s moduledoc). */
+/**
+ * Type-boundary, GEEN businessvalidatie (zelfde principe als `alsPureAanleidingType`): de
+ * concept-persistentie staat elke string of NULL toe zodat een onvolledig concept opslaanbaar
+ * blijft; een ongeldige waarde bereikt ongewijzigd de pure calculator, die die zelf als
+ * KRITIEK markeert. Uitsluitend NULL blijft NULL ("nog niet gekozen").
+ */
+function alsPureWozObjectType(waarde: string | null): BgWozObjectType | null {
+  return waarde as BgWozObjectType | null;
+}
+
+/** Letterlijke veldkopie, GEEN transformatie/validatie — enige type-boundary: `alsPureWozObjectType`. */
 function naarPureWozObjectInvoer(wozObject: WozObject): BgWozObjectInvoer {
   return {
     complexnummer: wozObject.complexnummer,
-    wozObjectAdres: wozObject.wozObjectAdres,
+    objectType: alsPureWozObjectType(wozObject.objectType),
+    unitnummer: wozObject.unitnummer,
     aanslagjaar: wozObject.aanslagjaar,
     waardepeildatum: wozObject.waardepeildatum,
     werkelijkeWoz: wozObject.werkelijkeWoz,

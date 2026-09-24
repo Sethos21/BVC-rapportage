@@ -3880,6 +3880,31 @@ export const MIGRATIONS: readonly Migration[] = [
       `ALTER TABLE begroting_frozen_verzekering_regel ADD COLUMN ogb_kostensoort TEXT NULL`,
     ],
   },
+  /**
+   * Gemeentelijke lasten/WOZ (Master Contract §6.8 / UX §9.2, vastgestelde
+   * correctie): een WOZ-object is een bestaand complex + "Geheel complex" of een
+   * bestaande unit — GEEN vrij adres-/objectveld meer. Het vrije tekstveld
+   * `woz_object_adres` vervalt op zowel de concept- als de frozen-tabel
+   * (`DROP COLUMN`; de kolom zit in geen index/trigger/constraint) en wordt
+   * vervangen door `object_type` ('GEHEEL_COMPLEX' | 'UNIT' | NULL = nog niet
+   * gekozen, enum-CHECK) + `unitnummer` (bronsleutel, alleen bij UNIT). Bestaande
+   * rijen krijgen bewust `NULL` — een objectkeuze wordt NIET verzonnen uit de oude
+   * vrije tekst; de pure calculator markeert zo'n rij als KRITIEK (objectkeuze
+   * ontbreekt). Er bestaat geen productiedata in deze tabellen (geen Worker/CLI
+   * schrijft ze; alleen tests), dus geen relevant dataverlies.
+   */
+  {
+    version: 30,
+    description: "Gemeentelijke lasten/WOZ: object = complex + geheel complex/unit (object_type + unitnummer) i.p.v. vrij adres",
+    ddl: [
+      `ALTER TABLE begroting_woz_object DROP COLUMN woz_object_adres`,
+      `ALTER TABLE begroting_woz_object ADD COLUMN object_type TEXT NULL CHECK (object_type IS NULL OR object_type IN ('GEHEEL_COMPLEX', 'UNIT'))`,
+      `ALTER TABLE begroting_woz_object ADD COLUMN unitnummer TEXT NULL`,
+      `ALTER TABLE begroting_frozen_woz_object DROP COLUMN woz_object_adres`,
+      `ALTER TABLE begroting_frozen_woz_object ADD COLUMN object_type TEXT NULL CHECK (object_type IS NULL OR object_type IN ('GEHEEL_COMPLEX', 'UNIT'))`,
+      `ALTER TABLE begroting_frozen_woz_object ADD COLUMN unitnummer TEXT NULL`,
+    ],
+  },
 ];
 
 function schemaMetaTableExists(db: DatabaseSync): boolean {

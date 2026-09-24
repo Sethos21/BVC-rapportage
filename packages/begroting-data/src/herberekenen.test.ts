@@ -1307,7 +1307,8 @@ describe("herberekenBegroting — Gemeentelijke lasten / WOZ (OB-033)", () => {
     return {
       id: null,
       complexnummer: "001",
-      wozObjectAdres: "Kerkstraat 1, Schijndel",
+      objectType: "GEHEEL_COMPLEX",
+      unitnummer: null,
       aanslagjaar: 2026,
       waardepeildatum: new Date(Date.UTC(2025, 0, 1)),
       werkelijkeWoz: new Decimal(1_000_000),
@@ -1331,7 +1332,8 @@ describe("herberekenBegroting — Gemeentelijke lasten / WOZ (OB-033)", () => {
   function alsPureInvoer(o: WozObjectInvoer): BgWozObjectInvoer {
     return {
       complexnummer: o.complexnummer,
-      wozObjectAdres: o.wozObjectAdres,
+      objectType: o.objectType as BgWozObjectInvoer["objectType"],
+      unitnummer: o.unitnummer,
       aanslagjaar: o.aanslagjaar,
       waardepeildatum: o.waardepeildatum,
       werkelijkeWoz: o.werkelijkeWoz,
@@ -1443,7 +1445,7 @@ describe("herberekenBegroting — Gemeentelijke lasten / WOZ (OB-033)", () => {
 
   it("8. incomplete regel (complexnummer/adres ontbreken): KRITIEK zichtbaar, financieel bedrag blijft meetellen, niet in perComplex", () => {
     const versie = maakMinimaalGeldigeConceptVersie();
-    schrijfWozObjecten(db, versie.id, [objectInvoer({ complexnummer: null, wozObjectAdres: null })]);
+    schrijfWozObjecten(db, versie.id, [objectInvoer({ complexnummer: null, objectType: null })]);
     schrijfGemeentelijkeLastenModule(db, versie.id, moduleInvoer());
 
     const resultaat = herberekenBegroting(db, versie.id);
