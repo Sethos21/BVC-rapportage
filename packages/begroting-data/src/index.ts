@@ -354,6 +354,15 @@ export {
   leesRelevanteGemeentelijkeLastenGrootboekenVoorAdministratie,
   type RelevantGemeentelijkeLastenGrootboek,
 } from "./gemeentelijkeLastenRelevanteGrootboeken.js";
+// Gemeentelijke lasten: "Voorstel overnemen" (alleen domein-/servicecontract voor een latere UI; bij exact één relevante GL).
+export {
+  leesGemeentelijkeLastenVoorstelStatus,
+  neemWozVoorstelOver,
+  VoorstelOvernameGeweigerdError,
+  type GemeentelijkeLastenVoorstelStatus,
+  type VoorstelOvernameBlokkade,
+  type WozVoorstelOvername,
+} from "./gemeentelijkeLastenVoorstelOvername.js";
 // Algemene kosten Estimated (Vervolgtranche 5): handmatige resterende verwachting per post + koppeling met Begroting/Werkelijk (nooit bevroren).
 export {
   schrijfAlgemeneKostenEstimatedVerwachting,
