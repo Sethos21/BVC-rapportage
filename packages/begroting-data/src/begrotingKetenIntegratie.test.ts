@@ -1,0 +1,363 @@
+import Decimal from "decimal.js";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { DatabaseSync } from "node:sqlite";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+  ALGEMENE_KOSTEN_CATEGORIEEN,
+  LEEGSTAND_CATEGORIEEN,
+  RENTE_CATEGORIEEN,
+  berekenPnLBoom,
+  berekenWerkelijkAlgemeneKosten,
+  berekenWerkelijkGemeentelijkeLasten,
+  berekenWerkelijkOnderhoud,
+  berekenWerkelijkVerzekeringen,
+  vergelijkPnLResultaten,
+  type BgManagementInvoer,
+  type PurePnLBovenEbitdaRegel,
+} from "@bvc/reporting";
+import { schrijfAlgemeneKostenCategorieState } from "./algemeneKostenCategorieState.js";
+import { schrijfAlgemeneKostenEstimatedVerwachting } from "./algemeneKostenEstimatedVerwachting.js";
+import { schrijfAlgemeneKostenRegels } from "./algemeneKostenRegels.js";
+import { leesBegrotingPnLRegels, leesEstimatedPnLRegels, type EstimatedPnLInvoer } from "./begrotingPnL.js";
+import { leesBegrotingsversie, maakBegrotingsversie, type NieuweBegrotingsversieInput } from "./begrotingsversies.js";
+import { schrijfCorrectiefDagelijksOnderhoudBeoordeeld } from "./correctiefDagelijksOnderhoudBeoordeeld.js";
+import { schrijfCorrectiefDagelijksOnderhoudEstimatedVerwachtingen } from "./correctiefDagelijksOnderhoudEstimated.js";
+import { schrijfCorrectiefDagelijksOnderhoudRegels } from "./correctiefDagelijksOnderhoudRegels.js";
+import { openOrCreateDatabase } from "./database.js";
+import { schrijfGemeentelijkeLastenEstimatedVerwachting } from "./gemeentelijkeLastenEstimated.js";
+import { schrijfGemeentelijkeLastenModule, schrijfWozSetBevestigd } from "./gemeentelijkeLastenModule.js";
+import { schrijfGemeentelijkeLastenRegels } from "./gemeentelijkeLastenRegels.js";
+import { neemWozVoorstelOver } from "./gemeentelijkeLastenVoorstelOvername.js";
+import { schrijfGeplandeVerkoopBeoordeeld } from "./geplandeVerkoopBeoordeeld.js";
+import { schrijfGeplandOnderhoudActiviteiten } from "./geplandOnderhoudActiviteiten.js";
+import { schrijfGeplandOnderhoudBeoordeeld } from "./geplandOnderhoudBeoordeeld.js";
+import { schrijfGeplandOnderhoudEstimatedVerwachtingen } from "./geplandOnderhoudEstimated.js";
+import { schrijfLeegstandCategorieState } from "./leegstandCategorieState.js";
+import { schrijfModule1Aannames } from "./module1Aannames.js";
+import { schrijfModule1Snapshot } from "./module1Snapshot.js";
+import { schrijfModule3Invoer } from "./module3Invoer.js";
+import { voegPnLBronmappingMutatieToe, type PnLBronmappingMutatieInvoer } from "./pnlBronmappingRepository.js";
+import { schrijfRenteCategorieState } from "./renteCategorieState.js";
+import { stelBegrotingVast } from "./vaststellen.js";
+import { schrijfVerzekeringBeoordeeld } from "./verzekeringBeoordeeld.js";
+import { schrijfWozObjecten } from "./wozObjecten.js";
+
+/**
+ * VERVOLGTRANCHE 6, DEEL C — gezamenlijke ketenintegratie: Begroting (concept én vastgesteld) en Estimated door de
+ * pure P&L-engine, met de harde invarianten: GL-regelpost ≠ WOZ-voorstel, Actual exact éénmaal, onbekend nooit €0,
+ * subtotalen uitsluitend afgeleid, vastgestelde Begroting immutable terwijl Estimated wijzigbaar blijft,
+ * administratiegebonden mappings zonder 070-hardcoding. Bedragen zijn expliciet gemarkeerde testfixtures.
+ */
+
+let dir: string;
+let db: DatabaseSync;
+
+beforeEach(() => {
+  dir = mkdtempSync(join(tmpdir(), "bvc-begroting-data-keten-"));
+  db = openOrCreateDatabase(join(dir, "begrotingen.sqlite"));
+});
+
+afterEach(() => {
+  db.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+const D = (n: string | number) => new Decimal(n);
+const MODULE3: BgManagementInvoer = { wijze: "NIEUWE_VERGOEDING", bedrag: D(500), eenheid: "MAAND", ingangsdatum: null };
+const versieInput = (bedrijfsnr: string): NieuweBegrotingsversieInput => ({ originType: "NIEUW", bedrijfsnr, begrotingsjaar: 2027, bronPeildatum: new Date(Date.UTC(2026, 6, 31)) });
+
+function mapping(overrides: Partial<PnLBronmappingMutatieInvoer>): PnLBronmappingMutatieInvoer {
+  return {
+    bedrijfsnr: "070",
+    grootboekrekening: "4710",
+    grootboekOmschrijving: null,
+    ogbKostensoort: null,
+    ogbKostensoortOmschrijving: null,
+    economischeModule: "GEMEENTELIJKE_LASTEN",
+    economischeCategorie: "GEMEENTELIJKE_LASTEN",
+    geldigVanafBoekjaar: 2025,
+    geldigVanafPeriode: "01",
+    geldigTotBoekjaar: null,
+    geldigTotPeriode: null,
+    type: "NIEUWE_MAPPING_VANAF_PERIODE",
+    vorigeMappingId: null,
+    gewijzigdOp: new Date("2026-09-14T00:00:00.000Z"),
+    gebruiker: "test",
+    wijzigingsreden: "testfixture",
+    ...overrides,
+  };
+}
+
+/** 070-achtig: twee relevante GL's. 003-achtig: één GL4701. De ketencode kent geen van beide. */
+function zetMappings(): void {
+  voegPnLBronmappingMutatieToe(db, mapping({ grootboekrekening: "4700", ogbKostensoort: "4701" }));
+  voegPnLBronmappingMutatieToe(db, mapping({ grootboekrekening: "4710" }));
+  voegPnLBronmappingMutatieToe(db, mapping({ bedrijfsnr: "003", grootboekrekening: "4701" }));
+}
+
+interface OpzetOpties {
+  glRegelBedrag?: Decimal | null;
+  akBeoordeeld?: boolean;
+  wozBevestigd?: boolean;
+  metWoz?: boolean;
+}
+
+/** Volledig vaststelbare begroting; Onderhoud met 1 activiteit + 1 correctief-regel, Algemene kosten met regels per post. */
+function bouwVersie(bedrijfsnr: string, opties: OpzetOpties = {}) {
+  const { glRegelBedrag = D(2000), akBeoordeeld = true, wozBevestigd = true, metWoz = true } = opties;
+  const glGl = bedrijfsnr === "003" ? "4701" : "4710";
+  const versie = maakBegrotingsversie(db, versieInput(bedrijfsnr));
+  const id = versie.id;
+  schrijfModule1Snapshot(db, id, []);
+  schrijfModule1Aannames(db, id, { begrotingsjaar: 2027, indexatiePercentage: D(3) });
+  schrijfModule3Invoer(db, id, MODULE3);
+  const activiteit = schrijfGeplandOnderhoudActiviteiten(db, id, [
+    { id: null, complexnummer: "001", omschrijving: "Dak", grootboekrekening: "4300", ogbKostensoort: null, aanleidingType: "MJOP", aanleidingToelichting: "MJOP 2027", q1: D(1000), q2: D(1000), q3: D(1000), q4: D(1000), status: "GEPLAND", leverancier: null, offertebedrag: null, notitie: null },
+  ])[0]!;
+  schrijfGeplandOnderhoudBeoordeeld(db, id, true);
+  const correctief = schrijfCorrectiefDagelijksOnderhoudRegels(db, id, [{ id: null, omschrijving: "Klein", complexnummer: null, grootboekrekening: "4300", ogbKostensoort: null, jaarbedrag: D(500) }])[0]!;
+  schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, id, true);
+  schrijfVerzekeringBeoordeeld(db, id, true);
+  if (metWoz) {
+    schrijfWozObjecten(db, id, [{ id: null, complexnummer: "001", objectType: "GEHEEL_COMPLEX", unitnummer: null, aanslagjaar: 2026, waardepeildatum: new Date(Date.UTC(2026, 0, 1)), werkelijkeWoz: D(1000000), verwachteWozOverride: null }]);
+    schrijfGemeentelijkeLastenModule(db, id, { werkelijkeGemeentelijkeLasten: D(9000), wozStijgingPercentage: D(10), lastenPercentageStijging: D(5), begrotingsPercentageOverride: null, beoordeeld: true });
+    schrijfWozSetBevestigd(db, id, wozBevestigd);
+  } else {
+    schrijfGemeentelijkeLastenModule(db, id, { werkelijkeGemeentelijkeLasten: null, wozStijgingPercentage: null, lastenPercentageStijging: null, begrotingsPercentageOverride: null, beoordeeld: true });
+  }
+  schrijfGemeentelijkeLastenRegels(db, id, glRegelBedrag === null ? [] : [{ id: null, grootboekrekening: glGl, ogbKostensoort: null, jaarbedrag: glRegelBedrag }]);
+  schrijfAlgemeneKostenRegels(db, id, [
+    { id: null, categorie: "ACCOUNTANT", ogbKostensoortCode: null, omschrijving: "Jaarrekening", complexnummer: null, jaarbedrag: D(4000) },
+    { id: null, categorie: "MAKELAARSKOSTEN", ogbKostensoortCode: null, omschrijving: "Taxatie", complexnummer: null, jaarbedrag: D(2500) },
+    { id: null, categorie: "BANKKOSTEN", ogbKostensoortCode: null, omschrijving: "Bank", complexnummer: null, jaarbedrag: D(300) },
+  ]);
+  schrijfAlgemeneKostenCategorieState(db, id, Object.fromEntries(ALGEMENE_KOSTEN_CATEGORIEEN.map((c) => [c, { beoordeeld: akBeoordeeld, vorigJaarBedrag: null, verwachteVerhogingPercentage: null }])) as never);
+  schrijfLeegstandCategorieState(db, id, Object.fromEntries(LEEGSTAND_CATEGORIEEN.map((c) => [c, { beoordeeld: true, laatstBekendServicekostenvoorschotJaar: null, laatstBekendServicekostenvoorschotJaarHerkomst: null, verwachteLeegstandsperiodeMaanden: null }])) as never);
+  schrijfRenteCategorieState(db, id, Object.fromEntries(RENTE_CATEGORIEEN.map((c) => [c, { beoordeeld: true }])) as never);
+  schrijfGeplandeVerkoopBeoordeeld(db, id, true);
+  return { id, activiteitId: activiteit.id, correctiefId: correctief.id };
+}
+
+const regelWaarde = (regels: readonly PurePnLBovenEbitdaRegel[], sleutel: string) => regels.find((r) => r.regelSleutel === sleutel)!.waarde;
+const bedrag = (regels: readonly PurePnLBovenEbitdaRegel[], sleutel: string): string => {
+  const w = regelWaarde(regels, sleutel);
+  return w.status === "ONBEKEND" ? "ONBEKEND" : w.bedrag.toString();
+};
+const serialiseer = (regels: readonly PurePnLBovenEbitdaRegel[]) => JSON.stringify(regels.map((r) => [r.regelSleutel, r.groep, r.waarde.status, r.waarde.status === "ONBEKEND" ? r.waarde.dekkingReden : r.waarde.bedrag.toString()]));
+
+/** Werkelijk t/m afgesloten periode (testfixture): Onderhoud 3000 (Gebouwen), Verzekeringen 700, Gemeentelijke lasten 4000, Accountant 1000. */
+function estimatedInvoer(overrides: Partial<EstimatedPnLInvoer> = {}): EstimatedPnLInvoer {
+  return {
+    onderhoud: { werkelijk: berekenWerkelijkOnderhoud([{ economischeCategorie: "ONDERHOUD_GEBOUWEN", complexnummer: "001", saldo: D(3000) }]), dekkingBevestigd: true, resterendeKwartalen: ["Q3", "Q4"] },
+    verzekeringen: { werkelijk: berekenWerkelijkVerzekeringen([{ economischeCategorie: "BRAND_OPSTALVERZEKERING", complexnummer: "001", saldo: D(700) }]), dekkingBevestigd: true, resterendeMaanden: [7, 8, 9, 10, 11, 12] },
+    gemeentelijkeLasten: { werkelijk: berekenWerkelijkGemeentelijkeLasten([{ economischeCategorie: "GEMEENTELIJKE_LASTEN", complexnummer: "001", saldo: D(4000) }]), dekkingBevestigd: true },
+    algemeneKosten: { werkelijk: berekenWerkelijkAlgemeneKosten([{ economischeCategorie: "ACCOUNTANT", saldo: D(1000) }]), dekkingBevestigd: true },
+    ...overrides,
+  };
+}
+
+describe("Begroting → P&L: Gemeentelijke lasten gebruikt de GL-regelpost, niet het WOZ-voorstel", () => {
+  it("1. WOZ-voorstel (10.395) is NIET de P&L-begrotingspost: de P&L toont de som van de GL-regels (2.000)", () => {
+    zetMappings();
+    const { id } = bouwVersie("070", { glRegelBedrag: D(2000) });
+    const regels = leesBegrotingPnLRegels(db, id);
+    expect(bedrag(regels, "GEMEENTELIJKE_LASTEN")).toBe("2000");
+  });
+
+  it("2. één relevante GL: 'Voorstel overnemen' zet het volledige voorstel op die GL en de P&L volgt (10.395); daarvoor was de post 0 of eigen invoer", () => {
+    zetMappings();
+    const { id } = bouwVersie("003", { glRegelBedrag: null });
+    expect(bedrag(leesBegrotingPnLRegels(db, id), "GEMEENTELIJKE_LASTEN")).toBe("0"); // bewust beoordeeld, geen regels → bekende €0 (geen voorstel gebruikt)
+    neemWozVoorstelOver(db, id);
+    expect(bedrag(leesBegrotingPnLRegels(db, id), "GEMEENTELIJKE_LASTEN")).toBe("10395");
+  });
+
+  it("3. meerdere relevante GL's: geen automatische verdeling; de P&L-post blijft wat de gebruiker per GL invulde", () => {
+    zetMappings();
+    const { id } = bouwVersie("070", { glRegelBedrag: null });
+    expect(() => neemWozVoorstelOver(db, id)).toThrow(/MEERDERE_RELEVANTE_GLS/);
+    schrijfGemeentelijkeLastenRegels(db, id, [
+      { id: null, grootboekrekening: "4700", ogbKostensoort: "4701", jaarbedrag: D(8000) },
+      { id: null, grootboekrekening: "4710", ogbKostensoort: null, jaarbedrag: D(1500) },
+    ]);
+    expect(bedrag(leesBegrotingPnLRegels(db, id), "GEMEENTELIJKE_LASTEN")).toBe("9500");
+  });
+
+  it("4. het verschil met het voorstel is een waarschuwing en blokkeert vaststellen niet; de bevroren P&L-post blijft de GL-regelpost", () => {
+    zetMappings();
+    const { id } = bouwVersie("070", { glRegelBedrag: D(2000) });
+    expect(() => stelBegrotingVast(db, id, new Date(Date.UTC(2026, 8, 25)))).not.toThrow();
+    expect(bedrag(leesBegrotingPnLRegels(db, id), "GEMEENTELIJKE_LASTEN")).toBe("2000");
+  });
+
+  it("5. onbevestigde WOZ-set blijft vaststellen blokkeren én de post is in de concept-P&L ONBEKEND (kritiek), niet €0", () => {
+    zetMappings();
+    const { id } = bouwVersie("070", { wozBevestigd: false });
+    expect(() => stelBegrotingVast(db, id)).toThrow(/KRITIEKE controls/);
+    expect(bedrag(leesBegrotingPnLRegels(db, id), "GEMEENTELIJKE_LASTEN")).toBe("ONBEKEND");
+  });
+
+  it("6. administraties zonder WOZ-objecten: bestaand bewuste-€0-pad — vaststelbaar en een bekende post", () => {
+    zetMappings();
+    const { id } = bouwVersie("003", { metWoz: false, glRegelBedrag: D(1234) });
+    stelBegrotingVast(db, id, new Date(Date.UTC(2026, 8, 25)));
+    expect(bedrag(leesBegrotingPnLRegels(db, id), "GEMEENTELIJKE_LASTEN")).toBe("1234");
+  });
+});
+
+describe("Begroting → P&L: onbekend is nooit €0; subtotalen zijn uitsluitend afgeleid", () => {
+  it("7. Algemene kosten: een niet-beoordeelde post is ONBEKEND (concept) terwijl de overige posten bekend blijven; bewust €0 blijft een bekende €0", () => {
+    zetMappings();
+    const { id } = bouwVersie("070", { akBeoordeeld: false });
+    schrijfAlgemeneKostenCategorieState(db, id, Object.fromEntries(ALGEMENE_KOSTEN_CATEGORIEEN.map((c) => [c, { beoordeeld: c !== "BANKKOSTEN", vorigJaarBedrag: null, verwachteVerhogingPercentage: null }])) as never);
+    const regels = leesBegrotingPnLRegels(db, id);
+    expect(bedrag(regels, "BANKKOSTEN")).toBe("ONBEKEND");
+    expect(bedrag(regels, "ACCOUNTANT")).toBe("4000");
+    expect(bedrag(regels, "JURIDISCHE_KOSTEN")).toBe("0"); // beoordeeld zonder regels = bewuste, bekende €0
+    const boom = berekenPnLBoom("BEGROTING_NIEUW_JAAR", regels);
+    expect(boom.algemeneKosten.volledigheid.status).toBe("ONVOLLEDIG");
+    expect(boom.algemeneKosten.besteWetenSom.toString()).toBe("6500"); // onbekende post telt niet als 0 mee, wordt gemeld
+  });
+
+  it("8. Onderhoud Begroting = Gepland + Correctief (exact één regel, geen dubbele telling); hele boom: kosten/EBITDA uitsluitend door de engine berekend", () => {
+    zetMappings();
+    const { id } = bouwVersie("070");
+    const regels = leesBegrotingPnLRegels(db, id);
+    expect(regels.filter((r) => r.regelSleutel === "ONDERHOUD")).toHaveLength(1);
+    expect(bedrag(regels, "ONDERHOUD")).toBe("4500"); // 4000 gepland + 500 correctief
+    const boom = berekenPnLBoom("BEGROTING_NIEUW_JAAR", regels);
+    // Exploitatie: onderhoud 4500 + verzekeringen 0 + gemeentelijke lasten 2000. Management en beheer: beheer 0 + management 6000.
+    expect(boom.exploitatieLasten.besteWetenSom.toString()).toBe("6500");
+    expect(boom.managementEnBeheer.besteWetenSom.toString()).toBe("6000");
+    expect(boom.algemeneKosten.besteWetenSom.toString()).toBe("6800");
+    expect(boom.totaalKosten.besteWetenSom.toString()).toBe("19300");
+    expect(boom.ebitda.bedrag.toString()).toBe(boom.totaalOpbrengsten.besteWetenSom.minus(boom.totaalKosten.besteWetenSom).toString());
+    expect(boom.ebitda.volledigheid).toEqual({ status: "VOLLEDIG" });
+  });
+
+  it("9. levenscyclus-pariteit: de P&L-regels van het concept zijn identiek aan die van dezelfde begroting na vaststellen (bevroren gelezen)", () => {
+    zetMappings();
+    const { id } = bouwVersie("070");
+    const voor = serialiseer(leesBegrotingPnLRegels(db, id));
+    stelBegrotingVast(db, id, new Date(Date.UTC(2026, 8, 25)));
+    expect(leesBegrotingsversie(db, id)!.status).toBe("VASTGESTELD");
+    expect(serialiseer(leesBegrotingPnLRegels(db, id))).toBe(voor);
+  });
+});
+
+describe("Estimated → P&L: Werkelijk exact éénmaal; Estimated muteert de vastgestelde Begroting niet", () => {
+  function zetVerwachtingen(id: string, activiteitId: number, correctiefId: number, factor: number): void {
+    schrijfGeplandOnderhoudEstimatedVerwachtingen(db, id, [{ activiteitId, q1: D(0), q2: D(0), q3: D(500 * factor), q4: D(500 * factor) }]);
+    schrijfCorrectiefDagelijksOnderhoudEstimatedVerwachtingen(db, id, [{ regelId: correctiefId, resterendBedrag: D(100 * factor) }]);
+    schrijfGemeentelijkeLastenEstimatedVerwachting(db, id, D(0));
+    schrijfAlgemeneKostenEstimatedVerwachting(db, id, { ACCOUNTANT: D(500 * factor), ALGEMENE_KOSTEN: D(0), JURIDISCHE_KOSTEN: D(0), MAKELAARSKOSTEN: D(0), BANKKOSTEN: D(0) });
+  }
+
+  it("10. Onderhoud Actual exact éénmaal: Estimated = Werkelijk moduleTotaal (3000) + resterend Gepland (1000) + resterend Correctief (100) = 4100 — Begroting (4500) wordt niet opgeteld", () => {
+    zetMappings();
+    const { id, activiteitId, correctiefId } = bouwVersie("070");
+    zetVerwachtingen(id, activiteitId, correctiefId, 1);
+    const regels = leesEstimatedPnLRegels(db, id, estimatedInvoer());
+    expect(bedrag(regels, "ONDERHOUD")).toBe("4100");
+  });
+
+  it("11. Algemene kosten Estimated: Werkelijk éénmaal per post + handmatige verwachting; niet-ingevulde posten blijven ONBEKEND (nooit €0)", () => {
+    zetMappings();
+    const { id, activiteitId, correctiefId } = bouwVersie("070");
+    zetVerwachtingen(id, activiteitId, correctiefId, 1);
+    let regels = leesEstimatedPnLRegels(db, id, estimatedInvoer());
+    expect(bedrag(regels, "ACCOUNTANT")).toBe("1500"); // 1000 werkelijk + 500
+    expect(bedrag(regels, "BANKKOSTEN")).toBe("0"); // 0 werkelijk + bewuste 0
+    schrijfAlgemeneKostenEstimatedVerwachting(db, id, { ACCOUNTANT: D(500), ALGEMENE_KOSTEN: null, JURIDISCHE_KOSTEN: null, MAKELAARSKOSTEN: null, BANKKOSTEN: null });
+    regels = leesEstimatedPnLRegels(db, id, estimatedInvoer());
+    expect(bedrag(regels, "ALGEMENE_KOSTEN")).toBe("ONBEKEND");
+    expect(bedrag(regels, "ACCOUNTANT")).toBe("1500");
+  });
+
+  it("12. Gemeentelijke lasten Estimated: afwijking t.o.v. de GL-regelpost (2000), niet t.o.v. het WOZ-voorstel; onbevestigde Werkelijk-dekking = onbekend", () => {
+    zetMappings();
+    const { id, activiteitId, correctiefId } = bouwVersie("070");
+    zetVerwachtingen(id, activiteitId, correctiefId, 1);
+    const regels = leesEstimatedPnLRegels(db, id, estimatedInvoer());
+    expect(bedrag(regels, "GEMEENTELIJKE_LASTEN")).toBe("4000"); // 4000 werkelijk + bewuste 0
+    const onbevestigd = leesEstimatedPnLRegels(db, id, estimatedInvoer({ gemeentelijkeLasten: { werkelijk: berekenWerkelijkGemeentelijkeLasten([]), dekkingBevestigd: false } }));
+    expect(bedrag(onbevestigd, "GEMEENTELIJKE_LASTEN")).toBe("ONBEKEND");
+  });
+
+  it("13. Onderhoud zonder vastgelegde resterende verwachting of met onbevestigde dekking: ONBEKEND, niet stil laag/€0", () => {
+    zetMappings();
+    const { id } = bouwVersie("070");
+    expect(bedrag(leesEstimatedPnLRegels(db, id, estimatedInvoer()), "ONDERHOUD")).toBe("ONBEKEND"); // geen verwachtingen vastgelegd
+    const { activiteitId, correctiefId } = { activiteitId: leesActiviteitId(id), correctiefId: leesCorrectiefId(id) };
+    zetVerwachtingen(id, activiteitId, correctiefId, 1);
+    const onbevestigd = leesEstimatedPnLRegels(db, id, estimatedInvoer({ onderhoud: { ...estimatedInvoer().onderhoud, dekkingBevestigd: false } }));
+    expect(bedrag(onbevestigd, "ONDERHOUD")).toBe("ONBEKEND");
+  });
+
+  it("14. Huur/Beheer/Management Estimated zijn niet gebouwd en verschijnen als ONBEKEND/TECHNISCH_NIET_ONDERSTEUND: Estimated-EBITDA is ONVOLLEDIG", () => {
+    zetMappings();
+    const { id, activiteitId, correctiefId } = bouwVersie("070");
+    zetVerwachtingen(id, activiteitId, correctiefId, 1);
+    const regels = leesEstimatedPnLRegels(db, id, estimatedInvoer());
+    for (const s of ["HUUROPBRENGST_BELAST", "HUUROPBRENGST_ONBELAST", "BEHEERKOSTEN", "MANAGEMENTVERGOEDING"]) {
+      expect(regelWaarde(regels, s)).toMatchObject({ status: "ONBEKEND", dekkingReden: "TECHNISCH_NIET_ONDERSTEUND" });
+    }
+    const boom = berekenPnLBoom("ESTIMATED", regels);
+    expect(boom.ebitda.volledigheid.status).toBe("ONVOLLEDIG");
+  });
+
+  it("15. Estimated muteert de vastgestelde Begroting niet: na vaststellen blijven de Begroting-P&L-regels byte-identiek terwijl Estimated meebeweegt", () => {
+    zetMappings();
+    const { id, activiteitId, correctiefId } = bouwVersie("070");
+    stelBegrotingVast(db, id, new Date(Date.UTC(2026, 8, 25)));
+    const begrotingVoor = serialiseer(leesBegrotingPnLRegels(db, id));
+    zetVerwachtingen(id, activiteitId, correctiefId, 1);
+    const est1 = serialiseer(leesEstimatedPnLRegels(db, id, estimatedInvoer()));
+    zetVerwachtingen(id, activiteitId, correctiefId, 3); // Estimated blijft wijzigbaar na vaststellen
+    const est2 = serialiseer(leesEstimatedPnLRegels(db, id, estimatedInvoer()));
+    expect(est2).not.toBe(est1);
+    expect(serialiseer(leesBegrotingPnLRegels(db, id))).toBe(begrotingVoor);
+    expect(leesBegrotingsversie(db, id)!.status).toBe("VASTGESTELD");
+  });
+
+  it("16. Begroting en Estimated naast elkaar in de engine: verschil wordt afgeleid, onvolledigheid propageert", () => {
+    zetMappings();
+    const { id, activiteitId, correctiefId } = bouwVersie("070");
+    zetVerwachtingen(id, activiteitId, correctiefId, 1);
+    const begroting = berekenPnLBoom("BEGROTING_NIEUW_JAAR", leesBegrotingPnLRegels(db, id));
+    const estimated = berekenPnLBoom("ESTIMATED", leesEstimatedPnLRegels(db, id, estimatedInvoer()));
+    const v = vergelijkPnLResultaten(estimated, begroting);
+    expect(v.algemeneKosten.afwijking.toString()).toBe(begroting.algemeneKosten.besteWetenSom.minus(estimated.algemeneKosten.besteWetenSom).toString());
+    expect(v.ebitda.volledigheid.status).toBe("ONVOLLEDIG");
+  });
+
+  function leesActiviteitId(versieId: string): number {
+    return (db.prepare(`SELECT id FROM begroting_gepland_onderhoud_activiteit WHERE begroting_versie_id = ?`).get(versieId) as { id: number }).id;
+  }
+  function leesCorrectiefId(versieId: string): number {
+    return (db.prepare(`SELECT id FROM begroting_correctief_dagelijks_onderhoud_regel WHERE begroting_versie_id = ?`).get(versieId) as { id: number }).id;
+  }
+});
+
+describe("Administratiegebonden: geen administratie-070-hardcoding", () => {
+  it("17. dezelfde code, twee administraties met verschillende GL-sets: 003 (één GL4701) en 070 (4700+4710) geven elk hun eigen relevante-GL-uitkomst; een 070-GL bij 003 wordt ONBEKEND (kritiek)", () => {
+    zetMappings();
+    const a070 = bouwVersie("070", { glRegelBedrag: D(2000) });
+    const a003 = bouwVersie("003", { glRegelBedrag: D(700) });
+    expect(bedrag(leesBegrotingPnLRegels(db, a070.id), "GEMEENTELIJKE_LASTEN")).toBe("2000");
+    expect(bedrag(leesBegrotingPnLRegels(db, a003.id), "GEMEENTELIJKE_LASTEN")).toBe("700");
+    schrijfGemeentelijkeLastenRegels(db, a003.id, [{ id: null, grootboekrekening: "4710", ogbKostensoort: null, jaarbedrag: D(700) }]); // 070-GL bij 003
+    expect(bedrag(leesBegrotingPnLRegels(db, a003.id), "GEMEENTELIJKE_LASTEN")).toBe("ONBEKEND");
+  });
+
+  it("18. een niet-bestaande versie faalt; niets in de keten schrijft (geen Estimated-rijen door lezen)", () => {
+    expect(() => leesBegrotingPnLRegels(db, "bestaat-niet")).toThrow(/bestaat niet/);
+    zetMappings();
+    const { id } = bouwVersie("070");
+    leesBegrotingPnLRegels(db, id);
+    expect((db.prepare(`SELECT COUNT(*) AS n FROM begroting_gemeentelijke_lasten_estimated_verwachting`).get() as { n: number }).n).toBe(0);
+  });
+});
+

@@ -363,6 +363,9 @@ export {
   type VoorstelOvernameBlokkade,
   type WozVoorstelOvername,
 } from "./gemeentelijkeLastenVoorstelOvername.js";
+// Gemeentelijke lasten Estimated (begrotingspost = som GL-regels) en de Begroting/Estimated → pure P&L-verbinding (Vervolgtranche 6).
+export { leesGemeentelijkeLastenEstimatedVerwachting, schrijfGemeentelijkeLastenEstimatedVerwachting, leesGemeentelijkeLastenEstimatedResultaat } from "./gemeentelijkeLastenEstimated.js";
+export { leesBegrotingPnLRegels, leesEstimatedPnLRegels, type EstimatedPnLInvoer } from "./begrotingPnL.js";
 // Algemene kosten Estimated (Vervolgtranche 5): handmatige resterende verwachting per post + koppeling met Begroting/Werkelijk (nooit bevroren).
 export {
   schrijfAlgemeneKostenEstimatedVerwachting,
