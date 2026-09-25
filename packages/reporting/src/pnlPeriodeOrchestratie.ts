@@ -15,6 +15,8 @@ import { berekenWerkelijkVerzekeringenViaCentraleMapping } from "./begroting/ver
 import { verzekeringWerkelijkNaarPnLBovenEbitdaRegels } from "./begroting/verzekeringWerkelijkPnLAdapter.js";
 import { berekenWerkelijkGemeentelijkeLastenViaCentraleMapping } from "./begroting/gemeentelijkeLastenCentraleMapping.js";
 import { gemeentelijkeLastenWerkelijkNaarPnLBovenEbitdaRegels } from "./begroting/gemeentelijkeLastenWerkelijkPnLAdapter.js";
+import { berekenWerkelijkLeegstandViaCentraleMapping } from "./begroting/leegstandCentraleMapping.js";
+import { leegstandWerkelijkNaarPnLBovenEbitdaRegels } from "./begroting/leegstandPnLAdapters.js";
 import { berekenWerkelijkAlgemeneKostenViaCentraleMapping } from "./begroting/algemeneKostenCentraleMapping.js";
 import { algemeneKostenWerkelijkNaarPnLBovenEbitdaRegels } from "./begroting/algemeneKostenWerkelijkPnLAdapter.js";
 
@@ -113,6 +115,7 @@ interface ModuleBuckets {
   verzekeringen: PnLRuweBoekingRegel[];
   gemeentelijkeLasten: PnLRuweBoekingRegel[];
   algemeneKosten: PnLRuweBoekingRegel[];
+  leegstand: PnLRuweBoekingRegel[];
 }
 
 interface PartitieResultaat {
@@ -139,7 +142,7 @@ function partitioneerPerModule(context: PnLPeriodeOrchestratieContext, boekingen
     return module;
   }
 
-  const buckets: ModuleBuckets = { huur: [], beheer: [], management: [], onderhoud: [], servicekostenEigenaar: [], verzekeringen: [], gemeentelijkeLasten: [], algemeneKosten: [] };
+  const buckets: ModuleBuckets = { huur: [], beheer: [], management: [], onderhoud: [], servicekostenEigenaar: [], verzekeringen: [], gemeentelijkeLasten: [], algemeneKosten: [], leegstand: [] };
   const nietGemapt: PnLRuweBoekingRegel[] = [];
   const nietOndersteund = new Map<PnLEconomischeModule, PnLRuweBoekingRegel[]>();
 
@@ -173,6 +176,9 @@ function partitioneerPerModule(context: PnLPeriodeOrchestratieContext, boekingen
         break;
       case "ALGEMENE_KOSTEN":
         buckets.algemeneKosten.push(boeking);
+        break;
+      case "LEEGSTAND":
+        buckets.leegstand.push(boeking);
         break;
       default: {
         const groep = nietOndersteund.get(module) ?? [];
@@ -216,6 +222,7 @@ export function berekenPnLPeriode(context: PnLPeriodeOrchestratieContext, boekin
   const verzekering = berekenWerkelijkVerzekeringenViaCentraleMapping(invoer, buckets.verzekeringen.map(naarRegelMetComplex), mappingregels);
   const gemLasten = berekenWerkelijkGemeentelijkeLastenViaCentraleMapping(invoer, buckets.gemeentelijkeLasten.map(naarRegelMetComplex), mappingregels);
   const algemeneKosten = berekenWerkelijkAlgemeneKostenViaCentraleMapping(invoer, buckets.algemeneKosten.map(naarBasisRegel), mappingregels);
+  const leegstand = berekenWerkelijkLeegstandViaCentraleMapping(invoer, buckets.leegstand.map(naarRegelMetComplex), mappingregels);
 
   // Bronmapping-DEKKING (Vervolgtranche 6): alle boekingen van de administratie/periode worden verwerkt, dus een module
   // waarvoor de administratie GEEN enkele bewezen mapping heeft is niet "€0" maar ONBEKEND (NIET_GEMAPT). Alleen een
@@ -233,6 +240,10 @@ export function berekenPnLPeriode(context: PnLPeriodeOrchestratieContext, boekin
     ...verzekeringWerkelijkNaarPnLBovenEbitdaRegels(verzekering.werkelijk, heeftMapping("VERZEKERINGEN")),
     ...gemeentelijkeLastenWerkelijkNaarPnLBovenEbitdaRegels(gemLasten.werkelijk, heeftMapping("GEMEENTELIJKE_LASTEN")),
     ...algemeneKostenWerkelijkNaarPnLBovenEbitdaRegels(algemeneKosten.werkelijk, heeftMapping("ALGEMENE_KOSTEN"), gemapt("ALGEMENE_KOSTEN")),
+    // Leegstandskosten (Vervolgtranche 8): ÉÉN P&L-post; per kostensoort alleen bekend met een bewezen LEEGSTAND-mapping van deze administratie.
+    // Servicekosten leegstand op een GL van het domein SERVICEKOSTEN_EIGENAAR (bv. GL4350/OGB4319 bij 070) staat in de Servicekosten-eigenaar-regels,
+    // niet hier: een OGB creëert geen ander hoofddomein (zie `leegstandWerkelijkNaarPnLBovenEbitdaRegels`).
+    ...leegstandWerkelijkNaarPnLBovenEbitdaRegels(leegstand.werkelijk, true, gemapt("LEEGSTAND")),
   ];
 
   const resultaat = berekenPnLBoom("WERKELIJK", regels);

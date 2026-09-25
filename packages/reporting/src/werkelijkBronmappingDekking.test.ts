@@ -102,3 +102,42 @@ describe("berekenPnLPeriode — dekking per administratie", () => {
     expect(r.resultaat.ebitda.volledigheid.status).toBe("ONVOLLEDIG");
   });
 });
+
+describe("Leegstandskosten — Werkelijk per administratie (Vervolgtranche 8)", () => {
+  const contextVan = (bedrijfsnr: string) => ({ bedrijfsnr, ...REFERENTIE });
+  const boeking = (gl: string, ogb: string | null, saldo: number): PnLRuweBoekingRegel => ({ grootboekrekening: gl, ogbKostensoort: ogb, ogbKostensoortOmschrijving: null, complexnummer: "003", saldo: new Decimal(saldo) });
+  const leegstandRegel = (o: Partial<PnLBronmappingRegel>) => m({ economischeModule: "LEEGSTAND", grootboekrekening: "4200", economischeCategorie: "NUTS_LEEGSTAND", ...o });
+  const sleutels = (r: ReturnType<typeof berekenPnLPeriode>) => r.resultaat.exploitatieLasten.regels.map((x) => x.regelSleutel);
+  const hoofd = (r: ReturnType<typeof berekenPnLPeriode>) => r.resultaat.exploitatieLasten.regels.find((x) => x.regelSleutel === "LEEGSTANDSKOSTEN")!;
+
+  it("GL4350 wordt NIET zonder bewijs als leegstand-servicekosten behandeld: het bewezen GL+OGB-domein Servicekosten eigenaar draagt het bedrag in de eigen regels, Leegstandskosten blijft onbekend (geen mapping in het domein Leegstand) en er is geen dubbele telling", () => {
+    const ske = [m({ grootboekrekening: "4350", ogbKostensoort: "4319", economischeModule: "SERVICEKOSTEN_EIGENAAR", economischeCategorie: "SERVICEKOSTEN_LEEGSTAND" })];
+    const r = berekenPnLPeriode(contextVan("070"), [boeking("4350", "4319", 1354.1)], ske);
+    expect(hoofd(r).waarde).toMatchObject({ status: "ONBEKEND", dekkingReden: "NIET_GEMAPT" });
+    const skeLeegstand = r.resultaat.exploitatieLasten.regels.find((x) => x.regelSleutel === "SERVICEKOSTEN_LEEGSTAND")!;
+    expect(skeLeegstand.waarde).toEqual({ status: "BEKEND", bedrag: new Decimal("1354.1") });
+    expect(r.resultaat.exploitatieLasten.besteWetenSom.toString()).toBe("1354.1"); // exact één keer
+    expect(sleutels(r).filter((s) => s === "LEEGSTANDSKOSTEN")).toHaveLength(1);
+  });
+
+  it("een administratie mét bewezen LEEGSTAND-mapping voor alle drie de kostensoorten heeft een bekende post (Actual exact één keer); een administratie zonder mapping onbekend — geen 070-hardcoding", () => {
+    const mapping = [
+      leegstandRegel({ bedrijfsnr: "005", ogbKostensoort: "N1", economischeCategorie: "NUTS_LEEGSTAND" }),
+      leegstandRegel({ bedrijfsnr: "005", ogbKostensoort: "S1", economischeCategorie: "SERVICEKOSTEN_LEEGSTAND" }),
+      leegstandRegel({ bedrijfsnr: "005", ogbKostensoort: "O1", economischeCategorie: "OVERIGE_LEEGSTANDSKOSTEN" }),
+    ];
+    const boekingen = [boeking("4200", "N1", 30), boeking("4200", "S1", 20), boeking("4200", "O1", 5)];
+    const a = berekenPnLPeriode(contextVan("005"), boekingen, mapping);
+    expect(hoofd(a).waarde).toEqual({ status: "BEKEND", bedrag: new Decimal(55) });
+    expect(a.resultaat.exploitatieLasten.volledigheid.status === "ONVOLLEDIG" ? a.resultaat.exploitatieLasten.volledigheid.ontbrekend.some((o) => o.regelSleutel.startsWith("LEEGSTANDSKOSTEN")) : false).toBe(false);
+    const b = berekenPnLPeriode(contextVan("070"), [], mapping);
+    expect(hoofd(b).waarde.status).toBe("ONBEKEND");
+  });
+
+  it("een boeking op een LEEGSTAND-GL met een niet-gemapte OGB wordt niet stil genegeerd of verdeeld: ze staat zichtbaar in nietMeegenomen (module null) en telt niet mee in een kostensoort", () => {
+    const mapping = [leegstandRegel({ bedrijfsnr: "005", ogbKostensoort: "N1", economischeCategorie: "NUTS_LEEGSTAND" })];
+    const r = berekenPnLPeriode(contextVan("005"), [boeking("4200", "N1", 30), boeking("4200", "X9", 12)], mapping);
+    expect(hoofd(r).waarde).toEqual({ status: "BEKEND", bedrag: new Decimal(30) });
+    expect(r.nietMeegenomen).toEqual([{ economischeModule: null, totaal: new Decimal(12), aantalBoekingen: 1 }]);
+  });
+});

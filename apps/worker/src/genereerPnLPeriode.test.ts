@@ -132,7 +132,7 @@ describe("genereerPnLPeriode — productie-integratie (echte xlsx-bron + echte P
     // Juridisch en — in dit fixture bewust niet gemapt — Makelaar/taxatie) zijn ONBEKEND in plaats van een bevestigde €0; EBITDA is daardoor ONVOLLEDIG.
     const ebitdaVolledigheid = resultaat.resultaat.ebitda.volledigheid;
     expect(ebitdaVolledigheid.status).toBe("ONVOLLEDIG");
-    expect(ebitdaVolledigheid.status === "ONVOLLEDIG" ? ebitdaVolledigheid.ontbrekend.map((o) => o.regelSleutel).sort() : []).toEqual(["ACCOUNTANT", "JURIDISCHE_KOSTEN", "MAKELAARSKOSTEN", "MANAGEMENTVERGOEDING"]);
+    expect(ebitdaVolledigheid.status === "ONVOLLEDIG" ? ebitdaVolledigheid.ontbrekend.map((o) => o.regelSleutel).sort() : []).toEqual(["ACCOUNTANT", "JURIDISCHE_KOSTEN", "LEEGSTANDSKOSTEN", "MAKELAARSKOSTEN", "MANAGEMENTVERGOEDING"]);
     expect(resultaat.nietMeegenomen).toEqual([]);
 
     // Renderer: het geschreven HTML-rapport bevat de EBITDA-uitkomst, geen eigen herberekening.

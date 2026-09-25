@@ -41,10 +41,11 @@ describe("berekenPnLPeriode — 070 H1 2026, ÉÉN gemengde boekingenstroom (nie
     expect(resultaat.ebitda.bedrag.toDecimalPlaces(0).toString()).toBe("311180"); // legacy H1 EBITDA — exacte match, zie GAT-013
   });
 
-  it("VERVOLGTRANCHE 6 — Unknown != zero: de bedragen blijven exact, maar Management, Accountant- en Juridische kosten zijn voor 070 ONBEKEND (geen bewezen mapping) in plaats van een bevestigde €0; kosten en EBITDA zijn daardoor ONVOLLEDIG", () => {
+  it("VERVOLGTRANCHE 6 — Unknown != zero: de bedragen blijven exact, maar Management, Leegstandskosten, Accountant- en Juridische kosten zijn voor 070 ONBEKEND (geen bewezen mapping) in plaats van een bevestigde €0; kosten en EBITDA zijn daardoor ONVOLLEDIG", () => {
     const onbekend = (volledigheid: (typeof resultaat)["totaalKosten"]["volledigheid"]) => (volledigheid.status === "ONVOLLEDIG" ? volledigheid.ontbrekend.map((o) => [o.regelSleutel, o.reden]) : []);
     expect(onbekend(resultaat.totaalKosten.volledigheid)).toEqual([
       ["MANAGEMENTVERGOEDING", "GEEN_BEOORDELING"],
+      ["LEEGSTANDSKOSTEN", "NIET_GEMAPT"], // Vervolgtranche 8: geen bewezen LEEGSTAND-mapping voor 070 (Nuts/Servicekosten/Overige)
       ["ACCOUNTANT", "NIET_GEMAPT"],
       ["JURIDISCHE_KOSTEN", "NIET_GEMAPT"],
     ]);
