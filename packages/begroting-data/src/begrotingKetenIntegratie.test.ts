@@ -10,6 +10,9 @@ import {
   RENTE_CATEGORIEEN,
   berekenPnLBoom,
   berekenWerkelijkAlgemeneKosten,
+  berekenWerkelijkBeheer,
+  berekenWerkelijkHuur,
+  berekenWerkelijkManagement,
   berekenWerkelijkGemeentelijkeLasten,
   berekenWerkelijkOnderhoud,
   berekenWerkelijkVerzekeringen,
@@ -37,6 +40,7 @@ import { schrijfGeplandOnderhoudEstimatedVerwachtingen } from "./geplandOnderhou
 import { schrijfLeegstandCategorieState } from "./leegstandCategorieState.js";
 import { schrijfModule1Aannames } from "./module1Aannames.js";
 import { schrijfModule1Snapshot } from "./module1Snapshot.js";
+import { schrijfModule2Config } from "./module2Config.js";
 import { schrijfModule3Invoer } from "./module3Invoer.js";
 import { voegPnLBronmappingMutatieToe, type PnLBronmappingMutatieInvoer } from "./pnlBronmappingRepository.js";
 import { schrijfRenteCategorieState } from "./renteCategorieState.js";
@@ -150,6 +154,10 @@ const serialiseer = (regels: readonly PurePnLBovenEbitdaRegel[]) => JSON.stringi
 /** Werkelijk t/m afgesloten periode (testfixture): Onderhoud 3000 (Gebouwen), Verzekeringen 700, Gemeentelijke lasten 4000, Accountant 1000. */
 function estimatedInvoer(overrides: Partial<EstimatedPnLInvoer> = {}): EstimatedPnLInvoer {
   return {
+    resterendeMaanden: [7, 8, 9, 10, 11, 12],
+    huur: { werkelijk: berekenWerkelijkHuur([{ economischeCategorie: "HUUROPBRENGST_BELAST", saldo: D(-1000) }]), dekkingBevestigd: true },
+    beheer: { werkelijk: berekenWerkelijkBeheer([{ economischeCategorie: "BEHEERKOSTEN", saldo: D(100) }]), dekkingBevestigd: true },
+    management: { werkelijk: berekenWerkelijkManagement([{ economischeCategorie: "MANAGEMENTVERGOEDING", saldo: D(3000) }]), dekkingBevestigd: true },
     onderhoud: { werkelijk: berekenWerkelijkOnderhoud([{ economischeCategorie: "ONDERHOUD_GEBOUWEN", complexnummer: "001", saldo: D(3000) }]), dekkingBevestigd: true, resterendeKwartalen: ["Q3", "Q4"] },
     verzekeringen: { werkelijk: berekenWerkelijkVerzekeringen([{ economischeCategorie: "BRAND_OPSTALVERZEKERING", complexnummer: "001", saldo: D(700) }]), dekkingBevestigd: true, resterendeMaanden: [7, 8, 9, 10, 11, 12] },
     gemeentelijkeLasten: { werkelijk: berekenWerkelijkGemeentelijkeLasten([{ economischeCategorie: "GEMEENTELIJKE_LASTEN", complexnummer: "001", saldo: D(4000) }]), dekkingBevestigd: true },
@@ -296,16 +304,41 @@ describe("Estimated → P&L: Werkelijk exact éénmaal; Estimated muteert de vas
     expect(bedrag(onbevestigd, "ONDERHOUD")).toBe("ONBEKEND");
   });
 
-  it("14. Huur/Beheer/Management Estimated zijn niet gebouwd en verschijnen als ONBEKEND/TECHNISCH_NIET_ONDERSTEUND: Estimated-EBITDA is ONVOLLEDIG", () => {
+  it("14. Huur, Beheer en Management Estimated zijn gebouwd: Werkelijk + resterende maanden uit de Begroting (Management 3.000 + 6 × 500 = 6.000; Beheer 100 + 0 = 100; Huur 1.000 + 0 = 1.000)", () => {
     zetMappings();
     const { id, activiteitId, correctiefId } = bouwVersie("070");
     zetVerwachtingen(id, activiteitId, correctiefId, 1);
     const regels = leesEstimatedPnLRegels(db, id, estimatedInvoer());
-    for (const s of ["HUUROPBRENGST_BELAST", "HUUROPBRENGST_ONBELAST", "BEHEERKOSTEN", "MANAGEMENTVERGOEDING"]) {
-      expect(regelWaarde(regels, s)).toMatchObject({ status: "ONBEKEND", dekkingReden: "TECHNISCH_NIET_ONDERSTEUND" });
-    }
-    const boom = berekenPnLBoom("ESTIMATED", regels);
+    expect(bedrag(regels, "MANAGEMENTVERGOEDING")).toBe("6000");
+    expect(bedrag(regels, "BEHEERKOSTEN")).toBe("100");
+    expect(bedrag(regels, "HUUROPBRENGST_BELAST")).toBe("1000");
+    expect(bedrag(regels, "HUUROPBRENGST_ONBELAST")).toBe("0");
+    expect(bedrag(regels, "VERLEENDE_HUURKORTING")).toBe("0");
+  });
+
+  it("14b. ontbrekende Management-Werkelijk-dekking (070-BRONGAT) houdt Management ONBEKEND en Management-en-beheer/EBITDA ONVOLLEDIG — de overige posten blijven bekend", () => {
+    zetMappings();
+    const { id, activiteitId, correctiefId } = bouwVersie("070");
+    zetVerwachtingen(id, activiteitId, correctiefId, 1);
+    const invoer = estimatedInvoer();
+    const zonderManagement = leesEstimatedPnLRegels(db, id, { ...invoer, management: { ...invoer.management, dekkingBevestigd: false } });
+    expect(bedrag(zonderManagement, "MANAGEMENTVERGOEDING")).toBe("ONBEKEND");
+    expect(bedrag(zonderManagement, "BEHEERKOSTEN")).toBe("100");
+    const boom = berekenPnLBoom("ESTIMATED", zonderManagement);
+    expect(boom.managementEnBeheer.volledigheid.status).toBe("ONVOLLEDIG");
+    expect(boom.managementEnBeheer.volledigheid.status === "ONVOLLEDIG" ? boom.managementEnBeheer.volledigheid.ontbrekend.map((o) => o.regelSleutel) : []).toEqual(["MANAGEMENTVERGOEDING"]);
     expect(boom.ebitda.volledigheid.status).toBe("ONVOLLEDIG");
+    // Met bevestigde dekking voor alle modules en alle verwachtingen ingevuld is Estimated-EBITDA volledig; het BRONGAT is dan de enige oorzaak geweest.
+    expect(berekenPnLBoom("ESTIMATED", leesEstimatedPnLRegels(db, id, invoer)).ebitda.volledigheid).toEqual({ status: "VOLLEDIG" });
+  });
+
+  it("14c. Huur/Beheer/Management Estimated volgen de Begroting van de versie: na vaststellen uit de bevroren output, en muteren die niet", () => {
+    zetMappings();
+    const { id, activiteitId, correctiefId } = bouwVersie("070");
+    zetVerwachtingen(id, activiteitId, correctiefId, 1);
+    const concept = serialiseer(leesEstimatedPnLRegels(db, id, estimatedInvoer()));
+    stelBegrotingVast(db, id, new Date(Date.UTC(2026, 8, 25)));
+    expect(serialiseer(leesEstimatedPnLRegels(db, id, estimatedInvoer()))).toBe(concept);
   });
 
   it("15. Estimated muteert de vastgestelde Begroting niet: na vaststellen blijven de Begroting-P&L-regels byte-identiek terwijl Estimated meebeweegt", () => {
@@ -322,7 +355,7 @@ describe("Estimated → P&L: Werkelijk exact éénmaal; Estimated muteert de vas
     expect(leesBegrotingsversie(db, id)!.status).toBe("VASTGESTELD");
   });
 
-  it("16. Begroting en Estimated naast elkaar in de engine: verschil wordt afgeleid, onvolledigheid propageert", () => {
+  it("16. Begroting en Estimated naast elkaar in de engine: verschil wordt afgeleid; volledig bij volledige dekking, onvolledig zodra één benodigde post onbekend is", () => {
     zetMappings();
     const { id, activiteitId, correctiefId } = bouwVersie("070");
     zetVerwachtingen(id, activiteitId, correctiefId, 1);
@@ -330,7 +363,10 @@ describe("Estimated → P&L: Werkelijk exact éénmaal; Estimated muteert de vas
     const estimated = berekenPnLBoom("ESTIMATED", leesEstimatedPnLRegels(db, id, estimatedInvoer()));
     const v = vergelijkPnLResultaten(estimated, begroting);
     expect(v.algemeneKosten.afwijking.toString()).toBe(begroting.algemeneKosten.besteWetenSom.minus(estimated.algemeneKosten.besteWetenSom).toString());
-    expect(v.ebitda.volledigheid.status).toBe("ONVOLLEDIG");
+    expect(v.ebitda.volledigheid).toEqual({ status: "VOLLEDIG" });
+    const invoer = estimatedInvoer();
+    const metGat = berekenPnLBoom("ESTIMATED", leesEstimatedPnLRegels(db, id, { ...invoer, management: { ...invoer.management, dekkingBevestigd: false } }));
+    expect(vergelijkPnLResultaten(metGat, begroting).ebitda.volledigheid.status).toBe("ONVOLLEDIG");
   });
 
   function leesActiviteitId(versieId: string): number {
@@ -361,3 +397,68 @@ describe("Administratiegebonden: geen administratie-070-hardcoding", () => {
   });
 });
 
+
+describe("Estimated Huur + Beheer + Management met echte contracten door de hele keten (Vervolgtranche 7)", () => {
+  const dat = (s: string) => new Date(`${s}T00:00:00.000Z`);
+  const vs = (soort: string, jaar: number, btw = "Y") => ({ vorderingsoort: soort, bedragJaar: D(jaar), btwYn: btw });
+  const contractFeit = (bedrijfsnr: string, nummer: string, o: Record<string, unknown>) => ({
+    bedrijfsnr, contractnummer: nummer, huurdernummer: null, huurderNaam: null, complexnummer: "001", rentrollComponenten: [vs("01", 120000)],
+    ingangsdatum: dat("2020-01-01"), einddatum: null, indexatiedatum: null, indexatieHerhalingMaanden: 12, toekomstigeKortingswijzigingen: [], ...o,
+  });
+
+  /** C1 belast 10.000/mnd (korting 1.000/mnd, +3% per augustus), C2 onbelast 5.000/mnd tot 15 september; beheer complex 001: vast 12.000 (+5% aug) + 6% variabel. */
+  function zetContractenNeer(id: string, bedrijfsnr: string): void {
+    schrijfModule1Snapshot(db, id, [
+      contractFeit(bedrijfsnr, "C1", { rentrollComponenten: [vs("01", 120000), vs("13", -12000)], indexatiedatum: dat("2027-08-01") }),
+      contractFeit(bedrijfsnr, "C2", { rentrollComponenten: [vs("01", 60000, "N")], einddatum: dat("2027-09-15") }),
+    ] as never);
+    schrijfModule2Config(db, id, [{ complexnummer: "001", vastBedragJaar: D(12000), vastIndexatiePercentage: D(5), vastIndexatiedatum: dat("2027-08-01"), variabelPercentage: D(6) }]);
+  }
+  const invoerMetContracten = () => ({
+    ...estimatedInvoer(),
+    huur: {
+      werkelijk: berekenWerkelijkHuur([
+        { economischeCategorie: "HUUROPBRENGST_BELAST", saldo: D(-60000) },
+        { economischeCategorie: "HUUROPBRENGST_ONBELAST", saldo: D(-30000) },
+        { economischeCategorie: "VERLEENDE_HUURKORTING", saldo: D(6000) },
+      ]),
+      dekkingBevestigd: true,
+    },
+  });
+
+  it("19. Huur Estimated per P&L-regel: belast/onbelast gescheiden bruto + korting één keer; totaal = Werkelijk (84.000) + resterend netto (68.000 = 61.500 + 12.500 − 6.000)", () => {
+    zetMappings();
+    const { id, activiteitId, correctiefId } = bouwVersie("070");
+    zetContractenNeer(id, "070");
+    schrijfGeplandOnderhoudEstimatedVerwachtingen(db, id, [{ activiteitId, q1: D(0), q2: D(0), q3: D(500), q4: D(500) }]);
+    schrijfCorrectiefDagelijksOnderhoudEstimatedVerwachtingen(db, id, [{ regelId: correctiefId, resterendBedrag: D(100) }]);
+    const regels = leesEstimatedPnLRegels(db, id, invoerMetContracten());
+    expect(bedrag(regels, "HUUROPBRENGST_BELAST")).toBe("121500");
+    expect(bedrag(regels, "HUUROPBRENGST_ONBELAST")).toBe("42500");
+    expect(bedrag(regels, "VERLEENDE_HUURKORTING")).toBe("-12000");
+    expect(berekenPnLBoom("ESTIMATED", regels).totaalOpbrengsten.besteWetenSom.toString()).toBe("152000");
+  });
+
+  it("20. Beheer Estimated sluit aan op de Huur-grondslag: Werkelijk 100 + resterend vast 6.250 + variabel 6% × 68.000 (C1 55.500 + C2 12.500, beide complex 001) = 10.430; vast/variabel uit de bestaande configuratie", () => {
+    zetMappings();
+    const { id } = bouwVersie("070");
+    zetContractenNeer(id, "070");
+    expect(bedrag(leesEstimatedPnLRegels(db, id, invoerMetContracten()), "BEHEERKOSTEN")).toBe("10430");
+  });
+
+  it("21. het vaststellen van de Begroting verandert Estimated Huur/Beheer/Management niet en de Estimated wijzigt de vastgestelde Begroting niet; geen 070-hardcoding (003 geeft dezelfde uitkomst)", () => {
+    zetMappings();
+    const a070 = bouwVersie("070");
+    zetContractenNeer(a070.id, "070");
+    const a003 = bouwVersie("003");
+    zetContractenNeer(a003.id, "003");
+    const voor070 = serialiseer(leesEstimatedPnLRegels(db, a070.id, invoerMetContracten()));
+    const voor003 = serialiseer(leesEstimatedPnLRegels(db, a003.id, invoerMetContracten()));
+    const begrotingVoor = serialiseer(leesBegrotingPnLRegels(db, a070.id));
+    stelBegrotingVast(db, a070.id, new Date(Date.UTC(2026, 8, 25)));
+    expect(serialiseer(leesEstimatedPnLRegels(db, a070.id, invoerMetContracten()))).toBe(voor070);
+    expect(serialiseer(leesBegrotingPnLRegels(db, a070.id))).toBe(begrotingVoor);
+    const huurRegels = (r: string) => (JSON.parse(r) as string[][]).filter((x) => ["HUUROPBRENGST_BELAST", "HUUROPBRENGST_ONBELAST", "VERLEENDE_HUURKORTING", "BEHEERKOSTEN", "MANAGEMENTVERGOEDING"].includes(x[0]!));
+    expect(huurRegels(voor003)).toEqual(huurRegels(voor070));
+  });
+});

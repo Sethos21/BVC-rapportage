@@ -3,17 +3,28 @@ import {
   algemeneKostenBegrotingNaarPnLBovenEbitdaRegels,
   algemeneKostenEstimatedNaarPnLBovenEbitdaRegels,
   beheerBegrotingNaarPnLBovenEbitdaRegels,
+  beheerEstimatedNaarPnLBovenEbitdaRegels,
+  berekenEstimatedBeheer,
+  berekenEstimatedHuur,
+  berekenEstimatedManagement,
   gemeentelijkeLastenBegrotingNaarPnLBovenEbitdaRegels,
   gemeentelijkeLastenEstimatedNaarPnLBovenEbitdaRegels,
   huurBegrotingNaarPnLBovenEbitdaRegels,
+  huurEstimatedNaarPnLBovenEbitdaRegels,
   managementBegrotingNaarPnLBovenEbitdaRegels,
+  managementEstimatedNaarPnLBovenEbitdaRegels,
   onderhoudBegrotingNaarPnLBovenEbitdaRegels,
   onderhoudEstimatedTotaalNaarPnLBovenEbitdaRegels,
   verzekeringEstimatedNaarPnLBovenEbitdaRegels,
   verzekeringenBegrotingNaarPnLBovenEbitdaRegels,
+  type BgBeheerResultaat,
+  type BgHuurResultaat,
   type BgManagementResultaat,
   type BgOnderhoudKwartaal,
   type PurePnLBovenEbitdaRegel,
+  type WerkelijkBeheerResultaat,
+  type WerkelijkHuurResultaat,
+  type WerkelijkManagementResultaat,
   type WerkelijkAlgemeneKostenResultaat,
   type WerkelijkGemeentelijkeLastenResultaat,
   type WerkelijkOnderhoudResultaat,
@@ -44,9 +55,11 @@ import { leesVerzekeringEstimatedResultaat } from "./verzekeringEstimated.js";
  *   voor Onderhoud (totaalniveau), Verzekeringen, Gemeentelijke lasten en Algemene kosten. Estimated leest de
  *   Begroting en muteert haar nooit (ook niet na vaststellen). Aanvraag voor `berekenPnLBoom("ESTIMATED", …)`.
  *
- * NIET ONDERSTEUND IN ESTIMATED (bewust, niet stil weggelaten): Huur, Beheersvergoeding en Managementvergoeding — hun
- * automatische resterende-verwachting-logica is niet gebouwd. Ze verschijnen als ONBEKEND/TECHNISCH_NIET_ONDERSTEUND,
- * zodat EBITDA-Estimated ONVOLLEDIG is in plaats van te lage kosten/opbrengsten als volledig te presenteren.
+ * HUUR, BEHEERSVERGOEDING EN MANAGEMENTVERGOEDING (Vervolgtranche 7): Estimated = Werkelijk (aangeleverd, exact éénmaal) +
+ * de resterende maanden uit de Begroting van deze versie (concept herberekend, vastgesteld bevroren) — automatisch uit de
+ * contract-/begrotingslogica (FO OB-024), zonder persistentie. `resterendeMaanden` is expliciete invoer (kalendermaanden ná
+ * de laatst afgesloten periode). Werkelijk-dekking per module bepaalt de aanroeper (zie `bepaalGemapteCategorieen`): zonder
+ * bewezen mapping — bekend voor Management bij 070 — is de regel ONBEKEND.
  * Werkelijk komt uit de aparte Werkelijk-keten (`berekenPnLPeriode`), niet uit dit bestand.
  */
 
@@ -107,33 +120,51 @@ export function leesBegrotingPnLRegels(db: DatabaseSync, versieId: string): Pure
   ];
 }
 
+/** De Begroting-resultaten van Huur, Beheer en Management volgens de lifecycle (concept herberekend, vastgesteld bevroren). Leest, schrijft nooit. */
+function leesHuurBeheerManagementBegroting(db: DatabaseSync, versieId: string): { module1: BgHuurResultaat; module2: BgBeheerResultaat; module3: BgManagementResultaat | null } {
+  const versie = leesBegrotingsversie(db, versieId);
+  if (versie === null) {
+    throw new Error(`Begrotingsversie ${versieId} bestaat niet.`);
+  }
+  if (versie.status === "VASTGESTELD") {
+    const frozen = leesFrozenBegrotingsresultaat(db, versieId);
+    if (frozen === null) {
+      throw new Error(`Begrotingsversie ${versieId} is VASTGESTELD, maar de bevroren Huur-/Beheer-output ontbreekt (interne inconsistentie).`);
+    }
+    return { module1: frozen.module1, module2: frozen.module2, module3: leesFrozenModule3Resultaat(db, versieId) };
+  }
+  const b = herberekenBegroting(db, versieId);
+  return { module1: b.module1, module2: b.module2, module3: b.module3 };
+}
+
 /** Werkelijk-invoer per module — al berekend door de Werkelijk-keten (bronfeit); hier nooit herberekend. */
 export interface EstimatedPnLInvoer {
+  /** Kalendermaanden (1..12) ná de laatst afgesloten periode — voor Huur, Beheer en Management. Leeg = jaar volledig afgesloten. */
+  resterendeMaanden: readonly number[];
+  huur: { werkelijk: WerkelijkHuurResultaat; dekkingBevestigd: boolean };
+  beheer: { werkelijk: WerkelijkBeheerResultaat; dekkingBevestigd: boolean };
+  management: { werkelijk: WerkelijkManagementResultaat; dekkingBevestigd: boolean };
   onderhoud: { werkelijk: WerkelijkOnderhoudResultaat; dekkingBevestigd: boolean; resterendeKwartalen: readonly BgOnderhoudKwartaal[] };
   verzekeringen: { werkelijk: WerkelijkVerzekeringResultaat; dekkingBevestigd: boolean; resterendeMaanden: readonly number[] };
   gemeentelijkeLasten: { werkelijk: WerkelijkGemeentelijkeLastenResultaat; dekkingBevestigd: boolean };
   algemeneKosten: { werkelijk: WerkelijkAlgemeneKostenResultaat; dekkingBevestigd: boolean };
 }
 
-function nietOndersteundeEstimatedRegels(): PurePnLBovenEbitdaRegel[] {
-  const onbekend = (module: string) => ({ status: "ONBEKEND" as const, dekkingReden: "TECHNISCH_NIET_ONDERSTEUND" as const, toelichting: `Estimated ${module}: automatische resterende-verwachting-logica is nog niet gebouwd.` });
-  return [
-    { regelSleutel: "HUUROPBRENGST_BELAST", boomPositie: "BOVEN_EBITDA", groep: "OPBRENGSTEN", contributieAard: "OPBRENGST", waarde: onbekend("Huur") },
-    { regelSleutel: "HUUROPBRENGST_ONBELAST", boomPositie: "BOVEN_EBITDA", groep: "OPBRENGSTEN", contributieAard: "OPBRENGST", waarde: onbekend("Huur") },
-    { regelSleutel: "BEHEERKOSTEN", boomPositie: "BOVEN_EBITDA", groep: "MANAGEMENT_EN_BEHEER", contributieAard: "KOSTEN", waarde: onbekend("Beheersvergoeding") },
-    { regelSleutel: "MANAGEMENTVERGOEDING", boomPositie: "BOVEN_EBITDA", groep: "MANAGEMENT_EN_BEHEER", contributieAard: "KOSTEN", waarde: onbekend("Managementvergoeding") },
-  ];
-}
-
-/** Estimated → regels voor de modules waarvoor Estimated is gebouwd, plus expliciet-onbekende regels voor de rest (zie moduledoc). */
+/** Estimated → regels voor Huur, Beheer, Management, Onderhoud (totaal), Verzekeringen, Gemeentelijke lasten en Algemene kosten (zie moduledoc). */
 export function leesEstimatedPnLRegels(db: DatabaseSync, versieId: string, invoer: EstimatedPnLInvoer): PurePnLBovenEbitdaRegel[] {
+  const basis = leesHuurBeheerManagementBegroting(db, versieId);
+  const huur = berekenEstimatedHuur(basis.module1, invoer.huur.werkelijk, invoer.huur.dekkingBevestigd, invoer.resterendeMaanden);
+  const beheer = berekenEstimatedBeheer(basis.module1, basis.module2, invoer.beheer.werkelijk, invoer.beheer.dekkingBevestigd, invoer.resterendeMaanden);
+  const management = berekenEstimatedManagement(basis.module3, invoer.management.werkelijk, invoer.management.dekkingBevestigd, invoer.resterendeMaanden);
   const onderhoud = leesOnderhoudTotaalResultaat(db, versieId, invoer.onderhoud.werkelijk, invoer.onderhoud.resterendeKwartalen);
   const verzekering = leesVerzekeringEstimatedResultaat(db, versieId, invoer.verzekeringen.werkelijk, invoer.verzekeringen.dekkingBevestigd, invoer.verzekeringen.resterendeMaanden);
   const gemeentelijkeLasten = leesGemeentelijkeLastenEstimatedResultaat(db, versieId, invoer.gemeentelijkeLasten.werkelijk, invoer.gemeentelijkeLasten.dekkingBevestigd);
   const algemeneKosten = leesAlgemeneKostenEstimatedResultaat(db, versieId, invoer.algemeneKosten.werkelijk, invoer.algemeneKosten.dekkingBevestigd);
 
   return [
-    ...nietOndersteundeEstimatedRegels(),
+    ...huurEstimatedNaarPnLBovenEbitdaRegels(huur),
+    ...beheerEstimatedNaarPnLBovenEbitdaRegels(beheer),
+    ...managementEstimatedNaarPnLBovenEbitdaRegels(management),
     ...onderhoudEstimatedTotaalNaarPnLBovenEbitdaRegels({
       estimatedOnderhoudTotaal: onderhoud.estimatedOnderhoudTotaal,
       werkelijkDekkingBevestigd: invoer.onderhoud.dekkingBevestigd,
