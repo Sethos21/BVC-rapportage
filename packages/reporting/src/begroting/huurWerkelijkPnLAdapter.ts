@@ -58,7 +58,7 @@ import type { PnLBronBijdrage, PurePnLBovenEbitdaRegel } from "../pnlEngine.js";
  * ONBEKEND, ongeacht hun berekende waarde.
  */
 
-const HUUR_NIET_GECLASSIFICEERD_SLEUTEL = "HUUR_NIET_GECLASSIFICEERD";
+export const HUUR_NIET_GECLASSIFICEERD_SLEUTEL = "HUUR_NIET_GECLASSIFICEERD";
 
 export function huurWerkelijkNaarPnLBovenEbitdaRegels(resultaat: WerkelijkHuurResultaat, brondekkingBevestigd: boolean): PurePnLBovenEbitdaRegel[] {
   function categorieBijdrage(categorie: HuurWerkelijkCategorie): PnLBronBijdrage {
