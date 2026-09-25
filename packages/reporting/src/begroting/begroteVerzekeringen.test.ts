@@ -653,3 +653,39 @@ describe("Verzekeringen — Estimated per polis (besluit 2026-09-25)", () => {
     expect(r.estimated.moduleEstimatedTotaal).toBeNull();
   });
 });
+
+describe("Verzekeringen — override zonder actieve maand (besluit 2026-09-25, vervolgtranche 3)", () => {
+  const JAAR = 2027;
+  const aannames = { begrotingsjaar: JAAR, beoordeeld: true };
+  function polis(overrides: Partial<BgVerzekeringRegelInvoer> = {}): BgVerzekeringRegelInvoer {
+    return {
+      complexnummer: "001",
+      verzekeraar: "Gilde",
+      grootboekrekening: "4130",
+      ingangsdatum: new Date(Date.UTC(2028, 0, 1)), // start ná het begrotingsjaar: geen actieve maand
+      looptijdMaanden: 12,
+      bedrag: new Decimal(12000),
+      indexPercentage: new Decimal(3),
+      handmatigBegrootOverride: null,
+      ...overrides,
+    };
+  }
+  const kritiek = (p: BgVerzekeringRegelInvoer) => berekenBegroteVerzekeringen([p], aannames).controleVereist.filter((c) => c.ernst === "KRITIEK" && c.bericht.includes("geen actieve maand"));
+
+  it("niet-nul override (positief of negatief) op een polis zonder actieve maand: blokkerende KRITIEK", () => {
+    expect(kritiek(polis({ handmatigBegrootOverride: new Decimal(500) }))).toHaveLength(1);
+    expect(kritiek(polis({ handmatigBegrootOverride: new Decimal(-500) }))).toHaveLength(1);
+  });
+
+  it("expliciet €0 is geldig; geen override en een polis mét actieve maand geven geen KRITIEK", () => {
+    expect(kritiek(polis({ handmatigBegrootOverride: new Decimal(0) }))).toEqual([]);
+    expect(kritiek(polis())).toEqual([]);
+    expect(kritiek(polis({ ingangsdatum: new Date(Date.UTC(2027, 11, 1)), handmatigBegrootOverride: new Decimal(500) }))).toEqual([]); // start december: 1 actieve maand
+  });
+
+  it("de override blijft financieel meetellen (functioneel incompleet ≠ onberekenbaar); een NaN-override valt onder de bestaande NaN-regel, niet onder deze", () => {
+    const r = berekenBegroteVerzekeringen([polis({ handmatigBegrootOverride: new Decimal(500) })], aannames);
+    expect(r.totaalEffectiefBegroot.toString()).toBe("500");
+    expect(kritiek(polis({ handmatigBegrootOverride: new Decimal(NaN) }))).toEqual([]);
+  });
+});

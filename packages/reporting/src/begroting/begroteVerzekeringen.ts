@@ -279,7 +279,7 @@ export function bepaalRelevanteVerlengmomenten(ingangsdatum: Date, looptijdMaand
   return momenten;
 }
 
-function valideerRegel(invoer: BgVerzekeringRegelInvoer, index: number): BgVerzekeringControleItem[] {
+function valideerRegel(invoer: BgVerzekeringRegelInvoer, index: number, begrotingsjaar: number): BgVerzekeringControleItem[] {
   const controleVereist: BgVerzekeringControleItem[] = [];
   const meld = (bericht: string, ernst: BgVerzekeringControleErnst = "KRITIEK") => controleVereist.push({ regelIndex: index, ernst, bericht });
 
@@ -317,6 +317,15 @@ function valideerRegel(invoer: BgVerzekeringRegelInvoer, index: number): BgVerze
       meld(`Regel ${index}: handmatigBegrootOverride is geen geldig getal (NaN) — override genegeerd, berekendBegroot blijft leidend.`);
     } else if (invoer.handmatigBegrootOverride.isNegative()) {
       meld(`Regel ${index}: handmatigBegrootOverride is negatief (${invoer.handmatigBegrootOverride.toString()}) — toegestaan, telt volledig mee.`, "WAARSCHUWING");
+    }
+    // Besluit 2026-09-25 (vervolgtranche 3): een NIET-NUL jaaroverride op een polis zonder actieve maand in dit
+    // begrotingsjaar (ingangsdatum ná het jaar) kan niet over maanden worden verdeeld en is een blokkerende
+    // KRITIEK; een expliciete override van €0 is geldig. De override telt financieel ongewijzigd mee (zoals bij
+    // de overige functionele KRITIEKs) — het blokkeert beoordeling/vaststellen.
+    if (!invoer.handmatigBegrootOverride.isNaN() && !invoer.handmatigBegrootOverride.isZero() && isGeldigeDatum(invoer.ingangsdatum) && !bepaalActieveMaanden(invoer.ingangsdatum, begrotingsjaar).some(Boolean)) {
+      meld(
+        `Regel ${index}: handmatigBegrootOverride (${invoer.handmatigBegrootOverride.toString()}) is niet-nul, maar de polis heeft in begrotingsjaar ${begrotingsjaar} geen actieve maand (ingangsdatum ná het jaar) — de override kan niet over maanden worden verdeeld; verplicht op te lossen voor vaststellen (expliciet €0 is wel geldig).`,
+      );
     }
   }
 
@@ -416,7 +425,7 @@ function berekenRegel(
   index: number,
   begrotingsjaar: number,
 ): { uitkomst: BgVerzekeringRegelUitkomst; controleVereist: BgVerzekeringControleItem[] } {
-  const controleVereist = valideerRegel(invoer, index);
+  const controleVereist = valideerRegel(invoer, index, begrotingsjaar);
 
   const rekenvoorwaardenGeldig =
     isGeldigeDatum(invoer.ingangsdatum) && isGeldigeLooptijd(invoer.looptijdMaanden) && isGeldigDecimal(invoer.bedrag) && isGeldigDecimal(invoer.indexPercentage);
