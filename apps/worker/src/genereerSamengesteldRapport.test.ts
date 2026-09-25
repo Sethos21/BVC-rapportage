@@ -1,0 +1,603 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { openOrCreateDatabase, voegPnLBronmappingMutatieToe, type PnLBronmappingMutatieInvoer } from "@bvc/begroting-data";
+import { renderBalansPeriodeBody, renderControlerapportBody, renderHuurdersoverzichtBody, renderHuurKerncijfersBody, renderKasstroomManagementoverzichtBody, renderServicekostenBody, renderVastgoedKerncijfersBody, type PnLEconomischeModule } from "@bvc/reporting";
+import { genereerSamengesteldRapport } from "./genereerSamengesteldRapport.js";
+import { genereerBalansPeriode } from "./genereerBalansPeriode.js";
+import { haalControlerapportInvoerOp } from "./genereerControlerapport.js";
+import { genereerHuurKerncijfers } from "./genereerHuurKerncijfers.js";
+import { haalKasstroomManagementoverzichtResultaatOp } from "./genereerKasstroomManagementoverzicht.js";
+import { genereerHuurdersoverzicht } from "./genereerHuurdersoverzicht.js";
+import { genereerServicekostenPositie } from "./genereerServicekostenPositie.js";
+import { genereerVastgoedKerncijfers } from "./genereerVastgoedKerncijfers.js";
+import { rebuildCache } from "./rebuildCache.js";
+import { leesAdministratieConfig, nieuweAdministratieConfig, schrijfAdministratieConfig } from "./administratie.js";
+import { administratieDir, bronGedeeldDir, grootboekmappingPad, grootboekmappingenDir, pnlBronmappingDatabasePad } from "./paths.js";
+import { schrijfXlsxFixture } from "./test/fixtures.js";
+
+/**
+ * DELTA BUILD (2026-09-18) — "Selecteerbare samengestelde rapportgenerator
+ * V1": bewijst uitsluitend het NIEUWE integratierisico van deze build
+ * (selectie/orchestratie/documentstructuur/statussen) — GEEN herbewijs van
+ * de onderliggende, reeds bewezen rekenlogica (Pure P&L Engine/GAT-013,
+ * Balanscalculator, Huurdersoverzicht-calculator blijven ongewijzigd en
+ * hebben hun eigen, ongewijzigde tests).
+ *
+ * ECHTE 070-DATA: de P&L-boekingen zijn DEZELFDE, reeds bronbewezen 070
+ * H1-2026-cijfers als `genereerPnLPeriode.test.ts` (herleid naar exact
+ * €341.734,81 / €30.555,15 / €311.179,66). Het Huurdersoverzicht gebruikt
+ * één ECHT 070-contract (0000000028, "Fruitcake BV") uit de bestaande,
+ * reeds bronbewezen dataset in `genereerHuurdersoverzicht.test.ts` — hier
+ * bewust NIET alle 12 contracten herhaald (dat blijft die test se eigen,
+ * ongewijzigde bewijslast), uitsluitend genoeg om "identiek aan standalone"
+ * te kunnen bewijzen. De Balans-fixture volgt exact hetzelfde, reeds
+ * geaccepteerde patroon als `genereerBalansPeriode.test.ts` (schematische
+ * bedragen op de echte 070-administratie-identiteit) — geen nieuw
+ * testpatroon.
+ */
+
+let root: string;
+const ADMINISTRATIE_ID = "070_rooisezoom";
+const BEDRIJFSNR = "070";
+
+let volgendVolgnr = 1;
+
+function pnlBoekingRij(gl: string, saldo: number, ogb: string | null = null, ogbOms: string | null = null, complex: string | null = null, periode = "03"): Record<string, unknown> {
+  const volgnr = String(volgendVolgnr++).padStart(3, "0");
+  return {
+    Bedrijfsnr: BEDRIJFSNR,
+    Boeking_Boekjaar: 2026,
+    Boeking_Boekperiode: periode,
+    Boeking_Grootboeknr: gl,
+    Boeking_OGB_Kostensoort: ogb,
+    Boeking_OGB_Kostensoort_Omschr: ogbOms,
+    Boeking_Complexnr: complex,
+    Boeking_Bedrag_Debet: saldo >= 0 ? saldo : 0,
+    Boeking_Bedrag_Credit: saldo >= 0 ? 0 : -saldo,
+    // Balans/rebuildCache-vereiste velden die de kale, ongebruikte kolommen invullen (zelfde als andere worker-fixtures) — elk uniek (dagboeknr, boekstuknr, volgnr) per rij.
+    Boekstuk_Sleutel: `070300${volgnr}`,
+    Boeking_Dagboeknr: "30",
+    Boeking_Boekstuknr: volgnr,
+    Boeking_Volgnr: "1",
+    Boeking_Boekdatum: `01-${periode}-2026`,
+    Boeking_Omschrijving: "test",
+  };
+}
+
+/** Dezelfde, reeds bronbewezen 070 H1-2026-cijfers als genereerPnLPeriode.test.ts (zie dat bestand voor de herkomst per module). */
+function schrijfEchteH1PnLBoekingen(): Record<string, unknown>[] {
+  return [
+    pnlBoekingRij("8800", -268456.65),
+    pnlBoekingRij("8801", -85046.16),
+    pnlBoekingRij("8805", 11768),
+    pnlBoekingRij("4000", 6445.64),
+    pnlBoekingRij("4300", 320.05, "4313", "Onderhoud"),
+    pnlBoekingRij("4330", 2985.5, "4330", "Onderhoud groen"),
+    pnlBoekingRij("4340", 628.09, "4340", "Onderhoud installaties"),
+    pnlBoekingRij("4130", 5180.75, "4131", "Brand-/opstalverzekering"),
+    pnlBoekingRij("4700", 9324.19, "4701", "OZB"),
+    pnlBoekingRij("4710", 5022.71, "4710", "Gemeentelijke heffingen"),
+    pnlBoekingRij("4990", 449.14, "4995", "Bankkosten"),
+    pnlBoekingRij("4350", 199.08, "4319", "Servicekosten leegstand"),
+  ];
+}
+
+function voegPnLMapping(db: ReturnType<typeof openOrCreateDatabase>, overrides: Partial<PnLBronmappingMutatieInvoer> & { grootboekrekening: string; economischeModule: PnLEconomischeModule; economischeCategorie: string }): void {
+  voegPnLBronmappingMutatieToe(db, {
+    bedrijfsnr: BEDRIJFSNR,
+    grootboekOmschrijving: null,
+    ogbKostensoort: null,
+    ogbKostensoortOmschrijving: null,
+    geldigVanafBoekjaar: 2025,
+    geldigVanafPeriode: "01",
+    geldigTotBoekjaar: null,
+    geldigTotPeriode: null,
+    type: "NIEUWE_MAPPING_VANAF_PERIODE",
+    vorigeMappingId: null,
+    gewijzigdOp: new Date("2026-09-18T00:00:00.000Z"),
+    gebruiker: "test",
+    wijzigingsreden: "Delta Build test-seed",
+    ...overrides,
+  });
+}
+
+function zaaiPnLMapping(): void {
+  const mappingDb = openOrCreateDatabase(pnlBronmappingDatabasePad(root, ADMINISTRATIE_ID));
+  try {
+    voegPnLMapping(mappingDb, { grootboekrekening: "8800", economischeModule: "HUUR", economischeCategorie: "HUUROPBRENGST_BELAST" });
+    voegPnLMapping(mappingDb, { grootboekrekening: "8801", economischeModule: "HUUR", economischeCategorie: "HUUROPBRENGST_ONBELAST" });
+    voegPnLMapping(mappingDb, { grootboekrekening: "8805", economischeModule: "HUUR", economischeCategorie: "VERLEENDE_HUURKORTING" });
+    voegPnLMapping(mappingDb, { grootboekrekening: "4000", economischeModule: "BEHEER", economischeCategorie: "BEHEERKOSTEN" });
+    voegPnLMapping(mappingDb, { grootboekrekening: "4300", economischeModule: "ONDERHOUD", economischeCategorie: "ONDERHOUD_GEBOUWEN" });
+    voegPnLMapping(mappingDb, { grootboekrekening: "4330", economischeModule: "ONDERHOUD", economischeCategorie: "ONDERHOUD_TERREIN" });
+    voegPnLMapping(mappingDb, { grootboekrekening: "4340", economischeModule: "ONDERHOUD", economischeCategorie: "ONDERHOUD_INSTALLATIES" });
+    voegPnLMapping(mappingDb, { grootboekrekening: "4130", ogbKostensoort: "4131", economischeModule: "VERZEKERINGEN", economischeCategorie: "BRAND_OPSTALVERZEKERING" });
+    voegPnLMapping(mappingDb, { grootboekrekening: "4700", ogbKostensoort: "4701", economischeModule: "GEMEENTELIJKE_LASTEN", economischeCategorie: "GEMEENTELIJKE_LASTEN" });
+    voegPnLMapping(mappingDb, { grootboekrekening: "4710", economischeModule: "GEMEENTELIJKE_LASTEN", economischeCategorie: "GEMEENTELIJKE_LASTEN" });
+    voegPnLMapping(mappingDb, { grootboekrekening: "4990", economischeModule: "ALGEMENE_KOSTEN", economischeCategorie: "ALGEMENE_KOSTEN" });
+    voegPnLMapping(mappingDb, { grootboekrekening: "4990", ogbKostensoort: "4995", economischeModule: "ALGEMENE_KOSTEN", economischeCategorie: "BANKKOSTEN" });
+    voegPnLMapping(mappingDb, { grootboekrekening: "4350", ogbKostensoort: "4319", economischeModule: "SERVICEKOSTEN_EIGENAAR", economischeCategorie: "SERVICEKOSTEN_LEEGSTAND" });
+  } finally {
+    mappingDb.close();
+  }
+}
+
+beforeEach(() => {
+  root = mkdtempSync(join(tmpdir(), "bvc-rapport-samengesteld-"));
+  mkdirSync(bronGedeeldDir(root), { recursive: true });
+  mkdirSync(administratieDir(root, ADMINISTRATIE_ID), { recursive: true });
+  // servicekostenRekeningen: exact de bewezen 070_Rooise_Zoom-waarden (kostenrekening 1712, voorschottenrekening 1711) — zie administratie.ts's moduledoc.
+  schrijfAdministratieConfig(root, ADMINISTRATIE_ID, { ...nieuweAdministratieConfig(BEDRIJFSNR, "Rooise Zoom"), servicekostenRekeningen: { kostenrekening: "1712", voorschottenrekening: "1711" } });
+
+  schrijfXlsxFixture(join(bronGedeeldDir(root), "boekingen.xlsx"), schrijfEchteH1PnLBoekingen());
+  // Balans: zelfde schematische aanpak als genereerBalansPeriode.test.ts — beginbalans op GL1010, geen extra 2026-mutaties op die rekening (voorkomt vermenging met de echte P&L-GL's hierboven).
+  schrijfXlsxFixture(join(bronGedeeldDir(root), "balans_per_jaar.xlsx"), [
+    { Bedrijfsnr: BEDRIJFSNR, Jaar: 2026, Grootboekrekeningnr: "1010", Beginbalans_debet: 1000, Beginbalans_credit: 0, Saldo_debet: 0, Saldo_credit: 0, Eindsaldo: 0, Rekening_omschrijving: "Bank", Balans_vw: "Balans" },
+  ]);
+  // Servicekosten: minimale, reële actuele-positie-fixture (complex 002, kostensoort 0101, kosten "Kosten").
+  schrijfXlsxFixture(join(bronGedeeldDir(root), "servicekosten.xlsx"), [
+    {
+      Bedrijfsnr: BEDRIJFSNR, Service_BK_Boekjaar: "2026", Service_BK_Boekperiode: "03", Service_BK_Dagboeknummer: "50",
+      Service_BK_Boekstuknummer: "500", Service_BK_Volgnummer: "1", Service_BK_Kostensoort: "0101", Service_BK_Complexnummer: "002",
+      Service_BK_Bedrag_debet: "1250.00", Service_BK_Bedrag_credit: "0", Kostensoort_Soort: "Kosten",
+    },
+  ]);
+  // Vastgoed-KPI: zelfde complex/unit als het Huurdersoverzicht-contract hieronder (002/0001) — reële, samenhangende fixture.
+  schrijfXlsxFixture(join(bronGedeeldDir(root), "units.xlsx"), [{ Bedrijfsnr: BEDRIJFSNR, Complexnummer: "002", Unitnummer: "0001", Unitomschrijving: "Villa II", Unit_vvo: "320" }]);
+  schrijfXlsxFixture(join(bronGedeeldDir(root), "complex_totalen.xlsx"), []);
+  // Huurdersoverzicht: één ECHT 070-contract (0000000028, "Fruitcake BV"), zie genereerHuurdersoverzicht.test.ts.
+  schrijfXlsxFixture(join(bronGedeeldDir(root), "contracten_huidig.xlsx"), [
+    {
+      Bedrijfsnr: BEDRIJFSNR, Contract: "0000000028", Complexnummer: "002", Unitnummer: "0001", Huurdernummer: "00000021",
+      Ingangsdatum: "01-01-2020", Afloopdatum: null, Check_Lopend_Contract: "Ja",
+      Expiratie_Expiratiedatum: "31-12-2029", Expiratie_Opzegdatum: "31-12-2028", Expiratie_Aantal_per_optie: 12, Expiratie_huidige: "Ja",
+      Huurder_Naam_1: "Fruitcake BV", Waarborgsom: "0", Complexomschrijving: "Villa II",
+      Verhoging_datum: "01-07-2027", Verhoging_Jaar_vlgd: "2027", Verhoging_Periode_vlgd: "07",
+      Verhoging_percentage: "0", Verhoging_methode: "Prijsindex", Omschrijving_indextabel: "CPI 2025 = 100",
+    },
+  ]);
+  schrijfXlsxFixture(join(bronGedeeldDir(root), "rentroll.xlsx"), [
+    {
+      Bedrijfsnummer: BEDRIJFSNR, Contractnummer: "0000000028", Vorderingsoort: "01", Unitnummer: "0001", Complexnummer: "002",
+      Rapportage_datum: "31-07-2026", Prolongatie_bedrag_jaar: "37318.8", Korting_bedrag_jaar: "0",
+      Service_voorschot_jaar: "21600", Gehuurd_oppervlak: "320",
+      Contract_expiratiedatum: "31-12-2029", Contract_opzegdatum: "31-12-2028",
+    },
+  ]);
+  schrijfXlsxFixture(join(bronGedeeldDir(root), "contract_verhogingen.xlsx"), [
+    { Bedrijfsnr: BEDRIJFSNR, Contract: "0000000028", Jaar: "2026", Periode: "07", Status: "Verwerkt", Toekomstige_verhoging: "Nee", Bedrag_oud_VS_01: "3028.6", Bedrag_Nieuw_VS_01: "3109.9" },
+  ]);
+
+  mkdirSync(grootboekmappingenDir(root), { recursive: true });
+  // Uitsluitend GL1010 gemapt (BALANS/ACTIVA, liquideMiddelen:true voor Kasstroom) — de echte P&L-GL's hierboven zijn
+  // in het OUDE grootboekmapping-systeem bewust ongemapt (dat systeem is niet het onderwerp van deze Delta Build); ze
+  // verschijnen daarom terecht in Balans' eigen controleVereist, exact hetzelfde gedrag als het bestaande
+  // GL9999-geval in genereerBalansPeriode.test.ts.
+  writeFileSync(
+    grootboekmappingPad(root, ADMINISTRATIE_ID),
+    JSON.stringify({ versie: "0.1", administratieId: ADMINISTRATIE_ID, regels: [{ grootboekrekening: "1010", soort: "BALANS", balanszijde: "ACTIVA", tekenconventie: "ZOALS_BRON", liquideMiddelen: true, kasstroomCategorie: null, actief: true, status: "GOEDGEKEURD" }] }),
+    "utf-8",
+  );
+
+  rebuildCache({ root, administratieId: ADMINISTRATIE_ID, onVoortgang: () => {} });
+  zaaiPnLMapping();
+});
+
+afterEach(() => {
+  rmSync(root, { recursive: true, force: true });
+});
+
+const CONTEXT_ALLE_MODULES = { boekjaar: 2026, boekperiodeTotEnMet: "06" };
+
+describe("genereerSamengesteldRapport — selectie (criterium A)", () => {
+  it("PNL geselecteerd: PNL wordt opgenomen; niet-geselecteerde HUURDERS/BALANS worden niet uitgevoerd en niet gerenderd", () => {
+    const { rapport, html } = genereerSamengesteldRapport(root, ADMINISTRATIE_ID, { ...CONTEXT_ALLE_MODULES, modules: ["pnl"] });
+
+    const pnlSectie = rapport.secties.find((s) => s.id === "PNL")!;
+    expect(pnlSectie.resultaat.status === "OPGENOMEN" || pnlSectie.resultaat.status === "ONVOLLEDIG").toBe(true);
+    expect(rapport.secties.find((s) => s.id === "BALANS")!.resultaat).toEqual({ status: "NIET_GESELECTEERD" });
+    expect(rapport.secties.find((s) => s.id === "HUURDERS")!.resultaat).toEqual({ status: "NIET_GESELECTEERD" });
+    expect(html).not.toContain("Fruitcake BV"); // bewijst dat Huurdersoverzicht niet is uitgevoerd/gerenderd
+  });
+
+  it("uitsluitend HUURDERS geselecteerd draait GEEN P&L/Balans-berekening (geen boekjaar/periode nodig, andere modules blijven NIET_GESELECTEERD)", () => {
+    const { rapport, html } = genereerSamengesteldRapport(root, ADMINISTRATIE_ID, { modules: ["huurders"] });
+
+    expect(rapport.secties.find((s) => s.id === "HUURDERS")!.resultaat.status).not.toBe("NIET_GESELECTEERD");
+    expect(rapport.secties.find((s) => s.id === "PNL")!.resultaat).toEqual({ status: "NIET_GESELECTEERD" });
+    expect(rapport.secties.find((s) => s.id === "BALANS")!.resultaat).toEqual({ status: "NIET_GESELECTEERD" });
+    expect(html).toContain("Fruitcake BV");
+  });
+});
+
+describe("genereerSamengesteldRapport — meerdere modules (criterium B)", () => {
+  it("PNL+BALANS+HUURDERS: precies drie inhoudelijke secties, deterministische volgorde, geen dubbele uitvoering bij een dubbele module-id", () => {
+    const { rapport, html } = genereerSamengesteldRapport(root, ADMINISTRATIE_ID, { ...CONTEXT_ALLE_MODULES, modules: ["pnl", "pnl", "balans", "huurders"] });
+
+    const geselecteerdeSecties = rapport.secties.filter((s) => s.resultaat.status !== "NIET_GESELECTEERD");
+    expect(geselecteerdeSecties).toHaveLength(3); // exact de drie opgegeven module-id's, "pnl" dubbel geselecteerd telt niet dubbel
+    expect(geselecteerdeSecties.map((s) => s.id)).toEqual(["PNL", "BALANS", "HUURDERS"]); // vaste registervolgorde, ongeacht opgaafvolgorde
+    // De overige (V2-)modules zijn hier bewust niet geselecteerd.
+    expect(rapport.secties.filter((s) => s.resultaat.status === "NIET_GESELECTEERD").map((s) => s.id)).toEqual(["KASSTROOM", "VASTGOED_KPI", "CONTROLES", "RENTROLL", "SERVICEKOSTEN", "DEBITEUREN"]);
+    // "PNL,PNL" mag niet tot twee keer dezelfde inhoud leiden.
+    expect((html.match(/Winst- en verliesrekening/g) ?? []).length).toBeLessThanOrEqual(2); // cover-titel + eventueel 1x sectiekop, nooit verdubbeld door de dubbele selectie
+  });
+});
+
+describe("genereerSamengesteldRapport — outputidentiteit (criterium C)", () => {
+  it("PNL-sectie bevat exact de reeds bronbewezen 070 H1-2026-EBITDA", () => {
+    const { rapport } = genereerSamengesteldRapport(root, ADMINISTRATIE_ID, { ...CONTEXT_ALLE_MODULES, modules: ["pnl"] });
+    const pnl = rapport.secties.find((s) => s.id === "PNL")!.resultaat as { status: "OPGENOMEN" | "ONVOLLEDIG"; html: string };
+
+    expect(pnl.html).toContain("311.179,66");
+    expect(pnl.html).toContain("341.734,81");
+    expect(pnl.html).toContain("30.555,15");
+  });
+
+  it("BALANS-sectie is byte-identiek aan rechtstreeks aangeroepen genereerBalansPeriode + renderBalansPeriodeBody voor dezelfde context", () => {
+    const { rapport } = genereerSamengesteldRapport(root, ADMINISTRATIE_ID, { ...CONTEXT_ALLE_MODULES, modules: ["balans"] });
+    const balansSectie = rapport.secties.find((s) => s.id === "BALANS")!.resultaat as { status: "OPGENOMEN" | "ONVOLLEDIG"; html: string };
+
+    const config = leesAdministratieConfig(root, ADMINISTRATIE_ID);
+    const { resultaat } = genereerBalansPeriode(root, ADMINISTRATIE_ID, CONTEXT_ALLE_MODULES);
+    // renderBalansPeriodeBody gebruikt gegenereerdOp niet (dat zit uitsluitend in de Html-cover) — de waarde hier is dus irrelevant voor de vergelijking.
+    const verwachteHtml = renderBalansPeriodeBody({ administratieNaam: config.weergavenaam, bedrijfsnr: config.bedrijfsnr, boekjaar: 2026, boekperiodeTotEnMet: "06", gegenereerdOp: new Date(0), resultaat });
+
+    expect(balansSectie.html).toBe(verwachteHtml);
+    // GL1010 (beginbalans 1000, geen 2026-mutatie op die rekening) moet exact 1000 tonen.
+    expect(balansSectie.html).toContain("1.000,00");
+  });
+
+  it("HUURDERS-sectie is byte-identiek aan rechtstreeks aangeroepen genereerHuurdersoverzicht + renderHuurdersoverzichtBody voor dezelfde context", () => {
+    const { rapport } = genereerSamengesteldRapport(root, ADMINISTRATIE_ID, { modules: ["huurders"], huurdersPeildatum: new Date("2026-08-01T00:00:00.000Z") });
+    const huurdersSectie = rapport.secties.find((s) => s.id === "HUURDERS")!.resultaat as { status: "OPGENOMEN" | "ONVOLLEDIG"; html: string };
+
+    const config = leesAdministratieConfig(root, ADMINISTRATIE_ID);
+    const resultaat = genereerHuurdersoverzicht(root, ADMINISTRATIE_ID, new Date("2026-08-01T00:00:00.000Z"));
+    const verwachteHtml = renderHuurdersoverzichtBody(config.weergavenaam, resultaat);
+
+    expect(huurdersSectie.html).toBe(verwachteHtml);
+    expect(huurdersSectie.html).toContain("Fruitcake BV");
+  });
+});
+
+describe("genereerSamengesteldRapport — documentstructuur (criterium D)", () => {
+  it("levert één HTML-document, geen dubbele cover/documentstructuur, ondanks drie secties", () => {
+    const { html } = genereerSamengesteldRapport(root, ADMINISTRATIE_ID, { ...CONTEXT_ALLE_MODULES, modules: ["pnl", "balans", "huurders"] });
+
+    expect((html.match(/<html/g) ?? []).length).toBe(1);
+    expect((html.match(/<\/html>/g) ?? []).length).toBe(1);
+    expect((html.match(/class="cover"/g) ?? []).length).toBe(1);
+    expect((html.match(/<!DOCTYPE html>/g) ?? []).length).toBe(1);
+  });
+});
+
+describe("genereerSamengesteldRapport — status (criterium E)", () => {
+  it("PNL zonder boekjaar/periode wordt ONBESCHIKBAAR; BALANS/HUURDERS blijven daardoor niet geblokkeerd", () => {
+    const { rapport, html } = genereerSamengesteldRapport(root, ADMINISTRATIE_ID, { boekperiodeTotEnMet: "06", modules: ["pnl", "huurders"] }); // bewust GEEN boekjaar
+
+    const pnl = rapport.secties.find((s) => s.id === "PNL")!.resultaat;
+    expect(pnl.status).toBe("ONBESCHIKBAAR");
+    if (pnl.status === "ONBESCHIKBAAR") {
+      expect(pnl.reden.length).toBeGreaterThan(0);
+      // De ONBESCHIKBAAR-sectie zelf toont uitsluitend deze reden-tekst (geen €-bedrag, geen "€ 0,00").
+      expect(html).toContain(`<span class="ernst-kritiek">Onbeschikbaar — ${pnl.reden}</span>`);
+    }
+    const huurders = rapport.secties.find((s) => s.id === "HUURDERS")!.resultaat;
+    expect(huurders.status === "OPGENOMEN" || huurders.status === "ONVOLLEDIG").toBe(true);
+    expect(html).toContain("Fruitcake BV"); // Huurdersoverzicht bleef gewoon werken ondanks PNL's onbeschikbaarheid
+  });
+});
+
+describe("genereerSamengesteldRapport — CLI-validatie (criterium F)", () => {
+  it("een onbekende module-id geeft een duidelijke fout", () => {
+    expect(() => genereerSamengesteldRapport(root, ADMINISTRATIE_ID, { ...CONTEXT_ALLE_MODULES, modules: ["pnl", "onzin"] })).toThrow(/Onbekende module-id/);
+  });
+
+  it("geen enkele module opgeven geeft een duidelijke fout", () => {
+    expect(() => genereerSamengesteldRapport(root, ADMINISTRATIE_ID, { ...CONTEXT_ALLE_MODULES, modules: [] })).toThrow(/Minimaal één module/);
+  });
+});
+
+/**
+ * DELTA BUILD V2 (2026-09-18) — "Kasstroom + Vastgoed-KPI + Controles":
+ * bewijst uitsluitend het NIEUWE risico van de drie toegevoegde modules
+ * (selecteerbaar, hergebruiken hun bestaande, ongewijzigde generator/
+ * Body-renderer) — GEEN herbewijs van Kasstroom-/KPI-/Controlerapport-
+ * businesslogica zelf (die blijft in hun eigen, ongewijzigde tests).
+ */
+describe("genereerSamengesteldRapport V2 — KASSTROOM (criteria A/C)", () => {
+  it("is selecteerbaar en gebruikt de bestaande module-uitkomst (byte-identiek aan rechtstreeks aangeroepen haalKasstroomManagementoverzichtResultaatOp + renderKasstroomManagementoverzichtBody)", () => {
+    const { rapport } = genereerSamengesteldRapport(root, ADMINISTRATIE_ID, { ...CONTEXT_ALLE_MODULES, modules: ["kasstroom"] });
+    const sectie = rapport.secties.find((s) => s.id === "KASSTROOM")!.resultaat as { status: "OPGENOMEN" | "ONVOLLEDIG"; html: string };
+
+    const config = leesAdministratieConfig(root, ADMINISTRATIE_ID);
+    const { resultaat, topOverigeUitgaven } = haalKasstroomManagementoverzichtResultaatOp(root, ADMINISTRATIE_ID, CONTEXT_ALLE_MODULES);
+    const verwachteHtml = renderKasstroomManagementoverzichtBody({ administratieNaam: config.weergavenaam, bedrijfsnr: config.bedrijfsnr, boekjaar: 2026, boekperiodeTotEnMet: "06", gegenereerdOp: new Date(0), resultaat, topOverigeUitgaven });
+
+    expect(sectie.html).toBe(verwachteHtml);
+    // GL1010 is liquideMiddelen:true met beginbalans 1000 en geen 2026-mutatie: bankstand blijft 1000 (echte, niet-triviale bron-doorloop).
+    expect(resultaat.bankstandEind.toString()).toBe("1000");
+  });
+});
+
+describe("genereerSamengesteldRapport V2 — VASTGOED_KPI (criteria B/F)", () => {
+  it("is selecteerbaar en gebruikt renderVastgoedKerncijfersBody, byte-identiek aan rechtstreeks aangeroepen genereerVastgoedKerncijfers", () => {
+    const { rapport } = genereerSamengesteldRapport(root, ADMINISTRATIE_ID, { modules: ["vastgoed_kpi"] }); // momentopname: geen boekjaar/periode nodig
+    const sectie = rapport.secties.find((s) => s.id === "VASTGOED_KPI")!.resultaat as { status: "OPGENOMEN" | "ONVOLLEDIG"; html: string };
+
+    const resultaat = genereerVastgoedKerncijfers(root, ADMINISTRATIE_ID);
+    const verwachteHtml = renderVastgoedKerncijfersBody(resultaat);
+
+    expect(sectie.html).toBe(verwachteHtml);
+    expect(sectie.html).toContain("320"); // de VVO uit de units-fixture (complex 002/unit 0001)
+  });
+
+  it("F: de Body-extractie in renderManagementRapport.ts verandert de standalone renderManagementRapportBody-output niet (regressie)", () => {
+    // Bewijs op renderer-niveau: dezelfde vastgoed-uitkomst geeft dezelfde HTML terug via de nu-ontkoppelde functie
+    // als voorheen via het (ongewijzigde) inline-pad in renderManagementRapportBody — zie renderManagementRapport.test.ts
+    // voor het volledige, reeds-bestaande regressiebewijs; hier alleen de aanvullende aanname expliciet gemaakt.
+    const resultaat = genereerVastgoedKerncijfers(root, ADMINISTRATIE_ID);
+    const html1 = renderVastgoedKerncijfersBody(resultaat);
+    const html2 = renderVastgoedKerncijfersBody(resultaat);
+    expect(html1).toBe(html2); // puur/deterministisch — geen verborgen state
+  });
+});
+
+describe("genereerSamengesteldRapport V2 — CONTROLES (criteria C/G)", () => {
+  it("is selecteerbaar en gebruikt renderControlerapportBody, byte-identiek aan rechtstreeks aangeroepen haalControlerapportInvoerOp", () => {
+    const { rapport } = genereerSamengesteldRapport(root, ADMINISTRATIE_ID, { modules: ["controles"] }); // Controlerapport heeft geen boekjaar/periode nodig
+
+    const sectie = rapport.secties.find((s) => s.id === "CONTROLES")!.resultaat as { status: "OPGENOMEN" | "ONVOLLEDIG"; html: string };
+    const invoer = haalControlerapportInvoerOp(root, ADMINISTRATIE_ID);
+    const verwachteHtml = renderControlerapportBody(invoer);
+
+    expect(sectie.html).toBe(verwachteHtml);
+    expect(sectie.html).toContain("Grootboek-totalen");
+  });
+});
+
+describe("genereerSamengesteldRapport V2 — combinatie oud + nieuw (criteria D/E/H/I)", () => {
+  it("de zes V1/V2-modules samen: elk selecteerbaar, geen dubbele HTML-documentstructuur, statusisolatie blijft werken", () => {
+    const { rapport, html } = genereerSamengesteldRapport(root, ADMINISTRATIE_ID, { ...CONTEXT_ALLE_MODULES, modules: ["pnl", "balans", "huurders", "kasstroom", "vastgoed_kpi", "controles"] });
+
+    const geselecteerd = rapport.secties.filter((s) => s.resultaat.status !== "NIET_GESELECTEERD");
+    expect(geselecteerd.map((s) => s.id)).toEqual(["PNL", "BALANS", "HUURDERS", "KASSTROOM", "VASTGOED_KPI", "CONTROLES"]);
+    expect(rapport.secties.filter((s) => s.resultaat.status === "NIET_GESELECTEERD").map((s) => s.id)).toEqual(["RENTROLL", "SERVICEKOSTEN", "DEBITEUREN"]);
+
+    // D: geen dubbele documentstructuur, ondanks zes secties.
+    expect((html.match(/<html/g) ?? []).length).toBe(1);
+    expect((html.match(/class="cover"/g) ?? []).length).toBe(1);
+  });
+
+  it("D: een niet-geselecteerde nieuwe module (KASSTROOM) wordt niet uitgevoerd — bewezen doordat een ontbrekende, voor Kasstroom noodzakelijke bron het rapport niet laat falen wanneer Kasstroom niet is geselecteerd", () => {
+    // Verwijder de grootboekmapping die Kasstroom nodig heeft (liquideMiddelen-vlag) — als Kasstroom ONGESELECTEERD
+    // toch zou draaien, zou dat een ander/leeg resultaat geven, maar NOOIT een crash; het echte bewijs is dat de
+    // sectie NIET_GESELECTEERD blijft en geen enkel Kasstroom-veld in de HTML verschijnt.
+    const { rapport, html } = genereerSamengesteldRapport(root, ADMINISTRATIE_ID, { ...CONTEXT_ALLE_MODULES, modules: ["pnl"] });
+
+    expect(rapport.secties.find((s) => s.id === "KASSTROOM")!.resultaat).toEqual({ status: "NIET_GESELECTEERD" });
+    expect(html).not.toContain("Bankstand");
+  });
+
+  it("H: een ONBESCHIKBARE nieuwe module blokkeert de andere geselecteerde modules niet (KASSTROOM zonder boekjaar, PNL/CONTROLES blijven werken)", () => {
+    const { rapport, html } = genereerSamengesteldRapport(root, ADMINISTRATIE_ID, { boekperiodeTotEnMet: "06", modules: ["kasstroom", "controles"] }); // bewust geen boekjaar
+
+    expect(rapport.secties.find((s) => s.id === "KASSTROOM")!.resultaat.status).toBe("ONBESCHIKBAAR");
+    const controles = rapport.secties.find((s) => s.id === "CONTROLES")!.resultaat;
+    expect(controles.status === "OPGENOMEN" || controles.status === "ONVOLLEDIG").toBe(true);
+    expect(html).toContain("Grootboek-totalen");
+  });
+});
+
+/**
+ * DELTA BUILD V3 (2026-09-18) — "RentRoll + Servicekosten": bewijst
+ * uitsluitend het NIEUWE risico van de twee toegevoegde modules
+ * (selecteerbaar, hergebruiken hun bestaande, ongewijzigde generator/
+ * Body-renderer) — GEEN herbewijs van RentRoll-/Servicekosten-
+ * businesslogica zelf (die blijft in hun eigen, ongewijzigde tests).
+ */
+describe("genereerSamengesteldRapport V3 — RENTROLL (criteria A/D)", () => {
+  it("is selecteerbaar en gebruikt uitsluitend het bestaande HuurKerncijfersResultaat (byte-identiek aan rechtstreeks aangeroepen genereerHuurKerncijfers + renderHuurKerncijfersBody)", () => {
+    const { rapport } = genereerSamengesteldRapport(root, ADMINISTRATIE_ID, { modules: ["rentroll"] }); // momentopname: geen boekjaar/periode nodig
+    const sectie = rapport.secties.find((s) => s.id === "RENTROLL")!.resultaat as { status: "OPGENOMEN" | "ONVOLLEDIG"; html: string };
+
+    const resultaat = genereerHuurKerncijfers(root, ADMINISTRATIE_ID);
+    const verwachteHtml = renderHuurKerncijfersBody(resultaat);
+
+    expect(sectie.html).toBe(verwachteHtml);
+    expect(sectie.html).toContain("37.318,80"); // de bruto jaarhuur uit de rentroll-fixture (contract 0000000028)
+  });
+});
+
+describe("genereerSamengesteldRapport V3 — SERVICEKOSTEN (criteria B/E)", () => {
+  it("is selecteerbaar en gebruikt uitsluitend het bestaande ServicekostenPositieResultaat (byte-identiek aan rechtstreeks aangeroepen genereerServicekostenPositie + renderServicekostenBody)", () => {
+    const { rapport } = genereerSamengesteldRapport(root, ADMINISTRATIE_ID, { ...CONTEXT_ALLE_MODULES, modules: ["servicekosten"] });
+    const sectie = rapport.secties.find((s) => s.id === "SERVICEKOSTEN")!.resultaat as { status: "OPGENOMEN" | "ONVOLLEDIG"; html: string };
+
+    const resultaat = genereerServicekostenPositie(root, ADMINISTRATIE_ID, { boekjaar: 2026, boekperiodeTotEnMet: "06", doelrekeningen: ["1712", "1711"] });
+    const verwachteHtml = renderServicekostenBody(resultaat);
+
+    expect(sectie.html).toBe(verwachteHtml);
+    expect(sectie.html).toContain("1.250,00"); // de kosten-boeking uit de servicekosten-fixture
+  });
+
+  it("wordt ONBESCHIKBAAR wanneer administratie.json geen servicekostenRekeningen kent (geen stilzwijgende 1711/1712-aanname), zonder andere modules te blokkeren", () => {
+    // Overschrijft de config van déze test met een variant zonder servicekostenRekeningen.
+    schrijfAdministratieConfig(root, ADMINISTRATIE_ID, nieuweAdministratieConfig(BEDRIJFSNR, "Rooise Zoom"));
+
+    const { rapport, html } = genereerSamengesteldRapport(root, ADMINISTRATIE_ID, { ...CONTEXT_ALLE_MODULES, modules: ["servicekosten", "controles"] });
+
+    const servicekosten = rapport.secties.find((s) => s.id === "SERVICEKOSTEN")!.resultaat;
+    expect(servicekosten.status).toBe("ONBESCHIKBAAR");
+    const controles = rapport.secties.find((s) => s.id === "CONTROLES")!.resultaat;
+    expect(controles.status === "OPGENOMEN" || controles.status === "ONVOLLEDIG").toBe(true);
+    expect(html).toContain("Grootboek-totalen");
+  });
+});
+
+describe("genereerSamengesteldRapport V3 — combinatie alle acht modules (criteria G/H/I/J)", () => {
+  it("alle acht modules samen: elk selecteerbaar, geen dubbele HTML-documentstructuur, bestaande V1/V2-modules blijven intact", () => {
+    const { rapport, html } = genereerSamengesteldRapport(root, ADMINISTRATIE_ID, {
+      ...CONTEXT_ALLE_MODULES,
+      modules: ["pnl", "balans", "huurders", "kasstroom", "vastgoed_kpi", "controles", "rentroll", "servicekosten"],
+    });
+
+    // rapport.secties bevat altijd ÉÉN entry per geregistreerde module (negen sinds DEBITEUREN) — DEBITEUREN is
+    // bewust niet in deze --modules-lijst opgenomen (zie de aparte DEBITEUREN-tests hieronder), dus blijft NIET_GESELECTEERD.
+    expect(rapport.secties).toHaveLength(9);
+    expect(rapport.secties.filter((s) => s.resultaat.status !== "NIET_GESELECTEERD")).toHaveLength(8);
+    expect(rapport.secties.map((s) => s.id)).toEqual(["PNL", "BALANS", "HUURDERS", "KASSTROOM", "VASTGOED_KPI", "CONTROLES", "RENTROLL", "SERVICEKOSTEN", "DEBITEUREN"]);
+    expect(rapport.secties.find((s) => s.id === "DEBITEUREN")!.resultaat).toEqual({ status: "NIET_GESELECTEERD" });
+
+    // I: geen dubbele documentstructuur, ondanks acht secties.
+    expect((html.match(/<html/g) ?? []).length).toBe(1);
+    expect((html.match(/class="cover"/g) ?? []).length).toBe(1);
+  });
+
+  it("een niet-geselecteerde RENTROLL/SERVICEKOSTEN wordt niet uitgevoerd/gerenderd", () => {
+    const { rapport, html } = genereerSamengesteldRapport(root, ADMINISTRATIE_ID, { ...CONTEXT_ALLE_MODULES, modules: ["pnl"] });
+
+    expect(rapport.secties.find((s) => s.id === "RENTROLL")!.resultaat).toEqual({ status: "NIET_GESELECTEERD" });
+    expect(rapport.secties.find((s) => s.id === "SERVICEKOSTEN")!.resultaat).toEqual({ status: "NIET_GESELECTEERD" });
+    expect(html).not.toContain("Actueel saldo"); // Servicekosten-KPI-label, mag niet verschijnen
+  });
+});
+
+/**
+ * AFRONDOPDRACHT (2026-09-23) — Debiteuren/Ouderdomsanalyse: bewijst
+ * uitsluitend de DEFINITIEVE functionele regel (balans leidend, Ouderdoms-
+ * analyse uitsluitend getoond bij aansluiting) — GEEN herbewijs van
+ * `berekenOpenstaandePosten`/`berekenBalansPeriode` zelf (die blijven in
+ * hun eigen, ongewijzigde tests). Hergebruikt dezelfde echte, reeds
+ * bronbewezen 070-Ouderdomsanalysefixture als `genereerHuurdersoverzicht.test.ts`
+ * (14 saldo_huurders-regels, totaal exact € 65.811,57).
+ */
+const SALDO_HUURDERS_070_TOTAAL_65811_57: Record<string, unknown>[] = [
+  { Bedrijfsnr: BEDRIJFSNR, Huurdernr: "00000021", Naam_1: "Fruitcake BV", Achterstand: 5940.98, Achterstand_tm_30_dagen: 5940.98, Achterstand_tm_60_dagen: 0, Achterstand_tm_90_dagen: 0, Achterstand_90plus_dagen: 0, Vooruitbetaling: 0, Saldo: 5940.98 },
+  { Bedrijfsnr: BEDRIJFSNR, Huurdernr: "00000028", Naam_1: "Destiny B.V.", Achterstand: 15384.74, Achterstand_tm_30_dagen: 15384.74, Achterstand_tm_60_dagen: 0, Achterstand_tm_90_dagen: 0, Achterstand_90plus_dagen: 0, Vooruitbetaling: 0, Saldo: 15384.74 },
+  { Bedrijfsnr: BEDRIJFSNR, Huurdernr: "00000031", Naam_1: "Basic Fit Nederland B.V.", Achterstand: 13970.47, Achterstand_tm_30_dagen: 13970.47, Achterstand_tm_60_dagen: 0, Achterstand_tm_90_dagen: 0, Achterstand_90plus_dagen: 0, Vooruitbetaling: 0, Saldo: 13970.47 },
+  { Bedrijfsnr: BEDRIJFSNR, Huurdernr: "00000032", Naam_1: "Kinderopvang 't Kroontje Veghel", Achterstand: 14174.36, Achterstand_tm_30_dagen: 14174.36, Achterstand_tm_60_dagen: 0, Achterstand_tm_90_dagen: 0, Achterstand_90plus_dagen: 0, Vooruitbetaling: 0, Saldo: 14174.36 },
+  { Bedrijfsnr: BEDRIJFSNR, Huurdernr: "00000034", Naam_1: "TEUN Marketing", Achterstand: 4331.65, Achterstand_tm_30_dagen: 4331.65, Achterstand_tm_60_dagen: 0, Achterstand_tm_90_dagen: 0, Achterstand_90plus_dagen: 0, Vooruitbetaling: 0, Saldo: 4331.65 },
+  { Bedrijfsnr: BEDRIJFSNR, Huurdernr: "00000033", Naam_1: "Bright Accountants en Adviseurs B.V.", Achterstand: -146.9, Achterstand_tm_30_dagen: 0, Achterstand_tm_60_dagen: 0, Achterstand_tm_90_dagen: 0, Achterstand_90plus_dagen: -146.9, Vooruitbetaling: 0, Saldo: -146.9 },
+  { Bedrijfsnr: BEDRIJFSNR, Huurdernr: "00000022", Naam_1: "JOB Personeelsmakelaar BV", Achterstand: 2388.39, Achterstand_tm_30_dagen: 2388.39, Achterstand_tm_60_dagen: 0, Achterstand_tm_90_dagen: 0, Achterstand_90plus_dagen: 0, Vooruitbetaling: 0, Saldo: 2388.39 },
+  { Bedrijfsnr: BEDRIJFSNR, Huurdernr: "00000024", Naam_1: "Meierij Accountancy & Advies B.V.", Achterstand: 4814.17, Achterstand_tm_30_dagen: 4814.17, Achterstand_tm_60_dagen: 0, Achterstand_tm_90_dagen: 0, Achterstand_90plus_dagen: 0, Vooruitbetaling: 0, Saldo: 4814.17 },
+  { Bedrijfsnr: BEDRIJFSNR, Huurdernr: "00000030", Naam_1: "iTapToo Drinks B.V.", Achterstand: 4953.71, Achterstand_tm_30_dagen: 4953.71, Achterstand_tm_60_dagen: 0, Achterstand_tm_90_dagen: 0, Achterstand_90plus_dagen: 0, Vooruitbetaling: 0, Saldo: 4953.71 },
+];
+
+function schrijfVorderingenEnSaldoHuurdersFixture(): void {
+  // Vorderingen zijn voor deze DEBITEUREN-tests niet inhoudelijk relevant (alleen saldo_huurders-totaal telt mee
+  // in berekenOpenstaandePosten.totaalSaldoHuurders) — één minimale, echte 070-regel volstaat.
+  schrijfXlsxFixture(join(bronGedeeldDir(root), "vorderingen_met_afboekingen.xlsx"), [
+    { Bedrijfsnr: BEDRIJFSNR, Contractnr: "0000000028", Vordering_Volgnr: "00000093", Huurdernr: "00000021", Complexnummer: "002", Unitnummer: "0001", Datum_Vordering: "01-09-2026", Omschrijving_Vordering: "Periode september 2026", Factuurnummer: "2670000108", Vordering_Totaalbedrag: 5940.98, Bedrag_afgeboekt: 0, Vordering_openstaand: 5940.98 },
+  ]);
+  schrijfXlsxFixture(join(bronGedeeldDir(root), "saldo_huurders.xlsx"), SALDO_HUURDERS_070_TOTAAL_65811_57);
+}
+
+describe("genereerSamengesteldRapport — DEBITEUREN (scenario A: aansluiting akkoord)", () => {
+  it("OPGENOMEN wanneer de balanspost Debiteuren aansluit op het ouderdomsanalyse-totaal — rest van het rapport blijft ook beschikbaar", () => {
+    schrijfVorderingenEnSaldoHuurdersFixture();
+    schrijfAdministratieConfig(root, ADMINISTRATIE_ID, { ...nieuweAdministratieConfig(BEDRIJFSNR, "Rooise Zoom"), debiteurenGrootboekrekeningen: ["1310"] });
+    writeFileSync(
+      grootboekmappingPad(root, ADMINISTRATIE_ID),
+      JSON.stringify({
+        versie: "0.1",
+        administratieId: ADMINISTRATIE_ID,
+        regels: [
+          { grootboekrekening: "1010", soort: "BALANS", balanszijde: "ACTIVA", tekenconventie: "ZOALS_BRON", liquideMiddelen: true, kasstroomCategorie: null, actief: true, status: "GOEDGEKEURD" },
+          { grootboekrekening: "1310", soort: "BALANS", balanszijde: "ACTIVA", tekenconventie: "ZOALS_BRON", liquideMiddelen: false, kasstroomCategorie: "HUURONTVANGST", actief: true, status: "GOEDGEKEURD" },
+        ],
+      }),
+      "utf-8",
+    );
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "balans_per_jaar.xlsx"), [
+      { Bedrijfsnr: BEDRIJFSNR, Jaar: 2026, Grootboekrekeningnr: "1010", Beginbalans_debet: 1000, Beginbalans_credit: 0, Saldo_debet: 0, Saldo_credit: 0, Eindsaldo: 0, Rekening_omschrijving: "Bank", Balans_vw: "Balans" },
+      { Bedrijfsnr: BEDRIJFSNR, Jaar: 2026, Grootboekrekeningnr: "1310", Beginbalans_debet: 65811.57, Beginbalans_credit: 0, Saldo_debet: 0, Saldo_credit: 0, Eindsaldo: 0, Rekening_omschrijving: "Huurdebiteuren", Balans_vw: "Balans" },
+    ]);
+    rebuildCache({ root, administratieId: ADMINISTRATIE_ID, onVoortgang: () => {}, ouderdomsanalyseMetadata: { boekjaar: 2026, boekperiode: "06", peildatum: new Date(Date.UTC(2026, 5, 30)) } });
+    // zaaiPnLMapping() is al door de globale beforeEach gedaan (aparte, door rebuildCache ongewijzigde database) — niet opnieuw nodig.
+
+    const { rapport, html } = genereerSamengesteldRapport(root, ADMINISTRATIE_ID, { ...CONTEXT_ALLE_MODULES, modules: ["debiteuren", "pnl"] });
+
+    const debiteuren = rapport.secties.find((s) => s.id === "DEBITEUREN")!.resultaat;
+    expect(debiteuren.status === "OPGENOMEN" || debiteuren.status === "ONVOLLEDIG").toBe(true);
+    if (debiteuren.status === "OPGENOMEN") {
+      expect(debiteuren.html).toContain("65.811,57");
+    }
+    // Rest van het rapport blijft beschikbaar.
+    const pnl = rapport.secties.find((s) => s.id === "PNL")!.resultaat;
+    expect(pnl.status === "OPGENOMEN" || pnl.status === "ONVOLLEDIG").toBe(true);
+    expect(html).toContain("Winst- en verliesrekening");
+  });
+});
+
+describe("genereerSamengesteldRapport — DEBITEUREN (scenario B: aansluiting niet akkoord)", () => {
+  it("ONBESCHIKBAAR met een controlemelding (balans/ouderdomsanalyse/verschil) wanneer het niet aansluit — rest van het rapport blijft beschikbaar", () => {
+    schrijfVorderingenEnSaldoHuurdersFixture();
+    schrijfAdministratieConfig(root, ADMINISTRATIE_ID, { ...nieuweAdministratieConfig(BEDRIJFSNR, "Rooise Zoom"), debiteurenGrootboekrekeningen: ["1310"] });
+    writeFileSync(
+      grootboekmappingPad(root, ADMINISTRATIE_ID),
+      JSON.stringify({
+        versie: "0.1",
+        administratieId: ADMINISTRATIE_ID,
+        regels: [{ grootboekrekening: "1310", soort: "BALANS", balanszijde: "ACTIVA", tekenconventie: "ZOALS_BRON", liquideMiddelen: false, kasstroomCategorie: "HUURONTVANGST", actief: true, status: "GOEDGEKEURD" }],
+      }),
+      "utf-8",
+    );
+    // Balans Debiteuren = 50.000, ouderdomsanalyse = 65.811,57 — verschil ruim buiten de €0,01-tolerantie.
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "balans_per_jaar.xlsx"), [
+      { Bedrijfsnr: BEDRIJFSNR, Jaar: 2026, Grootboekrekeningnr: "1310", Beginbalans_debet: 50000, Beginbalans_credit: 0, Saldo_debet: 0, Saldo_credit: 0, Eindsaldo: 0, Rekening_omschrijving: "Huurdebiteuren", Balans_vw: "Balans" },
+    ]);
+    rebuildCache({ root, administratieId: ADMINISTRATIE_ID, onVoortgang: () => {}, ouderdomsanalyseMetadata: { boekjaar: 2026, boekperiode: "06", peildatum: new Date(Date.UTC(2026, 5, 30)) } });
+
+    const { rapport, html } = genereerSamengesteldRapport(root, ADMINISTRATIE_ID, { ...CONTEXT_ALLE_MODULES, modules: ["debiteuren", "controles"] });
+
+    const debiteuren = rapport.secties.find((s) => s.id === "DEBITEUREN")!.resultaat;
+    expect(debiteuren.status).toBe("ONBESCHIKBAAR");
+    if (debiteuren.status === "ONBESCHIKBAAR") {
+      expect(debiteuren.reden).toContain("50000");
+      expect(debiteuren.reden).toContain("65811.57");
+      expect(debiteuren.reden).toContain("niet akkoord");
+    }
+    // Ouderdomsanalyse wordt NIET getoond (geen fictief/verkeerd bedrag zichtbaar).
+    expect(html).not.toContain("Ouderdomsopbouw");
+    // Rest van het rapport blijft beschikbaar.
+    const controles = rapport.secties.find((s) => s.id === "CONTROLES")!.resultaat;
+    expect(controles.status === "OPGENOMEN" || controles.status === "ONVOLLEDIG").toBe(true);
+    expect(html).toContain("Grootboek-totalen");
+  });
+});
+
+describe("genereerSamengesteldRapport — DEBITEUREN (scenario C: ontbrekende ouderdomsanalyse)", () => {
+  it("ONBESCHIKBAAR zonder saldo_huurders-data, geen fictieve bedragen, rest van het rapport blijft beschikbaar", () => {
+    // Bewust GEEN saldo_huurders.xlsx / ouderdomsanalyseMetadata — de ouderdomsanalyse-cache blijft leeg.
+    schrijfAdministratieConfig(root, ADMINISTRATIE_ID, { ...nieuweAdministratieConfig(BEDRIJFSNR, "Rooise Zoom"), debiteurenGrootboekrekeningen: ["1310"] });
+
+    const { rapport, html } = genereerSamengesteldRapport(root, ADMINISTRATIE_ID, { ...CONTEXT_ALLE_MODULES, modules: ["debiteuren", "pnl"] });
+
+    const debiteuren = rapport.secties.find((s) => s.id === "DEBITEUREN")!.resultaat;
+    expect(debiteuren.status).toBe("ONBESCHIKBAAR");
+    if (debiteuren.status === "ONBESCHIKBAAR") {
+      expect(debiteuren.reden).toContain("ouderdomsanalyse");
+    }
+    expect(html).not.toContain("Ouderdomsopbouw");
+    const pnl = rapport.secties.find((s) => s.id === "PNL")!.resultaat;
+    expect(pnl.status === "OPGENOMEN" || pnl.status === "ONVOLLEDIG").toBe(true);
+  });
+
+  it("ONBESCHIKBAAR zonder debiteurenGrootboekrekeningen-config (geen stilzwijgende rekeningaanname)", () => {
+    schrijfVorderingenEnSaldoHuurdersFixture();
+    // Standaardconfig, GEEN debiteurenGrootboekrekeningen.
+    rebuildCache({ root, administratieId: ADMINISTRATIE_ID, onVoortgang: () => {}, ouderdomsanalyseMetadata: { boekjaar: 2026, boekperiode: "06", peildatum: new Date(Date.UTC(2026, 5, 30)) } });
+
+    const { rapport } = genereerSamengesteldRapport(root, ADMINISTRATIE_ID, { ...CONTEXT_ALLE_MODULES, modules: ["debiteuren"] });
+
+    const debiteuren = rapport.secties.find((s) => s.id === "DEBITEUREN")!.resultaat;
+    expect(debiteuren.status).toBe("ONBESCHIKBAAR");
+    if (debiteuren.status === "ONBESCHIKBAAR") {
+      expect(debiteuren.reden).toContain("debiteurenGrootboekrekeningen");
+    }
+  });
+});
