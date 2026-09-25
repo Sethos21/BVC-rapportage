@@ -43,7 +43,7 @@ describe("berekenEstimatedGemeentelijkeLasten — A/B/C/D", () => {
     const begroting = berekenBegroteGemeentelijkeLasten([wozObject({ werkelijkeWoz: new Decimal(1000000) })], aannames()); // begroteGemeentelijkeLasten = 9000/1000000*100% * 1000000/100 = 9000
     expect(begroting.begroteGemeentelijkeLasten!.toString()).toBe("9000");
     const werkelijk = berekenWerkelijkGemeentelijkeLasten([boeking({ saldo: new Decimal(4000) })]); // niet gelijkmatig geboekt: t/m periode 6 al 4.000
-    const resultaat = berekenEstimatedGemeentelijkeLasten(begroting, werkelijk, true, { GEMEENTELIJKE_LASTEN: new Decimal(5500) });
+    const resultaat = berekenEstimatedGemeentelijkeLasten(begroting.begroteGemeentelijkeLasten, werkelijk, true, { GEMEENTELIJKE_LASTEN: new Decimal(5500) });
 
     const c = resultaat.perCategorie[0]!;
     expect(c.begrotingTotaal!.toString()).toBe("9000");
@@ -54,8 +54,8 @@ describe("berekenEstimatedGemeentelijkeLasten — A/B/C/D", () => {
   it("C. handmatige wijziging van de resterende verwachting verandert Estimated voorspelbaar", () => {
     const begroting = berekenBegroteGemeentelijkeLasten([wozObject()], aannames());
     const werkelijk = berekenWerkelijkGemeentelijkeLasten([boeking({ saldo: new Decimal(4000) })]);
-    const eerst = berekenEstimatedGemeentelijkeLasten(begroting, werkelijk, true, { GEMEENTELIJKE_LASTEN: new Decimal(5000) });
-    const gewijzigd = berekenEstimatedGemeentelijkeLasten(begroting, werkelijk, true, { GEMEENTELIJKE_LASTEN: new Decimal(6000) });
+    const eerst = berekenEstimatedGemeentelijkeLasten(begroting.begroteGemeentelijkeLasten, werkelijk, true, { GEMEENTELIJKE_LASTEN: new Decimal(5000) });
+    const gewijzigd = berekenEstimatedGemeentelijkeLasten(begroting.begroteGemeentelijkeLasten, werkelijk, true, { GEMEENTELIJKE_LASTEN: new Decimal(6000) });
     expect(gewijzigd.moduleEstimatedTotaal!.minus(eerst.moduleEstimatedTotaal!).toString()).toBe("1000");
   });
 
@@ -63,7 +63,7 @@ describe("berekenEstimatedGemeentelijkeLasten — A/B/C/D", () => {
     const begroting = berekenBegroteGemeentelijkeLasten([wozObject()], aannames());
     const voorher = begroting.begroteGemeentelijkeLasten!.toString();
     const werkelijk = berekenWerkelijkGemeentelijkeLasten([boeking({ saldo: new Decimal(4000) })]);
-    berekenEstimatedGemeentelijkeLasten(begroting, werkelijk, true, { GEMEENTELIJKE_LASTEN: new Decimal(5000) });
+    berekenEstimatedGemeentelijkeLasten(begroting.begroteGemeentelijkeLasten, werkelijk, true, { GEMEENTELIJKE_LASTEN: new Decimal(5000) });
     expect(begroting.begroteGemeentelijkeLasten!.toString()).toBe(voorher);
   });
 });
@@ -72,7 +72,7 @@ describe("berekenEstimatedGemeentelijkeLasten — E/F. Unknown != zero (ongelijk
   it("E. ontbrekende resterende verwachting (null) -> estimatedTotaal blijft null", () => {
     const begroting = berekenBegroteGemeentelijkeLasten([wozObject()], aannames());
     const werkelijk = berekenWerkelijkGemeentelijkeLasten([boeking({ saldo: new Decimal(4000) })]);
-    const resultaat = berekenEstimatedGemeentelijkeLasten(begroting, werkelijk, true, { GEMEENTELIJKE_LASTEN: null });
+    const resultaat = berekenEstimatedGemeentelijkeLasten(begroting.begroteGemeentelijkeLasten, werkelijk, true, { GEMEENTELIJKE_LASTEN: null });
     expect(resultaat.perCategorie[0]!.estimatedTotaal).toBeNull();
     expect(resultaat.moduleEstimatedTotaal).toBeNull();
   });
@@ -80,7 +80,7 @@ describe("berekenEstimatedGemeentelijkeLasten — E/F. Unknown != zero (ongelijk
   it("F. onvolledige Werkelijk-dekking (brondekking niet bevestigd) maakt Estimated niet volledig bekend", () => {
     const begroting = berekenBegroteGemeentelijkeLasten([wozObject()], aannames());
     const werkelijk = berekenWerkelijkGemeentelijkeLasten([boeking({ saldo: new Decimal(4000) })]);
-    const resultaat = berekenEstimatedGemeentelijkeLasten(begroting, werkelijk, false, { GEMEENTELIJKE_LASTEN: new Decimal(5000) });
+    const resultaat = berekenEstimatedGemeentelijkeLasten(begroting.begroteGemeentelijkeLasten, werkelijk, false, { GEMEENTELIJKE_LASTEN: new Decimal(5000) });
     expect(resultaat.perCategorie[0]!.estimatedTotaal).toBeNull();
   });
 });
@@ -89,7 +89,7 @@ describe("gemeentelijkeLastenEstimatedNaarPnLBovenEbitdaRegels — G/H/I", () =>
   it("G. Estimated Gemeentelijke Lasten komt terecht in EXPLOITATIE_LASTEN, boven EBITDA, als KOSTEN", () => {
     const begroting = berekenBegroteGemeentelijkeLasten([wozObject()], aannames());
     const werkelijk = berekenWerkelijkGemeentelijkeLasten([boeking({ saldo: new Decimal(4000) })]);
-    const estimated = berekenEstimatedGemeentelijkeLasten(begroting, werkelijk, true, { GEMEENTELIJKE_LASTEN: new Decimal(5500) });
+    const estimated = berekenEstimatedGemeentelijkeLasten(begroting.begroteGemeentelijkeLasten, werkelijk, true, { GEMEENTELIJKE_LASTEN: new Decimal(5500) });
     const [regelPnL] = gemeentelijkeLastenEstimatedNaarPnLBovenEbitdaRegels(estimated);
 
     expect(regelPnL!.boomPositie).toBe("BOVEN_EBITDA");
@@ -101,7 +101,7 @@ describe("gemeentelijkeLastenEstimatedNaarPnLBovenEbitdaRegels — G/H/I", () =>
   it("H. EBITDA gebruikt Estimated correct wanneer waardesoort ESTIMATED wordt berekend", () => {
     const begroting = berekenBegroteGemeentelijkeLasten([wozObject()], aannames());
     const werkelijk = berekenWerkelijkGemeentelijkeLasten([boeking({ saldo: new Decimal(4000) })]);
-    const estimated = berekenEstimatedGemeentelijkeLasten(begroting, werkelijk, true, { GEMEENTELIJKE_LASTEN: new Decimal(5500) });
+    const estimated = berekenEstimatedGemeentelijkeLasten(begroting.begroteGemeentelijkeLasten, werkelijk, true, { GEMEENTELIJKE_LASTEN: new Decimal(5500) });
     const kostenRegels = gemeentelijkeLastenEstimatedNaarPnLBovenEbitdaRegels(estimated);
     const opbrengstRegel = { regelSleutel: "HUUROPBRENGST_BELAST", boomPositie: "BOVEN_EBITDA" as const, groep: "OPBRENGSTEN" as const, contributieAard: "OPBRENGST" as const, waarde: { status: "BEKEND" as const, bedrag: new Decimal(100000) } };
 
@@ -115,7 +115,7 @@ describe("gemeentelijkeLastenEstimatedNaarPnLBovenEbitdaRegels — G/H/I", () =>
   it("I. onder-EBITDA-regels blijven onaangetast door Estimated Gemeentelijke Lasten", () => {
     const begroting = berekenBegroteGemeentelijkeLasten([wozObject()], aannames());
     const werkelijk = berekenWerkelijkGemeentelijkeLasten([boeking({ saldo: new Decimal(4000) })]);
-    const estimated = berekenEstimatedGemeentelijkeLasten(begroting, werkelijk, true, { GEMEENTELIJKE_LASTEN: new Decimal(5500) });
+    const estimated = berekenEstimatedGemeentelijkeLasten(begroting.begroteGemeentelijkeLasten, werkelijk, true, { GEMEENTELIJKE_LASTEN: new Decimal(5500) });
     const kostenRegels = gemeentelijkeLastenEstimatedNaarPnLBovenEbitdaRegels(estimated);
     const rentekosten = { regelSleutel: "RENTEKOSTEN", boomPositie: "ONDER_EBITDA" as const, contributieAard: "KOSTEN" as const, waarde: { status: "BEKEND" as const, bedrag: new Decimal(50000) } };
 
@@ -127,7 +127,7 @@ describe("gemeentelijkeLastenEstimatedNaarPnLBovenEbitdaRegels — G/H/I", () =>
   it("F (ONBEKEND doorgegeven aan de engine): een niet-bekende Estimated-bijdrage maakt de groep en EBITDA ONVOLLEDIG", () => {
     const begroting = berekenBegroteGemeentelijkeLasten([wozObject()], aannames());
     const werkelijk = berekenWerkelijkGemeentelijkeLasten([boeking({ saldo: new Decimal(4000) })]);
-    const estimated = berekenEstimatedGemeentelijkeLasten(begroting, werkelijk, true, { GEMEENTELIJKE_LASTEN: null });
+    const estimated = berekenEstimatedGemeentelijkeLasten(begroting.begroteGemeentelijkeLasten, werkelijk, true, { GEMEENTELIJKE_LASTEN: null });
     const [regelPnL] = gemeentelijkeLastenEstimatedNaarPnLBovenEbitdaRegels(estimated);
     expect(regelPnL!.waarde.status).toBe("ONBEKEND");
     expect((regelPnL!.waarde as { status: "ONBEKEND"; dekkingReden: PnLDekkingReden }).dekkingReden).toBe("GEEN_BEOORDELING");
@@ -142,7 +142,29 @@ describe("J. administratie-onafhankelijkheid", () => {
   it("berekenEstimatedGemeentelijkeLasten/de adapter kennen geen enkel GL/OGB/administratieveld", () => {
     const begroting = berekenBegroteGemeentelijkeLasten([wozObject({ werkelijkeWoz: new Decimal(2500000) })], aannames({ begrotingsjaar: 2031, werkelijkeGemeentelijkeLasten: new Decimal(20000) }));
     const werkelijk = berekenWerkelijkGemeentelijkeLasten([boeking({ saldo: new Decimal(9999), complexnummer: "ANDERE-ADM-1" })]);
-    const resultaat = berekenEstimatedGemeentelijkeLasten(begroting, werkelijk, true, { GEMEENTELIJKE_LASTEN: new Decimal(1) });
+    const resultaat = berekenEstimatedGemeentelijkeLasten(begroting.begroteGemeentelijkeLasten, werkelijk, true, { GEMEENTELIJKE_LASTEN: new Decimal(1) });
     expect(resultaat.moduleEstimatedTotaal!.toString()).toBe("10000");
+  });
+});
+
+describe("Estimated gebruikt de begrotingspost (som van de GL-regels), NIET het WOZ-voorstel (Vervolgtranche 6)", () => {
+  it("begrotingTotaal/afwijking komen uit de aangeleverde GL-post; het WOZ-voorstel (9000) speelt geen rol", () => {
+    const woz = berekenBegroteGemeentelijkeLasten([wozObject()], aannames());
+    expect(woz.begroteGemeentelijkeLasten!.toString()).toBe("9000"); // voorstel = referentie
+    const glPost = new Decimal(8200); // som van de GL-regels
+    const werkelijk = berekenWerkelijkGemeentelijkeLasten([boeking({ saldo: new Decimal(4000) })]);
+    const r = berekenEstimatedGemeentelijkeLasten(glPost, werkelijk, true, { GEMEENTELIJKE_LASTEN: new Decimal(4000) });
+    expect(r.moduleBegrotingTotaal!.toString()).toBe("8200");
+    expect(r.perCategorie[0]!.begrotingTotaal!.toString()).toBe("8200");
+    expect(r.perCategorie[0]!.estimatedTotaal!.toString()).toBe("8000");
+    expect(r.perCategorie[0]!.afwijking!.toString()).toBe("-200"); // 8000 − 8200, niet 8000 − 9000
+  });
+
+  it("een onbekende begrotingspost (null, bv. vóór migratie 33 bevroren) blijft onbekend — afwijking null, nooit €0", () => {
+    const werkelijk = berekenWerkelijkGemeentelijkeLasten([boeking({ saldo: new Decimal(4000) })]);
+    const r = berekenEstimatedGemeentelijkeLasten(null, werkelijk, true, { GEMEENTELIJKE_LASTEN: new Decimal(1) });
+    expect(r.moduleBegrotingTotaal).toBeNull();
+    expect(r.perCategorie[0]!.afwijking).toBeNull();
+    expect(r.moduleEstimatedTotaal!.toString()).toBe("4001");
   });
 });

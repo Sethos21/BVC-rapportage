@@ -1,4 +1,5 @@
 import Decimal from "decimal.js";
+import type { BgGemeentelijkeLastenResultaat } from "./begroteGemeentelijkeLasten.js";
 import type { BgControleErnst } from "./begroteHuuropbrengsten.js";
 import { resolveerPnLBronmapping, type PnLBronmappingRegel } from "../pnlBronmapping.js";
 
@@ -248,4 +249,36 @@ export function bepaalRelevanteGemeentelijkeLastenGrootboeken(mappingregels: rea
     }
   }
   return relevant;
+}
+
+// ── Controle WOZ-voorstel ↔ begroot via GL-regels (besluit na Vervolgtranche 4, 25-09-2026) ──────────────
+
+/**
+ * De controle `WOZ-voorstel | Begroot via GL-regels | Verschil`. Het WOZ-voorstel is uitsluitend onderbouwing/
+ * referentie: het wordt nooit over GL's verdeeld en de begroting van de post blijft de som van de GL-regels.
+ *
+ * - `wozVoorstel = null` = er is (nog) geen voorstel: er zijn geen WOZ-objecten (het bestaande bewuste-€0-pad —
+ *   dan is er niets om mee te vergelijken) of de WOZ-set is nog niet bevestigd (dan wordt geen voorstel berekend).
+ * - `verschil = begrootViaGlRegels − wozVoorstel` (positief = begroot boven het voorstel); `null` zonder voorstel —
+ *   onbekend, nooit €0.
+ */
+export interface BgWozVoorstelControle {
+  wozVoorstel: Decimal | null;
+  begrootViaGlRegels: Decimal;
+  verschil: Decimal | null;
+}
+
+export function bepaalWozVoorstelControle(wozResultaat: Pick<BgGemeentelijkeLastenResultaat, "wozObjecten" | "begroteGemeentelijkeLasten">, begrootViaGlRegels: Decimal): BgWozVoorstelControle {
+  const wozVoorstel = wozResultaat.wozObjecten.length > 0 ? wozResultaat.begroteGemeentelijkeLasten : null;
+  return { wozVoorstel, begrootViaGlRegels, verschil: wozVoorstel !== null ? begrootViaGlRegels.minus(wozVoorstel) : null };
+}
+
+/** Het verschil is een WAARSCHUWING en blokkeert vaststellen NOOIT; een verschil van exact 0 of een onbekend voorstel geeft geen melding. */
+export function wozVoorstelVerschilControleItem(controle: BgWozVoorstelControle): BgGlLastenControleItem | null {
+  if (controle.wozVoorstel === null || controle.verschil === null || controle.verschil.isZero()) return null;
+  return {
+    regelIndex: null,
+    ernst: "WAARSCHUWING",
+    bericht: `WOZ-voorstel ${controle.wozVoorstel.toString()} | begroot via GL-regels ${controle.begrootViaGlRegels.toString()} | verschil ${controle.verschil.toString()} — het begrote bedrag wijkt af van het WOZ-voorstel; controleer bewust (blokkeert vaststellen niet).`,
+  };
 }

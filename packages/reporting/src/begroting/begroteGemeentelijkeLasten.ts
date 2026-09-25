@@ -580,7 +580,12 @@ export interface EstimatedGemeentelijkeLastenResultaat {
  * afleiding van `verwachtingResterendJaar` bestaat.
  */
 export function berekenEstimatedGemeentelijkeLasten(
-  begroting: BgGemeentelijkeLastenResultaat,
+  /**
+   * De begrotingspost "Gemeentelijke lasten pand" — sinds Vervolgtranche 4/6 de SOM VAN DE GL-REGELS
+   * (`grootboekRegels.begroteGemeentelijkeLastenPost`), NOOIT het WOZ-voorstel (`begroteGemeentelijkeLasten`).
+   * `null` = onbekend (bv. een vóór migratie 33 bevroren begroting zonder GL-regels).
+   */
+  begrotingTotaal: Decimal | null,
   werkelijk: WerkelijkGemeentelijkeLastenResultaat,
   werkelijkDekkingBevestigd: boolean,
   verwachtingPerCategorie: Record<BgGemeentelijkeLastenWerkelijkCategorie, Decimal | null>,
@@ -593,12 +598,12 @@ export function berekenEstimatedGemeentelijkeLasten(
     const estimatedTotaal = werkelijkVoldoendeBekend && isGeldigDecimal(verwachting) ? werkelijkTotaal.plus(verwachting) : null;
     return {
       categorie,
-      begrotingTotaal: begroting.begroteGemeentelijkeLasten,
+      begrotingTotaal,
       werkelijkTotaal,
       werkelijkVoldoendeBekend,
       verwachtingResterendJaar: verwachting,
       estimatedTotaal,
-      afwijking: estimatedTotaal !== null && begroting.begroteGemeentelijkeLasten !== null ? estimatedTotaal.minus(begroting.begroteGemeentelijkeLasten) : null,
+      afwijking: estimatedTotaal !== null && begrotingTotaal !== null ? estimatedTotaal.minus(begrotingTotaal) : null,
     };
   });
 
@@ -606,7 +611,7 @@ export function berekenEstimatedGemeentelijkeLasten(
 
   return {
     perCategorie,
-    moduleBegrotingTotaal: begroting.begroteGemeentelijkeLasten,
+    moduleBegrotingTotaal: begrotingTotaal,
     moduleWerkelijkTotaal: werkelijk.moduleTotaal,
     moduleEstimatedTotaal,
   };

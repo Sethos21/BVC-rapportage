@@ -425,7 +425,7 @@ describe("WOZ-set compleet bevestigen (besluit 2026-09-25)", () => {
   it("Estimated: een onbekende (onbevestigde) Begroting geeft begrotingTotaal/afwijking null; Estimated zelf blijft berekenbaar uit Werkelijk + verwachting", () => {
     const begroting = berekenBegroteGemeentelijkeLasten([wozObject()], aannames({ wozSetBevestigd: false }));
     const werkelijk = berekenWerkelijkGemeentelijkeLasten([{ economischeCategorie: "GEMEENTELIJKE_LASTEN", complexnummer: "001", saldo: new Decimal(9000) }]);
-    const r = berekenEstimatedGemeentelijkeLasten(begroting, werkelijk, true, { GEMEENTELIJKE_LASTEN: new Decimal(0) });
+    const r = berekenEstimatedGemeentelijkeLasten(begroting.begroteGemeentelijkeLasten, werkelijk, true, { GEMEENTELIJKE_LASTEN: new Decimal(0) });
     expect(r.moduleBegrotingTotaal).toBeNull();
     expect(r.perCategorie[0]!.afwijking).toBeNull();
     expect(r.moduleEstimatedTotaal!.toString()).toBe("9000");

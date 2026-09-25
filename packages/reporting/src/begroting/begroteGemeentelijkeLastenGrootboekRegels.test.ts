@@ -1,8 +1,11 @@
 import Decimal from "decimal.js";
 import { describe, expect, it } from "vitest";
+import { berekenBegroteGemeentelijkeLasten, type BgGemeentelijkeLastenAannames, type BgWozObjectInvoer } from "./begroteGemeentelijkeLasten.js";
 import {
   bepaalRelevanteGemeentelijkeLastenGrootboeken,
+  bepaalWozVoorstelControle,
   berekenBegroteGemeentelijkeLastenPerGrootboek,
+  wozVoorstelVerschilControleItem,
   type BgGlLastenRegelInvoer,
   type BgRelevantGrootboek,
 } from "./begroteGemeentelijkeLastenGrootboekRegels.js";
@@ -231,5 +234,61 @@ describe("berekenBegroteGemeentelijkeLastenPerGrootboek — post = som van de GL
     expect(a.begroteGemeentelijkeLastenPost.toString()).toBe(b.begroteGemeentelijkeLastenPost.toString());
     expect(a.perGrootboek[0]!.subtotaal.toString()).toBe("10");
     expect(b.perGrootboek[0]!.subtotaal.toString()).toBe("90");
+  });
+});
+
+describe("WOZ-voorstel ↔ begroot via GL-regels — verschilcontrole (waarschuwing, nooit blokkerend)", () => {
+  const woz = (over: Partial<BgWozObjectInvoer> = {}): BgWozObjectInvoer => ({
+    complexnummer: "001",
+    objectType: "GEHEEL_COMPLEX",
+    unitnummer: null,
+    aanslagjaar: 2026,
+    waardepeildatum: new Date(Date.UTC(2026, 0, 1)),
+    werkelijkeWoz: new Decimal(1000000),
+    verwachteWozOverride: null,
+    ...over,
+  });
+  const aannames = (over: Partial<BgGemeentelijkeLastenAannames> = {}): BgGemeentelijkeLastenAannames => ({
+    begrotingsjaar: 2027,
+    werkelijkeGemeentelijkeLasten: new Decimal(9000),
+    wozStijgingPercentage: new Decimal(0),
+    lastenPercentageStijging: new Decimal(0),
+    begrotingsPercentageOverride: null,
+    wozSetBevestigd: true,
+    beoordeeld: true,
+    ...over,
+  });
+
+  it("voorstel en GL-post naast elkaar: verschil = begroot − voorstel; WAARSCHUWING bij een afwijking, niet bij gelijkheid", () => {
+    const res = berekenBegroteGemeentelijkeLasten([woz()], aannames()); // voorstel 9000
+    const afwijkend = bepaalWozVoorstelControle(res, new Decimal(9500));
+    expect(afwijkend.wozVoorstel!.toString()).toBe("9000");
+    expect(afwijkend.verschil!.toString()).toBe("500");
+    const item = wozVoorstelVerschilControleItem(afwijkend)!;
+    expect(item.ernst).toBe("WAARSCHUWING");
+    expect(item.bericht).toContain("9000");
+    expect(item.bericht).toContain("9500");
+    expect(wozVoorstelVerschilControleItem(bepaalWozVoorstelControle(res, new Decimal(9000)))).toBeNull();
+  });
+
+  it("negatief verschil (begroot onder het voorstel) behoudt zijn teken — geen Math.abs", () => {
+    const res = berekenBegroteGemeentelijkeLasten([woz()], aannames());
+    expect(bepaalWozVoorstelControle(res, new Decimal(8000)).verschil!.toString()).toBe("-1000");
+  });
+
+  it("onbevestigde WOZ-set: geen voorstel, dus verschil onbekend (null) en geen melding — nooit €0", () => {
+    const res = berekenBegroteGemeentelijkeLasten([woz()], aannames({ wozSetBevestigd: false }));
+    const c = bepaalWozVoorstelControle(res, new Decimal(5000));
+    expect(c.wozVoorstel).toBeNull();
+    expect(c.verschil).toBeNull();
+    expect(wozVoorstelVerschilControleItem(c)).toBeNull();
+  });
+
+  it("geen WOZ-objecten (bewuste-€0-pad): niets om mee te vergelijken — geen voorstel, geen verschil, geen melding", () => {
+    const res = berekenBegroteGemeentelijkeLasten([], aannames({ wozSetBevestigd: false }));
+    const c = bepaalWozVoorstelControle(res, new Decimal(1234));
+    expect(c.wozVoorstel).toBeNull();
+    expect(c.verschil).toBeNull();
+    expect(wozVoorstelVerschilControleItem(c)).toBeNull();
   });
 });
