@@ -879,7 +879,7 @@ function naarPureLeegstandRegelInvoer(regel: LeegstandRegel): BgLeegstandRegelIn
  * CATEGORIE positioneel, exact hetzelfde principe en dezelfde defensieve
  * lengte-controle als `berekenAlgemeneKostenUitInvoer`.
  */
-function berekenLeegstandUitInvoer(
+export function berekenLeegstandUitInvoer(
   versieId: string,
   begrotingsjaar: number,
   regels: readonly LeegstandRegel[],

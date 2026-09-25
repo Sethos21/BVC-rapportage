@@ -4149,6 +4149,26 @@ export const MIGRATIONS: readonly Migration[] = [
       )`,
     ],
   },
+  /**
+   * Migratie 37 — Leegstandskosten: Estimated-persistentie (Vervolgtranche 8; FO OB-030/031): de handmatige resterende
+   * verwachting per kostensoort (Nuts / Servicekosten / Overige) PER KWARTAAL, de vastgestelde kwartaalstructuur. Exact het
+   * Estimated-patroon van migratie 27/31/34/36: GEEN VASTGESTELD-triggers en geen CONCEPT-check — Estimated wordt nooit
+   * bevroren en muteert de vastgestelde Begroting niet. Een rij bevat altijd een bedrag (NOT NULL; expliciet '0' = bewust €0),
+   * GEEN rij = niet ingevuld (onbekend, nooit stil 0). Werkelijk wordt niet per kwartaal verdeeld en staat hier niet in.
+   */
+  {
+    version: 37,
+    description: "Leegstandskosten: Estimated-persistentie (handmatige resterende verwachting per kostensoort en kwartaal)",
+    ddl: [
+      `CREATE TABLE begroting_leegstand_estimated_verwachting (
+        begroting_versie_id TEXT NOT NULL REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        categorie TEXT NOT NULL CHECK (categorie IN ('NUTS_LEEGSTAND', 'SERVICEKOSTEN_LEEGSTAND', 'OVERIGE_LEEGSTANDSKOSTEN')),
+        kwartaal INTEGER NOT NULL CHECK (kwartaal IN (1, 2, 3, 4)),
+        bedrag TEXT NOT NULL,
+        PRIMARY KEY (begroting_versie_id, categorie, kwartaal)
+      )`,
+    ],
+  },
 ];
 
 function schemaMetaTableExists(db: DatabaseSync): boolean {
