@@ -89,6 +89,7 @@ export * from "./begroting/begroteCorrectiefDagelijksOnderhoud.js";
 export * from "./begroting/begroteCorrectiefDagelijksOnderhoudEstimated.js";
 export * from "./begroting/begroteVerzekeringen.js";
 export * from "./begroting/begroteGemeentelijkeLasten.js";
+export * from "./begroting/begroteGemeentelijkeLastenGrootboekRegels.js";
 export * from "./begroting/begroteAlgemeneKosten.js";
 export * from "./begroting/begroteLeegstand.js";
 export * from "./begroting/begroteRente.js";
