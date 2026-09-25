@@ -6,7 +6,9 @@ import type { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   berekenBegroteGemeentelijkeLasten,
+  bepaalWozVoorstelControle,
   berekenBegroteGemeentelijkeLastenPerGrootboek,
+  wozVoorstelVerschilControleItem,
   type BgGemeentelijkeLastenAannames,
   type BgGlLastenRegelInvoer,
   type BgRelevantGrootboek,
@@ -94,7 +96,16 @@ function berekenMetIds(
   return {
     ...resultaat,
     wozObjecten: resultaat.wozObjecten.map((o, i) => ({ persistentieId: ids[i]!, wozObject: o })),
-    grootboekRegels: { ...grootboek, regels: grootboek.regels.map((r, i) => ({ persistentieId: glRegels[i]!.id, regel: r })) },
+    grootboekRegels: (() => {
+      const wozVoorstelControle = bepaalWozVoorstelControle(resultaat, grootboek.begroteGemeentelijkeLastenPost);
+      const item = wozVoorstelVerschilControleItem(wozVoorstelControle);
+      return {
+        ...grootboek,
+        controleVereist: item !== null ? [...grootboek.controleVereist, item] : grootboek.controleVereist,
+        regels: grootboek.regels.map((r, i) => ({ persistentieId: glRegels[i]!.id, regel: r })),
+        wozVoorstelControle,
+      };
+    })(),
   };
 }
 
@@ -634,6 +645,30 @@ describe("directe begroting per GL (Vervolgtranche 4, migratie 33) — frozen ro
       expect(() => db.prepare(`UPDATE ${t} SET volgnr = volgnr + 100 WHERE begroting_versie_id = ?`).run(vast.id), t).toThrow(/VASTGESTELD/);
     }
     expect(leesFrozenGemeentelijkeLastenResultaat(db, vast.id)!.grootboekRegels!.begroteGemeentelijkeLastenPost.toString()).toBe("2000");
+  });
+});
+
+describe("bevroren WOZ-voorstelcontrole (migratie 35)", () => {
+  it("28. voorstel, begroot via GL-regels en verschil round-trippen exact; het verschil is een bevroren WAARSCHUWING (frozen read herberekent niets)", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    const resultaat = berekenMetIds([wozObject()], [10], AANNAMES, [{ id: 5, regel: glRegel({ grootboekrekening: "4710", jaarbedrag: new Decimal(9500) }) }], [{ grootboekrekening: "4710", glDefault: true, ogbKostensoorten: [] }]);
+    schrijf(versie.id, resultaat);
+    const gelezen = leesFrozenGemeentelijkeLastenResultaat(db, versie.id)!.grootboekRegels!;
+    expect(gelezen.wozVoorstelControle.wozVoorstel!.toString()).toBe("10395");
+    expect(gelezen.wozVoorstelControle.begrootViaGlRegels.toString()).toBe("9500");
+    expect(gelezen.wozVoorstelControle.verschil!.toString()).toBe("-895");
+    expect(gelezen.controleVereist.filter((c) => c.ernst === "WAARSCHUWING" && c.bericht.includes("verschil"))).toHaveLength(1);
+    expect(gelezen.controleVereist.some((c) => c.ernst === "KRITIEK")).toBe(false);
+  });
+
+  it("29. zonder WOZ-objecten (bewuste-€0-pad) is er geen voorstel: voorstel en verschil worden als NULL bevroren, niet als 0", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    schrijf(versie.id, berekenMetIds([], [], AANNAMES_ZONDER_OBJECTEN, [{ id: 5, regel: glRegel({ grootboekrekening: "4710" }) }], [{ grootboekrekening: "4710", glDefault: true, ogbKostensoorten: [] }]), null);
+    const ruw = db.prepare(`SELECT woz_voorstel, woz_voorstel_verschil FROM begroting_frozen_gemeentelijke_lasten_resultaat WHERE begroting_versie_id = ?`).get(versie.id);
+    expect(ruw).toEqual({ woz_voorstel: null, woz_voorstel_verschil: null });
+    const gelezen = leesFrozenGemeentelijkeLastenResultaat(db, versie.id)!.grootboekRegels!;
+    expect(gelezen.wozVoorstelControle.wozVoorstel).toBeNull();
+    expect(gelezen.wozVoorstelControle.verschil).toBeNull();
   });
 });
 

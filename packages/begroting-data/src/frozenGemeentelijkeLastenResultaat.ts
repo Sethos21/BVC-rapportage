@@ -139,6 +139,8 @@ interface ResultaatRow {
   totale_effectief_verwachte_woz: string;
   begrote_gemeentelijke_lasten: string;
   begrote_lasten_post: string | null;
+  woz_voorstel: string | null;
+  woz_voorstel_verschil: string | null;
 }
 
 interface GlRegelRow {
@@ -229,8 +231,8 @@ export function schrijfFrozenGemeentelijkeLastenResultaatZonderTransactie(
        (begroting_versie_id, werkelijke_gemeentelijke_lasten, woz_stijging_percentage, lasten_percentage_stijging,
         begrotings_percentage_override, beoordeeld, woz_set_bevestigd, review_status, totale_werkelijke_woz, historisch_lasten_percentage,
         automatisch_begrotings_percentage, effectief_begrotings_percentage, totale_automatisch_verwachte_woz,
-        totale_effectief_verwachte_woz, begrote_gemeentelijke_lasten, begrote_lasten_post)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        totale_effectief_verwachte_woz, begrote_gemeentelijke_lasten, begrote_lasten_post, woz_voorstel, woz_voorstel_verschil)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     versieId,
     werkelijkeGemeentelijkeLasten !== null ? werkelijkeGemeentelijkeLasten.toString() : null,
@@ -248,6 +250,8 @@ export function schrijfFrozenGemeentelijkeLastenResultaatZonderTransactie(
     resultaat.totaleEffectiefVerwachteWoz.toString(),
     bepaald(resultaat.begroteGemeentelijkeLasten, "begroteGemeentelijkeLasten", versieId).toString(),
     resultaat.grootboekRegels.begroteGemeentelijkeLastenPost.toString(),
+    resultaat.grootboekRegels.wozVoorstelControle.wozVoorstel !== null ? resultaat.grootboekRegels.wozVoorstelControle.wozVoorstel.toString() : null,
+    resultaat.grootboekRegels.wozVoorstelControle.verschil !== null ? resultaat.grootboekRegels.wozVoorstelControle.verschil.toString() : null,
   );
 
   const insertGlRegel = db.prepare(
@@ -441,7 +445,7 @@ export function leesFrozenGemeentelijkeLastenResultaat(db: DatabaseSync, versieI
     return { objectIndex, ernst: rij.ernst as BgGemeentelijkeLastenControleErnst, bericht: rij.bericht };
   });
 
-  const grootboekRegels = header.begrote_lasten_post !== null ? leesFrozenGlRegels(db, versieId, header.begrote_lasten_post) : null;
+  const grootboekRegels = header.begrote_lasten_post !== null ? leesFrozenGlRegels(db, versieId, header.begrote_lasten_post, header.woz_voorstel, header.woz_voorstel_verschil) : null;
 
   return {
     begrotingsjaar: versie.begrotingsjaar,
@@ -467,7 +471,7 @@ export function leesFrozenGemeentelijkeLastenResultaat(db: DatabaseSync, versieI
 }
 
 /** Leest de bevroren directe begroting per GL — UITSLUITEND de frozen tabellen, geen herberekening van som of subtotalen. */
-function leesFrozenGlRegels(db: DatabaseSync, versieId: string, post: string): HerberekendGlLastenResultaat {
+function leesFrozenGlRegels(db: DatabaseSync, versieId: string, post: string, wozVoorstel: string | null, wozVoorstelVerschil: string | null): HerberekendGlLastenResultaat {
   const regelRijen = db
     .prepare(`SELECT regel_id, grootboekrekening, ogb_kostensoort, jaarbedrag FROM begroting_frozen_gemeentelijke_lasten_regel WHERE begroting_versie_id = ? ORDER BY volgnr`)
     .all(versieId) as unknown as GlRegelRow[];
@@ -506,5 +510,10 @@ function leesFrozenGlRegels(db: DatabaseSync, versieId: string, post: string): H
     return { regelIndex, ernst: rij.ernst as BgGlLastenControleErnst, bericht: rij.bericht };
   });
 
-  return { regels, begroteGemeentelijkeLastenPost: new Decimal(post), perGrootboek, controleVereist };
+  const wozVoorstelControle = {
+    wozVoorstel: wozVoorstel !== null ? new Decimal(wozVoorstel) : null,
+    begrootViaGlRegels: new Decimal(post),
+    verschil: wozVoorstelVerschil !== null ? new Decimal(wozVoorstelVerschil) : null,
+  };
+  return { regels, begroteGemeentelijkeLastenPost: new Decimal(post), perGrootboek, controleVereist, wozVoorstelControle };
 }

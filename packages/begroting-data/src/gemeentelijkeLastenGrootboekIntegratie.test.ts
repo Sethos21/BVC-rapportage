@@ -19,6 +19,7 @@ import { schrijfLeegstandCategorieState } from "./leegstandCategorieState.js";
 import { schrijfModule1Aannames } from "./module1Aannames.js";
 import { schrijfModule1Snapshot } from "./module1Snapshot.js";
 import { schrijfModule3Invoer } from "./module3Invoer.js";
+import { schrijfWozObjecten } from "./wozObjecten.js";
 import { voegPnLBronmappingMutatieToe, type PnLBronmappingMutatieInvoer } from "./pnlBronmappingRepository.js";
 import { schrijfRenteCategorieState } from "./renteCategorieState.js";
 import { stelBegrotingVast } from "./vaststellen.js";
@@ -263,5 +264,76 @@ describe("stelBegrotingVast — directe begroting per relevante GL", () => {
     ).run(versie.id);
     schrijfWozSetBevestigd(db, versie.id, false);
     expect(() => stelBegrotingVast(db, versie.id)).toThrow(/KRITIEKE controls/);
+  });
+});
+
+describe("WOZ-voorstel als referentie — verschilcontrole, lifecycle en P&L-post (Vervolgtranche 6, deel A)", () => {
+  /** WOZ 1.000.000 × 1,10; historisch % = 9000 / 1.000.000; +5% → WOZ-voorstel 10.395. */
+  function zetWozNeer(versieId: string, bevestigd: boolean): void {
+    schrijfWozObjecten(db, versieId, [{ id: null, complexnummer: "001", objectType: "GEHEEL_COMPLEX", unitnummer: null, aanslagjaar: 2026, waardepeildatum: new Date(Date.UTC(2026, 0, 1)), werkelijkeWoz: new Decimal(1000000), verwachteWozOverride: null }]);
+    schrijfGemeentelijkeLastenModule(db, versieId, { werkelijkeGemeentelijkeLasten: new Decimal(9000), wozStijgingPercentage: new Decimal(10), lastenPercentageStijging: new Decimal(5), begrotingsPercentageOverride: null, beoordeeld: true });
+    schrijfWozSetBevestigd(db, versieId, bevestigd);
+  }
+  const controle = (versieId: string) => herberekenBegroting(db, versieId).gemeentelijkeLasten;
+
+  it("15. het WOZ-voorstel is NIET de begrotingspost: post = som van de GL-regels, voorstel blijft apart", () => {
+    zetMapping070();
+    const versie = maakBegrotingsversie(db, VERSIE_070);
+    zetBasisNeer(versie.id, [regel({ grootboekrekening: "4710", jaarbedrag: new Decimal(2000) })]);
+    zetWozNeer(versie.id, true);
+    const r = controle(versie.id);
+    expect(r.begroteGemeentelijkeLasten!.toString()).toBe("10395");
+    expect(r.grootboekRegels.begroteGemeentelijkeLastenPost.toString()).toBe("2000");
+    expect(r.grootboekRegels.wozVoorstelControle.verschil!.toString()).toBe("-8395");
+  });
+
+  it("16. verschil met het voorstel is een WAARSCHUWING en blokkeert vaststellen niet; het bevriest mee", () => {
+    zetMapping070();
+    const versie = maakBegrotingsversie(db, VERSIE_070);
+    zetBasisNeer(versie.id, [regel({ grootboekrekening: "4700", ogbKostensoort: "4701", jaarbedrag: new Decimal(7000) }), regel({ grootboekrekening: "4710", jaarbedrag: new Decimal(1000) })]);
+    zetWozNeer(versie.id, true);
+    const r = controle(versie.id).grootboekRegels;
+    expect(r.controleVereist.some((c) => c.ernst === "WAARSCHUWING" && c.bericht.includes("verschil"))).toBe(true);
+    expect(kritiek(r.controleVereist)).toEqual([]);
+    const vast = stelBegrotingVast(db, versie.id, new Date(Date.UTC(2026, 8, 25)));
+    expect(vast.gemeentelijkeLasten.grootboekRegels!.wozVoorstelControle.verschil!.toString()).toBe("-2395");
+    expect(leesFrozenGemeentelijkeLastenResultaat(db, versie.id)!.grootboekRegels!.wozVoorstelControle.wozVoorstel!.toString()).toBe("10395");
+  });
+
+  it("17. gelijk aan het voorstel: geen verschilmelding; onbevestigde WOZ-set: geen voorstel (verschil onbekend, geen melding) maar vaststellen blijft geblokkeerd", () => {
+    zetMapping070();
+    const versie = maakBegrotingsversie(db, VERSIE_070);
+    zetBasisNeer(versie.id, [regel({ grootboekrekening: "4710", jaarbedrag: new Decimal("10395") })]);
+    zetWozNeer(versie.id, true);
+    expect(controle(versie.id).grootboekRegels.controleVereist.some((c) => c.bericht.includes("verschil"))).toBe(false);
+
+    schrijfWozSetBevestigd(db, versie.id, false);
+    const r = controle(versie.id);
+    expect(r.begroteGemeentelijkeLasten).toBeNull();
+    expect(r.grootboekRegels.wozVoorstelControle.wozVoorstel).toBeNull();
+    expect(r.grootboekRegels.wozVoorstelControle.verschil).toBeNull();
+    expect(r.grootboekRegels.controleVereist.some((c) => c.bericht.includes("verschil"))).toBe(false);
+    expect(() => stelBegrotingVast(db, versie.id)).toThrow(/KRITIEKE controls/);
+  });
+
+  it("18. GL-regels mogen worden ingevuld vóórdat de WOZ-set is bevestigd; de post is dan direct bekend", () => {
+    zetMapping070();
+    const versie = maakBegrotingsversie(db, VERSIE_070);
+    zetBasisNeer(versie.id, []);
+    zetWozNeer(versie.id, false);
+    schrijfGemeentelijkeLastenRegels(db, versie.id, [regel({ grootboekrekening: "4710", jaarbedrag: new Decimal(3000) })]);
+    const r = controle(versie.id);
+    expect(r.grootboekRegels.begroteGemeentelijkeLastenPost.toString()).toBe("3000");
+    expect(kritiek(r.grootboekRegels.controleVereist)).toEqual([]);
+  });
+
+  it("19. administratie zonder WOZ-objecten: bestaand bewuste-€0-pad — geen voorstel, geen verschilmelding, vaststellen mogelijk", () => {
+    zetMapping070();
+    const versie = maakBegrotingsversie(db, VERSIE_070);
+    zetBasisNeer(versie.id, [regel({ grootboekrekening: "4710", jaarbedrag: new Decimal(1234) })]);
+    const r = controle(versie.id);
+    expect(r.grootboekRegels.wozVoorstelControle.wozVoorstel).toBeNull();
+    expect(r.grootboekRegels.controleVereist.some((c) => c.bericht.includes("verschil"))).toBe(false);
+    expect(stelBegrotingVast(db, versie.id, new Date(Date.UTC(2026, 8, 25))).gemeentelijkeLasten.grootboekRegels!.begroteGemeentelijkeLastenPost.toString()).toBe("1234");
   });
 });

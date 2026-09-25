@@ -7,8 +7,10 @@ import {
   berekenBegroteBeheersvergoeding,
   berekenBegroteCorrectiefDagelijksOnderhoud,
   berekenBegroteGemeentelijkeLasten,
+  bepaalWozVoorstelControle,
   berekenBegroteGemeentelijkeLastenPerGrootboek,
   berekenBegroteGeplandeVerkoop,
+  wozVoorstelVerschilControleItem,
   berekenBegroteGeplandOnderhoud,
   berekenBegroteHuuropbrengsten,
   berekenBegroteLeegstand,
@@ -33,6 +35,7 @@ import {
   type BgGlLastenRegelInvoer,
   type BgGlLastenRegelUitkomst,
   type BgGlLastenResultaat,
+  type BgWozVoorstelControle,
   type BgRelevantGrootboek,
   type BgGeplandeVerkoopRegelInvoer,
   type BgGeplandeVerkoopRegelUitkomst,
@@ -308,6 +311,8 @@ export interface GlLastenRegelUitkomstMetId {
 /** `BgGlLastenResultaat` met uitsluitend `regels` vervangen door de ID-geannoteerde variant — de directe begroting per relevante GL (Vervolgtranche 4). */
 export interface HerberekendGlLastenResultaat extends Omit<BgGlLastenResultaat, "regels"> {
   regels: readonly GlLastenRegelUitkomstMetId[];
+  /** `WOZ-voorstel | Begroot via GL-regels | Verschil` — het verschil is een (niet-blokkerende) waarschuwing in `controleVereist`. */
+  wozVoorstelControle: BgWozVoorstelControle;
 }
 
 /**
@@ -726,7 +731,7 @@ function naarPureWozObjectInvoer(wozObject: WozObject): BgWozObjectInvoer {
  * uitkomsten — positioneel (`invoer[i] ↔ resultaat.wozObjecten[i]`), zelfde
  * principe en defensieve lengte-controle als `berekenVerzekeringUitInvoer`.
  */
-function berekenGemeentelijkeLastenUitInvoer(
+export function berekenGemeentelijkeLastenUitInvoer(
   versieId: string,
   begrotingsjaar: number,
   wozObjecten: readonly WozObject[],
@@ -775,7 +780,11 @@ function berekenGemeentelijkeLastenUitInvoer(
     regel: regelUitkomst,
   }));
 
-  return { ...resultaat, wozObjecten: wozObjectenMetId, grootboekRegels: { ...grootboekResultaat, regels: regelsMetId } };
+  const wozVoorstelControle = bepaalWozVoorstelControle(resultaat, grootboekResultaat.begroteGemeentelijkeLastenPost);
+  const verschilItem = wozVoorstelVerschilControleItem(wozVoorstelControle);
+  const controleVereist = verschilItem !== null ? [...grootboekResultaat.controleVereist, verschilItem] : grootboekResultaat.controleVereist;
+
+  return { ...resultaat, wozObjecten: wozObjectenMetId, grootboekRegels: { ...grootboekResultaat, controleVereist, regels: regelsMetId, wozVoorstelControle } };
 }
 
 /** Letterlijke veldkopie, GEEN transformatie/validatie — de opslagvorm mapt 1-op-1 naar de pure invoer. */

@@ -4117,6 +4117,21 @@ export const MIGRATIONS: readonly Migration[] = [
       )`,
     ],
   },
+  /**
+   * Migratie 35 — Gemeentelijke lasten: bevroren WOZ-voorstel-controle (Vervolgtranche 6, besluit na tranche 4):
+   * `WOZ-voorstel | Begroot via GL-regels | Verschil`. Twee nullable kolommen op de frozen resultaat-rij; `begroot via
+   * GL-regels` is de reeds bevroren `begrote_lasten_post`. NULL = geen voorstel (geen WOZ-objecten, of vóór deze
+   * migratie bevroren) — onbekend, nooit 0. Het verschil is een waarschuwing en wordt niet apart bewaakt: frozen
+   * read herberekent niets. Additief; migratie 30 en 33 ongemoeid.
+   */
+  {
+    version: 35,
+    description: "Gemeentelijke lasten: bevroren WOZ-voorstel en verschil met de GL-regelpost",
+    ddl: [
+      `ALTER TABLE begroting_frozen_gemeentelijke_lasten_resultaat ADD COLUMN woz_voorstel TEXT NULL`,
+      `ALTER TABLE begroting_frozen_gemeentelijke_lasten_resultaat ADD COLUMN woz_voorstel_verschil TEXT NULL`,
+    ],
+  },
 ];
 
 function schemaMetaTableExists(db: DatabaseSync): boolean {
