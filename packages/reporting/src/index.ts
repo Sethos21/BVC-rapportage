@@ -84,6 +84,7 @@ export * from "./begroting/gemeentelijkeLastenWerkelijkPnLAdapter.js";
 export * from "./begroting/begroteGeplandOnderhoud.js";
 export * from "./begroting/begroteGeplandOnderhoudEstimated.js";
 export * from "./begroting/begroteCanonErfpacht.js";
+export * from "./begroting/wozHistorieCsv.js";
 export * from "./begroting/begroteCorrectiefDagelijksOnderhoud.js";
 export * from "./begroting/begroteCorrectiefDagelijksOnderhoudEstimated.js";
 export * from "./begroting/begroteVerzekeringen.js";

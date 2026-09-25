@@ -6,6 +6,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { maakBegrotingsversie, markeerVastgesteld, type NieuweBegrotingsversieInput } from "./begrotingsversies.js";
 import { leesGemeentelijkeLastenModule, schrijfWozSetBevestigd } from "./gemeentelijkeLastenModule.js";
+import { leesWozHistorieCsv } from "./wozHistorieExport.js";
 import { openOrCreateDatabase } from "./database.js";
 import { leesWozObjecten, schrijfWozObjecten, type WozObject, type WozObjectInvoer } from "./wozObjecten.js";
 
@@ -408,5 +409,30 @@ describe("WOZ-objecten — bevestiging 'WOZ-set compleet' vervalt bij elke wijzi
     schrijfWozObjecten(db, versie.id, [objectInvoer()]);
     expect(bevestigd(versie.id)).toBe(false);
     expect(db.prepare(`SELECT COUNT(*) AS n FROM begroting_gemeentelijke_lasten_module`).get()).toEqual({ n: 0 });
+  });
+});
+
+describe("WOZ-historie CSV vanuit de persistentielaag (leesWozHistorieCsv)", () => {
+  it("niet beschikbaar zonder bevestiging; beschikbaar na bevestiging met administratiecode; weer niet beschikbaar na een WOZ-wijziging", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    const [a] = schrijfWozObjecten(db, versie.id, [
+      objectInvoer({ objectType: "GEHEEL_COMPLEX", unitnummer: null, aanslagjaar: 2025, werkelijkeWoz: new Decimal(1000000) }),
+      objectInvoer({ objectType: "GEHEEL_COMPLEX", unitnummer: null, aanslagjaar: 2026, werkelijkeWoz: new Decimal(1050000) }),
+    ]);
+    expect(leesWozHistorieCsv(db, versie.id)).toEqual({ beschikbaar: false, reden: "WOZ_SET_NIET_BEVESTIGD" });
+
+    schrijfWozSetBevestigd(db, versie.id, true);
+    const r = leesWozHistorieCsv(db, versie.id);
+    if (!r.beschikbaar) throw new Error("verwacht beschikbaar");
+    expect(r.aantalRegels).toBe(2);
+    expect(r.csv.split("\r\n")[2]).toMatch(/^070;001;Geheel complex;2026;.*;1050000;50000;5$/);
+    expect(leesWozHistorieCsv(db, versie.id, { aanslagjaarVan: 2027 })).toMatchObject({ beschikbaar: true, aantalRegels: 0 });
+
+    schrijfWozObjecten(db, versie.id, [{ ...naarInvoer(a!), werkelijkeWoz: new Decimal(1) }]);
+    expect(leesWozHistorieCsv(db, versie.id)).toEqual({ beschikbaar: false, reden: "WOZ_SET_NIET_BEVESTIGD" });
+  });
+
+  it("onbekende versie wordt geweigerd; export schrijft niets", () => {
+    expect(() => leesWozHistorieCsv(db, "bestaat-niet")).toThrow(/bestaat niet/);
   });
 });

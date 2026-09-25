@@ -342,6 +342,8 @@ export {
   type GemeentelijkeLastenModuleSchrijfInvoer,
 } from "./gemeentelijkeLastenModule.js";
 export { schrijfWozObjecten, leesWozObjecten, type WozObject, type WozObjectInvoer } from "./wozObjecten.js";
+// WOZ-historie CSV-export (besluit 2026-09-25): persistente WOZ-set + administratiecode + bevestiging → pure CSV-bouw.
+export { leesWozHistorieCsv } from "./wozHistorieExport.js";
 
 // Algemene kosten (OB-035/036) — fase P1, UITSLUITEND concept-persistence
 // (geen pure-calculator-integratie in dit bestand zelf; herberekening/frozen
