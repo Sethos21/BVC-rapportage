@@ -398,6 +398,26 @@ describe("Administratiegebonden: geen administratie-070-hardcoding", () => {
 });
 
 
+describe("Estimated Algemene kosten: per-categorie mappingdekking (Accountant/Juridisch zonder bewezen mapping blijven ONBEKEND)", () => {
+  it("22. met gemapteCategorieen zonder ACCOUNTANT/JURIDISCH_KOSTEN zijn die twee posten ONBEKEND ondanks een handmatige verwachting; de gemapte posten blijven bekend; zonder de parameter blijft het gedrag ongewijzigd", () => {
+    zetMappings();
+    const { id, activiteitId, correctiefId } = bouwVersie("070");
+    schrijfGeplandOnderhoudEstimatedVerwachtingen(db, id, [{ activiteitId, q1: D(0), q2: D(0), q3: D(500), q4: D(500) }]);
+    schrijfCorrectiefDagelijksOnderhoudEstimatedVerwachtingen(db, id, [{ regelId: correctiefId, resterendBedrag: D(100) }]);
+    schrijfGemeentelijkeLastenEstimatedVerwachting(db, id, D(0));
+    schrijfAlgemeneKostenEstimatedVerwachting(db, id, { ACCOUNTANT: D(500), ALGEMENE_KOSTEN: D(0), JURIDISCHE_KOSTEN: D(0), MAKELAARSKOSTEN: D(0), BANKKOSTEN: D(0) });
+    const basis = estimatedInvoer();
+    const zonder = leesEstimatedPnLRegels(db, id, basis);
+    expect(bedrag(zonder, "ACCOUNTANT")).toBe("1500");
+    const gemapt = new Set(["ALGEMENE_KOSTEN", "MAKELAARSKOSTEN", "BANKKOSTEN"]);
+    const met = leesEstimatedPnLRegels(db, id, { ...basis, algemeneKosten: { ...basis.algemeneKosten, gemapteCategorieen: gemapt } });
+    expect(bedrag(met, "ACCOUNTANT")).toBe("ONBEKEND");
+    expect(bedrag(met, "JURIDISCHE_KOSTEN")).toBe("ONBEKEND");
+    expect(bedrag(met, "BANKKOSTEN")).toBe("0");
+    expect(berekenPnLBoom("ESTIMATED", met).algemeneKosten.volledigheid.status).toBe("ONVOLLEDIG");
+  });
+});
+
 describe("Estimated Huur + Beheer + Management met echte contracten door de hele keten (Vervolgtranche 7)", () => {
   const dat = (s: string) => new Date(`${s}T00:00:00.000Z`);
   const vs = (soort: string, jaar: number, btw = "Y") => ({ vorderingsoort: soort, bedragJaar: D(jaar), btwYn: btw });

@@ -147,7 +147,12 @@ export interface EstimatedPnLInvoer {
   onderhoud: { werkelijk: WerkelijkOnderhoudResultaat; dekkingBevestigd: boolean; resterendeKwartalen: readonly BgOnderhoudKwartaal[] };
   verzekeringen: { werkelijk: WerkelijkVerzekeringResultaat; dekkingBevestigd: boolean; resterendeMaanden: readonly number[] };
   gemeentelijkeLasten: { werkelijk: WerkelijkGemeentelijkeLastenResultaat; dekkingBevestigd: boolean };
-  algemeneKosten: { werkelijk: WerkelijkAlgemeneKostenResultaat; dekkingBevestigd: boolean };
+  /**
+   * `gemapteCategorieen` (optioneel; `bepaalGemapteCategorieen` voor MODULE ALGEMENE_KOSTEN): een post zonder bewezen mapping voor de
+   * administratie (bv. Accountant/Juridisch) is dan ONBEKEND in Estimated, ook al is er een handmatige verwachting — het Werkelijk
+   * van die post is onbekend, niet €0. Zonder deze parameter blijft de modulebrede dekking leidend.
+   */
+  algemeneKosten: { werkelijk: WerkelijkAlgemeneKostenResultaat; dekkingBevestigd: boolean; gemapteCategorieen?: ReadonlySet<string> };
 }
 
 /** Estimated → regels voor Huur, Beheer, Management, Onderhoud (totaal), Verzekeringen, Gemeentelijke lasten en Algemene kosten (zie moduledoc). */
@@ -174,6 +179,13 @@ export function leesEstimatedPnLRegels(db: DatabaseSync, versieId: string, invoe
     }),
     ...verzekeringEstimatedNaarPnLBovenEbitdaRegels(verzekering.estimated),
     ...gemeentelijkeLastenEstimatedNaarPnLBovenEbitdaRegels(gemeentelijkeLasten),
-    ...algemeneKostenEstimatedNaarPnLBovenEbitdaRegels(algemeneKosten),
+    ...algemeneKostenEstimatedNaarPnLBovenEbitdaRegels(algemeneKosten).map((regel): PurePnLBovenEbitdaRegel => {
+      const gemapt = invoer.algemeneKosten.gemapteCategorieen;
+      if (gemapt === undefined || gemapt.has(regel.regelSleutel)) return regel;
+      return {
+        ...regel,
+        waarde: { status: "ONBEKEND", dekkingReden: "NIET_GEMAPT", toelichting: `Estimated Algemene kosten (${regel.regelSleutel}): voor deze administratie bestaat geen bewezen bronmapping naar deze categorie — Werkelijk onbekend, dus Estimated onbekend.` },
+      };
+    }),
   ];
 }
