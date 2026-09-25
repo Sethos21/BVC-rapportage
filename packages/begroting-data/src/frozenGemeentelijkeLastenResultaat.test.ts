@@ -4,7 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { berekenBegroteGemeentelijkeLasten, type BgGemeentelijkeLastenAannames, type BgWozObjectInvoer } from "@bvc/reporting";
+import {
+  berekenBegroteGemeentelijkeLasten,
+  berekenBegroteGemeentelijkeLastenPerGrootboek,
+  type BgGemeentelijkeLastenAannames,
+  type BgGlLastenRegelInvoer,
+  type BgRelevantGrootboek,
+  type BgWozObjectInvoer,
+} from "@bvc/reporting";
 import { maakBegrotingsversie, markeerVastgesteld, verwijderConceptVersie, type NieuweBegrotingsversieInput } from "./begrotingsversies.js";
 import { openOrCreateDatabase } from "./database.js";
 import {
@@ -79,11 +86,15 @@ function berekenMetIds(
   wozObjecten: readonly BgWozObjectInvoer[],
   ids: readonly number[],
   aannames: BgGemeentelijkeLastenAannames = AANNAMES,
+  glRegels: readonly { id: number; regel: BgGlLastenRegelInvoer }[] = [],
+  relevanteGrootboeken: readonly BgRelevantGrootboek[] = [],
 ): HerberekendGemeentelijkeLastenResultaat {
   const resultaat = berekenBegroteGemeentelijkeLasten(wozObjecten, aannames);
+  const grootboek = berekenBegroteGemeentelijkeLastenPerGrootboek(glRegels.map((r) => r.regel), relevanteGrootboeken);
   return {
     ...resultaat,
     wozObjecten: resultaat.wozObjecten.map((o, i) => ({ persistentieId: ids[i]!, wozObject: o })),
+    grootboekRegels: { ...grootboek, regels: grootboek.regels.map((r, i) => ({ persistentieId: glRegels[i]!.id, regel: r })) },
   };
 }
 
@@ -510,3 +521,128 @@ describe("frozen CHECKs — tweede beschermingslaag (migratie 15)", () => {
     expect(gelezen.begroteGemeentelijkeLasten!.toString()).toBe(resultaat.begroteGemeentelijkeLasten!.toString());
   });
 });
+
+const RELEVANT_070: BgRelevantGrootboek[] = [
+  { grootboekrekening: "4700", glDefault: false, ogbKostensoorten: ["4701"] },
+  { grootboekrekening: "4710", glDefault: true, ogbKostensoorten: [] },
+];
+
+const glRegel = (overrides: Partial<BgGlLastenRegelInvoer> = {}): BgGlLastenRegelInvoer => ({ grootboekrekening: "4710", ogbKostensoort: null, jaarbedrag: new Decimal(1000), ...overrides });
+
+describe("directe begroting per GL (Vervolgtranche 4, migratie 33) — frozen roundtrip", () => {
+  const twee = [
+    { id: 41, regel: glRegel({ grootboekrekening: "4700", ogbKostensoort: "4701", jaarbedrag: new Decimal("8000.125") }) },
+    { id: 7, regel: glRegel({ grootboekrekening: "4710", jaarbedrag: new Decimal("2000") }) },
+  ];
+
+  it("20. regels, subtotalen per GL en bevroren post round-trippen exact; ids zijn stabiel (niet-sequentieel) en de post is de som van de regels", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    const resultaat = berekenMetIds([], [], AANNAMES_ZONDER_OBJECTEN, twee, RELEVANT_070);
+    schrijf(versie.id, resultaat, null);
+
+    const gelezen = leesFrozenGemeentelijkeLastenResultaat(db, versie.id)!;
+    expect(gelezen.grootboekRegels).not.toBeNull();
+    expect(gelezen.grootboekRegels!.begroteGemeentelijkeLastenPost.toString()).toBe("10000.125");
+    expect(gelezen.grootboekRegels!.regels.map((r) => r.persistentieId)).toEqual([41, 7]);
+    expect(gelezen.grootboekRegels!.regels.map((r) => [r.regel.invoer.grootboekrekening, r.regel.invoer.ogbKostensoort, r.regel.invoer.jaarbedrag?.toString()])).toEqual([
+      ["4700", "4701", "8000.125"],
+      ["4710", null, "2000"],
+    ]);
+    expect(gelezen.grootboekRegels!.perGrootboek.map((g) => [g.grootboekrekening, g.aantalRegels, g.subtotaal.toString()])).toEqual([
+      ["4700", 1, "8000.125"],
+      ["4710", 1, "2000"],
+    ]);
+    expect(normaliseer(gelezen.grootboekRegels)).toEqual(normaliseer(resultaat.grootboekRegels));
+  });
+
+  it("21. het WOZ-voorstel en de GL-post blijven twee losse getallen: het voorstel voedt geen regel en verandert de post niet", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    const resultaat = berekenMetIds([wozObject()], [10], AANNAMES, twee, RELEVANT_070);
+    schrijf(versie.id, resultaat);
+    const gelezen = leesFrozenGemeentelijkeLastenResultaat(db, versie.id)!;
+    expect(gelezen.begroteGemeentelijkeLasten!.toString()).toBe("10395"); // WOZ-voorstel: 1.100.000 × (0,9% × 1,05) — alleen referentie
+    expect(gelezen.grootboekRegels!.begroteGemeentelijkeLastenPost.toString()).toBe("10000.125"); // som van de regels
+  });
+
+  it("22. controls op regelniveau: regelIndex wordt vertaald naar/van regel_id; module-brede controls round-trippen met regel_id NULL", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    // Negatief bedrag = WAARSCHUWING op regel 1; 4700 zonder regel = module-brede WAARSCHUWING.
+    const resultaat = berekenMetIds([], [], AANNAMES_ZONDER_OBJECTEN, [{ id: 5, regel: glRegel({ grootboekrekening: "4710", jaarbedrag: new Decimal(-50) }) }], RELEVANT_070);
+    expect(resultaat.grootboekRegels.controleVereist.some((c) => c.regelIndex === 0)).toBe(true);
+    expect(resultaat.grootboekRegels.controleVereist.some((c) => c.regelIndex === null)).toBe(true);
+    schrijf(versie.id, resultaat, null);
+
+    const ruw = db.prepare(`SELECT regel_id, ernst FROM begroting_frozen_gemeentelijke_lasten_regel_control WHERE begroting_versie_id = ? ORDER BY volgnr`).all(versie.id) as { regel_id: number | null; ernst: string }[];
+    expect(ruw.some((r) => r.regel_id === 5)).toBe(true);
+    expect(ruw.some((r) => r.regel_id === null)).toBe(true);
+    expect(leesFrozenGemeentelijkeLastenResultaat(db, versie.id)!.grootboekRegels!.controleVereist).toEqual(resultaat.grootboekRegels.controleVereist);
+  });
+
+  it("23. bewust €0: geen regels + post 0 wordt bevroren als post '0' (niet NULL) en blijft van onbekend te onderscheiden", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    schrijf(versie.id, berekenMetIds([], [], AANNAMES_ZONDER_OBJECTEN), null);
+    const gelezen = leesFrozenGemeentelijkeLastenResultaat(db, versie.id)!;
+    expect(gelezen.grootboekRegels).not.toBeNull();
+    expect(gelezen.grootboekRegels!.begroteGemeentelijkeLastenPost.toString()).toBe("0");
+    expect(gelezen.grootboekRegels!.regels).toEqual([]);
+  });
+
+  it("24. een vóór migratie 33 bevroren resultaat (begrote_lasten_post NULL) leest terug als grootboekRegels = null — post onbekend, nooit 0 of het WOZ-voorstel", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    schrijf(versie.id, berekenMetIds([wozObject()], [10]));
+    db.prepare(`UPDATE begroting_frozen_gemeentelijke_lasten_resultaat SET begrote_lasten_post = NULL WHERE begroting_versie_id = ?`).run(versie.id);
+    const gelezen = leesFrozenGemeentelijkeLastenResultaat(db, versie.id)!;
+    expect(gelezen.grootboekRegels).toBeNull();
+    expect(gelezen.begroteGemeentelijkeLasten).not.toBeNull(); // WOZ-voorstel blijft gewoon leesbaar
+  });
+
+  it("25. opnieuw schrijven tijdens CONCEPT vervangt de GL-regels volledig (geen resten van de vorige set)", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    schrijf(versie.id, berekenMetIds([], [], AANNAMES_ZONDER_OBJECTEN, twee, RELEVANT_070), null);
+    schrijf(versie.id, berekenMetIds([], [], AANNAMES_ZONDER_OBJECTEN, [twee[1]!], RELEVANT_070), null);
+    const gelezen = leesFrozenGemeentelijkeLastenResultaat(db, versie.id)!;
+    expect(gelezen.grootboekRegels!.regels.map((r) => r.persistentieId)).toEqual([7]);
+    expect(gelezen.grootboekRegels!.begroteGemeentelijkeLastenPost.toString()).toBe("2000");
+    expect((db.prepare(`SELECT COUNT(*) AS n FROM begroting_frozen_gemeentelijke_lasten_grootboek WHERE begroting_versie_id = ?`).get(versie.id) as { n: number }).n).toBe(1);
+  });
+
+  it("26. een regel zonder bedrag kan niet worden bevroren (fail-fast; vaststellen blokkeert dit vooraf als KRITIEK) en laat het vorige resultaat intact", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    schrijf(versie.id, berekenMetIds([], [], AANNAMES_ZONDER_OBJECTEN, [twee[1]!], RELEVANT_070), null);
+    expect(() => schrijf(versie.id, berekenMetIds([], [], AANNAMES_ZONDER_OBJECTEN, [{ id: 1, regel: glRegel({ jaarbedrag: null }) }], RELEVANT_070), null)).toThrow(/geen jaarbedrag/);
+    expect(leesFrozenGemeentelijkeLastenResultaat(db, versie.id)!.grootboekRegels!.begroteGemeentelijkeLastenPost.toString()).toBe("2000");
+  });
+
+  it("27. de nieuwe frozen tabellen zijn na VASTGESTELD immutable en cascaderen weg bij verwijderen van een CONCEPT-versie", () => {
+    const concept = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    // Alleen GL4710: de relevante GL4700 zonder regel geeft een module-brede WAARSCHUWING, dus ook de control-tabel heeft een rij.
+    schrijf(concept.id, berekenMetIds([], [], AANNAMES_ZONDER_OBJECTEN, [twee[1]!], RELEVANT_070), null);
+    const tabellen = ["begroting_frozen_gemeentelijke_lasten_regel", "begroting_frozen_gemeentelijke_lasten_regel_control", "begroting_frozen_gemeentelijke_lasten_grootboek"];
+    for (const t of tabellen) {
+      expect((db.prepare(`SELECT COUNT(*) AS n FROM ${t} WHERE begroting_versie_id = ?`).get(concept.id) as { n: number }).n, t).toBeGreaterThan(0);
+    }
+    verwijderConceptVersie(db, concept.id);
+    for (const t of tabellen) {
+      expect((db.prepare(`SELECT COUNT(*) AS n FROM ${t} WHERE begroting_versie_id = ?`).get(concept.id) as { n: number }).n, t).toBe(0);
+    }
+
+    const vast = maakBegrotingsversie(db, { ...NIEUWE_VERSIE_INPUT, begrotingsjaar: 2028 });
+    schrijf(vast.id, berekenMetIds([], [], AANNAMES_ZONDER_OBJECTEN, [twee[1]!], RELEVANT_070), null);
+    markeerVastgesteld(db, vast.id, new Date(Date.UTC(2026, 8, 25)));
+    for (const t of tabellen) {
+      expect(() => db.prepare(`DELETE FROM ${t} WHERE begroting_versie_id = ?`).run(vast.id), t).toThrow(/VASTGESTELD/);
+      expect(() => db.prepare(`UPDATE ${t} SET volgnr = volgnr + 100 WHERE begroting_versie_id = ?`).run(vast.id), t).toThrow(/VASTGESTELD/);
+    }
+    expect(leesFrozenGemeentelijkeLastenResultaat(db, vast.id)!.grootboekRegels!.begroteGemeentelijkeLastenPost.toString()).toBe("2000");
+  });
+});
+
+const AANNAMES_ZONDER_OBJECTEN: BgGemeentelijkeLastenAannames = {
+  begrotingsjaar: 2027,
+  werkelijkeGemeentelijkeLasten: null,
+  wozStijgingPercentage: null,
+  lastenPercentageStijging: null,
+  begrotingsPercentageOverride: null,
+  wozSetBevestigd: false,
+  beoordeeld: true,
+};

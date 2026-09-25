@@ -3956,9 +3956,10 @@ export const MIGRATIONS: readonly Migration[] = [
    *    NULL = nog niet ingevuld (nooit stil 0). Geen CHECK op inhoud: een functioneel onvolledig CONCEPT
    *    (bv. lege GL) moet opslaanbaar blijven; validatie hoort in de pure calculator. Drie
    *    VASTGESTELD-immutability-triggers, zoals de overige begrotingsregels.
-   * 2. `begroting_frozen_gemeentelijke_lasten_regel` + `..._regel_control` — de bij vaststellen bevroren
-   *    regels en hun (niet-blokkerende) controls, gekoppeld aan het stabiele `regel_id`. `jaarbedrag`
-   *    NOT NULL: een regel zonder bedrag is KRITIEK en kan dus nooit worden bevroren.
+   * 2. `begroting_frozen_gemeentelijke_lasten_regel` + `..._regel_control` + `..._grootboek` — de bij vaststellen
+   *    bevroren regels, hun (niet-blokkerende) controls (gekoppeld aan het stabiele `regel_id`) en de subtotalen per
+   *    GL (bevroren, zodat frozen read niets herberekent). `jaarbedrag` NOT NULL: een regel zonder bedrag is KRITIEK
+   *    en kan dus nooit worden bevroren.
    * 3. `begroting_frozen_gemeentelijke_lasten_resultaat.begrote_lasten_post` — de bevroren P&L-post
    *    "Gemeentelijke lasten pand" (som van de regels). NULLABLE: NULL = een vóór deze migratie bevroren
    *    resultaat zonder GL-regels; de post is dan onbekend (nooit teruggeschreven naar 0 of naar het
@@ -4018,6 +4019,16 @@ export const MIGRATIONS: readonly Migration[] = [
         PRIMARY KEY (begroting_versie_id, volgnr),
         FOREIGN KEY (begroting_versie_id) REFERENCES begroting_frozen_gemeentelijke_lasten_resultaat(begroting_versie_id) ON DELETE CASCADE
       )`,
+      `CREATE TABLE begroting_frozen_gemeentelijke_lasten_grootboek (
+        begroting_versie_id TEXT NOT NULL,
+        volgnr INTEGER NOT NULL,
+        grootboekrekening TEXT NOT NULL,
+        aantal_regels INTEGER NOT NULL,
+        subtotaal TEXT NOT NULL,
+        PRIMARY KEY (begroting_versie_id, grootboekrekening),
+        UNIQUE (begroting_versie_id, volgnr),
+        FOREIGN KEY (begroting_versie_id) REFERENCES begroting_frozen_gemeentelijke_lasten_resultaat(begroting_versie_id) ON DELETE CASCADE
+      )`,
       `CREATE TRIGGER trg_begroting_frozen_gemeentelijke_lasten_regel_vastgesteld_no_insert
        BEFORE INSERT ON begroting_frozen_gemeentelijke_lasten_regel
        FOR EACH ROW
@@ -4059,6 +4070,27 @@ export const MIGRATIONS: readonly Migration[] = [
        WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
        BEGIN
          SELECT RAISE(ABORT, 'begroting_frozen_gemeentelijke_lasten_regel_control: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_gemeentelijke_lasten_grootboek_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_frozen_gemeentelijke_lasten_grootboek
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_gemeentelijke_lasten_grootboek: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_gemeentelijke_lasten_grootboek_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_frozen_gemeentelijke_lasten_grootboek
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_gemeentelijke_lasten_grootboek: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_gemeentelijke_lasten_grootboek_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_frozen_gemeentelijke_lasten_grootboek
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_gemeentelijke_lasten_grootboek: begrotingsversie is VASTGESTELD, frozen output is immutable');
        END`,
     ],
   },

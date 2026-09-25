@@ -5,11 +5,14 @@ import type {
   BgGemeentelijkeLastenControleErnst,
   BgGemeentelijkeLastenControleItem,
   BgGemeentelijkeLastenReviewStatus,
+  BgGlLastenControleErnst,
+  BgGlLastenControleItem,
+  BgGlLastenGrootboekSubtotaal,
   BgWozObjectInvoer,
   BgWozObjectUitkomst,
 } from "@bvc/reporting";
 import { leesBegrotingsversie } from "./begrotingsversies.js";
-import type { HerberekendGemeentelijkeLastenResultaat, WozObjectUitkomstMetId } from "./herberekenen.js";
+import type { GlLastenRegelUitkomstMetId, HerberekendGemeentelijkeLastenResultaat, HerberekendGlLastenResultaat, WozObjectUitkomstMetId } from "./herberekenen.js";
 
 /**
  * Persistence voor de bevroren Gemeentelijke-Lasten/WOZ-OUTPUT (OB-033, fase
@@ -55,6 +58,11 @@ import type { HerberekendGemeentelijkeLastenResultaat, WozObjectUitkomstMetId } 
  * gebeurt de omgekeerde vertaling (`woz_object_id → objectIndex`) via
  * dezelfde, opnieuw opgebouwde koppeling.
  *
+ * DIRECTE BEGROTING PER GL (Vervolgtranche 4, migratie 33): de bevroren regels, hun controls, de subtotalen per GL en
+ * de bevroren P&L-post ("Gemeentelijke lasten pand" = som van de regels) staan in eigen frozen tabellen, gekoppeld aan
+ * het stabiele `regel_id`; frozen read herberekent ook daar niets. Een VÓÓR migratie 33 bevroren resultaat heeft geen
+ * regels en een NULL-post: `grootboekRegels` is dan `null` — de post is onbekend, nooit 0 en nooit het WOZ-voorstel.
+ *
  * `schrijfFrozenGemeentelijkeLastenResultaatZonderTransactie` is bewust als
  * los, transactievrij bouwblok geëxporteerd (niet via `index.ts`) zodat
  * `stelBegrotingVast` (`vaststellen.ts`) dezelfde schrijflogica kan
@@ -68,8 +76,10 @@ import type { HerberekendGemeentelijkeLastenResultaat, WozObjectUitkomstMetId } 
  * terugleesbare frozen resultaat, exact wat `VastgesteldeBegroting.
  * gemeentelijkeLasten` (`vaststellen.ts`) bevat.
  */
-export interface FrozenGemeentelijkeLastenResultaat extends HerberekendGemeentelijkeLastenResultaat {
+export interface FrozenGemeentelijkeLastenResultaat extends Omit<HerberekendGemeentelijkeLastenResultaat, "grootboekRegels"> {
   werkelijkeGemeentelijkeLasten: Decimal | null;
+  /** De bevroren directe begroting per GL; `null` = een vóór migratie 33 bevroren resultaat zonder GL-regels (post onbekend). */
+  grootboekRegels: HerberekendGlLastenResultaat | null;
 }
 
 /**
@@ -128,6 +138,26 @@ interface ResultaatRow {
   totale_automatisch_verwachte_woz: string;
   totale_effectief_verwachte_woz: string;
   begrote_gemeentelijke_lasten: string;
+  begrote_lasten_post: string | null;
+}
+
+interface GlRegelRow {
+  regel_id: number;
+  grootboekrekening: string;
+  ogb_kostensoort: string | null;
+  jaarbedrag: string;
+}
+
+interface GlGrootboekRow {
+  grootboekrekening: string;
+  aantal_regels: number;
+  subtotaal: string;
+}
+
+interface GlControlRow {
+  regel_id: number | null;
+  ernst: string;
+  bericht: string;
 }
 
 interface WozObjectRow {
@@ -186,6 +216,9 @@ export function schrijfFrozenGemeentelijkeLastenResultaatZonderTransactie(
     );
   }
 
+  db.prepare(`DELETE FROM begroting_frozen_gemeentelijke_lasten_regel_control WHERE begroting_versie_id = ?`).run(versieId);
+  db.prepare(`DELETE FROM begroting_frozen_gemeentelijke_lasten_grootboek WHERE begroting_versie_id = ?`).run(versieId);
+  db.prepare(`DELETE FROM begroting_frozen_gemeentelijke_lasten_regel WHERE begroting_versie_id = ?`).run(versieId);
   db.prepare(`DELETE FROM begroting_frozen_gemeentelijke_lasten_control WHERE begroting_versie_id = ?`).run(versieId);
   db.prepare(`DELETE FROM begroting_frozen_gemeentelijke_lasten_complex WHERE begroting_versie_id = ?`).run(versieId);
   db.prepare(`DELETE FROM begroting_frozen_woz_object WHERE begroting_versie_id = ?`).run(versieId);
@@ -196,8 +229,8 @@ export function schrijfFrozenGemeentelijkeLastenResultaatZonderTransactie(
        (begroting_versie_id, werkelijke_gemeentelijke_lasten, woz_stijging_percentage, lasten_percentage_stijging,
         begrotings_percentage_override, beoordeeld, woz_set_bevestigd, review_status, totale_werkelijke_woz, historisch_lasten_percentage,
         automatisch_begrotings_percentage, effectief_begrotings_percentage, totale_automatisch_verwachte_woz,
-        totale_effectief_verwachte_woz, begrote_gemeentelijke_lasten)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        totale_effectief_verwachte_woz, begrote_gemeentelijke_lasten, begrote_lasten_post)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     versieId,
     werkelijkeGemeentelijkeLasten !== null ? werkelijkeGemeentelijkeLasten.toString() : null,
@@ -214,7 +247,47 @@ export function schrijfFrozenGemeentelijkeLastenResultaatZonderTransactie(
     resultaat.totaleAutomatischVerwachteWoz.toString(),
     resultaat.totaleEffectiefVerwachteWoz.toString(),
     bepaald(resultaat.begroteGemeentelijkeLasten, "begroteGemeentelijkeLasten", versieId).toString(),
+    resultaat.grootboekRegels.begroteGemeentelijkeLastenPost.toString(),
   );
+
+  const insertGlRegel = db.prepare(
+    `INSERT INTO begroting_frozen_gemeentelijke_lasten_regel (begroting_versie_id, regel_id, volgnr, grootboekrekening, ogb_kostensoort, jaarbedrag)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  );
+  resultaat.grootboekRegels.regels.forEach(({ persistentieId, regel }, volgnr) => {
+    const gl = regel.invoer.grootboekrekening;
+    if (gl === null) {
+      throw new Error(`Interne fout: begrotingsversie ${versieId}: te bevriezen Gemeentelijke-lastenregel ${persistentieId} heeft geen grootboekrekening — vaststellen had dit als KRITIEK moeten blokkeren.`);
+    }
+    if (regel.invoer.jaarbedrag === null) {
+      throw new Error(`Interne fout: begrotingsversie ${versieId}: te bevriezen Gemeentelijke-lastenregel ${persistentieId} heeft geen jaarbedrag — vaststellen had dit als KRITIEK moeten blokkeren.`);
+    }
+    insertGlRegel.run(versieId, persistentieId, volgnr, gl, regel.invoer.ogbKostensoort, regel.invoer.jaarbedrag.toString());
+  });
+
+  const insertGlGrootboek = db.prepare(
+    `INSERT INTO begroting_frozen_gemeentelijke_lasten_grootboek (begroting_versie_id, volgnr, grootboekrekening, aantal_regels, subtotaal) VALUES (?, ?, ?, ?, ?)`,
+  );
+  resultaat.grootboekRegels.perGrootboek.forEach((g, volgnr) => {
+    insertGlGrootboek.run(versieId, volgnr, g.grootboekrekening, g.aantalRegels, g.subtotaal.toString());
+  });
+
+  const insertGlControl = db.prepare(
+    `INSERT INTO begroting_frozen_gemeentelijke_lasten_regel_control (begroting_versie_id, volgnr, regel_id, ernst, bericht) VALUES (?, ?, ?, ?, ?)`,
+  );
+  resultaat.grootboekRegels.controleVereist.forEach((control, volgnr) => {
+    let regelId: number | null = null;
+    if (control.regelIndex !== null) {
+      const gekoppeld = resultaat.grootboekRegels.regels[control.regelIndex];
+      if (gekoppeld === undefined) {
+        throw new Error(
+          `Interne fout: begrotingsversie ${versieId}: GL-control verwijst naar regelIndex ${control.regelIndex}, buiten bereik van ${resultaat.grootboekRegels.regels.length} regels — correlatie geschonden.`,
+        );
+      }
+      regelId = gekoppeld.persistentieId;
+    }
+    insertGlControl.run(versieId, volgnr, regelId, control.ernst, control.bericht);
+  });
 
   const insertWozObject = db.prepare(
     `INSERT INTO begroting_frozen_woz_object
@@ -368,6 +441,8 @@ export function leesFrozenGemeentelijkeLastenResultaat(db: DatabaseSync, versieI
     return { objectIndex, ernst: rij.ernst as BgGemeentelijkeLastenControleErnst, bericht: rij.bericht };
   });
 
+  const grootboekRegels = header.begrote_lasten_post !== null ? leesFrozenGlRegels(db, versieId, header.begrote_lasten_post) : null;
+
   return {
     begrotingsjaar: versie.begrotingsjaar,
     beoordeeld: header.beoordeeld === 1,
@@ -387,5 +462,49 @@ export function leesFrozenGemeentelijkeLastenResultaat(db: DatabaseSync, versieI
     perComplex,
     controleVereist,
     werkelijkeGemeentelijkeLasten: header.werkelijke_gemeentelijke_lasten !== null ? new Decimal(header.werkelijke_gemeentelijke_lasten) : null,
+    grootboekRegels,
   };
+}
+
+/** Leest de bevroren directe begroting per GL — UITSLUITEND de frozen tabellen, geen herberekening van som of subtotalen. */
+function leesFrozenGlRegels(db: DatabaseSync, versieId: string, post: string): HerberekendGlLastenResultaat {
+  const regelRijen = db
+    .prepare(`SELECT regel_id, grootboekrekening, ogb_kostensoort, jaarbedrag FROM begroting_frozen_gemeentelijke_lasten_regel WHERE begroting_versie_id = ? ORDER BY volgnr`)
+    .all(versieId) as unknown as GlRegelRow[];
+  const regels: GlLastenRegelUitkomstMetId[] = regelRijen.map((rij, index) => {
+    const jaarbedrag = new Decimal(rij.jaarbedrag);
+    return {
+      persistentieId: rij.regel_id,
+      regel: { index, invoer: { grootboekrekening: rij.grootboekrekening, ogbKostensoort: rij.ogb_kostensoort, jaarbedrag }, bijdrage: jaarbedrag },
+    };
+  });
+  const indexPerRegelId = new Map(regels.map((r, index) => [r.persistentieId, index]));
+
+  const grootboekRijen = db
+    .prepare(`SELECT grootboekrekening, aantal_regels, subtotaal FROM begroting_frozen_gemeentelijke_lasten_grootboek WHERE begroting_versie_id = ? ORDER BY volgnr`)
+    .all(versieId) as unknown as GlGrootboekRow[];
+  const perGrootboek: BgGlLastenGrootboekSubtotaal[] = grootboekRijen.map((rij) => ({
+    grootboekrekening: rij.grootboekrekening,
+    aantalRegels: rij.aantal_regels,
+    subtotaal: new Decimal(rij.subtotaal),
+  }));
+
+  const controlRijen = db
+    .prepare(`SELECT regel_id, ernst, bericht FROM begroting_frozen_gemeentelijke_lasten_regel_control WHERE begroting_versie_id = ? ORDER BY volgnr`)
+    .all(versieId) as unknown as GlControlRow[];
+  const controleVereist: BgGlLastenControleItem[] = controlRijen.map((rij) => {
+    let regelIndex: number | null = null;
+    if (rij.regel_id !== null) {
+      const gevonden = indexPerRegelId.get(rij.regel_id);
+      if (gevonden === undefined) {
+        throw new Error(
+          `Interne fout: begrotingsversie ${versieId}: frozen GL-control verwijst naar regel_id ${rij.regel_id}, die niet voorkomt in de frozen GL-regels — inconsistente frozen data.`,
+        );
+      }
+      regelIndex = gevonden;
+    }
+    return { regelIndex, ernst: rij.ernst as BgGlLastenControleErnst, bericht: rij.bericht };
+  });
+
+  return { regels, begroteGemeentelijkeLastenPost: new Decimal(post), perGrootboek, controleVereist };
 }

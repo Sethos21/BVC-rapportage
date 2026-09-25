@@ -7,6 +7,7 @@ import {
   berekenBegroteBeheersvergoeding,
   berekenBegroteCorrectiefDagelijksOnderhoud,
   berekenBegroteGemeentelijkeLasten,
+  berekenBegroteGemeentelijkeLastenPerGrootboek,
   berekenBegroteGeplandeVerkoop,
   berekenBegroteGeplandOnderhoud,
   berekenBegroteHuuropbrengsten,
@@ -29,6 +30,10 @@ import {
   type BgCorrectiefDagelijksRegelUitkomst,
   type BgCorrectiefDagelijksResultaat,
   type BgGemeentelijkeLastenResultaat,
+  type BgGlLastenRegelInvoer,
+  type BgGlLastenRegelUitkomst,
+  type BgGlLastenResultaat,
+  type BgRelevantGrootboek,
   type BgGeplandeVerkoopRegelInvoer,
   type BgGeplandeVerkoopRegelUitkomst,
   type BgGeplandeVerkoopResultaat,
@@ -75,6 +80,8 @@ import {
   type CorrectiefDagelijksOnderhoudRegel,
 } from "./correctiefDagelijksOnderhoudRegels.js";
 import { leesGemeentelijkeLastenModule, type GemeentelijkeLastenModuleInvoer } from "./gemeentelijkeLastenModule.js";
+import { leesGemeentelijkeLastenRegels, type GemeentelijkeLastenRegel } from "./gemeentelijkeLastenRegels.js";
+import { leesRelevanteGemeentelijkeLastenGrootboekenVoorAdministratie } from "./gemeentelijkeLastenRelevanteGrootboeken.js";
 import { leesGeplandeVerkoopBeoordeeld } from "./geplandeVerkoopBeoordeeld.js";
 import { leesGeplandeVerkoopRegels, type GeplandeVerkoopRegel } from "./geplandeVerkoopRegels.js";
 import { leesGeplandOnderhoudActiviteiten, type GeplandOnderhoudActiviteit } from "./geplandOnderhoudActiviteiten.js";
@@ -292,9 +299,29 @@ export interface WozObjectUitkomstMetId {
   wozObject: BgWozObjectUitkomst;
 }
 
-/** `BgGemeentelijkeLastenResultaat` met uitsluitend `wozObjecten` vervangen door de ID-geannoteerde variant — alle overige velden ongewijzigd, rechtstreeks van de pure calculator. */
+/** Koppelt een berekende Gemeentelijke-lastenregel-uitkomst (per GL) terug aan haar persistente `id` — uitsluitend positioneel bepaald binnen één aanroep, zelfde principe als `WozObjectUitkomstMetId`. */
+export interface GlLastenRegelUitkomstMetId {
+  persistentieId: number;
+  regel: BgGlLastenRegelUitkomst;
+}
+
+/** `BgGlLastenResultaat` met uitsluitend `regels` vervangen door de ID-geannoteerde variant — de directe begroting per relevante GL (Vervolgtranche 4). */
+export interface HerberekendGlLastenResultaat extends Omit<BgGlLastenResultaat, "regels"> {
+  regels: readonly GlLastenRegelUitkomstMetId[];
+}
+
+/**
+ * `BgGemeentelijkeLastenResultaat` met `wozObjecten` vervangen door de ID-geannoteerde variant, aangevuld met
+ * `grootboekRegels` (Vervolgtranche 4, besluit 2026-09-25).
+ *
+ * LET OP — TWEE VERSCHILLENDE GETALLEN, NIET VERWISSELEN: `begroteGemeentelijkeLasten` (en de percentages/perComplex)
+ * is het WOZ-GEBASEERDE VOORSTEL-totaal (referentie, geen verdeelsleutel, voedt geen regel). De begroting van de
+ * P&L-post "Gemeentelijke lasten pand" is `grootboekRegels.begroteGemeentelijkeLastenPost`: de som van de direct per
+ * relevante GL begrote regels.
+ */
 export interface HerberekendGemeentelijkeLastenResultaat extends Omit<BgGemeentelijkeLastenResultaat, "wozObjecten"> {
   wozObjecten: readonly WozObjectUitkomstMetId[];
+  grootboekRegels: HerberekendGlLastenResultaat;
 }
 
 /** Koppelt een berekende Algemene-Kosten-regel-uitkomst terug aan haar persistente `id` — uitsluitend positioneel bepaald BINNEN de regels van diezelfde categorie, zelfde principe als `WozObjectUitkomstMetId`. */
@@ -400,6 +427,10 @@ export interface HerberekenInvoer {
   wozObjecten: readonly WozObject[];
   /** `leesGemeentelijkeLastenModule`'s "geen rij → alle aannamevelden null, beoordeeld false"-semantiek, ongewijzigd doorgegeven. */
   gemeentelijkeLastenModule: GemeentelijkeLastenModuleInvoer;
+  /** Rauwe Gemeentelijke-lastenregels per GL (Vervolgtranche 4) — GEEN pure-module-vorm; de mapping naar `BgGlLastenRegelInvoer` gebeurt pas in `berekenBegrotingUitInvoer`. */
+  gemeentelijkeLastenRegels: readonly GemeentelijkeLastenRegel[];
+  /** De voor de administratie/het begrotingsjaar van deze versie relevante Gemeentelijke-lasten-GL's, gegevensgedreven uit de centrale P&L-bronmapping (`gemeentelijkeLastenRelevanteGrootboeken.ts`). */
+  gemeentelijkeLastenRelevanteGrootboeken: readonly BgRelevantGrootboek[];
   /** De lokale algemene-kostenclassificatie (OB-035/036) van de administratie van deze begrotingsversie (`versie.bedrijfsnr`) — GEEN begrotingsversie-gebonden data, zie `algemeneKostenClassificatie.ts`'s moduledoc. */
   algemeneKostenClassificatie: readonly BgAlgemeneKostenClassificatieRegel[];
   /** Rauwe Algemene-Kosten-regelpersistence (OB-035/036) — GEEN pure-module-vorm; de mapping naar `BgAlgemeneKostenRegelInvoer` gebeurt pas in `berekenBegrotingUitInvoer`. */
@@ -462,6 +493,8 @@ export function leesHerberekenInvoerZonderTransactie(db: DatabaseSync, versieId:
     verzekeringBeoordeeld: leesVerzekeringBeoordeeld(db, versieId),
     wozObjecten: leesWozObjecten(db, versieId),
     gemeentelijkeLastenModule: leesGemeentelijkeLastenModule(db, versieId),
+    gemeentelijkeLastenRegels: leesGemeentelijkeLastenRegels(db, versieId),
+    gemeentelijkeLastenRelevanteGrootboeken: leesRelevanteGemeentelijkeLastenGrootboekenVoorAdministratie(db, versie.bedrijfsnr, versie.begrotingsjaar),
     algemeneKostenClassificatie: leesAlgemeneKostenClassificatie(db, versie.bedrijfsnr),
     algemeneKostenRegels: leesAlgemeneKostenRegels(db, versieId),
     algemeneKostenCategorieState: leesAlgemeneKostenCategorieState(db, versieId),
@@ -698,8 +731,11 @@ function berekenGemeentelijkeLastenUitInvoer(
   begrotingsjaar: number,
   wozObjecten: readonly WozObject[],
   moduleInvoer: GemeentelijkeLastenModuleInvoer,
+  regels: readonly GemeentelijkeLastenRegel[],
+  relevanteGrootboeken: readonly BgRelevantGrootboek[],
 ): HerberekendGemeentelijkeLastenResultaat {
   let resultaat: BgGemeentelijkeLastenResultaat;
+  let grootboekResultaat: BgGlLastenResultaat;
   try {
     resultaat = berekenBegroteGemeentelijkeLasten(wozObjecten.map(naarPureWozObjectInvoer), {
       begrotingsjaar,
@@ -710,6 +746,7 @@ function berekenGemeentelijkeLastenUitInvoer(
       wozSetBevestigd: moduleInvoer.wozSetBevestigd,
       beoordeeld: moduleInvoer.beoordeeld,
     });
+    grootboekResultaat = berekenBegroteGemeentelijkeLastenPerGrootboek(regels.map(naarPureGlLastenRegelInvoer), relevanteGrootboeken);
   } catch (error) {
     throw new Error(
       `Berekening van begrotingsversie ${versieId} is mislukt tijdens Gemeentelijke Lasten/WOZ: ${error instanceof Error ? error.message : String(error)}`,
@@ -728,7 +765,22 @@ function berekenGemeentelijkeLastenUitInvoer(
     wozObject: wozObjectUitkomst,
   }));
 
-  return { ...resultaat, wozObjecten: wozObjectenMetId };
+  if (grootboekResultaat.regels.length !== regels.length) {
+    throw new Error(
+      `Interne fout: begrotingsversie ${versieId}: Gemeentelijke-lasten-GL-calculator gaf ${grootboekResultaat.regels.length} regel-uitkomsten terug voor ${regels.length} ingevoerde regels — positionele id-correlatie geschonden.`,
+    );
+  }
+  const regelsMetId: GlLastenRegelUitkomstMetId[] = grootboekResultaat.regels.map((regelUitkomst, index) => ({
+    persistentieId: regels[index]!.id,
+    regel: regelUitkomst,
+  }));
+
+  return { ...resultaat, wozObjecten: wozObjectenMetId, grootboekRegels: { ...grootboekResultaat, regels: regelsMetId } };
+}
+
+/** Letterlijke veldkopie, GEEN transformatie/validatie — de opslagvorm mapt 1-op-1 naar de pure invoer. */
+function naarPureGlLastenRegelInvoer(regel: GemeentelijkeLastenRegel): BgGlLastenRegelInvoer {
+  return { grootboekrekening: regel.grootboekrekening, ogbKostensoort: regel.ogbKostensoort, jaarbedrag: regel.jaarbedrag };
 }
 
 /** Letterlijke veldkopie, GEEN transformatie/validatie — GEEN type-boundary-cast nodig (zie `HerberekendeBegroting`'s moduledoc). */
@@ -1052,6 +1104,8 @@ export function berekenBegrotingUitInvoer(
     invoer.versie.begrotingsjaar,
     invoer.wozObjecten,
     invoer.gemeentelijkeLastenModule,
+    invoer.gemeentelijkeLastenRegels,
+    invoer.gemeentelijkeLastenRelevanteGrootboeken,
   );
 
   const algemeneKosten = berekenAlgemeneKostenUitInvoer(

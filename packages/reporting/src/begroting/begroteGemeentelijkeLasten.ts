@@ -119,6 +119,12 @@ import type { BgControleErnst } from "./begroteHuuropbrengsten.js";
  * blijft ongewijzigd. Het intrekken van de bevestiging bij toevoegen/wijzigen/verwijderen van
  * een WOZ-record is een persistentie-invariant (`@bvc/begroting-data`), niet van deze module.
  *
+ * VERVOLGTRANCHE 4 (besluit 2026-09-25): de begroting van de P&L-post "Gemeentelijke lasten pand" is de SOM van
+ * begrotingsregels die de gebruiker rechtstreeks per relevante GL invoert (`begroteGemeentelijkeLastenGrootboekRegels.ts`).
+ * Het hier berekende WOZ-gebaseerde totaal (`begroteGemeentelijkeLasten`) blijft ONGEWIJZIGD bestaan als voorstel/referentie
+ * (met de WOZ-set-compleet-lifecycle), maar wordt niet over GL's verdeeld en voedt geen regel automatisch: historische
+ * realisatieverhoudingen zijn geen verdeelsleutel.
+ *
  * BUITEN SCOPE (deze fase, expliciet niet gebouwd — geen aanname): GL-
  * koppeling/realisatie-integratie, Estimated, P&L-rendering, UI, formeel
  * WOZ-objectnummer, automatische WOZ-bron, afzonderlijke OZB/water/riool-
@@ -211,7 +217,12 @@ export interface BgGemeentelijkeLastenResultaat {
   effectiefBegrotingsPercentage: Decimal | null;
   totaleAutomatischVerwachteWoz: Decimal;
   totaleEffectiefVerwachteWoz: Decimal;
-  /** `null` zolang de WOZ-set niet is bevestigd — onbekend, nooit €0. */
+  /**
+   * WOZ-GEBASEERD VOORSTEL-totaal (referentie) — sinds Vervolgtranche 4 (besluit 2026-09-25) NIET de begroting van de
+   * P&L-post "Gemeentelijke lasten pand": die is de som van de direct per relevante GL begrote regels
+   * (`berekenBegroteGemeentelijkeLastenPerGrootboek`). Dit voorstel wordt niet over GL's verdeeld en voedt geen regel.
+   * `null` zolang de WOZ-set niet is bevestigd — onbekend, nooit €0.
+   */
   begroteGemeentelijkeLasten: Decimal | null;
   /** Uitsluitend WOZ-objecten met een geldig, niet-leeg `complexnummer` (zie moduledoc). */
   perComplex: BgGemeentelijkeLastenComplexTotaal[];

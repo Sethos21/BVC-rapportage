@@ -312,6 +312,13 @@ export function stelBegrotingVast(db: DatabaseSync, versieId: string, vastgestel
         `Begrotingsversie ${versieId}: Gemeentelijke Lasten/WOZ bevat één of meer KRITIEKE controls — vaststellen is niet mogelijk vóórdat deze zijn opgelost.`,
       );
     }
+    // Directe begroting per relevante GL (Vervolgtranche 4): een regel met een onbekende/niet-relevante GL of OGB,
+    // een ontbrekend bedrag of een dubbele regel is een KRITIEKE control en blokkeert vaststellen.
+    if (gemeentelijkeLasten.grootboekRegels.controleVereist.some((c) => c.ernst === "KRITIEK")) {
+      throw new Error(
+        `Begrotingsversie ${versieId}: Gemeentelijke lasten per grootboekrekening bevat één of meer KRITIEKE controls — vaststellen is niet mogelijk vóórdat deze zijn opgelost.`,
+      );
+    }
 
     // Algemene-Kosten-lifecycle-validatie (OB-035/036, fase P3, zie moduledoc) — UITSLUITEND lokaal voor
     // Algemene Kosten, wijzigt niets aan hoe de eerdere modules' eigen controleVereist wordt behandeld
