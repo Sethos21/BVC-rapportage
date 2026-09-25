@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openOrCreateDatabase } from "./database.js";
+import { leesPnLBronmappingRegels, leesPnLMappingWijzigingLog, voegPnLBronmappingMutatieToe, type PnLBronmappingMutatieInvoer } from "./pnlBronmappingRepository.js";
 import { MIGRATIONS, runMigrations, type Migration } from "./migrations.js";
 
 let dir: string;
@@ -1545,6 +1546,94 @@ it("17. migratie 32: woz_set_bevestigd (module-staat + frozen) additief, bestaan
     expect(rij).toEqual({ lasten: "9000", beoordeeld: 1, woz_set_bevestigd: 0 });
     expect(frozenKolommen).toContain("woz_set_bevestigd");
     expect(() => db.prepare(`UPDATE begroting_gemeentelijke_lasten_module SET woz_set_bevestigd = 2 WHERE begroting_versie_id = 'v1'`).run()).toThrow(/CHECK constraint failed/);
+    db.close();
+  });
+
+it("18. migratie 30 (DROP COLUMN) is technisch mogelijk op de SQLite van deze runtime: versie ≥ 3.35.0", () => {
+    const db = openOrCreateDatabase(dbPad);
+    const versie = (db.prepare(`SELECT sqlite_version() AS v`).get() as { v: string }).v;
+    db.close();
+    const [major, minor] = versie.split(".").map(Number) as [number, number];
+    expect(major > 3 || (major === 3 && minor >= 35)).toBe(true);
+  });
+
+  it("19. PRODUCTIEVORM: een schema-25 pnl-bronmapping-database (de enige productie-database die `openOrCreateDatabase` opent) behoudt na migraties 26-32 al haar mapping- en logdata identiek; alle begrotingstabellen die migratie 26-32 raken zijn leeg en de database blijft integer", () => {
+    const mutatie = (overrides: Partial<PnLBronmappingMutatieInvoer>): PnLBronmappingMutatieInvoer => ({
+      bedrijfsnr: "070",
+      grootboekrekening: "4700",
+      grootboekOmschrijving: "WOZ / OZB",
+      ogbKostensoort: "4701",
+      ogbKostensoortOmschrijving: "OZB",
+      economischeModule: "GEMEENTELIJKE_LASTEN",
+      economischeCategorie: "GEMEENTELIJKE_LASTEN",
+      geldigVanafBoekjaar: 2025,
+      geldigVanafPeriode: "01",
+      geldigTotBoekjaar: null,
+      geldigTotPeriode: null,
+      type: "NIEUWE_MAPPING_VANAF_PERIODE",
+      vorigeMappingId: null,
+      gewijzigdOp: new Date("2026-09-14T00:00:00.000Z"),
+      gebruiker: "migratietest",
+      wijzigingsreden: "bewijs productievorm",
+      ...overrides,
+    });
+
+    const dbOud = new DatabaseSync(dbPad);
+    runMigrations(dbOud, MIGRATIONS.filter((m) => m.version <= 25));
+    voegPnLBronmappingMutatieToe(dbOud, mutatie({}));
+    voegPnLBronmappingMutatieToe(dbOud, mutatie({ grootboekrekening: "4710", grootboekOmschrijving: "Gemeentelijke heffingen", ogbKostensoort: null, ogbKostensoortOmschrijving: null }));
+    voegPnLBronmappingMutatieToe(
+      dbOud,
+      mutatie({ grootboekrekening: "4130", grootboekOmschrijving: "Verzekering", ogbKostensoort: "4131", ogbKostensoortOmschrijving: "Brand-/opstalverzekering", economischeModule: "VERZEKERINGEN", economischeCategorie: "BRAND_OPSTALVERZEKERING" }),
+    );
+    const snapshot = (db: DatabaseSync) => JSON.stringify({ regels: leesPnLBronmappingRegels(db, "070"), log: leesPnLMappingWijzigingLog(db, "070") });
+    const voor = snapshot(dbOud);
+    const integriteitVoor = dbOud.prepare(`PRAGMA integrity_check`).all();
+    dbOud.close();
+    expect(JSON.parse(voor).regels).toHaveLength(3);
+    expect(integriteitVoor).toEqual([{ integrity_check: "ok" }]);
+
+    const db = openOrCreateDatabase(dbPad); // 26 t/m 32 in één keer
+    expect(snapshot(db)).toBe(voor);
+    expect(db.prepare(`PRAGMA integrity_check`).all()).toEqual([{ integrity_check: "ok" }]);
+    expect(db.prepare(`PRAGMA foreign_key_check`).all()).toEqual([]);
+
+    const geraakteTabellen = [
+      "begroting_gepland_onderhoud_activiteit",
+      "begroting_frozen_gepland_onderhoud_activiteit",
+      "begroting_correctief_dagelijks_onderhoud_regel",
+      "begroting_frozen_correctief_dagelijks_onderhoud_regel",
+      "begroting_verzekering_regel",
+      "begroting_frozen_verzekering_regel",
+      "begroting_woz_object",
+      "begroting_frozen_woz_object",
+      "begroting_gemeentelijke_lasten_module",
+      "begroting_frozen_gemeentelijke_lasten_resultaat",
+      "begrotingsversies",
+    ];
+    for (const tabel of geraakteTabellen) {
+      expect(db.prepare(`SELECT COUNT(*) AS n FROM ${tabel}`).get(), tabel).toEqual({ n: 0 });
+    }
+    db.close();
+  });
+
+  it("20. migratie 30 is verliesarm voor alles behalve het bewust vervallen vrije adresveld: alle overige kolommen van een bestaande WOZ-rij (concept én frozen) blijven exact behouden", () => {
+    const dbOud = new DatabaseSync(dbPad);
+    runMigrations(dbOud, MIGRATIONS.filter((m) => m.version <= 29));
+    dbOud.exec(`INSERT INTO begrotingsversies (id, bedrijfsnr, begrotingsjaar, bron_peildatum, status, created_at, based_on_version_id, origin_type)
+                VALUES ('v1', '070', 2027, '2026-07-31', 'CONCEPT', '2026-01-01T00:00:00.000Z', NULL, 'NIEUW')`);
+    dbOud
+      .prepare(
+        `INSERT INTO begroting_woz_object (begroting_versie_id, complexnummer, woz_object_adres, aanslagjaar, waardepeildatum, werkelijke_woz, verwachte_woz_override)
+         VALUES ('v1', '001', 'Kerkstraat 1', 2026, '2026-01-01', '1234567.89', '1300000')`,
+      )
+      .run();
+    const voor = dbOud.prepare(`SELECT id, begroting_versie_id, complexnummer, aanslagjaar, waardepeildatum, werkelijke_woz, verwachte_woz_override FROM begroting_woz_object`).all();
+    dbOud.close();
+
+    const db = openOrCreateDatabase(dbPad);
+    const na = db.prepare(`SELECT id, begroting_versie_id, complexnummer, aanslagjaar, waardepeildatum, werkelijke_woz, verwachte_woz_override FROM begroting_woz_object`).all();
+    expect(na).toEqual(voor);
     db.close();
   });
 });
