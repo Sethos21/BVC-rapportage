@@ -342,6 +342,18 @@ export {
   type GemeentelijkeLastenModuleSchrijfInvoer,
 } from "./gemeentelijkeLastenModule.js";
 export { schrijfWozObjecten, leesWozObjecten, type WozObject, type WozObjectInvoer } from "./wozObjecten.js";
+// Gemeentelijke lasten: directe begroting per relevante GL (Vervolgtranche 4, besluit 2026-09-25) — concept-regels + gegevensgedreven relevante GL's uit de centrale mapping.
+export {
+  schrijfGemeentelijkeLastenRegels,
+  leesGemeentelijkeLastenRegels,
+  type GemeentelijkeLastenRegel,
+  type GemeentelijkeLastenRegelInvoer,
+} from "./gemeentelijkeLastenRegels.js";
+export {
+  leesRelevanteGemeentelijkeLastenGrootboeken,
+  leesRelevanteGemeentelijkeLastenGrootboekenVoorAdministratie,
+  type RelevantGemeentelijkeLastenGrootboek,
+} from "./gemeentelijkeLastenRelevanteGrootboeken.js";
 // WOZ-historie CSV-export (besluit 2026-09-25): persistente WOZ-set + administratiecode + bevestiging → pure CSV-bouw.
 export { leesWozHistorieCsv } from "./wozHistorieExport.js";
 

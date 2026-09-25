@@ -3946,6 +3946,122 @@ export const MIGRATIONS: readonly Migration[] = [
       `ALTER TABLE begroting_frozen_gemeentelijke_lasten_resultaat ADD COLUMN woz_set_bevestigd INTEGER NOT NULL DEFAULT 0 CHECK (woz_set_bevestigd IN (0, 1))`,
     ],
   },
+  /**
+   * Migratie 33 — Gemeentelijke lasten: DIRECTE BEGROTING PER RELEVANTE GL (Vervolgtranche 4, Master Contract
+   * §6.8, besluit 2026-09-25). Additief: geen bestaande tabel of kolom wordt gewijzigd behalve één nullable
+   * kolom op de frozen resultaat-rij; migratie 30 blijft ongemoeid.
+   *
+   * 1. `begroting_gemeentelijke_lasten_regel` — concept-input: één regel per (GL, optionele OGB) met een
+   *    jaarbedrag dat de gebruiker rechtstreeks invoert (geen totaal dat verdeeld wordt). `jaarbedrag`
+   *    NULL = nog niet ingevuld (nooit stil 0). Geen CHECK op inhoud: een functioneel onvolledig CONCEPT
+   *    (bv. lege GL) moet opslaanbaar blijven; validatie hoort in de pure calculator. Drie
+   *    VASTGESTELD-immutability-triggers, zoals de overige begrotingsregels.
+   * 2. `begroting_frozen_gemeentelijke_lasten_regel` + `..._regel_control` — de bij vaststellen bevroren
+   *    regels en hun (niet-blokkerende) controls, gekoppeld aan het stabiele `regel_id`. `jaarbedrag`
+   *    NOT NULL: een regel zonder bedrag is KRITIEK en kan dus nooit worden bevroren.
+   * 3. `begroting_frozen_gemeentelijke_lasten_resultaat.begrote_lasten_post` — de bevroren P&L-post
+   *    "Gemeentelijke lasten pand" (som van de regels). NULLABLE: NULL = een vóór deze migratie bevroren
+   *    resultaat zonder GL-regels; de post is dan onbekend (nooit teruggeschreven naar 0 of naar het
+   *    WOZ-voorstel). Er zijn geen productiegegevens in deze tabellen (zie migratie 30-onderzoek).
+   */
+  {
+    version: 33,
+    description: "Gemeentelijke lasten: directe begroting per relevante GL (regels + frozen regels/controls + bevroren post)",
+    ddl: [
+      `CREATE TABLE begroting_gemeentelijke_lasten_regel (
+        id INTEGER PRIMARY KEY,
+        begroting_versie_id TEXT NOT NULL REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        grootboekrekening TEXT NOT NULL,
+        ogb_kostensoort TEXT NULL,
+        jaarbedrag TEXT NULL
+      )`,
+      `CREATE INDEX idx_begroting_gemeentelijke_lasten_regel_versie ON begroting_gemeentelijke_lasten_regel(begroting_versie_id)`,
+      `CREATE TRIGGER trg_begroting_gemeentelijke_lasten_regel_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_gemeentelijke_lasten_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_gemeentelijke_lasten_regel: begrotingsversie is VASTGESTELD, regels zijn immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_gemeentelijke_lasten_regel_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_gemeentelijke_lasten_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_gemeentelijke_lasten_regel: begrotingsversie is VASTGESTELD, regels zijn immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_gemeentelijke_lasten_regel_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_gemeentelijke_lasten_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_gemeentelijke_lasten_regel: begrotingsversie is VASTGESTELD, regels zijn immutable');
+       END`,
+      `ALTER TABLE begroting_frozen_gemeentelijke_lasten_resultaat ADD COLUMN begrote_lasten_post TEXT NULL`,
+      `CREATE TABLE begroting_frozen_gemeentelijke_lasten_regel (
+        begroting_versie_id TEXT NOT NULL,
+        regel_id INTEGER NOT NULL,
+        volgnr INTEGER NOT NULL,
+        grootboekrekening TEXT NOT NULL,
+        ogb_kostensoort TEXT NULL,
+        jaarbedrag TEXT NOT NULL,
+        PRIMARY KEY (begroting_versie_id, regel_id),
+        UNIQUE (begroting_versie_id, volgnr),
+        FOREIGN KEY (begroting_versie_id) REFERENCES begroting_frozen_gemeentelijke_lasten_resultaat(begroting_versie_id) ON DELETE CASCADE
+      )`,
+      `CREATE TABLE begroting_frozen_gemeentelijke_lasten_regel_control (
+        begroting_versie_id TEXT NOT NULL,
+        volgnr INTEGER NOT NULL,
+        regel_id INTEGER NULL,
+        ernst TEXT NOT NULL CHECK (ernst IN ('KRITIEK', 'WAARSCHUWING', 'INFORMATIEF')),
+        bericht TEXT NOT NULL,
+        PRIMARY KEY (begroting_versie_id, volgnr),
+        FOREIGN KEY (begroting_versie_id) REFERENCES begroting_frozen_gemeentelijke_lasten_resultaat(begroting_versie_id) ON DELETE CASCADE
+      )`,
+      `CREATE TRIGGER trg_begroting_frozen_gemeentelijke_lasten_regel_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_frozen_gemeentelijke_lasten_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_gemeentelijke_lasten_regel: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_gemeentelijke_lasten_regel_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_frozen_gemeentelijke_lasten_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_gemeentelijke_lasten_regel: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_gemeentelijke_lasten_regel_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_frozen_gemeentelijke_lasten_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_gemeentelijke_lasten_regel: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_gemeentelijke_lasten_regel_control_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_frozen_gemeentelijke_lasten_regel_control
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_gemeentelijke_lasten_regel_control: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_gemeentelijke_lasten_regel_control_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_frozen_gemeentelijke_lasten_regel_control
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_gemeentelijke_lasten_regel_control: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_gemeentelijke_lasten_regel_control_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_frozen_gemeentelijke_lasten_regel_control
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_gemeentelijke_lasten_regel_control: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+    ],
+  },
 ];
 
 function schemaMetaTableExists(db: DatabaseSync): boolean {
