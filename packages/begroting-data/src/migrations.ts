@@ -4094,6 +4094,29 @@ export const MIGRATIONS: readonly Migration[] = [
        END`,
     ],
   },
+  /**
+   * Migratie 34 — Algemene kosten: Estimated-persistentie (Vervolgtranche 5; FO OB-030/035/036): de handmatige
+   * RESTERENDE VERWACHTING per post (Accountant / Algemene / Juridische / Makelaars- / Bankkosten), het tweede
+   * deel van `Estimated = Werkelijk t/m afgesloten periode + resterende verwachting`.
+   *
+   * Exact het Estimated-patroon van migratie 27/31: BEWUST GEEN VASTGESTELD-triggers en geen CONCEPT-check —
+   * Estimated blijft het hele jaar wijzigbaar en wordt NOOIT bevroren; de vastgestelde Begroting wordt er nooit
+   * door gemuteerd. Eén rij per (versie, categorie): een rij bevat altijd een bedrag (NOT NULL; expliciet '0' =
+   * "geen kosten meer verwacht" is een geldige keuze), GEEN rij = nog niet ingevuld (onbekend, nooit stil 0).
+   * De categorie-CHECK spiegelt de vijf bestaande, ongewijzigde `ALGEMENE_KOSTEN_CATEGORIEEN`.
+   */
+  {
+    version: 34,
+    description: "Algemene kosten: Estimated-persistentie (handmatige resterende verwachting per post)",
+    ddl: [
+      `CREATE TABLE begroting_algemene_kosten_estimated_verwachting (
+        begroting_versie_id TEXT NOT NULL REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        categorie TEXT NOT NULL CHECK (categorie IN ('ACCOUNTANT', 'ALGEMENE_KOSTEN', 'JURIDISCHE_KOSTEN', 'MAKELAARSKOSTEN', 'BANKKOSTEN')),
+        resterend_bedrag TEXT NOT NULL,
+        PRIMARY KEY (begroting_versie_id, categorie)
+      )`,
+    ],
+  },
 ];
 
 function schemaMetaTableExists(db: DatabaseSync): boolean {

@@ -805,7 +805,7 @@ function naarPureAlgemeneKostenRegelInvoer(regel: AlgemeneKostenRegel): BgAlgeme
  * `begroteAlgemeneKosten.ts`), dus hetzelfde filter hier op de
  * ID-dragende regels reproduceert exact dezelfde j-de-positie-correlatie.
  */
-function berekenAlgemeneKostenUitInvoer(
+export function berekenAlgemeneKostenUitInvoer(
   versieId: string,
   begrotingsjaar: number,
   regels: readonly AlgemeneKostenRegel[],

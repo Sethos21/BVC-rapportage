@@ -354,6 +354,13 @@ export {
   leesRelevanteGemeentelijkeLastenGrootboekenVoorAdministratie,
   type RelevantGemeentelijkeLastenGrootboek,
 } from "./gemeentelijkeLastenRelevanteGrootboeken.js";
+// Algemene kosten Estimated (Vervolgtranche 5): handmatige resterende verwachting per post + koppeling met Begroting/Werkelijk (nooit bevroren).
+export {
+  schrijfAlgemeneKostenEstimatedVerwachting,
+  leesAlgemeneKostenEstimatedVerwachting,
+  type AlgemeneKostenEstimatedVerwachting,
+} from "./algemeneKostenEstimatedVerwachting.js";
+export { combineerAlgemeneKostenEstimated, leesAlgemeneKostenEstimatedResultaat, type AlgemeneKostenEstimatedInvoer } from "./algemeneKostenEstimated.js";
 // WOZ-historie CSV-export (besluit 2026-09-25): persistente WOZ-set + administratiecode + bevestiging → pure CSV-bouw.
 export { leesWozHistorieCsv } from "./wozHistorieExport.js";
 
