@@ -332,6 +332,23 @@ export type VerzekeringMaandStatus = "NIET_BESTAAND" | "BASIS" | "GEINDEXEERD";
  * waarheid voor `berekenJaarpremie`, het maandverloop en het resterende-premie-
  * voorstel — nooit een tweede, parallelle maandlogica.
  */
+/**
+ * Actieve maanden van `begrotingsjaar` voor één polis: een maand telt mee zodra de polis bestond
+ * (regime A/B/C, zie moduledoc) — uitsluitend afhankelijk van `ingangsdatum` t.o.v. het
+ * begrotingsjaar. Enige bron van waarheid voor "actief" in statussen, maandverloop en
+ * override-verdeling.
+ */
+function bepaalActieveMaanden(ingangsdatum: Date, begrotingsjaar: number): boolean[] {
+  const ingangsdatumJaar = ingangsdatum.getUTCFullYear();
+  const ingangsMaand = ingangsdatum.getUTCMonth() + 1;
+  const actief: boolean[] = [];
+  for (let maand = 1; maand <= 12; maand += 1) {
+    const polisBestaatNogNietDezeMaand = ingangsdatumJaar > begrotingsjaar || (ingangsdatumJaar === begrotingsjaar && maand < ingangsMaand);
+    actief.push(!polisBestaatNogNietDezeMaand);
+  }
+  return actief;
+}
+
 function bepaalMaandStatussen(
   ingangsdatum: Date,
   looptijdMaanden: number,
@@ -340,14 +357,11 @@ function bepaalMaandStatussen(
   const relevanteVerlengmomenten = bepaalRelevanteVerlengmomenten(ingangsdatum, looptijdMaanden, begrotingsjaar);
   const eersteRelevanteVerlengmoment = relevanteVerlengmomenten[0] ?? null;
   const geïndexeerdVanafMaand = eersteRelevanteVerlengmoment !== null ? eersteRelevanteVerlengmoment.getUTCMonth() + 1 : null;
-
-  const ingangsdatumJaar = ingangsdatum.getUTCFullYear();
-  const ingangsMaand = ingangsdatum.getUTCMonth() + 1;
+  const actief = bepaalActieveMaanden(ingangsdatum, begrotingsjaar);
 
   const statussen: VerzekeringMaandStatus[] = [];
   for (let maand = 1; maand <= 12; maand += 1) {
-    const polisBestaatNogNietDezeMaand = ingangsdatumJaar > begrotingsjaar || (ingangsdatumJaar === begrotingsjaar && maand < ingangsMaand);
-    if (polisBestaatNogNietDezeMaand) {
+    if (!actief[maand - 1]) {
       statussen.push("NIET_BESTAAND"); // telt mee als €0.
       continue;
     }
@@ -471,7 +485,7 @@ export function berekenBegroteVerzekeringen(regelsInvoer: readonly BgVerzekering
   };
 }
 
-// ── Maandverloop / kwartalen / resterende-premievoorstel (Master Contract §6.7, 2026-09-24) ──
+// ── Maandverloop / kwartalen / resterende premie / Estimated per polis (Master Contract §6.7, besluit 2026-09-25) ──
 
 function heeftRekenbareVelden(invoer: BgVerzekeringRegelInvoer): invoer is BgVerzekeringRegelInvoer & {
   ingangsdatum: Date;
@@ -491,78 +505,133 @@ export interface BgVerzekeringMaandBedrag {
   isEersteIndexatiemaand: boolean;
 }
 
+export type BgVerzekeringMaandverloopBron = "BEREKEND" | "OVERRIDE";
+
 export interface BgVerzekeringMaandverloop {
   maanden: BgVerzekeringMaandBedrag[];
-  /** Q1..Q4, elk één keer gedeeld door 12 over het aantal-maanden-teller (zelfde exactheidstechniek als het jaarbedrag). */
+  /** Q1..Q4 = exacte som van de drie bijbehorende maanden. */
   kwartalen: [Decimal, Decimal, Decimal, Decimal];
+  /** Het EFFECTIEVE jaarbedrag (override indien geldig, anders berekend) waarop maanden en kwartalen exact sluiten. */
+  effectiefJaarbedrag: Decimal;
+  bron: BgVerzekeringMaandverloopBron;
 }
 
 /**
- * CONTROLE-INFORMATIE (UX §9.1: "Maand- en kwartaalbedragen zijn controle-informatie, geen
- * extra invoer"): het maandverloop januari–december en de afgeleide Q1–Q4 van het BEREKENDE
- * VOORSTEL (`berekendBegroot`) van één polis. Een handmatige jaaroverride verandert deze
- * afleiding NIET (de override is een jaarbedrag; er is geen vastgesteld besluit hoe die over
- * maanden zou verdelen — dus bewust geen verdeling verzonnen). `null` zodra één van de vier
- * rekenkritische velden ontbreekt/ongeldig is (onbekend, nooit een stille €0-maandreeks).
- * Herleidt uitsluitend uit dezelfde `bepaalMaandStatussen` als het jaarbedrag; door de deling
- * per maand/kwartaal kan de som van de kwartalen bij niet-terminerende breuken op Decimal-
- * precisieniveau van het jaarbedrag afwijken — het jaarbedrag blijft altijd `berekendBegroot`.
+ * Aantal decimalen waarop een maandbedrag wordt gekwantiseerd vóór het slot-residu. Uitsluitend een
+ * technisch exactheidsmechanisme voor de AFGELEIDE maandverdeling (decimal.js rekent op 20 significante
+ * cijfers; gekwantiseerde termen met vaste schaal tellen exact op) — geen presentatieafronding en het
+ * effectieve jaarbedrag zelf wordt er nooit door gewijzigd.
+ */
+const MAAND_DECIMALEN = 10;
+
+/** Kwantiseert alle termen behalve de laatste en laat de laatste het residu absorberen, zodat de som EXACT het totaal is. */
+function sluitendOpTotaal(natuurlijk: readonly Decimal[], totaal: Decimal): Decimal[] {
+  if (natuurlijk.length === 0) return [];
+  const gekwantiseerd = natuurlijk.slice(0, -1).map((bedrag) => bedrag.toDecimalPlaces(MAAND_DECIMALEN));
+  return [...gekwantiseerd, totaal.minus(som(gekwantiseerd))];
+}
+
+/**
+ * MAANDVERLOOP EN Q1–Q4 (UX §9.1 "controle-informatie, geen extra invoer"; besluit 2026-09-25):
+ * altijd SLUITEND op het effectieve jaarbedrag van de polis.
+ *  - Zonder (geldige) override: het berekende voorstel — per actieve maand het basis- resp.
+ *    geïndexeerde maandbedrag (bestaande ingangs-/verlenglogica), met het slot-residu op de laatste
+ *    actieve maand.
+ *  - Met een geldige handmatige jaaroverride: de override VERVANGT het berekende jaarbedrag en wordt
+ *    tijdsevenredig (gelijk per maand) verdeeld over de maanden waarin de polis volgens de bestaande
+ *    polislogica actief is; de verlengmoment-/indexatielogica bepaalt dan alleen de aanduiding.
+ *    Een override van €0 is geldig (alle maanden €0).
+ * `null` (onbekend, nooit een stille €0-reeks) zodra het jaarbedrag of de actieve maanden niet te
+ * bepalen zijn: geen (geldige) override én een ontbrekend rekenkritisch veld, een ontbrekende
+ * ingangsdatum, of een niet-nul override op een polis zonder actieve maand in dit jaar.
  */
 export function berekenVerzekeringMaandverloop(invoer: BgVerzekeringRegelInvoer, begrotingsjaar: number): BgVerzekeringMaandverloop | null {
-  if (!heeftRekenbareVelden(invoer)) return null;
-  const { statussen, eersteRelevanteVerlengmoment } = bepaalMaandStatussen(invoer.ingangsdatum, invoer.looptijdMaanden, begrotingsjaar);
-  const eersteIndexatiemaand = eersteRelevanteVerlengmoment !== null ? eersteRelevanteVerlengmoment.getUTCMonth() + 1 : null;
-  const factor = indexFactorVan(invoer.indexPercentage);
+  const override = isGeldigDecimal(invoer.handmatigBegrootOverride) ? invoer.handmatigBegrootOverride : null;
+  const rekenbaar = heeftRekenbareVelden(invoer);
+  if ((override === null && !rekenbaar) || !isGeldigeDatum(invoer.ingangsdatum)) return null;
 
+  const actief = bepaalActieveMaanden(invoer.ingangsdatum, begrotingsjaar);
+  const actieveMaanden = ALLE_MAANDEN.filter((m) => actief[m - 1]);
+
+  const statussen: VerzekeringMaandStatus[] = rekenbaar
+    ? bepaalMaandStatussen(invoer.ingangsdatum, invoer.looptijdMaanden as number, begrotingsjaar).statussen
+    : ALLE_MAANDEN.map((m) => (actief[m - 1] ? "BASIS" : "NIET_BESTAAND"));
+  const eersteIndexatiemaand = rekenbaar
+    ? (bepaalRelevanteVerlengmomenten(invoer.ingangsdatum, invoer.looptijdMaanden as number, begrotingsjaar)[0]?.getUTCMonth() ?? -1) + 1
+    : 0;
+
+  const factor = rekenbaar ? indexFactorVan(invoer.indexPercentage as Decimal) : new Decimal(1);
+  const berekendJaar = rekenbaar
+    ? berekenJaarpremie(invoer.ingangsdatum, invoer.looptijdMaanden as number, invoer.bedrag as Decimal, invoer.indexPercentage as Decimal, begrotingsjaar).berekendBegroot
+    : null;
+  const effectiefJaarbedrag = override ?? (berekendJaar as Decimal);
+
+  let perActieveMaand: Decimal[];
+  if (actieveMaanden.length === 0) {
+    if (!effectiefJaarbedrag.isZero()) return null; // niets om over te verdelen: geen stille verdeling verzinnen
+    perActieveMaand = [];
+  } else if (override !== null) {
+    const gelijk = override.dividedBy(actieveMaanden.length);
+    perActieveMaand = sluitendOpTotaal(actieveMaanden.map(() => gelijk), override);
+  } else {
+    perActieveMaand = sluitendOpTotaal(
+      actieveMaanden.map((maand) => tellerVoorMaanden(statussen, [maand], invoer.bedrag as Decimal, factor).dividedBy(12)),
+      effectiefJaarbedrag,
+    );
+  }
+
+  const bedragPerMaand = new Map<number, Decimal>(actieveMaanden.map((maand, positie) => [maand, perActieveMaand[positie]!]));
   const maanden: BgVerzekeringMaandBedrag[] = ALLE_MAANDEN.map((maand) => ({
     maand,
-    bedrag: tellerVoorMaanden(statussen, [maand], invoer.bedrag, factor).dividedBy(12),
+    bedrag: bedragPerMaand.get(maand) ?? new Decimal(0),
     status: statussen[maand - 1]!,
     isEersteIndexatiemaand: eersteIndexatiemaand === maand && statussen[maand - 1] === "GEINDEXEERD",
   }));
-  const kwartaal = (eerste: number) => tellerVoorMaanden(statussen, [eerste, eerste + 1, eerste + 2], invoer.bedrag, factor).dividedBy(12);
-  return { maanden, kwartalen: [kwartaal(1), kwartaal(4), kwartaal(7), kwartaal(10)] };
+  const kwartaal = (eerste: number) => som([maanden[eerste - 1]!.bedrag, maanden[eerste]!.bedrag, maanden[eerste + 1]!.bedrag]);
+  return { maanden, kwartalen: [kwartaal(1), kwartaal(4), kwartaal(7), kwartaal(10)], effectiefJaarbedrag, bron: override !== null ? "OVERRIDE" : "BEREKEND" };
+}
+
+function valideerResterendeMaanden(resterendeMaanden: readonly number[]): void {
+  if (resterendeMaanden.some((m) => !Number.isInteger(m) || m < 1 || m > 12) || new Set(resterendeMaanden).size !== resterendeMaanden.length) {
+    throw new RangeError("resterendeMaanden moet unieke gehele maandnummers 1..12 bevatten.");
+  }
+}
+
+/**
+ * AUTOMATISCH RESTERENDE PREMIE VAN ÉÉN POLIS (voorstel): de som van de EFFECTIEVE maandbedragen
+ * (dus inclusief een handmatige jaaroverride, besluit 2026-09-25) over `resterendeMaanden`.
+ * `null` = onbekend zodra het maandverloop niet te bepalen is.
+ */
+export function berekenResterendePremieVoorstelPerPolis(invoer: BgVerzekeringRegelInvoer, begrotingsjaar: number, resterendeMaanden: readonly number[]): Decimal | null {
+  valideerResterendeMaanden(resterendeMaanden);
+  const verloop = berekenVerzekeringMaandverloop(invoer, begrotingsjaar);
+  return verloop === null ? null : som(resterendeMaanden.map((m) => verloop.maanden[m - 1]!.bedrag));
 }
 
 export interface BgVerzekeringResterendePremieVoorstel {
-  /** Som van de maandbedragen (voorstel) van alle polissen over de resterende maanden. `null` zodra minstens één polis niet rekenbaar is — nooit een gedeeltelijke som die onvolledigheid verbergt. */
+  /** Som van de per-polis-voorstellen. `null` zodra minstens één polis onbekend is — nooit een gedeeltelijke som die onvolledigheid verbergt. */
   voorstel: Decimal | null;
-  /** Posities (in de aangeleverde lijst) van polissen met ontbrekende/ongeldige rekenvelden. */
+  /** Per polis (zelfde volgorde als de invoer) het automatische voorstel; `null` = onbekend. */
+  perRegel: (Decimal | null)[];
+  /** Posities (in de aangeleverde lijst) van polissen waarvan het voorstel onbekend is. */
   onrekenbareRegelIndices: number[];
 }
 
 /**
- * AUTOMATISCH BEREKENDE RESTERENDE PREMIE (FO OB-032 / Master Contract §6.7: "Estimated =
- * Werkelijk + automatisch berekende resterende premie, handmatig aanpasbaar"): het voorstel
- * voor `verwachtingResterendJaar` van `berekenEstimatedVerzekeringen` — uitsluitend de som van
- * de voorstel-maandbedragen over `resterendeMaanden`. De resterende maanden zijn EXPLICIETE
- * invoer van de aanroeper (geen nieuwe periode-afsluitingsarchitectuur, zelfde aanpak als
- * Estimated Onderhoud). Het voorstel is de berekende premie (`berekendBegroot`-pad); een
- * handmatige jaaroverride op de Begroting verandert het niet. De gebruiker blijft het
- * voorstel handmatig kunnen aanpassen: dat gebeurt door een andere `verwachtingResterendJaar`
- * aan `berekenEstimatedVerzekeringen` mee te geven — niets hier muteert Begroting of Estimated.
+ * AUTOMATISCH BEREKENDE RESTERENDE PREMIE (FO OB-032 / Master Contract §6.7): het voorstel voor
+ * `verwachtingResterendJaar` van `berekenEstimatedVerzekeringen`, per polis uit het effectieve
+ * maandverloop over de EXPLICIET aangeleverde `resterendeMaanden` (geen nieuwe periode-
+ * afsluitingsarchitectuur). Niets hier muteert Begroting of Estimated.
  */
 export function berekenResterendePremieVoorstel(
   regelsInvoer: readonly BgVerzekeringRegelInvoer[],
   begrotingsjaar: number,
   resterendeMaanden: readonly number[],
 ): BgVerzekeringResterendePremieVoorstel {
-  if (resterendeMaanden.some((m) => !Number.isInteger(m) || m < 1 || m > 12) || new Set(resterendeMaanden).size !== resterendeMaanden.length) {
-    throw new RangeError("resterendeMaanden moet unieke gehele maandnummers 1..12 bevatten.");
-  }
-
-  const onrekenbareRegelIndices: number[] = [];
-  const tellers: Decimal[] = [];
-  regelsInvoer.forEach((invoer, index) => {
-    if (!heeftRekenbareVelden(invoer)) {
-      onrekenbareRegelIndices.push(index);
-      return;
-    }
-    const { statussen } = bepaalMaandStatussen(invoer.ingangsdatum, invoer.looptijdMaanden, begrotingsjaar);
-    tellers.push(tellerVoorMaanden(statussen, resterendeMaanden, invoer.bedrag, indexFactorVan(invoer.indexPercentage)));
-  });
-
-  return { voorstel: onrekenbareRegelIndices.length === 0 ? som(tellers).dividedBy(12) : null, onrekenbareRegelIndices };
+  valideerResterendeMaanden(resterendeMaanden);
+  const perRegel = regelsInvoer.map((invoer) => berekenResterendePremieVoorstelPerPolis(invoer, begrotingsjaar, resterendeMaanden));
+  const onrekenbareRegelIndices = perRegel.flatMap((v, index) => (v === null ? [index] : []));
+  return { voorstel: onrekenbareRegelIndices.length === 0 ? som(perRegel as Decimal[]) : null, perRegel, onrekenbareRegelIndices };
 }
 
 // ── Werkelijk (FASE M7, 2026-09-15) ─────────────────────────────────────────
@@ -754,4 +823,78 @@ export function berekenEstimatedVerzekeringen(
     moduleWerkelijkTotaal: werkelijk.moduleTotaal,
     moduleEstimatedTotaal,
   };
+}
+
+// ── Estimated per polis (Master Contract §6.7, besluit 2026-09-25) ──────────
+
+export interface BgVerzekeringEstimatedPolisUitkomst {
+  /** Positie in de aangeleverde polislijst (uitsluitend binnen deze aanroep; de orchestratie koppelt via de stabiele regel-id). */
+  index: number;
+  /** Automatisch resterend voorstel (effectief maandverloop over de resterende maanden). `null` = onbekend. */
+  automatischResterendVoorstel: Decimal | null;
+  /** Handmatige resterende verwachting voor deze polis. `null` = geen aanpassing; expliciet €0 is geldig. */
+  handmatigeResterendeVerwachting: Decimal | null;
+  /** De handmatige waarde indien geldig, anders het automatische voorstel. `null` = onbekend (nooit €0). */
+  effectieveResterendeVerwachting: Decimal | null;
+}
+
+export interface BgVerzekeringEstimatedPerPolisResultaat {
+  polissen: BgVerzekeringEstimatedPolisUitkomst[];
+  /** Som van de effectieve resterende verwachtingen; `null` zodra één polis onbekend is. */
+  resterendeVerwachtingTotaal: Decimal | null;
+  /** Werkelijk staat hierin op MODULENIVEAU en telt exact éénmaal mee (`berekenEstimatedVerzekeringen`). */
+  estimated: EstimatedVerzekeringResultaat;
+  controleVereist: BgVerzekeringControleItem[];
+}
+
+/**
+ * ESTIMATED MET HANDMATIGE AANPASSING PER POLIS. Per polis blijft traceerbaar: automatisch resterend
+ * voorstel → handmatige resterende verwachting → effectieve resterende verwachting; op modulebasis
+ * Werkelijk + Σ effectief = Estimated (via het bestaande `berekenEstimatedVerzekeringen`, dus
+ * dezelfde Werkelijk-dekkingsvoorwaarde). Bewust GEEN "Werkelijk per polis" of "Estimated per polis":
+ * de boekingen kennen geen polissleutel (alleen complexnummer, een polis-complex-relatie is 1-op-n) —
+ * een polisgewijze verdeling van Werkelijk zou een verzonnen koppeling zijn.
+ * `handmatigePerPolis` is positioneel gelijk aan `begroting.regels` binnen deze aanroep; de
+ * aanroepende laag koppelt uitsluitend via de stabiele regel-id.
+ */
+export function berekenEstimatedVerzekeringenPerPolis(
+  begroting: BgVerzekeringResultaat,
+  werkelijk: WerkelijkVerzekeringResultaat,
+  werkelijkDekkingBevestigd: boolean,
+  handmatigePerPolis: readonly (Decimal | null)[],
+  resterendeMaanden: readonly number[],
+): BgVerzekeringEstimatedPerPolisResultaat {
+  if (handmatigePerPolis.length !== begroting.regels.length) {
+    throw new RangeError(`handmatigePerPolis (${handmatigePerPolis.length}) moet positioneel overeenkomen met de polissen van de Begroting (${begroting.regels.length}).`);
+  }
+  valideerResterendeMaanden(resterendeMaanden);
+
+  const controleVereist: BgVerzekeringControleItem[] = [];
+  const polissen: BgVerzekeringEstimatedPolisUitkomst[] = begroting.regels.map((regel, index) => {
+    const automatischResterendVoorstel = berekenResterendePremieVoorstelPerPolis(regel.invoer, begroting.begrotingsjaar, resterendeMaanden);
+    const handmatig = handmatigePerPolis[index] ?? null;
+    let handmatigeResterendeVerwachting: Decimal | null = null;
+    if (handmatig !== null) {
+      if (handmatig.isNaN()) {
+        controleVereist.push({ regelIndex: index, ernst: "KRITIEK", bericht: `Polis ${index}: handmatige resterende verwachting is geen geldig getal (NaN) — genegeerd, automatisch voorstel blijft leidend.` });
+      } else {
+        handmatigeResterendeVerwachting = handmatig;
+        if (handmatig.isNegative()) {
+          controleVereist.push({ regelIndex: index, ernst: "WAARSCHUWING", bericht: `Polis ${index}: handmatige resterende verwachting is negatief (${handmatig.toString()}) — toegestaan, telt volledig mee.` });
+        }
+      }
+    }
+    return {
+      index,
+      automatischResterendVoorstel,
+      handmatigeResterendeVerwachting,
+      effectieveResterendeVerwachting: handmatigeResterendeVerwachting ?? automatischResterendVoorstel,
+    };
+  });
+
+  const resterendeVerwachtingTotaal = polissen.every((p) => p.effectieveResterendeVerwachting !== null)
+    ? som(polissen.map((p) => p.effectieveResterendeVerwachting as Decimal))
+    : null;
+  const estimated = berekenEstimatedVerzekeringen(begroting, werkelijk, werkelijkDekkingBevestigd, { BRAND_OPSTALVERZEKERING: resterendeVerwachtingTotaal });
+  return { polissen, resterendeVerwachtingTotaal, estimated, controleVereist };
 }

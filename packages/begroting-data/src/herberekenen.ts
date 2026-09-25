@@ -634,7 +634,7 @@ function naarPureVerzekeringInvoer(regel: VerzekeringRegel): BgVerzekeringRegelI
  * positioneel (`invoer[i] ↔ resultaat.regels[i]`), zelfde principe en
  * defensieve lengte-controle als `berekenCorrectiefDagelijksUitInvoer`.
  */
-function berekenVerzekeringUitInvoer(
+export function berekenVerzekeringUitInvoer(
   versieId: string,
   begrotingsjaar: number,
   regels: readonly VerzekeringRegel[],

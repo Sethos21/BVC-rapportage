@@ -3905,6 +3905,29 @@ export const MIGRATIONS: readonly Migration[] = [
       `ALTER TABLE begroting_frozen_woz_object ADD COLUMN unitnummer TEXT NULL`,
     ],
   },
+  /**
+   * Verzekeringen — handmatige Estimated-aanpassing PER POLIS (Master Contract
+   * §6.7, besluit 2026-09-25). Zelfde architectuurkeuze als de Onderhoud-
+   * Estimated-tabellen (migratie 27) en Geplande-Verkoop-Estimated (migratie
+   * 22): GEEN VASTGESTELD-immutability-triggers en NOOIT bevroren — Estimated
+   * blijft het hele jaar wijzigbaar en muteert de vastgestelde Begroting nooit;
+   * wel FK ON DELETE CASCADE. `regel_id` is PRIMARY KEY én FK naar de polisregel
+   * (1-op-1, stabiele koppeling, geen nieuwe businessidentiteit). "Geen rij" =
+   * geen handmatige aanpassing; een rij bevat altijd een bedrag (NOT NULL,
+   * expliciet '0' is geldig).
+   */
+  {
+    version: 31,
+    description: "Verzekeringen: handmatige Estimated-aanpassing per polis (regel_id, nooit bevroren)",
+    ddl: [
+      `CREATE TABLE begroting_verzekering_estimated_polis (
+        regel_id INTEGER PRIMARY KEY REFERENCES begroting_verzekering_regel(id) ON DELETE CASCADE,
+        begroting_versie_id TEXT NOT NULL REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        handmatige_resterende_verwachting TEXT NOT NULL
+      )`,
+      `CREATE INDEX idx_begroting_verzekering_estimated_polis_versie ON begroting_verzekering_estimated_polis(begroting_versie_id)`,
+    ],
+  },
 ];
 
 function schemaMetaTableExists(db: DatabaseSync): boolean {

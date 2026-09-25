@@ -272,6 +272,23 @@ export {
   type CorrectiefDagelijksOnderhoudEstimatedOnlyRegelInvoer,
 } from "./correctiefDagelijksOnderhoudEstimated.js";
 
+// Verzekeringen — Estimated met handmatige aanpassing PER POLIS (besluit 2026-09-25):
+// persistentie (nooit bevroren, geen CONCEPT-check) + afgeleide, ID-gekoppelde combinatie.
+export {
+  schrijfVerzekeringEstimatedPolissen,
+  leesVerzekeringEstimatedPolissen,
+  type VerzekeringEstimatedPolis,
+  type VerzekeringEstimatedPolisInvoer,
+} from "./verzekeringEstimatedPolissen.js";
+export {
+  combineerVerzekeringEstimated,
+  leesVerzekeringEstimatedResultaat,
+  type VerzekeringEstimatedResultaat,
+  type VerzekeringEstimatedPolisMetId,
+  type VerzekeringEstimatedControleItem,
+  type VerzekeringEstimatedInvoer,
+} from "./verzekeringEstimated.js";
+
 // Canon erfpacht (OB-034) — UITSLUITEND concept-persistence (regels per complex +
 // beoordeeld-vlag). Geen integratie in herberekenen/vaststellen/frozen en geen
 // "verborgen module"-registratie — zie migratie 28 en de oplevering.

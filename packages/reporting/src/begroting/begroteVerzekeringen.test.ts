@@ -4,7 +4,9 @@ import {
   bepaalRelevanteVerlengmomenten,
   berekenBegroteVerzekeringen,
   berekenEstimatedVerzekeringen,
+  berekenEstimatedVerzekeringenPerPolis,
   berekenResterendePremieVoorstel,
+  berekenResterendePremieVoorstelPerPolis,
   berekenVerzekeringMaandverloop,
   berekenWerkelijkVerzekeringen,
   type BgVerzekeringAannames,
@@ -463,11 +465,8 @@ describe("Verzekeringen — maandverloop, kwartalen en resterende-premievoorstel
     expect(later.kwartalen.every((q) => q.isZero())).toBe(true);
   });
 
-  it("onrekenbare polis geeft null (onbekend), nooit een stille €0-reeks; een override verandert het verloop niet", () => {
+  it("onrekenbare polis zonder override geeft null (onbekend), nooit een stille €0-reeks", () => {
     expect(berekenVerzekeringMaandverloop(polis({ bedrag: null }), JAAR)).toBeNull();
-    const zonder = berekenVerzekeringMaandverloop(polis(), JAAR)!;
-    const met = berekenVerzekeringMaandverloop(polis({ handmatigBegrootOverride: new Decimal(99) }), JAAR)!;
-    expect(met.kwartalen.map((q) => q.toString())).toEqual(zonder.kwartalen.map((q) => q.toString()));
   });
 
   it("resterende premie (voorstel) = som van voorstel-maanden over de resterende maanden; Estimated = Werkelijk + voorstel, Begroting ongewijzigd", () => {
@@ -488,5 +487,169 @@ describe("Verzekeringen — maandverloop, kwartalen en resterende-premievoorstel
     expect(() => berekenResterendePremieVoorstel([], JAAR, [13])).toThrow(RangeError);
     expect(() => berekenResterendePremieVoorstel([], JAAR, [3, 3])).toThrow(RangeError);
     expect(berekenResterendePremieVoorstel([], JAAR, [1, 2]).voorstel!.toString()).toBe("0");
+  });
+});
+
+describe("Verzekeringen — jaaroverride werkt door in maandverloop/Q1–Q4 (besluit 2026-09-25)", () => {
+  const JAAR = 2027;
+  function polis(overrides: Partial<BgVerzekeringRegelInvoer> = {}): BgVerzekeringRegelInvoer {
+    return {
+      complexnummer: "001",
+      verzekeraar: "Gilde",
+      grootboekrekening: "4130",
+      ingangsdatum: new Date(Date.UTC(2020, 6, 1)),
+      looptijdMaanden: 12,
+      bedrag: new Decimal(12000),
+      indexPercentage: new Decimal(3),
+      handmatigBegrootOverride: null,
+      ...overrides,
+    };
+  }
+  const somMaanden = (v: { maanden: { bedrag: Decimal }[] }) => v.maanden.reduce((a, m) => a.plus(m.bedrag), new Decimal(0));
+  const somKwartalen = (v: { kwartalen: Decimal[] }) => v.kwartalen.reduce((a, q) => a.plus(q), new Decimal(0));
+
+  it("override vervangt het berekende jaarbedrag en wordt gelijk verdeeld over de 12 actieve maanden; Q1–Q4 sluiten", () => {
+    const v = berekenVerzekeringMaandverloop(polis({ handmatigBegrootOverride: new Decimal(1200) }), JAAR)!;
+    expect(v.bron).toBe("OVERRIDE");
+    expect(v.effectiefJaarbedrag.toString()).toBe("1200");
+    expect(v.maanden.every((m) => m.bedrag.toString() === "100")).toBe(true);
+    expect(v.kwartalen.map((q) => q.toString())).toEqual(["300", "300", "300", "300"]);
+  });
+
+  it("override op een polis die in april start: alleen de 9 actieve maanden krijgen een bedrag, maanden vóór de start blijven €0", () => {
+    const v = berekenVerzekeringMaandverloop(polis({ ingangsdatum: new Date(Date.UTC(2027, 3, 1)), handmatigBegrootOverride: new Decimal(900) }), JAAR)!;
+    expect(v.maanden.slice(0, 3).every((m) => m.bedrag.isZero() && m.status === "NIET_BESTAAND")).toBe(true);
+    expect(v.maanden.slice(3).every((m) => m.bedrag.toString() === "100")).toBe(true);
+    expect(somMaanden(v).toString()).toBe("900");
+  });
+
+  it("SLUITEND ook bij niet-terminerende breuken: som(maanden) en som(kwartalen) zijn EXACT het effectieve jaarbedrag (override én berekend)", () => {
+    const gevallen = [
+      polis({ ingangsdatum: new Date(Date.UTC(2027, 5, 1)), handmatigBegrootOverride: new Decimal(100) }), // 7 actieve maanden
+      polis({ handmatigBegrootOverride: new Decimal("1234.56") }),
+      polis({ bedrag: new Decimal("100.10"), ingangsdatum: new Date(Date.UTC(2027, 4, 1)) }), // berekend
+      polis({ bedrag: new Decimal("9999.99"), indexPercentage: new Decimal("2.7") }), // berekend, verlenging in het jaar
+    ];
+    for (const g of gevallen) {
+      const v = berekenVerzekeringMaandverloop(g, JAAR)!;
+      expect(somMaanden(v).toString()).toBe(v.effectiefJaarbedrag.toString());
+      expect(somKwartalen(v).toString()).toBe(v.effectiefJaarbedrag.toString());
+    }
+  });
+
+  it("het effectieve jaarbedrag van het verloop is identiek aan effectiefBegroot van de calculator", () => {
+    for (const p of [polis(), polis({ handmatigBegrootOverride: new Decimal(777) }), polis({ handmatigBegrootOverride: new Decimal(0) })]) {
+      const uitkomst = berekenBegroteVerzekeringen([p], { begrotingsjaar: JAAR, beoordeeld: true }).regels[0]!;
+      expect(berekenVerzekeringMaandverloop(p, JAAR)!.effectiefJaarbedrag.toString()).toBe(uitkomst.effectiefBegroot.toString());
+    }
+  });
+
+  it("override €0 is geldig (alle maanden €0); negatieve override wordt verdeeld en sluit ook", () => {
+    const nul = berekenVerzekeringMaandverloop(polis({ handmatigBegrootOverride: new Decimal(0) }), JAAR)!;
+    expect(somMaanden(nul).isZero()).toBe(true);
+    const negatief = berekenVerzekeringMaandverloop(polis({ handmatigBegrootOverride: new Decimal(-1200) }), JAAR)!;
+    expect(somKwartalen(negatief).toString()).toBe("-1200");
+  });
+
+  it("override werkt ook wanneer de rekenvelden onvolledig zijn, mits de ingangsdatum bekend is (actieve maanden volgen daar alleen uit)", () => {
+    const v = berekenVerzekeringMaandverloop(polis({ bedrag: null, looptijdMaanden: null, handmatigBegrootOverride: new Decimal(1200) }), JAAR)!;
+    expect(somMaanden(v).toString()).toBe("1200");
+    expect(berekenVerzekeringMaandverloop(polis({ bedrag: null, ingangsdatum: null, handmatigBegrootOverride: new Decimal(1200) }), JAAR)).toBeNull();
+  });
+
+  it("niet-nul override op een polis zonder actieve maand dit jaar: onbekend (null), geen verzonnen verdeling; €0 blijft geldig", () => {
+    const later = polis({ ingangsdatum: new Date(Date.UTC(2028, 0, 1)) });
+    expect(berekenVerzekeringMaandverloop({ ...later, handmatigBegrootOverride: new Decimal(500) }, JAAR)).toBeNull();
+    expect(berekenVerzekeringMaandverloop({ ...later, handmatigBegrootOverride: new Decimal(0) }, JAAR)!.effectiefJaarbedrag.isZero()).toBe(true);
+  });
+
+  it("een ongeldige (NaN) override wordt genegeerd: het berekende voorstel blijft leidend", () => {
+    const v = berekenVerzekeringMaandverloop(polis({ handmatigBegrootOverride: new Decimal(NaN) }), JAAR)!;
+    expect(v.bron).toBe("BEREKEND");
+    expect(v.effectiefJaarbedrag.toString()).toBe("12180");
+  });
+
+  it("resterende premie volgt de override: override 1200 → resterende maanden 7–12 = 600", () => {
+    const r = berekenResterendePremieVoorstelPerPolis(polis({ handmatigBegrootOverride: new Decimal(1200) }), JAAR, [7, 8, 9, 10, 11, 12]);
+    expect(r!.toString()).toBe("600");
+  });
+});
+
+describe("Verzekeringen — Estimated per polis (besluit 2026-09-25)", () => {
+  const JAAR = 2027;
+  const MAANDEN_H2 = [7, 8, 9, 10, 11, 12];
+  function polis(overrides: Partial<BgVerzekeringRegelInvoer> = {}): BgVerzekeringRegelInvoer {
+    return {
+      complexnummer: "001",
+      verzekeraar: "Gilde",
+      grootboekrekening: "4130",
+      ingangsdatum: new Date(Date.UTC(2020, 6, 1)),
+      looptijdMaanden: 12,
+      bedrag: new Decimal(12000),
+      indexPercentage: new Decimal(3),
+      handmatigBegrootOverride: null,
+      ...overrides,
+    };
+  }
+  const werkelijk = (bedrag: number) => berekenWerkelijkVerzekeringen([{ economischeCategorie: "BRAND_OPSTALVERZEKERING", complexnummer: "001", saldo: new Decimal(bedrag) }]);
+  const begroting = (polissen: BgVerzekeringRegelInvoer[]) => berekenBegroteVerzekeringen(polissen, { begrotingsjaar: JAAR, beoordeeld: true });
+
+  it("zonder handmatige aanpassing: effectief = automatisch voorstel; Estimated = Werkelijk (module, éénmaal) + som resterend", () => {
+    const r = berekenEstimatedVerzekeringenPerPolis(begroting([polis(), polis({ complexnummer: "002", bedrag: new Decimal(6000), indexPercentage: new Decimal(0) })]), werkelijk(9000), true, [null, null], MAANDEN_H2);
+    expect(r.polissen.map((p) => p.effectieveResterendeVerwachting!.toString())).toEqual(["6180", "3000"]);
+    expect(r.polissen.every((p) => p.handmatigeResterendeVerwachting === null)).toBe(true);
+    expect(r.resterendeVerwachtingTotaal!.toString()).toBe("9180");
+    expect(r.estimated.moduleEstimatedTotaal!.toString()).toBe("18180"); // 9000 + 9180, Werkelijk niet per polis herhaald
+  });
+
+  it("handmatige aanpassing per polis vervangt alleen DIE polis; automatisch voorstel blijft zichtbaar naast de handmatige waarde", () => {
+    const r = berekenEstimatedVerzekeringenPerPolis(begroting([polis(), polis({ complexnummer: "002", bedrag: new Decimal(6000), indexPercentage: new Decimal(0) })]), werkelijk(9000), true, [null, new Decimal(1000)], MAANDEN_H2);
+    expect(r.polissen[1]).toMatchObject({ handmatigeResterendeVerwachting: new Decimal(1000) });
+    expect(r.polissen[1]!.automatischResterendVoorstel!.toString()).toBe("3000");
+    expect(r.polissen[1]!.effectieveResterendeVerwachting!.toString()).toBe("1000");
+    expect(r.polissen[0]!.effectieveResterendeVerwachting!.toString()).toBe("6180");
+    expect(r.estimated.moduleEstimatedTotaal!.toString()).toBe("16180");
+  });
+
+  it("expliciet €0 is een geldige handmatige verwachting en verschilt van geen aanpassing (null)", () => {
+    const b = begroting([polis()]);
+    const metNul = berekenEstimatedVerzekeringenPerPolis(b, werkelijk(9000), true, [new Decimal(0)], MAANDEN_H2);
+    const zonder = berekenEstimatedVerzekeringenPerPolis(b, werkelijk(9000), true, [null], MAANDEN_H2);
+    expect(metNul.polissen[0]!.effectieveResterendeVerwachting!.toString()).toBe("0");
+    expect(zonder.polissen[0]!.effectieveResterendeVerwachting!.toString()).toBe("6180");
+  });
+
+  it("onbekend automatisch voorstel (onrekenbare polis) zonder handmatige waarde: onbekend, Estimated null; mét handmatige waarde bekend", () => {
+    const b = begroting([polis({ bedrag: null })]);
+    const onbekend = berekenEstimatedVerzekeringenPerPolis(b, werkelijk(9000), true, [null], MAANDEN_H2);
+    expect(onbekend.polissen[0]!.effectieveResterendeVerwachting).toBeNull();
+    expect(onbekend.resterendeVerwachtingTotaal).toBeNull();
+    expect(onbekend.estimated.moduleEstimatedTotaal).toBeNull();
+    const bekend = berekenEstimatedVerzekeringenPerPolis(b, werkelijk(9000), true, [new Decimal(500)], MAANDEN_H2);
+    expect(bekend.estimated.moduleEstimatedTotaal!.toString()).toBe("9500");
+  });
+
+  it("de Begroting (effectief en berekend) blijft ongewijzigd door Estimated; een override op de Begroting werkt door in het voorstel", () => {
+    const b = begroting([polis({ handmatigBegrootOverride: new Decimal(1200) })]);
+    const voor = b.totaalEffectiefBegroot.toString();
+    const r = berekenEstimatedVerzekeringenPerPolis(b, werkelijk(500), true, [null], MAANDEN_H2);
+    expect(r.polissen[0]!.automatischResterendVoorstel!.toString()).toBe("600");
+    expect(r.estimated.moduleBegrotingTotaal.toString()).toBe(voor);
+    expect(b.totaalEffectiefBegroot.toString()).toBe(voor);
+  });
+
+  it("NaN handmatig: KRITIEK en genegeerd; negatief: WAARSCHUWING en telt mee; lengte-mismatch wordt geweigerd", () => {
+    const b = begroting([polis(), polis({ complexnummer: "002" })]);
+    const r = berekenEstimatedVerzekeringenPerPolis(b, werkelijk(0), true, [new Decimal(NaN), new Decimal(-100)], MAANDEN_H2);
+    expect(r.controleVereist.map((c) => [c.regelIndex, c.ernst])).toEqual([[0, "KRITIEK"], [1, "WAARSCHUWING"]]);
+    expect(r.polissen[0]!.handmatigeResterendeVerwachting).toBeNull();
+    expect(r.polissen[1]!.effectieveResterendeVerwachting!.toString()).toBe("-100");
+    expect(() => berekenEstimatedVerzekeringenPerPolis(b, werkelijk(0), true, [null], MAANDEN_H2)).toThrow(RangeError);
+  });
+
+  it("Werkelijk-dekking niet bevestigd: Estimated onbekend, ondanks bekende resterende verwachting", () => {
+    const r = berekenEstimatedVerzekeringenPerPolis(begroting([polis()]), werkelijk(9000), false, [null], MAANDEN_H2);
+    expect(r.resterendeVerwachtingTotaal).not.toBeNull();
+    expect(r.estimated.moduleEstimatedTotaal).toBeNull();
   });
 });
