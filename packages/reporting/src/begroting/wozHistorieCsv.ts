@@ -1,26 +1,28 @@
+import Decimal from "decimal.js";
 import { bepaalWozHistorie, type BgWozHistorieFilter, type BgWozObjectInvoer } from "./begroteGemeentelijkeLasten.js";
 
 /**
- * WOZ-historie CSV-export (Master Contract §6.8, besluit 2026-09-25; UX §9.2).
+ * WOZ-historie CSV-export (Master Contract §6.8, besluiten 2026-09-25; UX §9.2).
  *
  * KOLOMMEN (vastgesteld, exact deze volgorde en namen): Administratie | Complex |
  * Unit/Geheel complex | Aanslagjaar | Waardepeildatum | Werkelijke WOZ |
  * Verschil € vorig jaar | Verschil % vorig jaar. Filters op complex en periode
- * (aanslagjaar, grenzen inclusief) lopen via \`bepaalWozHistorie\`; de ontwikkeling wordt
+ * (aanslagjaar, grenzen inclusief) lopen via `bepaalWozHistorie`; de ontwikkeling wordt
  * dus op de volledige historie van het object berekend en pas daarna gefilterd.
  *
  * BESCHIKBAARHEID: "Zonder bevestigde historie blijft export zichtbaar maar uitgeschakeld"
- * (UX §9.2) — bij een niet-bevestigde WOZ-set is het resultaat \`beschikbaar: false\` en wordt
+ * (UX §9.2) — bij een niet-bevestigde WOZ-set is het resultaat `beschikbaar: false` en wordt
  * geen CSV opgebouwd.
  *
- * SERIALISATIE (uitsluitend technische keuzes, geen businessregels; het besluit legt alleen de
- * kolommen en filters vast): scheidingsteken \`;\`, regeleinde CRLF, header als eerste regel,
- * velden met \`;\`/\`"\`/regeleinde tussen dubbele aanhalingstekens (RFC-4180-escaping), getallen
- * als exacte Decimal-tekst met decimale punt zonder duizendtallen en ZONDER afronding
- * (presentatieafronding is aan de consument), datums als ISO \`YYYY-MM-DD\`, geen BOM. Een
- * ontbrekende ontwikkeling (eerste jaar, of voorgaande waarde niet positief) is een LEGE cel —
- * nooit 0. Tekstcellen (administratie/complex/unit) die met \`=\`, \`+\`, \`@\`, tab of CR beginnen
- * krijgen een voorloop-\`'\` zodat een spreadsheet ze niet als formule uitvoert.
+ * FORMAAT (vastgesteld besluit 2026-09-25, vervolgtranche 3): scheidingsteken `;`, DECIMALE
+ * KOMMA in alle getalcellen, datums als ISO `YYYY-MM-DD`, CRLF, LEGE cel voor onbekend/n.v.t.
+ * (eerste jaar, of voorgaande waarde niet positief — nooit 0), en formule-injectiebescherming:
+ * tekstcellen (administratie/complex/unit) die met `=`, `+`, `@`, tab of CR beginnen krijgen een
+ * voorloop-`'`. Het PERCENTAGE wordt uitsluitend IN DE EXPORT op 2 decimalen afgerond (half-up,
+ * altijd 2 decimalen, bv. `5,00`); de onderliggende berekening (`bepaalWozHistorie`) blijft
+ * ongerond. WOZ en Verschil € zijn exacte Decimal-waarden (alleen decimale komma, geen
+ * duizendtallen, geen afronding). Technische keuzes buiten het besluit: header als eerste regel,
+ * velden met `;`/`"`/regeleinde tussen dubbele aanhalingstekens (RFC-4180-escaping), geen BOM.
  */
 
 export const WOZ_HISTORIE_CSV_KOLOMMEN = [
@@ -58,6 +60,17 @@ function celMetEscaping(waarde: string): string {
   return /[;"\r\n]/.test(waarde) ? `"${waarde.replace(/"/g, '""')}"` : waarde;
 }
 
+/** Exacte Decimal-tekst met decimale komma (geen duizendtallen, geen afronding). */
+function getalCel(waarde: Decimal): string {
+  return waarde.toString().replace(".", ",");
+}
+
+/** Percentage uitsluitend voor de export: half-up op precies 2 decimalen, decimale komma; een afgerond nulresultaat is `0,00` (nooit `-0,00`). */
+function percentageCel(waarde: Decimal): string {
+  const afgerond = waarde.toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+  return (afgerond.isZero() ? new Decimal(0) : afgerond).toFixed(2).replace(".", ",");
+}
+
 function isoDatum(datum: Date): string {
   const jaar = datum.getUTCFullYear().toString().padStart(4, "0");
   const maand = (datum.getUTCMonth() + 1).toString().padStart(2, "0");
@@ -78,9 +91,9 @@ export function bouwWozHistorieCsv(invoer: BgWozHistorieCsvInvoer): BgWozHistori
       tekstCel(r.objectType === "UNIT" ? (r.unitnummer as string) : "Geheel complex"),
       String(r.aanslagjaar),
       isoDatum(r.waardepeildatum),
-      r.werkelijkeWoz.toString(),
-      r.ontwikkelingBedrag !== null ? r.ontwikkelingBedrag.toString() : "",
-      r.ontwikkelingPercentage !== null ? r.ontwikkelingPercentage.toString() : "",
+      getalCel(r.werkelijkeWoz),
+      r.ontwikkelingBedrag !== null ? getalCel(r.ontwikkelingBedrag) : "",
+      r.ontwikkelingPercentage !== null ? percentageCel(r.ontwikkelingPercentage) : "",
     ].join(";"),
   );
 

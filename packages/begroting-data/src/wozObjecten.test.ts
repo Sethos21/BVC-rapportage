@@ -425,7 +425,7 @@ describe("WOZ-historie CSV vanuit de persistentielaag (leesWozHistorieCsv)", () 
     const r = leesWozHistorieCsv(db, versie.id);
     if (!r.beschikbaar) throw new Error("verwacht beschikbaar");
     expect(r.aantalRegels).toBe(2);
-    expect(r.csv.split("\r\n")[2]).toMatch(/^070;001;Geheel complex;2026;.*;1050000;50000;5$/);
+    expect(r.csv.split("\r\n")[2]).toMatch(/^070;001;Geheel complex;2026;.*;1050000;50000;5,00$/);
     expect(leesWozHistorieCsv(db, versie.id, { aanslagjaarVan: 2027 })).toMatchObject({ beschikbaar: true, aantalRegels: 0 });
 
     schrijfWozObjecten(db, versie.id, [{ ...naarInvoer(a!), werkelijkeWoz: new Decimal(1) }]);
