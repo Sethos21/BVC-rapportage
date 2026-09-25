@@ -4132,6 +4132,23 @@ export const MIGRATIONS: readonly Migration[] = [
       `ALTER TABLE begroting_frozen_gemeentelijke_lasten_resultaat ADD COLUMN woz_voorstel_verschil TEXT NULL`,
     ],
   },
+  /**
+   * Migratie 36 — Gemeentelijke lasten: Estimated-persistentie (Vervolgtranche 6; Master Contract §6.8: "Estimated =
+   * realisatie + alleen handmatig bekende aanvullende aanslag/correctie"). Eén handmatige resterende verwachting per
+   * begrotingsversie. Exact het Estimated-patroon van migratie 27/31/34: GEEN VASTGESTELD-triggers en geen
+   * CONCEPT-check — Estimated wordt nooit bevroren en muteert de vastgestelde Begroting niet. Geen rij = nog niet
+   * ingevuld (onbekend); een rij bevat altijd een bedrag (expliciet '0' = geen aanvullende aanslag verwacht).
+   */
+  {
+    version: 36,
+    description: "Gemeentelijke lasten: Estimated-persistentie (handmatige resterende verwachting)",
+    ddl: [
+      `CREATE TABLE begroting_gemeentelijke_lasten_estimated_verwachting (
+        begroting_versie_id TEXT PRIMARY KEY REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        resterend_bedrag TEXT NOT NULL
+      )`,
+    ],
+  },
 ];
 
 function schemaMetaTableExists(db: DatabaseSync): boolean {
