@@ -97,6 +97,7 @@ export * from "./begroting/huurEstimatedPnLAdapter.js";
 export * from "./begroting/begroteBeheerEstimated.js";
 export * from "./begroting/begroteManagementEstimated.js";
 export * from "./begroting/leegstandPnLAdapters.js";
+export * from "./begroting/begroteLeegstandEstimatedKwartalen.js";
 export * from "./begroting/begroteAlgemeneKosten.js";
 export * from "./begroting/begroteLeegstand.js";
 export * from "./begroting/begroteRente.js";
