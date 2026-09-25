@@ -336,8 +336,10 @@ export { schrijfVerzekeringBeoordeeld, leesVerzekeringBeoordeeld } from "./verze
 // `gemeentelijkeLastenModule.ts`'s moduledoc.
 export {
   schrijfGemeentelijkeLastenModule,
+  schrijfWozSetBevestigd,
   leesGemeentelijkeLastenModule,
   type GemeentelijkeLastenModuleInvoer,
+  type GemeentelijkeLastenModuleSchrijfInvoer,
 } from "./gemeentelijkeLastenModule.js";
 export { schrijfWozObjecten, leesWozObjecten, type WozObject, type WozObjectInvoer } from "./wozObjecten.js";
 

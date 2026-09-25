@@ -57,7 +57,17 @@ import { leesFrozenGeplandOnderhoudResultaat } from "./frozenGeplandOnderhoudRes
 import { leesFrozenModule3Resultaat, schrijfFrozenModule3Resultaat } from "./frozenModule3Resultaat.js";
 import { leesFrozenBegrotingsresultaat, schrijfFrozenBegrotingsresultaat } from "./frozenResultaat.js";
 import { leesFrozenVerzekeringResultaat } from "./frozenVerzekeringResultaat.js";
-import { schrijfGemeentelijkeLastenModule, type GemeentelijkeLastenModuleInvoer } from "./gemeentelijkeLastenModule.js";
+import { schrijfGemeentelijkeLastenModule as schrijfModuleAannames, schrijfWozSetBevestigd, type GemeentelijkeLastenModuleInvoer } from "./gemeentelijkeLastenModule.js";
+
+/**
+ * Test-hulp: schrijft de module-aannames en zet daarna — zoals de gebruikersactie "WOZ-set compleet" — de
+ * bevestiging wanneer de fixture `wozSetBevestigd` heeft. Schrijven van aannames alleen raakt de bevestiging niet.
+ */
+function schrijfGemeentelijkeLastenModule(db: DatabaseSync, versieId: string, invoer: GemeentelijkeLastenModuleInvoer): void {
+  schrijfModuleAannames(db, versieId, invoer);
+  if (invoer.wozSetBevestigd) schrijfWozSetBevestigd(db, versieId, true);
+}
+
 import { herberekenBegroting } from "./herberekenen.js";
 import { leesModule1Aannames, schrijfModule1Aannames } from "./module1Aannames.js";
 import { schrijfModule1Overrides } from "./module1Overrides.js";
@@ -148,6 +158,7 @@ const GEMEENTELIJKE_LASTEN_ZERO_OBJECTS: GemeentelijkeLastenModuleInvoer = {
   wozStijgingPercentage: null,
   lastenPercentageStijging: null,
   begrotingsPercentageOverride: null,
+  wozSetBevestigd: false,
   beoordeeld: true,
 };
 
@@ -2275,6 +2286,7 @@ describe("stelBegrotingVast — Gemeentelijke Lasten/WOZ lifecycle-blokkade (OB-
       wozStijgingPercentage: new Decimal(10),
       lastenPercentageStijging: new Decimal(5),
       begrotingsPercentageOverride: null,
+      wozSetBevestigd: true,
       beoordeeld: true,
       ...overrides,
     };
@@ -2341,6 +2353,42 @@ describe("stelBegrotingVast — Gemeentelijke Lasten/WOZ lifecycle-blokkade (OB-
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("VASTGESTELD");
   });
 
+  it("4a (WOZ-set compleet). objecten + beoordeeld, maar de WOZ-set is NIET bevestigd: KRITIEK blokkeert vaststellen; niets bevroren, status blijft CONCEPT", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    zetMinimaleBasisNeer(versie.id);
+    schrijfWozObjecten(db, versie.id, [wozObjectInvoer()]);
+    schrijfGemeentelijkeLastenModule(db, versie.id, moduleInvoer({ wozSetBevestigd: false }));
+
+    expect(() => stelBegrotingVast(db, versie.id)).toThrow(/KRITIEKE controls/);
+    expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
+    expect(leesFrozenGemeentelijkeLastenResultaat(db, versie.id)).toBeNull();
+  });
+
+  it("4b (WOZ-set compleet). na expliciete bevestiging kan vaststellen; de bevestiging en bepaalde percentages zijn bevroren", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    zetMinimaleBasisNeer(versie.id);
+    schrijfWozObjecten(db, versie.id, [wozObjectInvoer()]);
+    schrijfGemeentelijkeLastenModule(db, versie.id, moduleInvoer({ wozSetBevestigd: true }));
+
+    stelBegrotingVast(db, versie.id);
+    const frozen = leesFrozenGemeentelijkeLastenResultaat(db, versie.id)!;
+    expect(frozen.wozSetBevestigd).toBe(true);
+    expect(frozen.historischLastenPercentage).not.toBeNull();
+    expect(frozen.begroteGemeentelijkeLasten).not.toBeNull();
+  });
+
+  it("4c (WOZ-set compleet). een WOZ-wijziging NA bevestiging trekt de bevestiging in: vaststellen is weer geblokkeerd tot opnieuw bevestigd", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    zetMinimaleBasisNeer(versie.id);
+    schrijfWozObjecten(db, versie.id, [wozObjectInvoer()]);
+    schrijfGemeentelijkeLastenModule(db, versie.id, moduleInvoer({ wozSetBevestigd: true }));
+    schrijfWozObjecten(db, versie.id, [wozObjectInvoer({ werkelijkeWoz: new Decimal(2000000) })]);
+
+    expect(() => stelBegrotingVast(db, versie.id)).toThrow(/KRITIEKE controls/);
+    schrijfWozSetBevestigd(db, versie.id, true);
+    expect(() => stelBegrotingVast(db, versie.id)).not.toThrow();
+  });
+
   it("5 (scenario A/M). beoordeeld=true + 0 WOZ-objecten + alle module-aannames null mag vaststellen -> REVIEWED_ZERO_OBJECTS, €0, frozen read correct", () => {
     const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
     zetMinimaleBasisNeer(versie.id);
@@ -2349,12 +2397,13 @@ describe("stelBegrotingVast — Gemeentelijke Lasten/WOZ lifecycle-blokkade (OB-
       wozStijgingPercentage: null,
       lastenPercentageStijging: null,
       begrotingsPercentageOverride: null,
+      wozSetBevestigd: false,
       beoordeeld: true,
     }); // 0 WOZ-objecten
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.gemeentelijkeLasten.reviewStatus).toBe("REVIEWED_ZERO_OBJECTS");
-    expect(resultaat.gemeentelijkeLasten.begroteGemeentelijkeLasten.toString()).toBe("0");
+    expect(resultaat.gemeentelijkeLasten.begroteGemeentelijkeLasten!.toString()).toBe("0");
     expect(resultaat.gemeentelijkeLasten.controleVereist.some((c) => c.ernst === "KRITIEK")).toBe(false);
 
     const frozen = leesFrozenGemeentelijkeLastenResultaat(db, versie.id)!;
@@ -2362,7 +2411,7 @@ describe("stelBegrotingVast — Gemeentelijke Lasten/WOZ lifecycle-blokkade (OB-
     expect(frozen.beoordeeld).toBe(true);
     expect(frozen.werkelijkeGemeentelijkeLasten).toBeNull();
     expect(frozen.wozStijgingPercentage).toBeNull();
-    expect(frozen.begroteGemeentelijkeLasten.toString()).toBe("0");
+    expect(frozen.begroteGemeentelijkeLasten!.toString()).toBe("0");
     expect(frozen.wozObjecten).toEqual([]);
     expect(frozen.perComplex).toEqual([]);
   });
@@ -2378,7 +2427,7 @@ describe("stelBegrotingVast — Gemeentelijke Lasten/WOZ lifecycle-blokkade (OB-
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.gemeentelijkeLasten.reviewStatus).toBe("REVIEWED_WITH_OBJECTS");
-    expect(resultaat.gemeentelijkeLasten.begroteGemeentelijkeLasten.toString()).toBe("10395");
+    expect(resultaat.gemeentelijkeLasten.begroteGemeentelijkeLasten!.toString()).toBe("10395");
   });
 
   it("7 (scenario C/D/K). meerdere WOZ-objecten en meerdere complexen frozen roundtrip, perComplex NIET herberekend", () => {
@@ -2394,8 +2443,8 @@ describe("stelBegrotingVast — Gemeentelijke Lasten/WOZ lifecycle-blokkade (OB-
     const frozen = leesFrozenGemeentelijkeLastenResultaat(db, versie.id)!;
     expect(frozen.wozObjecten).toHaveLength(2);
     expect(frozen.perComplex).toHaveLength(2);
-    const som = frozen.perComplex.reduce((t, c) => t.plus(c.begroteGemeentelijkeLasten), new Decimal(0));
-    expect(som.toString()).toBe(frozen.begroteGemeentelijkeLasten.toString());
+    const som = frozen.perComplex.reduce((t, c) => t.plus(c.begroteGemeentelijkeLasten!), new Decimal(0));
+    expect(som.toString()).toBe(frozen.begroteGemeentelijkeLasten!.toString());
   });
 
   it("8 (scenario E). WOZ-override blijft exact frozen", () => {
@@ -2419,7 +2468,7 @@ describe("stelBegrotingVast — Gemeentelijke Lasten/WOZ lifecycle-blokkade (OB-
 
     const frozen = leesFrozenGemeentelijkeLastenResultaat(db, versie.id)!;
     expect(frozen.begrotingsPercentageOverride?.toString()).toBe("2");
-    expect(frozen.effectiefBegrotingsPercentage.toString()).toBe("2");
+    expect(frozen.effectiefBegrotingsPercentage!.toString()).toBe("2");
   });
 
   it("10 (scenario G). expliciete Decimal(0)-WOZ-override blijft €0 en wordt niet null", () => {
@@ -2525,6 +2574,7 @@ describe("stelBegrotingVast — Gemeentelijke Lasten/WOZ atomiciteit (OB-033, fa
       wozStijgingPercentage: new Decimal(10),
       lastenPercentageStijging: new Decimal(5),
       begrotingsPercentageOverride: null,
+      wozSetBevestigd: true,
       beoordeeld: true,
     });
     schrijfAlgemeneKostenCategorieState(db, versieId, ALGEMENE_KOSTEN_ZERO_REGELS);
@@ -2618,6 +2668,7 @@ describe("stelBegrotingVast — Gemeentelijke Lasten/WOZ immutability (OB-033, f
       wozStijgingPercentage: new Decimal(10),
       lastenPercentageStijging: new Decimal(5),
       begrotingsPercentageOverride: null,
+      wozSetBevestigd: true,
       beoordeeld: true,
     });
     schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
@@ -2679,6 +2730,7 @@ describe("stelBegrotingVast — Gemeentelijke Lasten/WOZ immutability (OB-033, f
       wozStijgingPercentage: new Decimal(10),
       lastenPercentageStijging: new Decimal(5),
       begrotingsPercentageOverride: null,
+      wozSetBevestigd: true,
       beoordeeld: true,
     });
     schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
@@ -2724,6 +2776,7 @@ describe("stelBegrotingVast — Gemeentelijke Lasten/WOZ frozen-onafhankelijkhei
       wozStijgingPercentage: new Decimal(10),
       lastenPercentageStijging: new Decimal(5),
       begrotingsPercentageOverride: null,
+      wozSetBevestigd: true,
       beoordeeld: true,
     });
     schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
@@ -2733,7 +2786,7 @@ describe("stelBegrotingVast — Gemeentelijke Lasten/WOZ frozen-onafhankelijkhei
     stelBegrotingVast(db, versie.id);
 
     const vóórDirecteMutatie = leesFrozenGemeentelijkeLastenResultaat(db, versie.id)!;
-    expect(vóórDirecteMutatie.begroteGemeentelijkeLasten.toString()).toBe("10395");
+    expect(vóórDirecteMutatie.begroteGemeentelijkeLasten!.toString()).toBe("10395");
     const module1Vóór = leesFrozenBegrotingsresultaat(db, versie.id)!;
     const verzekeringVóór = leesFrozenVerzekeringResultaat(db, versie.id)!;
 
@@ -2743,7 +2796,7 @@ describe("stelBegrotingVast — Gemeentelijke Lasten/WOZ frozen-onafhankelijkhei
     db.prepare(`UPDATE begroting_woz_object SET werkelijke_woz = '999999999' WHERE begroting_versie_id = ?`).run(versie.id);
 
     const náDirecteMutatie = leesFrozenGemeentelijkeLastenResultaat(db, versie.id)!;
-    expect(náDirecteMutatie.begroteGemeentelijkeLasten.toString()).toBe("10395"); // ongewijzigd — frozen read leest nooit de concept-tabel
+    expect(náDirecteMutatie.begroteGemeentelijkeLasten!.toString()).toBe("10395"); // ongewijzigd — frozen read leest nooit de concept-tabel
 
     // Bestaande frozen resultaten van andere modules blijven byte-voor-byte ongewijzigd naast OB-033's frozen output.
     const normaliseer = (waarde: unknown) => JSON.stringify(waarde, (_key, v) => (v instanceof Decimal ? v.toString() : v));

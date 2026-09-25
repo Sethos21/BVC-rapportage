@@ -2,6 +2,7 @@ import Decimal from "decimal.js";
 import { describe, expect, it } from "vitest";
 import {
   berekenBegroteGemeentelijkeLasten,
+  berekenEstimatedGemeentelijkeLasten,
   berekenWerkelijkGemeentelijkeLasten,
   type BgGemeentelijkeLastenAannames,
   bepaalWozHistorie,
@@ -18,6 +19,7 @@ function aannames(overrides: Partial<BgGemeentelijkeLastenAannames> = {}): BgGem
     wozStijgingPercentage: new Decimal(10),
     lastenPercentageStijging: new Decimal(5),
     begrotingsPercentageOverride: null,
+    wozSetBevestigd: true,
     beoordeeld: true,
     ...overrides,
   };
@@ -50,14 +52,14 @@ describe("berekenBegroteGemeentelijkeLasten", () => {
       aannames(),
     );
     expect(r.totaleWerkelijkeWoz.toString()).toBe("3000000");
-    expect(r.historischLastenPercentage.toString()).toBe("0.3");
+    expect(r.historischLastenPercentage!.toString()).toBe("0.3");
     expect(r.wozObjecten[0]?.automatischVerwachteWoz.toString()).toBe("1100000");
     expect(r.wozObjecten[1]?.automatischVerwachteWoz.toString()).toBe("2200000");
     expect(r.totaleAutomatischVerwachteWoz.toString()).toBe("3300000");
-    expect(r.automatischBegrotingsPercentage.toString()).toBe("0.315");
-    expect(r.effectiefBegrotingsPercentage.toString()).toBe("0.315");
+    expect(r.automatischBegrotingsPercentage!.toString()).toBe("0.315");
+    expect(r.effectiefBegrotingsPercentage!.toString()).toBe("0.315");
     expect(r.totaleEffectiefVerwachteWoz.toString()).toBe("3300000");
-    expect(r.begroteGemeentelijkeLasten.toString()).toBe("10395");
+    expect(r.begroteGemeentelijkeLasten!.toString()).toBe("10395");
     expect(kritiekeMeldingen(r.controleVereist)).toHaveLength(0);
   });
 
@@ -82,9 +84,9 @@ describe("berekenBegroteGemeentelijkeLasten", () => {
       ],
       aannames({ begrotingsPercentageOverride: new Decimal("0.40") }),
     );
-    expect(r.automatischBegrotingsPercentage.toString()).toBe("0.315");
-    expect(r.effectiefBegrotingsPercentage.toString()).toBe("0.4");
-    expect(r.begroteGemeentelijkeLasten.toString()).toBe("13200"); // 3.300.000 * 0,40%
+    expect(r.automatischBegrotingsPercentage!.toString()).toBe("0.315");
+    expect(r.effectiefBegrotingsPercentage!.toString()).toBe("0.4");
+    expect(r.begroteGemeentelijkeLasten!.toString()).toBe("13200"); // 3.300.000 * 0,40%
   });
 
   it("D. expliciete €0 WOZ-override wordt gebruikt, valt NIET terug op automatisch berekende waarde", () => {
@@ -95,8 +97,8 @@ describe("berekenBegroteGemeentelijkeLasten", () => {
 
   it("E. expliciete 0% begrotingspercentage-override -> effectief 0%, begrote lasten €0", () => {
     const r = berekenBegroteGemeentelijkeLasten([wozObject()], aannames({ begrotingsPercentageOverride: new Decimal(0) }));
-    expect(r.effectiefBegrotingsPercentage.toString()).toBe("0");
-    expect(r.begroteGemeentelijkeLasten.toString()).toBe("0");
+    expect(r.effectiefBegrotingsPercentage!.toString()).toBe("0");
+    expect(r.begroteGemeentelijkeLasten!.toString()).toBe("0");
   });
 
   it("F. 0% WOZ-stijging is geldig", () => {
@@ -110,7 +112,7 @@ describe("berekenBegroteGemeentelijkeLasten", () => {
       [wozObject({ complexnummer: "001", werkelijkeWoz: new Decimal(1000000) }), wozObject({ complexnummer: "002", werkelijkeWoz: new Decimal(2000000) })],
       aannames({ lastenPercentageStijging: new Decimal(0) }),
     );
-    expect(r.automatischBegrotingsPercentage.toString()).toBe(r.historischLastenPercentage.toString());
+    expect(r.automatischBegrotingsPercentage!.toString()).toBe(r.historischLastenPercentage!.toString());
     expect(kritiekeMeldingen(r.controleVereist)).toHaveLength(0);
   });
 
@@ -124,8 +126,8 @@ describe("berekenBegroteGemeentelijkeLasten", () => {
   it("I. negatieve lastenpercentage-stijging: WAARSCHUWING, rekenkundig verwerkt", () => {
     const r = berekenBegroteGemeentelijkeLasten([wozObject()], aannames({ lastenPercentageStijging: new Decimal(-5) }));
     // enkel object: werkelijkeWoz 1.000.000, lasten 9.000 -> historisch 0,9%; 0,9% * (1 - 0,05) = 0,855%.
-    expect(r.historischLastenPercentage.toString()).toBe("0.9");
-    expect(r.automatischBegrotingsPercentage.toString()).toBe("0.855");
+    expect(r.historischLastenPercentage!.toString()).toBe("0.9");
+    expect(r.automatischBegrotingsPercentage!.toString()).toBe("0.855");
     expect(r.controleVereist.some((c) => c.ernst === "WAARSCHUWING" && c.bericht.includes("lastenPercentageStijging"))).toBe(true);
   });
 
@@ -138,9 +140,9 @@ describe("berekenBegroteGemeentelijkeLasten", () => {
   it("K. één object aanwezig maar totale werkelijke WOZ = 0: geen deling door nul, KRITIEK, geen NaN/Infinity, REVIEWED_WITH_OBJECTS", () => {
     const r = berekenBegroteGemeentelijkeLasten([wozObject({ werkelijkeWoz: new Decimal(0) })], aannames());
     expect(r.totaleWerkelijkeWoz.toString()).toBe("0");
-    expect(r.historischLastenPercentage.toString()).toBe("0");
-    expect(r.historischLastenPercentage.isFinite()).toBe(true);
-    expect(r.automatischBegrotingsPercentage.isFinite()).toBe(true);
+    expect(r.historischLastenPercentage!.toString()).toBe("0");
+    expect(r.historischLastenPercentage!.isFinite()).toBe(true);
+    expect(r.automatischBegrotingsPercentage!.isFinite()).toBe(true);
     expect(r.controleVereist.some((c) => c.ernst === "KRITIEK" && c.bericht.includes("totale werkelijke WOZ is nul"))).toBe(true);
     expect(r.reviewStatus).toBe("REVIEWED_WITH_OBJECTS"); // aannames() default heeft beoordeeld: true
   });
@@ -154,16 +156,16 @@ describe("berekenBegroteGemeentelijkeLasten", () => {
       aannames(),
     );
     expect(r.totaleWerkelijkeWoz.toString()).toBe("0");
-    expect(r.historischLastenPercentage.toString()).toBe("0");
-    expect(r.historischLastenPercentage.isFinite()).toBe(true);
-    expect(r.automatischBegrotingsPercentage.isFinite()).toBe(true);
+    expect(r.historischLastenPercentage!.toString()).toBe("0");
+    expect(r.historischLastenPercentage!.isFinite()).toBe(true);
+    expect(r.automatischBegrotingsPercentage!.isFinite()).toBe(true);
     expect(r.controleVereist.some((c) => c.ernst === "KRITIEK" && c.bericht.includes("totale werkelijke WOZ is nul"))).toBe(true);
   });
 
   it("L. ontbrekende werkelijkeGemeentelijkeLasten: KRITIEK, geen crash, veilig percentage 0", () => {
     const r = berekenBegroteGemeentelijkeLasten([wozObject()], aannames({ werkelijkeGemeentelijkeLasten: null }));
-    expect(r.historischLastenPercentage.toString()).toBe("0");
-    expect(r.automatischBegrotingsPercentage.toString()).toBe("0");
+    expect(r.historischLastenPercentage!.toString()).toBe("0");
+    expect(r.automatischBegrotingsPercentage!.toString()).toBe("0");
     expect(r.controleVereist.some((c) => c.ernst === "KRITIEK" && c.bericht.includes("werkelijkeGemeentelijkeLasten"))).toBe(true);
   });
 
@@ -205,9 +207,9 @@ describe("berekenBegroteGemeentelijkeLasten", () => {
     expect(kritiekeMeldingen(r.controleVereist)).toHaveLength(0);
     expect(r.controleVereist).toEqual([]); // ook geen WAARSCHUWING (beoordeeld=false)
     expect(r.totaleWerkelijkeWoz.toString()).toBe("0");
-    expect(r.historischLastenPercentage.toString()).toBe("0");
-    expect(r.automatischBegrotingsPercentage.toString()).toBe("0");
-    expect(r.begroteGemeentelijkeLasten.toString()).toBe("0");
+    expect(r.historischLastenPercentage!.toString()).toBe("0");
+    expect(r.automatischBegrotingsPercentage!.toString()).toBe("0");
+    expect(r.begroteGemeentelijkeLasten!.toString()).toBe("0");
   });
 
   it("O3 (OB033-016-correctie). beoordeeld=true + 0 objecten + ALLE module-aannames null: REVIEWED_ZERO_OBJECTS, uitsluitend de WAARSCHUWING, GEEN KRITIEK, begrote lasten €0", () => {
@@ -226,7 +228,7 @@ describe("berekenBegroteGemeentelijkeLasten", () => {
     expect(r.controleVereist).toHaveLength(1);
     expect(r.controleVereist[0]?.ernst).toBe("WAARSCHUWING");
     expect(r.controleVereist[0]?.bericht).toContain("0 WOZ-objecten");
-    expect(r.begroteGemeentelijkeLasten.toString()).toBe("0");
+    expect(r.begroteGemeentelijkeLasten!.toString()).toBe("0");
   });
 
   it("P. beoordeeld=true + objecten -> REVIEWED_WITH_OBJECTS", () => {
@@ -250,8 +252,8 @@ describe("berekenBegroteGemeentelijkeLasten", () => {
     expect(complex001.effectiefVerwachteWoz.toString()).toBe("1650000");
     expect(complex002.effectiefVerwachteWoz.toString()).toBe("2200000");
 
-    const somPerComplexLasten = complex001.begroteGemeentelijkeLasten.plus(complex002.begroteGemeentelijkeLasten);
-    expect(somPerComplexLasten.toString()).toBe(r.begroteGemeentelijkeLasten.toString());
+    const somPerComplexLasten = complex001.begroteGemeentelijkeLasten!.plus(complex002.begroteGemeentelijkeLasten!);
+    expect(somPerComplexLasten.toString()).toBe(r.begroteGemeentelijkeLasten!.toString());
   });
 
   it("Decimal-exactheid: geen drijvendekomma-afronding bij optelling van meerdere objecten", () => {
@@ -321,7 +323,7 @@ describe("WOZ-object = bestaand complex + geheel complex of bestaande unit (Mast
   it("de objectkeuze beïnvloedt geen bedrag: unit en geheel complex met dezelfde WOZ geven identieke totalen", () => {
     const unit = berekenBegroteGemeentelijkeLasten([wozObject({ objectType: "UNIT", unitnummer: "A-12" })], aannames());
     const geheel = berekenBegroteGemeentelijkeLasten([wozObject()], aannames());
-    expect(unit.begroteGemeentelijkeLasten.toString()).toBe(geheel.begroteGemeentelijkeLasten.toString());
+    expect(unit.begroteGemeentelijkeLasten!.toString()).toBe(geheel.begroteGemeentelijkeLasten!.toString());
   });
 
   it("positieve WOZ: geen KRITIEK; €0 en negatief: KRITIEK", () => {
@@ -380,5 +382,52 @@ describe("bepaalWozHistorie — ontwikkeling per complex/unit", () => {
     const laatste = h.regels.find((r) => r.aanslagjaar === 2026)!;
     expect(laatste.ontwikkelingBedrag!.toString()).toBe("1000000");
     expect(laatste.ontwikkelingPercentage).toBeNull();
+  });
+});
+
+describe("WOZ-set compleet bevestigen (besluit 2026-09-25)", () => {
+  it("VÓÓR bevestiging: geen historisch lastenpercentage, geen automatisch begrotingsvoorstel en geen begroting (null, nooit 0) + KRITIEK", () => {
+    const r = berekenBegroteGemeentelijkeLasten([wozObject()], aannames({ wozSetBevestigd: false }));
+    expect(r.wozSetBevestigd).toBe(false);
+    expect(r.historischLastenPercentage).toBeNull();
+    expect(r.automatischBegrotingsPercentage).toBeNull();
+    expect(r.effectiefBegrotingsPercentage).toBeNull();
+    expect(r.begroteGemeentelijkeLasten).toBeNull();
+    expect(r.perComplex.every((c) => c.begroteGemeentelijkeLasten === null)).toBe(true);
+    expect(r.controleVereist.some((c) => c.ernst === "KRITIEK" && c.objectIndex === null && c.bericht.includes("nog niet als compleet bevestigd"))).toBe(true);
+  });
+
+  it("vóór bevestiging blijft de verwachte WOZ per object beschikbaar en telt de totale WOZ mee (alleen percentage/voorstel wachten)", () => {
+    const r = berekenBegroteGemeentelijkeLasten([wozObject()], aannames({ wozSetBevestigd: false }));
+    expect(r.totaleWerkelijkeWoz.toString()).toBe("1000000");
+    expect(r.wozObjecten[0]!.effectiefVerwachteWoz.toString()).toBe("1100000");
+  });
+
+  it("een handmatige begrotingspercentage-override maakt de begroting vóór bevestiging niet bekend", () => {
+    const r = berekenBegroteGemeentelijkeLasten([wozObject()], aannames({ wozSetBevestigd: false, begrotingsPercentageOverride: new Decimal(1) }));
+    expect(r.begroteGemeentelijkeLasten).toBeNull();
+  });
+
+  it("NA bevestiging: identiek aan het bestaande rekengedrag, geen bevestigings-KRITIEK", () => {
+    const r = berekenBegroteGemeentelijkeLasten([wozObject()], aannames({ wozSetBevestigd: true }));
+    expect(r.historischLastenPercentage!.toString()).toBe("0.9");
+    expect(r.begroteGemeentelijkeLasten).not.toBeNull();
+    expect(r.controleVereist.some((c) => c.bericht.includes("bevestigd"))).toBe(false);
+  });
+
+  it("zonder WOZ-objecten is er geen set om te bevestigen: het bestaande bewust-€0-pad blijft ongewijzigd (ook onbevestigd)", () => {
+    const r = berekenBegroteGemeentelijkeLasten([], aannames({ wozSetBevestigd: false }));
+    expect(r.reviewStatus).toBe("REVIEWED_ZERO_OBJECTS");
+    expect(r.begroteGemeentelijkeLasten!.isZero()).toBe(true);
+    expect(r.controleVereist.some((c) => c.ernst === "KRITIEK")).toBe(false);
+  });
+
+  it("Estimated: een onbekende (onbevestigde) Begroting geeft begrotingTotaal/afwijking null; Estimated zelf blijft berekenbaar uit Werkelijk + verwachting", () => {
+    const begroting = berekenBegroteGemeentelijkeLasten([wozObject()], aannames({ wozSetBevestigd: false }));
+    const werkelijk = berekenWerkelijkGemeentelijkeLasten([{ economischeCategorie: "GEMEENTELIJKE_LASTEN", complexnummer: "001", saldo: new Decimal(9000) }]);
+    const r = berekenEstimatedGemeentelijkeLasten(begroting, werkelijk, true, { GEMEENTELIJKE_LASTEN: new Decimal(0) });
+    expect(r.moduleBegrotingTotaal).toBeNull();
+    expect(r.perCategorie[0]!.afwijking).toBeNull();
+    expect(r.moduleEstimatedTotaal!.toString()).toBe("9000");
   });
 });

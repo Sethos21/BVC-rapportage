@@ -707,6 +707,7 @@ function berekenGemeentelijkeLastenUitInvoer(
       wozStijgingPercentage: moduleInvoer.wozStijgingPercentage,
       lastenPercentageStijging: moduleInvoer.lastenPercentageStijging,
       begrotingsPercentageOverride: moduleInvoer.begrotingsPercentageOverride,
+      wozSetBevestigd: moduleInvoer.wozSetBevestigd,
       beoordeeld: moduleInvoer.beoordeeld,
     });
   } catch (error) {

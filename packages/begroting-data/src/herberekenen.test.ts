@@ -53,7 +53,17 @@ import {
   type CorrectiefDagelijksOnderhoudRegelInvoer,
 } from "./correctiefDagelijksOnderhoudRegels.js";
 import { openOrCreateDatabase } from "./database.js";
-import { schrijfGemeentelijkeLastenModule, type GemeentelijkeLastenModuleInvoer } from "./gemeentelijkeLastenModule.js";
+import { schrijfGemeentelijkeLastenModule as schrijfModuleAannames, schrijfWozSetBevestigd, type GemeentelijkeLastenModuleInvoer } from "./gemeentelijkeLastenModule.js";
+
+/**
+ * Test-hulp: schrijft de module-aannames en zet daarna — zoals de gebruikersactie "WOZ-set compleet" — de
+ * bevestiging wanneer de fixture `wozSetBevestigd` heeft. Schrijven van aannames alleen raakt de bevestiging niet.
+ */
+function schrijfGemeentelijkeLastenModule(db: DatabaseSync, versieId: string, invoer: GemeentelijkeLastenModuleInvoer): void {
+  schrijfModuleAannames(db, versieId, invoer);
+  if (invoer.wozSetBevestigd) schrijfWozSetBevestigd(db, versieId, true);
+}
+
 import { schrijfGeplandeVerkoopBeoordeeld } from "./geplandeVerkoopBeoordeeld.js";
 import { schrijfGeplandeVerkoopRegels, type GeplandeVerkoopRegelInvoer } from "./geplandeVerkoopRegels.js";
 import { schrijfGeplandOnderhoudActiviteiten, type GeplandOnderhoudActiviteitInvoer } from "./geplandOnderhoudActiviteiten.js";
@@ -1323,6 +1333,7 @@ describe("herberekenBegroting — Gemeentelijke lasten / WOZ (OB-033)", () => {
       wozStijgingPercentage: new Decimal(10),
       lastenPercentageStijging: new Decimal(5),
       begrotingsPercentageOverride: null,
+      wozSetBevestigd: true,
       beoordeeld: false,
       ...overrides,
     };
@@ -1348,7 +1359,7 @@ describe("herberekenBegroting — Gemeentelijke lasten / WOZ (OB-033)", () => {
     expect(resultaat.gemeentelijkeLasten).toBeDefined();
     expect(resultaat.gemeentelijkeLasten.beoordeeld).toBe(false);
     expect(resultaat.gemeentelijkeLasten.reviewStatus).toBe("NOT_REVIEWED");
-    expect(resultaat.gemeentelijkeLasten.begroteGemeentelijkeLasten.toString()).toBe("0");
+    expect(resultaat.gemeentelijkeLasten.begroteGemeentelijkeLasten!.toString()).toBe("0");
     expect(resultaat.gemeentelijkeLasten.wozObjecten).toEqual([]);
     expect(resultaat.gemeentelijkeLasten.perComplex).toEqual([]);
     expect(resultaat.gemeentelijkeLasten.controleVereist).toEqual([]);
@@ -1371,13 +1382,14 @@ describe("herberekenBegroting — Gemeentelijke lasten / WOZ (OB-033)", () => {
       wozStijgingPercentage: null,
       lastenPercentageStijging: null,
       begrotingsPercentageOverride: null,
+      wozSetBevestigd: false,
       beoordeeld: true,
     });
 
     const resultaat = herberekenBegroting(db, versie.id);
     expect(resultaat.gemeentelijkeLasten.reviewStatus).toBe("REVIEWED_ZERO_OBJECTS");
     expect(resultaat.gemeentelijkeLasten.controleVereist.filter((c) => c.ernst === "KRITIEK")).toHaveLength(0);
-    expect(resultaat.gemeentelijkeLasten.begroteGemeentelijkeLasten.toString()).toBe("0");
+    expect(resultaat.gemeentelijkeLasten.begroteGemeentelijkeLasten!.toString()).toBe("0");
   });
 
   it("3. één bestaand WOZ-object: exact gelijk aan directe pure-calculator-uitkomst", () => {
@@ -1389,11 +1401,11 @@ describe("herberekenBegroting — Gemeentelijke lasten / WOZ (OB-033)", () => {
     const resultaat = herberekenBegroting(db, versie.id);
     const direct = berekenBegroteGemeentelijkeLasten([alsPureInvoer(invoer)], { begrotingsjaar: 2027, ...moduleInvoer() });
 
-    expect(resultaat.gemeentelijkeLasten.begroteGemeentelijkeLasten.toString()).toBe(direct.begroteGemeentelijkeLasten.toString());
+    expect(resultaat.gemeentelijkeLasten.begroteGemeentelijkeLasten!.toString()).toBe(direct.begroteGemeentelijkeLasten!.toString());
     expect(resultaat.gemeentelijkeLasten.wozObjecten[0]?.wozObject).toEqual(direct.wozObjecten[0]);
     // werkelijkeWoz 1.000.000 x 1,10 = 1.100.000; historisch 9000/1.000.000*100 = 0,9%; automatisch 0,9 x 1,05 = 0,945%; 1.100.000 x 0,945% = 10.395
-    expect(resultaat.gemeentelijkeLasten.effectiefBegrotingsPercentage.toString()).toBe("0.945");
-    expect(resultaat.gemeentelijkeLasten.begroteGemeentelijkeLasten.toString()).toBe("10395");
+    expect(resultaat.gemeentelijkeLasten.effectiefBegrotingsPercentage!.toString()).toBe("0.945");
+    expect(resultaat.gemeentelijkeLasten.begroteGemeentelijkeLasten!.toString()).toBe("10395");
   });
 
   it("4. override verwachteWoz: effectiefVerwachteWoz volgt de override, automatischVerwachteWoz blijft zichtbaar als referentie", () => {
@@ -1414,9 +1426,9 @@ describe("herberekenBegroting — Gemeentelijke lasten / WOZ (OB-033)", () => {
     schrijfGemeentelijkeLastenModule(db, versie.id, moduleInvoer({ begrotingsPercentageOverride: new Decimal(2) }));
 
     const resultaat = herberekenBegroting(db, versie.id);
-    expect(resultaat.gemeentelijkeLasten.automatischBegrotingsPercentage.toString()).toBe("0.945");
-    expect(resultaat.gemeentelijkeLasten.effectiefBegrotingsPercentage.toString()).toBe("2");
-    expect(resultaat.gemeentelijkeLasten.begroteGemeentelijkeLasten.toString()).toBe("22000"); // 1.100.000 x 2% = 22.000
+    expect(resultaat.gemeentelijkeLasten.automatischBegrotingsPercentage!.toString()).toBe("0.945");
+    expect(resultaat.gemeentelijkeLasten.effectiefBegrotingsPercentage!.toString()).toBe("2");
+    expect(resultaat.gemeentelijkeLasten.begroteGemeentelijkeLasten!.toString()).toBe("22000"); // 1.100.000 x 2% = 22.000
   });
 
   it("6. meerdere objecten over meerdere complexen: perComplex-som sluit exact aan op het modulebedrag", () => {
@@ -1429,8 +1441,8 @@ describe("herberekenBegroting — Gemeentelijke lasten / WOZ (OB-033)", () => {
 
     const resultaat = herberekenBegroting(db, versie.id);
     expect(resultaat.gemeentelijkeLasten.perComplex).toHaveLength(2);
-    const somPerComplex = resultaat.gemeentelijkeLasten.perComplex.reduce((t, c) => t.plus(c.begroteGemeentelijkeLasten), new Decimal(0));
-    expect(somPerComplex.toString()).toBe(resultaat.gemeentelijkeLasten.begroteGemeentelijkeLasten.toString());
+    const somPerComplex = resultaat.gemeentelijkeLasten.perComplex.reduce((t, c) => t.plus(c.begroteGemeentelijkeLasten!), new Decimal(0));
+    expect(somPerComplex.toString()).toBe(resultaat.gemeentelijkeLasten.begroteGemeentelijkeLasten!.toString());
   });
 
   it("7. persistentie-id wordt correct teruggekoppeld per WOZ-object", () => {
@@ -1449,7 +1461,7 @@ describe("herberekenBegroting — Gemeentelijke lasten / WOZ (OB-033)", () => {
     schrijfGemeentelijkeLastenModule(db, versie.id, moduleInvoer());
 
     const resultaat = herberekenBegroting(db, versie.id);
-    expect(resultaat.gemeentelijkeLasten.begroteGemeentelijkeLasten.toString()).toBe("10395");
+    expect(resultaat.gemeentelijkeLasten.begroteGemeentelijkeLasten!.toString()).toBe("10395");
     expect(resultaat.gemeentelijkeLasten.perComplex).toEqual([]);
     expect(resultaat.gemeentelijkeLasten.controleVereist.filter((c) => c.ernst === "KRITIEK")).toHaveLength(2);
   });
@@ -1471,7 +1483,7 @@ describe("herberekenBegroting — Gemeentelijke lasten / WOZ (OB-033)", () => {
 
     const resultaat = herberekenBegroting(db, versie.id);
     expect(resultaat.gemeentelijkeLasten.totaleWerkelijkeWoz.toString()).toBe("0");
-    expect(resultaat.gemeentelijkeLasten.historischLastenPercentage.toString()).toBe("0");
+    expect(resultaat.gemeentelijkeLasten.historischLastenPercentage!.toString()).toBe("0");
     expect(
       resultaat.gemeentelijkeLasten.controleVereist.some((c) => c.objectIndex === null && c.bericht.includes("totale werkelijke WOZ is nul")),
     ).toBe(true);

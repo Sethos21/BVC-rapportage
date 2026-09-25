@@ -32,7 +32,7 @@ function wozObject(overrides: Partial<BgWozObjectInvoer> = {}): BgWozObjectInvoe
   };
 }
 function aannames(overrides: Partial<BgGemeentelijkeLastenAannames> = {}): BgGemeentelijkeLastenAannames {
-  return { begrotingsjaar: 2026, werkelijkeGemeentelijkeLasten: new Decimal(9000), wozStijgingPercentage: new Decimal(0), lastenPercentageStijging: new Decimal(0), begrotingsPercentageOverride: null, beoordeeld: true, ...overrides };
+  return { begrotingsjaar: 2026, werkelijkeGemeentelijkeLasten: new Decimal(9000), wozStijgingPercentage: new Decimal(0), lastenPercentageStijging: new Decimal(0), begrotingsPercentageOverride: null, wozSetBevestigd: true, beoordeeld: true, ...overrides };
 }
 function boeking(overrides: Partial<WerkelijkGemeentelijkeLastenBoekingRegel> = {}): WerkelijkGemeentelijkeLastenBoekingRegel {
   return { economischeCategorie: "GEMEENTELIJKE_LASTEN", complexnummer: "001", saldo: new Decimal(0), ...overrides };
@@ -41,12 +41,12 @@ function boeking(overrides: Partial<WerkelijkGemeentelijkeLastenBoekingRegel> = 
 describe("berekenEstimatedGemeentelijkeLasten — A/B/C/D", () => {
   it("A/B. estimatedTotaal = werkelijkTotaal + verwachtingResterendJaar — NOOIT begrotingTotaal + werkelijkTotaal + verwachting", () => {
     const begroting = berekenBegroteGemeentelijkeLasten([wozObject({ werkelijkeWoz: new Decimal(1000000) })], aannames()); // begroteGemeentelijkeLasten = 9000/1000000*100% * 1000000/100 = 9000
-    expect(begroting.begroteGemeentelijkeLasten.toString()).toBe("9000");
+    expect(begroting.begroteGemeentelijkeLasten!.toString()).toBe("9000");
     const werkelijk = berekenWerkelijkGemeentelijkeLasten([boeking({ saldo: new Decimal(4000) })]); // niet gelijkmatig geboekt: t/m periode 6 al 4.000
     const resultaat = berekenEstimatedGemeentelijkeLasten(begroting, werkelijk, true, { GEMEENTELIJKE_LASTEN: new Decimal(5500) });
 
     const c = resultaat.perCategorie[0]!;
-    expect(c.begrotingTotaal.toString()).toBe("9000");
+    expect(c.begrotingTotaal!.toString()).toBe("9000");
     expect(c.werkelijkTotaal.toString()).toBe("4000");
     expect(c.estimatedTotaal!.toString()).toBe("9500"); // 4000 + 5500, NIET 4000 + 9000 = 13000
   });
@@ -61,10 +61,10 @@ describe("berekenEstimatedGemeentelijkeLasten — A/B/C/D", () => {
 
   it("D. de Begroting zelf blijft ongewijzigd door een Estimated-aanroep", () => {
     const begroting = berekenBegroteGemeentelijkeLasten([wozObject()], aannames());
-    const voorher = begroting.begroteGemeentelijkeLasten.toString();
+    const voorher = begroting.begroteGemeentelijkeLasten!.toString();
     const werkelijk = berekenWerkelijkGemeentelijkeLasten([boeking({ saldo: new Decimal(4000) })]);
     berekenEstimatedGemeentelijkeLasten(begroting, werkelijk, true, { GEMEENTELIJKE_LASTEN: new Decimal(5000) });
-    expect(begroting.begroteGemeentelijkeLasten.toString()).toBe(voorher);
+    expect(begroting.begroteGemeentelijkeLasten!.toString()).toBe(voorher);
   });
 });
 

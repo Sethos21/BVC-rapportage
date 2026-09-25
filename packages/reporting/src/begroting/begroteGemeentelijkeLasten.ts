@@ -108,6 +108,17 @@ import type { BgControleErnst } from "./begroteHuuropbrengsten.js";
  * geeft `REVIEWED_ZERO_OBJECTS` MET uitsluitend de WAARSCHUWING hierboven,
  * NOOIT een KRITIEK uitsluitend vanwege het aantal objecten zelf.
  *
+ * WOZ-SET COMPLEET (Master Contract §6.8, besluit 2026-09-25): de gebruiker bevestigt
+ * expliciet dat de ingevoerde WOZ-set compleet is (`aannames.wozSetBevestigd`). ZOLANG DIE
+ * BEVESTIGING ONTBREEKT (en er WOZ-objecten zijn) worden het historische lastenpercentage,
+ * het automatische begrotingspercentage, het effectieve percentage en de begrote lasten
+ * NIET bepaald: die velden zijn dan `null` (onbekend — nooit een placeholder-0, universele
+ * invariant) en een module-brede KRITIEK meldt de ontbrekende bevestiging (blokkeert
+ * beoordeling/vaststellen). De verwachte WOZ per object blijft wel beschikbaar. Zonder
+ * WOZ-objecten is er geen set om te bevestigen: het bestaande "bewust €0"-pad (OB033-016)
+ * blijft ongewijzigd. Het intrekken van de bevestiging bij toevoegen/wijzigen/verwijderen van
+ * een WOZ-record is een persistentie-invariant (`@bvc/begroting-data`), niet van deze module.
+ *
  * BUITEN SCOPE (deze fase, expliciet niet gebouwd — geen aanname): GL-
  * koppeling/realisatie-integratie, Estimated, P&L-rendering, UI, formeel
  * WOZ-objectnummer, automatische WOZ-bron, afzonderlijke OZB/water/riool-
@@ -153,6 +164,8 @@ export interface BgGemeentelijkeLastenAannames {
   lastenPercentageStijging: Decimal | null;
   /** `null` = geen override — `automatischBegrotingsPercentage` blijft dan leidend. */
   begrotingsPercentageOverride: Decimal | null;
+  /** Expliciete gebruikersactie "WOZ-set compleet" (besluit 2026-09-25) — zie moduledoc. */
+  wozSetBevestigd: boolean;
   beoordeeld: boolean;
 }
 
@@ -171,7 +184,8 @@ export interface BgWozObjectUitkomst {
 export interface BgGemeentelijkeLastenComplexTotaal {
   complexnummer: string;
   effectiefVerwachteWoz: Decimal;
-  begroteGemeentelijkeLasten: Decimal;
+  /** `null` zolang de WOZ-set niet is bevestigd (zie moduledoc). */
+  begroteGemeentelijkeLasten: Decimal | null;
 }
 
 export interface BgGemeentelijkeLastenResultaat {
@@ -181,21 +195,24 @@ export interface BgGemeentelijkeLastenResultaat {
   reviewStatus: BgGemeentelijkeLastenReviewStatus;
   wozObjecten: BgWozObjectUitkomst[];
   totaleWerkelijkeWoz: Decimal;
-  /** Veilig `Decimal(0)` (met KRITIEK) zodra `werkelijkeGemeentelijkeLasten` ontbreekt of `totaleWerkelijkeWoz` nul is. */
-  historischLastenPercentage: Decimal;
+  /** Pure doorgifte van `aannames.wozSetBevestigd`. */
+  wozSetBevestigd: boolean;
+  /** `null` zolang de WOZ-set niet is bevestigd (bij WOZ-objecten). Anders veilig `Decimal(0)` (met KRITIEK) zodra `werkelijkeGemeentelijkeLasten` ontbreekt of `totaleWerkelijkeWoz` nul is. */
+  historischLastenPercentage: Decimal | null;
   /** Pure doorgifte van de aanname — traceerbaarheid. */
   wozStijgingPercentage: Decimal | null;
   /** Pure doorgifte van de aanname — traceerbaarheid. */
   lastenPercentageStijging: Decimal | null;
-  /** Veilig `Decimal(0)` zodra `historischLastenPercentage` of `lastenPercentageStijging` onbetrouwbaar is. */
-  automatischBegrotingsPercentage: Decimal;
+  /** `null` zolang de WOZ-set niet is bevestigd. Anders veilig `Decimal(0)` zodra `historischLastenPercentage` of `lastenPercentageStijging` onbetrouwbaar is. */
+  automatischBegrotingsPercentage: Decimal | null;
   /** Pure doorgifte van de aanname — traceerbaarheid. */
   begrotingsPercentageOverride: Decimal | null;
-  /** `begrotingsPercentageOverride` indien aanwezig en geldig, anders `automatischBegrotingsPercentage`. */
-  effectiefBegrotingsPercentage: Decimal;
+  /** `begrotingsPercentageOverride` indien aanwezig en geldig, anders `automatischBegrotingsPercentage`. `null` zolang de WOZ-set niet is bevestigd. */
+  effectiefBegrotingsPercentage: Decimal | null;
   totaleAutomatischVerwachteWoz: Decimal;
   totaleEffectiefVerwachteWoz: Decimal;
-  begroteGemeentelijkeLasten: Decimal;
+  /** `null` zolang de WOZ-set niet is bevestigd — onbekend, nooit €0. */
+  begroteGemeentelijkeLasten: Decimal | null;
   /** Uitsluitend WOZ-objecten met een geldig, niet-leeg `complexnummer` (zie moduledoc). */
   perComplex: BgGemeentelijkeLastenComplexTotaal[];
   controleVereist: BgGemeentelijkeLastenControleItem[];
@@ -350,7 +367,13 @@ export function berekenBegroteGemeentelijkeLasten(
     ? (aannames.begrotingsPercentageOverride as Decimal)
     : automatischBegrotingsPercentage;
 
-  const begroteGemeentelijkeLasten = totaleEffectiefVerwachteWoz.times(effectiefBegrotingsPercentage).dividedBy(100);
+  const percentagesBepaald = !heeftObjecten || aannames.wozSetBevestigd;
+  if (!percentagesBepaald) {
+    meldModulebreed(
+      "WOZ-set is nog niet als compleet bevestigd — het historische lastenpercentage en het automatische begrotingsvoorstel worden pas na bevestiging bepaald; verplicht voor vaststellen.",
+    );
+  }
+  const begroteGemeentelijkeLasten = percentagesBepaald ? totaleEffectiefVerwachteWoz.times(effectiefBegrotingsPercentage).dividedBy(100) : null;
 
   const perComplexMap = new Map<string, Decimal>();
   for (const object of wozObjecten) {
@@ -361,7 +384,7 @@ export function berekenBegroteGemeentelijkeLasten(
   const perComplex: BgGemeentelijkeLastenComplexTotaal[] = [...perComplexMap.entries()].map(([complexnummer, effectiefVerwachteWoz]) => ({
     complexnummer,
     effectiefVerwachteWoz,
-    begroteGemeentelijkeLasten: effectiefVerwachteWoz.times(effectiefBegrotingsPercentage).dividedBy(100),
+    begroteGemeentelijkeLasten: percentagesBepaald ? effectiefVerwachteWoz.times(effectiefBegrotingsPercentage).dividedBy(100) : null,
   }));
 
   if (aannames.beoordeeld && wozObjecten.length === 0) {
@@ -380,12 +403,13 @@ export function berekenBegroteGemeentelijkeLasten(
     reviewStatus,
     wozObjecten,
     totaleWerkelijkeWoz,
-    historischLastenPercentage,
+    wozSetBevestigd: aannames.wozSetBevestigd,
+    historischLastenPercentage: percentagesBepaald ? historischLastenPercentage : null,
     wozStijgingPercentage: aannames.wozStijgingPercentage,
     lastenPercentageStijging: aannames.lastenPercentageStijging,
-    automatischBegrotingsPercentage,
+    automatischBegrotingsPercentage: percentagesBepaald ? automatischBegrotingsPercentage : null,
     begrotingsPercentageOverride: aannames.begrotingsPercentageOverride,
-    effectiefBegrotingsPercentage,
+    effectiefBegrotingsPercentage: percentagesBepaald ? effectiefBegrotingsPercentage : null,
     totaleAutomatischVerwachteWoz,
     totaleEffectiefVerwachteWoz,
     begroteGemeentelijkeLasten,
@@ -519,8 +543,8 @@ export function berekenWerkelijkGemeentelijkeLasten(boekingen: readonly Werkelij
 
 export interface EstimatedGemeentelijkeLastenCategorieResultaat {
   categorie: BgGemeentelijkeLastenWerkelijkCategorie;
-  /** Ongewijzigde doorgifte van de Begroting — Estimated berekent/muteert de Begroting nooit. */
-  begrotingTotaal: Decimal;
+  /** Ongewijzigde doorgifte van de Begroting — Estimated berekent/muteert de Begroting nooit. `null` zolang de WOZ-set niet is bevestigd (begroting onbekend). */
+  begrotingTotaal: Decimal | null;
   werkelijkTotaal: Decimal;
   /** `false` zodra Werkelijk-dekking voor de afgesloten periode niet expliciet bevestigd is, of `nietGeclassificeerdTotaal` niet nul is — zie moduledoc. */
   werkelijkVoldoendeBekend: boolean;
@@ -533,7 +557,7 @@ export interface EstimatedGemeentelijkeLastenCategorieResultaat {
 export interface EstimatedGemeentelijkeLastenResultaat {
   /** Vaste volgorde: `GEMEENTELIJKE_LASTEN_WERKELIJK_CATEGORIEEN` (momenteel één element). */
   perCategorie: EstimatedGemeentelijkeLastenCategorieResultaat[];
-  moduleBegrotingTotaal: Decimal;
+  moduleBegrotingTotaal: Decimal | null;
   moduleWerkelijkTotaal: Decimal;
   /** `null` zodra één van de categorieën `estimatedTotaal === null` heeft. */
   moduleEstimatedTotaal: Decimal | null;
@@ -563,7 +587,7 @@ export function berekenEstimatedGemeentelijkeLasten(
       werkelijkVoldoendeBekend,
       verwachtingResterendJaar: verwachting,
       estimatedTotaal,
-      afwijking: estimatedTotaal !== null ? estimatedTotaal.minus(begroting.begroteGemeentelijkeLasten) : null,
+      afwijking: estimatedTotaal !== null && begroting.begroteGemeentelijkeLasten !== null ? estimatedTotaal.minus(begroting.begroteGemeentelijkeLasten) : null,
     };
   });
 

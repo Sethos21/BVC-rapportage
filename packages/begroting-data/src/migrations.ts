@@ -3928,6 +3928,24 @@ export const MIGRATIONS: readonly Migration[] = [
       `CREATE INDEX idx_begroting_verzekering_estimated_polis_versie ON begroting_verzekering_estimated_polis(begroting_versie_id)`,
     ],
   },
+  /**
+   * Gemeentelijke lasten/WOZ — expliciete "WOZ-set compleet"-bevestiging (Master
+   * Contract §6.8, besluit 2026-09-25). `woz_set_bevestigd` op de module-staat
+   * (concept): DEFAULT 0 = niet bevestigd — bestaande begrotingen blijven geldig
+   * maar hebben de bevestiging niet (de gebruiker moet die bewust geven; er wordt
+   * niets verzonnen). Op de frozen resultaat-rij wordt de bevestigingsstand
+   * meebevroren (DEFAULT 0 voor pre-bestaande rijen; er zijn geen
+   * productiegegevens in deze tabellen). Additief (`ADD COLUMN`), geen CHECK-
+   * wijziging aan bestaande kolommen.
+   */
+  {
+    version: 32,
+    description: "Gemeentelijke lasten/WOZ: woz_set_bevestigd (module-staat + frozen resultaat)",
+    ddl: [
+      `ALTER TABLE begroting_gemeentelijke_lasten_module ADD COLUMN woz_set_bevestigd INTEGER NOT NULL DEFAULT 0 CHECK (woz_set_bevestigd IN (0, 1))`,
+      `ALTER TABLE begroting_frozen_gemeentelijke_lasten_resultaat ADD COLUMN woz_set_bevestigd INTEGER NOT NULL DEFAULT 0 CHECK (woz_set_bevestigd IN (0, 1))`,
+    ],
+  },
 ];
 
 function schemaMetaTableExists(db: DatabaseSync): boolean {

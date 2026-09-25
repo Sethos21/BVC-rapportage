@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { maakBegrotingsversie, markeerVastgesteld, type NieuweBegrotingsversieInput } from "./begrotingsversies.js";
+import { leesGemeentelijkeLastenModule, schrijfWozSetBevestigd } from "./gemeentelijkeLastenModule.js";
 import { openOrCreateDatabase } from "./database.js";
 import { leesWozObjecten, schrijfWozObjecten, type WozObject, type WozObjectInvoer } from "./wozObjecten.js";
 
@@ -358,5 +359,54 @@ describe("WOZ-objecten — objectkeuze complex + geheel complex/unit (Master Con
     const perId = new Map(na.map((o) => [o.id, [o.unitnummer, o.werkelijkeWoz!.toString()]]));
     expect(perId.get(a!.id)).toEqual(["A", "1"]);
     expect(perId.get(b!.id)).toEqual(["B", "2"]);
+  });
+});
+
+describe("WOZ-objecten — bevestiging 'WOZ-set compleet' vervalt bij elke wijziging (besluit 2026-09-25)", () => {
+  function bevestigdeSet() {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    const [a, b] = schrijfWozObjecten(db, versie.id, [objectInvoer({ objectType: "UNIT", unitnummer: "A" }), objectInvoer({ objectType: "UNIT", unitnummer: "B" })]);
+    schrijfWozSetBevestigd(db, versie.id, true);
+    expect(leesGemeentelijkeLastenModule(db, versie.id).wozSetBevestigd).toBe(true);
+    return { versieId: versie.id, a: a!, b: b! };
+  }
+  const bevestigd = (versieId: string) => leesGemeentelijkeLastenModule(db, versieId).wozSetBevestigd;
+
+  it("toevoegen van een WOZ-record zet de bevestiging terug", () => {
+    const { versieId, a, b } = bevestigdeSet();
+    schrijfWozObjecten(db, versieId, [naarInvoer(a), naarInvoer(b), objectInvoer({ objectType: "UNIT", unitnummer: "C" })]);
+    expect(bevestigd(versieId)).toBe(false);
+  });
+
+  it("wijzigen van een WOZ-record zet de bevestiging terug", () => {
+    const { versieId, a, b } = bevestigdeSet();
+    schrijfWozObjecten(db, versieId, [{ ...naarInvoer(a), werkelijkeWoz: new Decimal(123) }, naarInvoer(b)]);
+    expect(bevestigd(versieId)).toBe(false);
+  });
+
+  it("verwijderen van een WOZ-record zet de bevestiging terug", () => {
+    const { versieId, a } = bevestigdeSet();
+    schrijfWozObjecten(db, versieId, [naarInvoer(a)]);
+    expect(bevestigd(versieId)).toBe(false);
+  });
+
+  it("een save zonder inhoudelijke wijziging (identieke lijst) laat de bevestiging staan", () => {
+    const { versieId, a, b } = bevestigdeSet();
+    schrijfWozObjecten(db, versieId, [naarInvoer(a), naarInvoer(b)]);
+    expect(bevestigd(versieId)).toBe(true);
+  });
+
+  it("een wijziging in een ANDERE begrotingsversie raakt de bevestiging van deze versie niet", () => {
+    const { versieId } = bevestigdeSet();
+    const andere = maakBegrotingsversie(db, { ...NIEUWE_VERSIE_INPUT, begrotingsjaar: 2028 });
+    schrijfWozObjecten(db, andere.id, [objectInvoer()]);
+    expect(bevestigd(versieId)).toBe(true);
+  });
+
+  it("zonder bestaande module-rij levert een WOZ-wijziging geen fout of nieuwe rij op", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    schrijfWozObjecten(db, versie.id, [objectInvoer()]);
+    expect(bevestigd(versie.id)).toBe(false);
+    expect(db.prepare(`SELECT COUNT(*) AS n FROM begroting_gemeentelijke_lasten_module`).get()).toEqual({ n: 0 });
   });
 });

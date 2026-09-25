@@ -178,6 +178,8 @@ export function schrijfWozObjecten(db: DatabaseSync, versieId: string, wozObject
       }
     }
 
+    const voorWijziging = JSON.stringify(leesWozObjecten(db, versieId));
+
     const behoudenIds = new Set(bestaandeIds);
     const huidigeRijen = db.prepare(`SELECT id FROM begroting_woz_object WHERE begroting_versie_id = ?`).all(versieId) as unknown as { id: number }[];
     const teVerwijderen = huidigeRijen.map((r) => r.id).filter((id) => !behoudenIds.has(id));
@@ -227,6 +229,13 @@ export function schrijfWozObjecten(db: DatabaseSync, versieId: string, wozObject
       }
     }
 
-    return leesWozObjecten(db, versieId);
+    const resultaat = leesWozObjecten(db, versieId);
+    // WOZ-SET COMPLEET (besluit 2026-09-25): toevoegen, wijzigen of verwijderen van een WOZ-record zet de
+    // bevestiging automatisch terug naar niet-bevestigd. Een save zonder inhoudelijke wijziging (identieke
+    // lijst) is geen wijziging en laat de bevestiging staan.
+    if (JSON.stringify(resultaat) !== voorWijziging) {
+      db.prepare(`UPDATE begroting_gemeentelijke_lasten_module SET woz_set_bevestigd = 0 WHERE begroting_versie_id = ?`).run(versieId);
+    }
+    return resultaat;
   });
 }

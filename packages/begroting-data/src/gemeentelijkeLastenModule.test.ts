@@ -9,6 +9,7 @@ import { openOrCreateDatabase } from "./database.js";
 import {
   leesGemeentelijkeLastenModule,
   schrijfGemeentelijkeLastenModule,
+  schrijfWozSetBevestigd,
   type GemeentelijkeLastenModuleInvoer,
 } from "./gemeentelijkeLastenModule.js";
 
@@ -40,6 +41,7 @@ function invoer(overrides: Partial<GemeentelijkeLastenModuleInvoer> = {}): Gemee
     wozStijgingPercentage: new Decimal(10),
     lastenPercentageStijging: new Decimal(5),
     begrotingsPercentageOverride: null,
+    wozSetBevestigd: false,
     beoordeeld: true,
     ...overrides,
   };
@@ -55,6 +57,7 @@ describe("schrijfGemeentelijkeLastenModule / leesGemeentelijkeLastenModule", () 
       lastenPercentageStijging: null,
       begrotingsPercentageOverride: null,
       beoordeeld: false,
+      wozSetBevestigd: false,
     });
   });
 
@@ -145,5 +148,42 @@ describe("schrijfGemeentelijkeLastenModule / leesGemeentelijkeLastenModule", () 
     expect(() =>
       db.prepare(`INSERT INTO begroting_gemeentelijke_lasten_module (begroting_versie_id, beoordeeld) VALUES (?, 2)`).run(versie.id),
     ).toThrow(/CHECK constraint failed/);
+  });
+});
+
+describe("WOZ-set compleet — module-staat (besluit 2026-09-25)", () => {
+  it("een module-aannamesave laat de bevestiging ongemoeid en kan haar niet zetten", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    schrijfGemeentelijkeLastenModule(db, versie.id, invoer({ wozSetBevestigd: true })); // veld wordt bewust genegeerd
+    expect(leesGemeentelijkeLastenModule(db, versie.id).wozSetBevestigd).toBe(false);
+    schrijfWozSetBevestigd(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, invoer({ werkelijkeGemeentelijkeLasten: new Decimal(1) }));
+    const na = leesGemeentelijkeLastenModule(db, versie.id);
+    expect(na.wozSetBevestigd).toBe(true);
+    expect(na.werkelijkeGemeentelijkeLasten!.toString()).toBe("1");
+  });
+
+  it("bevestigen kan ook zonder eerder opgeslagen aannames (lege rij) en laat de aannames leeg/onbeoordeeld; intrekken werkt", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    schrijfWozSetBevestigd(db, versie.id, true);
+    expect(leesGemeentelijkeLastenModule(db, versie.id)).toEqual({
+      werkelijkeGemeentelijkeLasten: null,
+      wozStijgingPercentage: null,
+      lastenPercentageStijging: null,
+      begrotingsPercentageOverride: null,
+      beoordeeld: false,
+      wozSetBevestigd: true,
+    });
+    schrijfWozSetBevestigd(db, versie.id, false);
+    expect(leesGemeentelijkeLastenModule(db, versie.id).wozSetBevestigd).toBe(false);
+  });
+
+  it("onbekende versie wordt geweigerd; na vaststellen is de bevestiging niet meer te wijzigen", () => {
+    expect(() => schrijfWozSetBevestigd(db, "bestaat-niet", true)).toThrow(/bestaat niet/);
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    schrijfWozSetBevestigd(db, versie.id, true);
+    markeerVastgesteld(db, versie.id, new Date());
+    expect(() => schrijfWozSetBevestigd(db, versie.id, false)).toThrow();
+    expect(leesGemeentelijkeLastenModule(db, versie.id).wozSetBevestigd).toBe(true);
   });
 });

@@ -72,6 +72,18 @@ export interface FrozenGemeentelijkeLastenResultaat extends HerberekendGemeentel
   werkelijkeGemeentelijkeLasten: Decimal | null;
 }
 
+/**
+ * Vaststellen (`vaststellen.ts`) blokkeert elke onbevestigde WOZ-set via een KRITIEK-control, dus bij een
+ * geldige freeze zijn deze afgeleide velden altijd bepaald. Een `null` hier is een interne inconsistentie
+ * (fail-fast) — nooit stil naar 0 omgezet.
+ */
+function bepaald(waarde: Decimal | null, veld: string, versieId: string): Decimal {
+  if (waarde === null) {
+    throw new Error(`Interne fout: begrotingsversie ${versieId}: ${veld} is niet bepaald (WOZ-set niet bevestigd) — frozen Gemeentelijke-Lasten-output vereist bepaalde waarden.`);
+  }
+  return waarde;
+}
+
 function withTransaction<T>(db: DatabaseSync, fn: () => T): T {
   db.exec("BEGIN");
   try {
@@ -107,6 +119,7 @@ interface ResultaatRow {
   lasten_percentage_stijging: string | null;
   begrotings_percentage_override: string | null;
   beoordeeld: number;
+  woz_set_bevestigd: number;
   review_status: string;
   totale_werkelijke_woz: string;
   historisch_lasten_percentage: string;
@@ -181,10 +194,10 @@ export function schrijfFrozenGemeentelijkeLastenResultaatZonderTransactie(
   db.prepare(
     `INSERT INTO begroting_frozen_gemeentelijke_lasten_resultaat
        (begroting_versie_id, werkelijke_gemeentelijke_lasten, woz_stijging_percentage, lasten_percentage_stijging,
-        begrotings_percentage_override, beoordeeld, review_status, totale_werkelijke_woz, historisch_lasten_percentage,
+        begrotings_percentage_override, beoordeeld, woz_set_bevestigd, review_status, totale_werkelijke_woz, historisch_lasten_percentage,
         automatisch_begrotings_percentage, effectief_begrotings_percentage, totale_automatisch_verwachte_woz,
         totale_effectief_verwachte_woz, begrote_gemeentelijke_lasten)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     versieId,
     werkelijkeGemeentelijkeLasten !== null ? werkelijkeGemeentelijkeLasten.toString() : null,
@@ -192,14 +205,15 @@ export function schrijfFrozenGemeentelijkeLastenResultaatZonderTransactie(
     resultaat.lastenPercentageStijging !== null ? resultaat.lastenPercentageStijging.toString() : null,
     resultaat.begrotingsPercentageOverride !== null ? resultaat.begrotingsPercentageOverride.toString() : null,
     resultaat.beoordeeld ? 1 : 0,
+    resultaat.wozSetBevestigd ? 1 : 0,
     resultaat.reviewStatus,
     resultaat.totaleWerkelijkeWoz.toString(),
-    resultaat.historischLastenPercentage.toString(),
-    resultaat.automatischBegrotingsPercentage.toString(),
-    resultaat.effectiefBegrotingsPercentage.toString(),
+    bepaald(resultaat.historischLastenPercentage, "historischLastenPercentage", versieId).toString(),
+    bepaald(resultaat.automatischBegrotingsPercentage, "automatischBegrotingsPercentage", versieId).toString(),
+    bepaald(resultaat.effectiefBegrotingsPercentage, "effectiefBegrotingsPercentage", versieId).toString(),
     resultaat.totaleAutomatischVerwachteWoz.toString(),
     resultaat.totaleEffectiefVerwachteWoz.toString(),
-    resultaat.begroteGemeentelijkeLasten.toString(),
+    bepaald(resultaat.begroteGemeentelijkeLasten, "begroteGemeentelijkeLasten", versieId).toString(),
   );
 
   const insertWozObject = db.prepare(
@@ -231,7 +245,7 @@ export function schrijfFrozenGemeentelijkeLastenResultaatZonderTransactie(
      VALUES (?, ?, ?, ?, ?)`,
   );
   resultaat.perComplex.forEach((complex, volgnr) => {
-    insertComplex.run(versieId, complex.complexnummer, volgnr, complex.effectiefVerwachteWoz.toString(), complex.begroteGemeentelijkeLasten.toString());
+    insertComplex.run(versieId, complex.complexnummer, volgnr, complex.effectiefVerwachteWoz.toString(), bepaald(complex.begroteGemeentelijkeLasten, "begroteGemeentelijkeLasten (complex)", versieId).toString());
   });
 
   const insertControl = db.prepare(
@@ -357,6 +371,7 @@ export function leesFrozenGemeentelijkeLastenResultaat(db: DatabaseSync, versieI
   return {
     begrotingsjaar: versie.begrotingsjaar,
     beoordeeld: header.beoordeeld === 1,
+    wozSetBevestigd: header.woz_set_bevestigd === 1,
     reviewStatus: header.review_status as BgGemeentelijkeLastenReviewStatus,
     wozObjecten,
     totaleWerkelijkeWoz: new Decimal(header.totale_werkelijke_woz),

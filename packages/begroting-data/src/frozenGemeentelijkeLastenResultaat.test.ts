@@ -65,6 +65,7 @@ const AANNAMES: BgGemeentelijkeLastenAannames = {
   wozStijgingPercentage: new Decimal(10),
   lastenPercentageStijging: new Decimal(5),
   begrotingsPercentageOverride: null,
+  wozSetBevestigd: true,
   beoordeeld: true,
 };
 
@@ -105,6 +106,7 @@ describe("schrijfFrozenGemeentelijkeLastenResultaat / leesFrozenGemeentelijkeLas
       wozStijgingPercentage: null,
       lastenPercentageStijging: null,
       begrotingsPercentageOverride: null,
+      wozSetBevestigd: false,
       beoordeeld: true,
     });
     expect(resultaat.reviewStatus).toBe("REVIEWED_ZERO_OBJECTS");
@@ -118,7 +120,7 @@ describe("schrijfFrozenGemeentelijkeLastenResultaat / leesFrozenGemeentelijkeLas
     expect(gelezen.wozStijgingPercentage).toBeNull();
     expect(gelezen.lastenPercentageStijging).toBeNull();
     expect(gelezen.begrotingsPercentageOverride).toBeNull();
-    expect(gelezen.begroteGemeentelijkeLasten.toString()).toBe("0");
+    expect(gelezen.begroteGemeentelijkeLasten!.toString()).toBe("0");
     expect(gelezen.wozObjecten).toEqual([]);
     expect(gelezen.perComplex).toEqual([]);
   });
@@ -141,7 +143,7 @@ describe("schrijfFrozenGemeentelijkeLastenResultaat / leesFrozenGemeentelijkeLas
     expect(ruweRij.werkelijke_woz).toBe("123456.789");
 
     const gelezen = leesFrozenGemeentelijkeLastenResultaat(db, versie.id)!;
-    expect(gelezen.begroteGemeentelijkeLasten.toString()).toBe(resultaat.begroteGemeentelijkeLasten.toString());
+    expect(gelezen.begroteGemeentelijkeLasten!.toString()).toBe(resultaat.begroteGemeentelijkeLasten!.toString());
   });
 
   it("3. complexnummer/objectkeuze (unit)/aanslagjaar/waardepeildatum round-trip exact", () => {
@@ -193,8 +195,8 @@ describe("schrijfFrozenGemeentelijkeLastenResultaat / leesFrozenGemeentelijkeLas
 
     const gelezen = leesFrozenGemeentelijkeLastenResultaat(db, versie.id)!;
     expect(gelezen.begrotingsPercentageOverride?.toString()).toBe("0.4");
-    expect(gelezen.effectiefBegrotingsPercentage.toString()).toBe("0.4");
-    expect(gelezen.automatischBegrotingsPercentage.toString()).toBe(resultaat.automatischBegrotingsPercentage.toString());
+    expect(gelezen.effectiefBegrotingsPercentage!.toString()).toBe("0.4");
+    expect(gelezen.automatischBegrotingsPercentage!.toString()).toBe(resultaat.automatischBegrotingsPercentage!.toString());
   });
 
   it("7. perComplex exact frozen en teruggelezen, NIET herberekend, meerdere complexen", () => {
@@ -214,8 +216,8 @@ describe("schrijfFrozenGemeentelijkeLastenResultaat / leesFrozenGemeentelijkeLas
     expect(gelezen.perComplex).toHaveLength(2);
     const complex001 = gelezen.perComplex.find((c) => c.complexnummer === "001")!;
     expect(complex001.effectiefVerwachteWoz.toString()).toBe("1650000");
-    const somPerComplex = gelezen.perComplex.reduce((t, c) => t.plus(c.begroteGemeentelijkeLasten), new Decimal(0));
-    expect(somPerComplex.toString()).toBe(gelezen.begroteGemeentelijkeLasten.toString());
+    const somPerComplex = gelezen.perComplex.reduce((t, c) => t.plus(c.begroteGemeentelijkeLasten!), new Decimal(0));
+    expect(somPerComplex.toString()).toBe(gelezen.begroteGemeentelijkeLasten!.toString());
   });
 
   it("8. controls exact behouden, objectIndex correct vertaald naar/van persistentieId", () => {
@@ -347,7 +349,7 @@ describe("frozen read gebruikt geen pure calculator en geen conceptdata", () => 
     );
 
     const gelezen = leesFrozenGemeentelijkeLastenResultaat(db, versie.id)!;
-    expect(gelezen.begroteGemeentelijkeLasten.toString()).toBe("999999"); // het gemanipuleerde bevroren bedrag, NIET herberekend
+    expect(gelezen.begroteGemeentelijkeLasten!.toString()).toBe("999999"); // het gemanipuleerde bevroren bedrag, NIET herberekend
   });
 });
 
@@ -418,7 +420,7 @@ describe("immutability", () => {
     markeerVastgesteld(db, versie.id, new Date());
 
     const gelezen = leesFrozenGemeentelijkeLastenResultaat(db, versie.id)!;
-    expect(gelezen.begroteGemeentelijkeLasten.toString()).toBe(resultaat.begroteGemeentelijkeLasten.toString());
+    expect(gelezen.begroteGemeentelijkeLasten!.toString()).toBe(resultaat.begroteGemeentelijkeLasten!.toString());
   });
 });
 
@@ -505,6 +507,6 @@ describe("frozen CHECKs — tweede beschermingslaag (migratie 15)", () => {
     const resultaat = berekenMetIds([wozObject({ complexnummer: "001" }), wozObject({ complexnummer: "004" })], [10, 20]);
     expect(() => schrijf(versie.id, resultaat)).not.toThrow();
     const gelezen = leesFrozenGemeentelijkeLastenResultaat(db, versie.id)!;
-    expect(gelezen.begroteGemeentelijkeLasten.toString()).toBe(resultaat.begroteGemeentelijkeLasten.toString());
+    expect(gelezen.begroteGemeentelijkeLasten!.toString()).toBe(resultaat.begroteGemeentelijkeLasten!.toString());
   });
 });
