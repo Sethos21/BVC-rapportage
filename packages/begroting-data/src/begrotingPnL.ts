@@ -11,6 +11,8 @@ import {
   gemeentelijkeLastenEstimatedNaarPnLBovenEbitdaRegels,
   huurBegrotingNaarPnLBovenEbitdaRegels,
   huurEstimatedNaarPnLBovenEbitdaRegels,
+  leegstandBegrotingNaarPnLBovenEbitdaRegels,
+  leegstandEstimatedNaarPnLBovenEbitdaRegels,
   managementBegrotingNaarPnLBovenEbitdaRegels,
   managementEstimatedNaarPnLBovenEbitdaRegels,
   onderhoudBegrotingNaarPnLBovenEbitdaRegels,
@@ -27,6 +29,7 @@ import {
   type WerkelijkManagementResultaat,
   type WerkelijkAlgemeneKostenResultaat,
   type WerkelijkGemeentelijkeLastenResultaat,
+  type WerkelijkLeegstandResultaat,
   type WerkelijkOnderhoudResultaat,
   type WerkelijkVerzekeringResultaat,
 } from "@bvc/reporting";
@@ -35,12 +38,14 @@ import { leesBegrotingsversie } from "./begrotingsversies.js";
 import { leesFrozenAlgemeneKostenResultaat } from "./frozenAlgemeneKostenResultaat.js";
 import { leesFrozenCorrectiefDagelijksOnderhoudResultaat } from "./frozenCorrectiefDagelijksOnderhoudResultaat.js";
 import { leesFrozenGemeentelijkeLastenResultaat } from "./frozenGemeentelijkeLastenResultaat.js";
+import { leesFrozenLeegstandResultaat } from "./frozenLeegstandResultaat.js";
 import { leesFrozenGeplandOnderhoudResultaat } from "./frozenGeplandOnderhoudResultaat.js";
 import { leesFrozenModule3Resultaat } from "./frozenModule3Resultaat.js";
 import { leesFrozenBegrotingsresultaat } from "./frozenResultaat.js";
 import { leesFrozenVerzekeringResultaat } from "./frozenVerzekeringResultaat.js";
 import { leesGemeentelijkeLastenEstimatedResultaat } from "./gemeentelijkeLastenEstimated.js";
 import { herberekenBegroting } from "./herberekenen.js";
+import { leesLeegstandEstimatedResultaat } from "./leegstandEstimated.js";
 import { leesOnderhoudTotaalResultaat } from "./onderhoudOrchestratie.js";
 import { leesVerzekeringEstimatedResultaat } from "./verzekeringEstimated.js";
 
@@ -78,6 +83,7 @@ export function leesBegrotingPnLRegels(db: DatabaseSync, versieId: string): Pure
   let verzekering: Parameters<typeof verzekeringenBegrotingNaarPnLBovenEbitdaRegels>[0];
   let gemeentelijkeLasten: Parameters<typeof gemeentelijkeLastenBegrotingNaarPnLBovenEbitdaRegels>[0];
   let algemeneKosten: Parameters<typeof algemeneKostenBegrotingNaarPnLBovenEbitdaRegels>[0];
+  let leegstand: Parameters<typeof leegstandBegrotingNaarPnLBovenEbitdaRegels>[0];
 
   if (versie.status === "VASTGESTELD") {
     const frozen12 = leesFrozenBegrotingsresultaat(db, versieId);
@@ -86,7 +92,8 @@ export function leesBegrotingPnLRegels(db: DatabaseSync, versieId: string): Pure
     const frozenVerzekering = leesFrozenVerzekeringResultaat(db, versieId);
     const frozenGl = leesFrozenGemeentelijkeLastenResultaat(db, versieId);
     const frozenAk = leesFrozenAlgemeneKostenResultaat(db, versieId);
-    if (frozen12 === null || frozenGepland === null || frozenCorrectief === null || frozenVerzekering === null || frozenGl === null || frozenAk === null) {
+    const frozenLeegstand = leesFrozenLeegstandResultaat(db, versieId);
+    if (frozen12 === null || frozenGepland === null || frozenCorrectief === null || frozenVerzekering === null || frozenGl === null || frozenAk === null || frozenLeegstand === null) {
       throw new Error(`Begrotingsversie ${versieId} is VASTGESTELD, maar (een deel van) de bevroren begroting-output ontbreekt (interne inconsistentie).`);
     }
     m1 = frozen12.module1;
@@ -97,6 +104,7 @@ export function leesBegrotingPnLRegels(db: DatabaseSync, versieId: string): Pure
     verzekering = frozenVerzekering;
     gemeentelijkeLasten = frozenGl;
     algemeneKosten = frozenAk;
+    leegstand = frozenLeegstand;
   } else {
     const b = herberekenBegroting(db, versieId);
     m1 = b.module1;
@@ -107,6 +115,7 @@ export function leesBegrotingPnLRegels(db: DatabaseSync, versieId: string): Pure
     verzekering = b.verzekering;
     gemeentelijkeLasten = b.gemeentelijkeLasten;
     algemeneKosten = b.algemeneKosten;
+    leegstand = b.leegstand;
   }
 
   return [
@@ -117,6 +126,7 @@ export function leesBegrotingPnLRegels(db: DatabaseSync, versieId: string): Pure
     ...verzekeringenBegrotingNaarPnLBovenEbitdaRegels(verzekering),
     ...gemeentelijkeLastenBegrotingNaarPnLBovenEbitdaRegels(gemeentelijkeLasten),
     ...algemeneKostenBegrotingNaarPnLBovenEbitdaRegels(algemeneKosten),
+    ...leegstandBegrotingNaarPnLBovenEbitdaRegels(leegstand),
   ];
 }
 
@@ -153,6 +163,12 @@ export interface EstimatedPnLInvoer {
    * van die post is onbekend, niet €0. Zonder deze parameter blijft de modulebrede dekking leidend.
    */
   algemeneKosten: { werkelijk: WerkelijkAlgemeneKostenResultaat; dekkingBevestigd: boolean; gemapteCategorieen?: ReadonlySet<string> };
+  /**
+   * Leegstandskosten (Vervolgtranche 8): één P&L-post; per kostensoort alleen bekend bij bevestigde dekking, bewezen mapping
+   * (`gemapteCategorieen` via `bepaalGemapteCategorieen` voor MODULE LEEGSTAND) en een ingevulde verwachting. Kwartalen ná de
+   * laatst afgesloten periode.
+   */
+  leegstand: { werkelijk: WerkelijkLeegstandResultaat; dekkingBevestigd: boolean; gemapteCategorieen?: ReadonlySet<string>; resterendeKwartalen: readonly BgOnderhoudKwartaal[] };
 }
 
 /** Estimated → regels voor Huur, Beheer, Management, Onderhoud (totaal), Verzekeringen, Gemeentelijke lasten en Algemene kosten (zie moduledoc). */
@@ -165,6 +181,7 @@ export function leesEstimatedPnLRegels(db: DatabaseSync, versieId: string, invoe
   const verzekering = leesVerzekeringEstimatedResultaat(db, versieId, invoer.verzekeringen.werkelijk, invoer.verzekeringen.dekkingBevestigd, invoer.verzekeringen.resterendeMaanden);
   const gemeentelijkeLasten = leesGemeentelijkeLastenEstimatedResultaat(db, versieId, invoer.gemeentelijkeLasten.werkelijk, invoer.gemeentelijkeLasten.dekkingBevestigd);
   const algemeneKosten = leesAlgemeneKostenEstimatedResultaat(db, versieId, invoer.algemeneKosten.werkelijk, invoer.algemeneKosten.dekkingBevestigd);
+  const leegstand = leesLeegstandEstimatedResultaat(db, versieId, invoer.leegstand.werkelijk, invoer.leegstand.resterendeKwartalen);
 
   return [
     ...huurEstimatedNaarPnLBovenEbitdaRegels(huur),
@@ -179,6 +196,11 @@ export function leesEstimatedPnLRegels(db: DatabaseSync, versieId: string, invoe
     }),
     ...verzekeringEstimatedNaarPnLBovenEbitdaRegels(verzekering.estimated),
     ...gemeentelijkeLastenEstimatedNaarPnLBovenEbitdaRegels(gemeentelijkeLasten),
+    ...leegstandEstimatedNaarPnLBovenEbitdaRegels(leegstand.estimated, {
+      werkelijkDekkingBevestigd: invoer.leegstand.dekkingBevestigd,
+      nietGeclassificeerdTotaal: invoer.leegstand.werkelijk.nietGeclassificeerdTotaal,
+      ...(invoer.leegstand.gemapteCategorieen !== undefined ? { gemapteCategorieen: invoer.leegstand.gemapteCategorieen } : {}),
+    }),
     ...algemeneKostenEstimatedNaarPnLBovenEbitdaRegels(algemeneKosten).map((regel): PurePnLBovenEbitdaRegel => {
       const gemapt = invoer.algemeneKosten.gemapteCategorieen;
       if (gemapt === undefined || gemapt.has(regel.regelSleutel)) return regel;

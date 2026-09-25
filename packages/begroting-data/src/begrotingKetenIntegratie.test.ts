@@ -12,6 +12,7 @@ import {
   berekenWerkelijkAlgemeneKosten,
   berekenWerkelijkBeheer,
   berekenWerkelijkHuur,
+  berekenWerkelijkLeegstand,
   berekenWerkelijkManagement,
   berekenWerkelijkGemeentelijkeLasten,
   berekenWerkelijkOnderhoud,
@@ -38,6 +39,8 @@ import { schrijfGeplandOnderhoudActiviteiten } from "./geplandOnderhoudActivitei
 import { schrijfGeplandOnderhoudBeoordeeld } from "./geplandOnderhoudBeoordeeld.js";
 import { schrijfGeplandOnderhoudEstimatedVerwachtingen } from "./geplandOnderhoudEstimated.js";
 import { schrijfLeegstandCategorieState } from "./leegstandCategorieState.js";
+import { schrijfLeegstandEstimatedVerwachting, type LeegstandEstimatedVerwachting } from "./leegstandEstimated.js";
+import { schrijfLeegstandRegels } from "./leegstandRegels.js";
 import { schrijfModule1Aannames } from "./module1Aannames.js";
 import { schrijfModule1Snapshot } from "./module1Snapshot.js";
 import { schrijfModule2Config } from "./module2Config.js";
@@ -141,6 +144,8 @@ function bouwVersie(bedrijfsnr: string, opties: OpzetOpties = {}) {
   schrijfLeegstandCategorieState(db, id, Object.fromEntries(LEEGSTAND_CATEGORIEEN.map((c) => [c, { beoordeeld: true, laatstBekendServicekostenvoorschotJaar: null, laatstBekendServicekostenvoorschotJaarHerkomst: null, verwachteLeegstandsperiodeMaanden: null }])) as never);
   schrijfRenteCategorieState(db, id, Object.fromEntries(RENTE_CATEGORIEEN.map((c) => [c, { beoordeeld: true }])) as never);
   schrijfGeplandeVerkoopBeoordeeld(db, id, true);
+  // Leegstandskosten: bewust beoordeeld zonder regels (bewuste €0-begroting) en een bewuste resterende verwachting €0 voor Q3 en Q4.
+  schrijfLeegstandEstimatedVerwachting(db, id, leegstandVerwachting({}));
   return { id, activiteitId: activiteit.id, correctiefId: correctief.id };
 }
 
@@ -150,6 +155,11 @@ const bedrag = (regels: readonly PurePnLBovenEbitdaRegel[], sleutel: string): st
   return w.status === "ONBEKEND" ? "ONBEKEND" : w.bedrag.toString();
 };
 const serialiseer = (regels: readonly PurePnLBovenEbitdaRegel[]) => JSON.stringify(regels.map((r) => [r.regelSleutel, r.groep, r.waarde.status, r.waarde.status === "ONBEKEND" ? r.waarde.dekkingReden : r.waarde.bedrag.toString()]));
+
+const LEEGSTAND_NUL = { q1: null, q2: null, q3: D(0), q4: D(0) };
+function leegstandVerwachting(o: Partial<Record<"NUTS_LEEGSTAND" | "SERVICEKOSTEN_LEEGSTAND" | "OVERIGE_LEEGSTANDSKOSTEN", { q1: Decimal | null; q2: Decimal | null; q3: Decimal | null; q4: Decimal | null }>>): LeegstandEstimatedVerwachting {
+  return { NUTS_LEEGSTAND: LEEGSTAND_NUL, SERVICEKOSTEN_LEEGSTAND: LEEGSTAND_NUL, OVERIGE_LEEGSTANDSKOSTEN: LEEGSTAND_NUL, ...o };
+}
 
 /** Werkelijk t/m afgesloten periode (testfixture): Onderhoud 3000 (Gebouwen), Verzekeringen 700, Gemeentelijke lasten 4000, Accountant 1000. */
 function estimatedInvoer(overrides: Partial<EstimatedPnLInvoer> = {}): EstimatedPnLInvoer {
@@ -162,6 +172,12 @@ function estimatedInvoer(overrides: Partial<EstimatedPnLInvoer> = {}): Estimated
     verzekeringen: { werkelijk: berekenWerkelijkVerzekeringen([{ economischeCategorie: "BRAND_OPSTALVERZEKERING", complexnummer: "001", saldo: D(700) }]), dekkingBevestigd: true, resterendeMaanden: [7, 8, 9, 10, 11, 12] },
     gemeentelijkeLasten: { werkelijk: berekenWerkelijkGemeentelijkeLasten([{ economischeCategorie: "GEMEENTELIJKE_LASTEN", complexnummer: "001", saldo: D(4000) }]), dekkingBevestigd: true },
     algemeneKosten: { werkelijk: berekenWerkelijkAlgemeneKosten([{ economischeCategorie: "ACCOUNTANT", saldo: D(1000) }]), dekkingBevestigd: true },
+    leegstand: {
+      werkelijk: berekenWerkelijkLeegstand([{ ogbKostensoort: "N1", complexnummer: "001", saldo: D(60) }], [{ ogbKostensoort: "N1", ogbKostensoortOmschrijving: "Nuts", categorie: "NUTS_LEEGSTAND" }]),
+      dekkingBevestigd: true,
+      gemapteCategorieen: new Set(["NUTS_LEEGSTAND", "SERVICEKOSTEN_LEEGSTAND", "OVERIGE_LEEGSTANDSKOSTEN"]),
+      resterendeKwartalen: ["Q3", "Q4"],
+    },
     ...overrides,
   };
 }
@@ -480,5 +496,79 @@ describe("Estimated Huur + Beheer + Management met echte contracten door de hele
     expect(serialiseer(leesBegrotingPnLRegels(db, a070.id))).toBe(begrotingVoor);
     const huurRegels = (r: string) => (JSON.parse(r) as string[][]).filter((x) => ["HUUROPBRENGST_BELAST", "HUUROPBRENGST_ONBELAST", "VERLEENDE_HUURKORTING", "BEHEERKOSTEN", "MANAGEMENTVERGOEDING"].includes(x[0]!));
     expect(huurRegels(voor003)).toEqual(huurRegels(voor070));
+  });
+});
+
+describe("Leegstandskosten door de hele keten: één P&L-post (Vervolgtranche 8)", () => {
+  const leegstandRegels = (id: string) =>
+    schrijfLeegstandRegels(db, id, [
+      { id: null, categorie: "NUTS_LEEGSTAND", complexnummer: "001", complexomschrijving: "Pand A", omschrijving: "Nuts", q1: D(100), q2: D(100), q3: D(100), q4: D(100) },
+      { id: null, categorie: "SERVICEKOSTEN_LEEGSTAND", complexnummer: null, complexomschrijving: null, omschrijving: "Service (NTB)", q1: D(50), q2: D(50), q3: D(50), q4: D(50) },
+      { id: null, categorie: "OVERIGE_LEEGSTANDSKOSTEN", complexnummer: null, complexomschrijving: null, omschrijving: "Overig", q1: D(0), q2: D(0), q3: D(25), q4: D(25) },
+    ]);
+  const leegstandRegelsIn = (regels: readonly PurePnLBovenEbitdaRegel[]) => regels.filter((r) => r.regelSleutel.startsWith("LEEGSTANDSKOSTEN"));
+
+  it("23. Begroting: Nuts 400 + Servicekosten 200 + Overige 50 = één P&L-regel Leegstandskosten (650); bewust €0 zonder regels is een bekende €0; complex en NTB toegestaan", () => {
+    zetMappings();
+    const a = bouwVersie("070");
+    expect(bedrag(leesBegrotingPnLRegels(db, a.id), "LEEGSTANDSKOSTEN")).toBe("0");
+    leegstandRegels(a.id);
+    const regels = leesBegrotingPnLRegels(db, a.id);
+    expect(leegstandRegelsIn(regels)).toHaveLength(1);
+    expect(bedrag(regels, "LEEGSTANDSKOSTEN")).toBe("650");
+    expect(regels.find((r) => r.regelSleutel === "LEEGSTANDSKOSTEN")!.specificaties!.map((s) => s.label)).toEqual(["NUTS_LEEGSTAND", "SERVICEKOSTEN_LEEGSTAND", "OVERIGE_LEEGSTANDSKOSTEN"]);
+  });
+
+  it("24. levenscyclus-pariteit en immutability: dezelfde P&L-regels voor en na vaststellen; Estimated wijzigen raakt de vastgestelde Begroting niet", () => {
+    zetMappings();
+    const a = bouwVersie("070");
+    leegstandRegels(a.id);
+    const voor = serialiseer(leesBegrotingPnLRegels(db, a.id));
+    stelBegrotingVast(db, a.id, new Date(Date.UTC(2026, 8, 25)));
+    expect(serialiseer(leesBegrotingPnLRegels(db, a.id))).toBe(voor);
+    schrijfLeegstandEstimatedVerwachting(db, a.id, leegstandVerwachting({ NUTS_LEEGSTAND: { q1: null, q2: null, q3: D(500), q4: D(500) } }));
+    expect(serialiseer(leesBegrotingPnLRegels(db, a.id))).toBe(voor);
+  });
+
+  it("25. Estimated: Werkelijk (Nuts 60, exact éénmaal) + resterende verwachting Q3+Q4 → één regel; onderdelen met bewuste €0 tellen mee (Nuts 60 + 40 = 100)", () => {
+    zetMappings();
+    const a = bouwVersie("070");
+    schrijfLeegstandEstimatedVerwachting(db, a.id, leegstandVerwachting({ NUTS_LEEGSTAND: { q1: null, q2: null, q3: D(15), q4: D(25) } }));
+    const regels = leesEstimatedPnLRegels(db, a.id, estimatedInvoer());
+    expect(leegstandRegelsIn(regels)).toHaveLength(1);
+    expect(bedrag(regels, "LEEGSTANDSKOSTEN")).toBe("100");
+  });
+
+  it("26. ontbrekende resterende verwachting: het onderdeel is onbekend, de post is de som van het bekende en de uitkomst ONVOLLEDIG; bekende bedragen blijven als beste-weten-som", () => {
+    zetMappings();
+    const a = bouwVersie("070");
+    schrijfLeegstandEstimatedVerwachting(db, a.id, leegstandVerwachting({ SERVICEKOSTEN_LEEGSTAND: { q1: null, q2: null, q3: null, q4: null } }));
+    const regels = leesEstimatedPnLRegels(db, a.id, estimatedInvoer());
+    expect(leegstandRegelsIn(regels).map((r) => r.regelSleutel)).toEqual(["LEEGSTANDSKOSTEN", "LEEGSTANDSKOSTEN_ONBEKEND_ONDERDEEL"]);
+    expect(bedrag(regels, "LEEGSTANDSKOSTEN")).toBe("60"); // Nuts 60 + 0, Overige 0 + 0; Servicekosten onbekend
+    const boom = berekenPnLBoom("ESTIMATED", regels);
+    expect(boom.exploitatieLasten.volledigheid.status).toBe("ONVOLLEDIG");
+  });
+
+  it("27. ontbrekende Leegstand-mapping/dekking (070: geen bewezen LEEGSTAND-mapping) maakt de post ONBEKEND, ook met ingevulde verwachting — niet €0 en niet met de Begroting gevuld; overige posten blijven bekend", () => {
+    zetMappings();
+    const a = bouwVersie("070");
+    leegstandRegels(a.id);
+    const basis = estimatedInvoer();
+    const zonderMapping = leesEstimatedPnLRegels(db, a.id, { ...basis, leegstand: { ...basis.leegstand, gemapteCategorieen: new Set() } });
+    expect(bedrag(zonderMapping, "LEEGSTANDSKOSTEN")).toBe("ONBEKEND");
+    expect(bedrag(zonderMapping, "MANAGEMENTVERGOEDING")).toBe("6000"); // overige posten met bevestigde dekking blijven bekend
+    const boom = berekenPnLBoom("ESTIMATED", zonderMapping);
+    expect(boom.exploitatieLasten.volledigheid.status).toBe("ONVOLLEDIG");
+    expect(boom.ebitda.volledigheid.status).toBe("ONVOLLEDIG");
+  });
+
+  it("28. geen 070-hardcoding: dezelfde code, administratie 003, dezelfde uitkomst; GL4350-achtige servicekosten worden niet uit Leegstand-Werkelijk afgeleid (Werkelijk komt uitsluitend aangeleverd via de LEEGSTAND-mapping)", () => {
+    zetMappings();
+    const a070 = bouwVersie("070");
+    const a003 = bouwVersie("003");
+    schrijfLeegstandEstimatedVerwachting(db, a003.id, leegstandVerwachting({ NUTS_LEEGSTAND: { q1: null, q2: null, q3: D(15), q4: D(25) } }));
+    schrijfLeegstandEstimatedVerwachting(db, a070.id, leegstandVerwachting({ NUTS_LEEGSTAND: { q1: null, q2: null, q3: D(15), q4: D(25) } }));
+    expect(bedrag(leesEstimatedPnLRegels(db, a003.id, estimatedInvoer()), "LEEGSTANDSKOSTEN")).toBe(bedrag(leesEstimatedPnLRegels(db, a070.id, estimatedInvoer()), "LEEGSTANDSKOSTEN"));
   });
 });
