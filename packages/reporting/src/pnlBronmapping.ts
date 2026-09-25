@@ -271,3 +271,32 @@ export function resolveerPnLBronmapping(invoer: PnLMappingResolutieInvoer, mappi
 
   return { status: "NIET_GEMAPT" };
 }
+
+/**
+ * Bronmapping-DEKKING (Vervolgtranche 6, ketencontrole): welke economische categorieën van `economischeModule`
+ * zijn voor deze administratie op dit referentiepunt (periode + systeemtijd) daadwerkelijk BEWEZEN gemapt? Een
+ * (GL, OGB)-sleutel telt alleen mee als de resolver hem op dit moment naar deze module vertaalt. Geen enkele
+ * categorie → de module heeft voor deze administratie GEEN mapping; een Werkelijk-bedrag van €0 is dan geen
+ * bevestigde nul maar ONBEKEND ("Unknown != zero"). Volledig gegevensgedreven: geen GL/OGB/administratie bekend.
+ */
+export function bepaalGemapteCategorieen(
+  mappingregels: readonly PnLBronmappingRegel[],
+  referentie: { bedrijfsnr: string; economischeModule: PnLEconomischeModule; boekjaar: number; boekperiode: string; opSysteemtijdstip: Date },
+): ReadonlySet<string> {
+  const regelsAdministratie = mappingregels.filter((r) => r.bedrijfsnr === referentie.bedrijfsnr);
+  const sleutels = new Map<string, { grootboekrekening: string; ogbKostensoort: string | null }>();
+  for (const r of regelsAdministratie) {
+    sleutels.set(`${r.grootboekrekening}::${r.ogbKostensoort ?? ""}`, { grootboekrekening: r.grootboekrekening, ogbKostensoort: r.ogbKostensoort });
+  }
+  const categorieen = new Set<string>();
+  for (const { grootboekrekening, ogbKostensoort } of sleutels.values()) {
+    const resultaat = resolveerPnLBronmapping(
+      { bedrijfsnr: referentie.bedrijfsnr, grootboekrekening, ogbKostensoort, boekjaar: referentie.boekjaar, boekperiode: referentie.boekperiode, opSysteemtijdstip: referentie.opSysteemtijdstip },
+      regelsAdministratie,
+    );
+    if (resultaat.status === "GEMAPT" && resultaat.economischeModule === referentie.economischeModule) {
+      categorieen.add(resultaat.economischeCategorie);
+    }
+  }
+  return categorieen;
+}

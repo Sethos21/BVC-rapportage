@@ -37,10 +37,23 @@ describe("berekenPnLPeriode — 070 H1 2026, ÉÉN gemengde boekingenstroom (nie
     expect(resultaat.totaalOpbrengsten.besteWetenSom.toString()).toBe("341734.81");
     expect(resultaat.totaalOpbrengsten.volledigheid).toEqual({ status: "VOLLEDIG" });
     expect(resultaat.totaalKosten.besteWetenSom.toString()).toBe("30555.15");
-    expect(resultaat.totaalKosten.volledigheid).toEqual({ status: "VOLLEDIG" });
     expect(resultaat.ebitda.bedrag.toString()).toBe("311179.66");
     expect(resultaat.ebitda.bedrag.toDecimalPlaces(0).toString()).toBe("311180"); // legacy H1 EBITDA — exacte match, zie GAT-013
-    expect(resultaat.ebitda.volledigheid).toEqual({ status: "VOLLEDIG" });
+  });
+
+  it("VERVOLGTRANCHE 6 — Unknown != zero: de bedragen blijven exact, maar Management, Accountant- en Juridische kosten zijn voor 070 ONBEKEND (geen bewezen mapping) in plaats van een bevestigde €0; kosten en EBITDA zijn daardoor ONVOLLEDIG", () => {
+    const onbekend = (volledigheid: (typeof resultaat)["totaalKosten"]["volledigheid"]) => (volledigheid.status === "ONVOLLEDIG" ? volledigheid.ontbrekend.map((o) => [o.regelSleutel, o.reden]) : []);
+    expect(onbekend(resultaat.totaalKosten.volledigheid)).toEqual([
+      ["MANAGEMENTVERGOEDING", "GEEN_BEOORDELING"],
+      ["ACCOUNTANT", "NIET_GEMAPT"],
+      ["JURIDISCHE_KOSTEN", "NIET_GEMAPT"],
+    ]);
+    expect(resultaat.ebitda.volledigheid.status).toBe("ONVOLLEDIG");
+    // De wél bewezen posten (Makelaar, Bank, Overige algemene kosten) blijven BEKEND.
+    const ak = resultaat.algemeneKosten.regels;
+    for (const sleutel of ["ALGEMENE_KOSTEN", "MAKELAARSKOSTEN", "BANKKOSTEN"]) {
+      expect(ak.find((r) => r.regelSleutel === sleutel)!.waarde.status).toBe("BEKEND");
+    }
   });
 
   it("laat geen boekingen buiten de P&L vallen — nietMeegenomen is leeg voor deze volledig bronbewezen 070-mapping", () => {

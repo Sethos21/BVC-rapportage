@@ -62,10 +62,24 @@ import type { PnLBronBijdrage, PurePnLBovenEbitdaRegel } from "../pnlEngine.js";
 
 const ALGEMENE_KOSTEN_NIET_GECLASSIFICEERD_SLEUTEL = "ALGEMENE_KOSTEN_NIET_GECLASSIFICEERD";
 
-export function algemeneKostenWerkelijkNaarPnLBovenEbitdaRegels(resultaat: WerkelijkAlgemeneKostenResultaat, brondekkingBevestigd: boolean): PurePnLBovenEbitdaRegel[] {
+/**
+ * `gemapteCategorieen` (optioneel; Vervolgtranche 6): de categorieën die voor deze administratie bewezen gemapt zijn
+ * (`bepaalGemapteCategorieen`). Een categorie zonder bewezen mapping — bv. Accountant- of Juridische kosten waar de
+ * administratie geen mappingregel voor heeft — is ONBEKEND (NIET_GEMAPT), NOOIT een bevestigde €0: er kunnen wel
+ * boekingen bestaan die zonder mapping in geen enkele categorie terechtkomen. Zonder deze parameter blijft het
+ * bestaande gedrag (dekking modulebreed) ongewijzigd.
+ */
+export function algemeneKostenWerkelijkNaarPnLBovenEbitdaRegels(
+  resultaat: WerkelijkAlgemeneKostenResultaat,
+  brondekkingBevestigd: boolean,
+  gemapteCategorieen?: ReadonlySet<string>,
+): PurePnLBovenEbitdaRegel[] {
   function categorieBijdrage(categorie: BgAlgemeneKostenCategorie): PnLBronBijdrage {
     if (!brondekkingBevestigd) {
       return { status: "ONBEKEND", dekkingReden: "GEEN_BEOORDELING", toelichting: `Bron-/mappingdekking voor Algemene-Kosten-Werkelijk (${categorie}) is niet expliciet bevestigd door de aanroepende laag.` };
+    }
+    if (gemapteCategorieen !== undefined && !gemapteCategorieen.has(categorie)) {
+      return { status: "ONBEKEND", dekkingReden: "NIET_GEMAPT", toelichting: `Algemene-Kosten-Werkelijk (${categorie}): voor deze administratie bestaat geen bewezen bronmapping naar deze categorie — onbekend, geen bevestigde €0.` };
     }
     const categorieResultaat = resultaat.perCategorie.find((c) => c.categorie === categorie)!;
     return { status: "BEKEND", bedrag: categorieResultaat.categorieTotaal };

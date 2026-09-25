@@ -1,5 +1,5 @@
 import Decimal from "decimal.js";
-import { resolveerPnLBronmapping, type PnLBronmappingRegel, type PnLEconomischeModule } from "./pnlBronmapping.js";
+import { bepaalGemapteCategorieen, resolveerPnLBronmapping, type PnLBronmappingRegel, type PnLEconomischeModule } from "./pnlBronmapping.js";
 import { berekenPnLBoom, type PurePnLBronRegel, type PurePnLResultaat } from "./pnlEngine.js";
 import { berekenWerkelijkHuurViaCentraleMapping } from "./begroting/huurCentraleMapping.js";
 import { huurWerkelijkNaarPnLBovenEbitdaRegels } from "./begroting/huurWerkelijkPnLAdapter.js";
@@ -217,15 +217,22 @@ export function berekenPnLPeriode(context: PnLPeriodeOrchestratieContext, boekin
   const gemLasten = berekenWerkelijkGemeentelijkeLastenViaCentraleMapping(invoer, buckets.gemeentelijkeLasten.map(naarRegelMetComplex), mappingregels);
   const algemeneKosten = berekenWerkelijkAlgemeneKostenViaCentraleMapping(invoer, buckets.algemeneKosten.map(naarBasisRegel), mappingregels);
 
+  // Bronmapping-DEKKING (Vervolgtranche 6): alle boekingen van de administratie/periode worden verwerkt, dus een module
+  // waarvoor de administratie GEEN enkele bewezen mapping heeft is niet "€0" maar ONBEKEND (NIET_GEMAPT). Alleen een
+  // module mét mapping en zonder boekingen levert een bevestigde nul. Voor Algemene kosten geldt dat per categorie
+  // (Accountant/Juridisch/… kunnen per administratie wel of niet gemapt zijn). Volledig gegevensgedreven.
+  const gemapt = (economischeModule: PnLEconomischeModule) => bepaalGemapteCategorieen(mappingregels, { ...invoer, economischeModule });
+  const heeftMapping = (economischeModule: PnLEconomischeModule) => gemapt(economischeModule).size > 0;
+
   const regels: PurePnLBronRegel[] = [
-    ...huurWerkelijkNaarPnLBovenEbitdaRegels(huur.werkelijk, true),
-    ...beheerWerkelijkNaarPnLBovenEbitdaRegels(beheer.werkelijk, true),
-    ...managementWerkelijkNaarPnLBovenEbitdaRegels(management.werkelijk, true),
-    ...onderhoudWerkelijkNaarPnLBovenEbitdaRegels(onderhoud.werkelijk, true),
-    ...servicekostenEigenaarWerkelijkNaarPnLBovenEbitdaRegels(ske.werkelijk, true),
-    ...verzekeringWerkelijkNaarPnLBovenEbitdaRegels(verzekering.werkelijk, true),
-    ...gemeentelijkeLastenWerkelijkNaarPnLBovenEbitdaRegels(gemLasten.werkelijk, true),
-    ...algemeneKostenWerkelijkNaarPnLBovenEbitdaRegels(algemeneKosten.werkelijk, true),
+    ...huurWerkelijkNaarPnLBovenEbitdaRegels(huur.werkelijk, heeftMapping("HUUR")),
+    ...beheerWerkelijkNaarPnLBovenEbitdaRegels(beheer.werkelijk, heeftMapping("BEHEER")),
+    ...managementWerkelijkNaarPnLBovenEbitdaRegels(management.werkelijk, heeftMapping("MANAGEMENT")),
+    ...onderhoudWerkelijkNaarPnLBovenEbitdaRegels(onderhoud.werkelijk, heeftMapping("ONDERHOUD")),
+    ...servicekostenEigenaarWerkelijkNaarPnLBovenEbitdaRegels(ske.werkelijk, heeftMapping("SERVICEKOSTEN_EIGENAAR")),
+    ...verzekeringWerkelijkNaarPnLBovenEbitdaRegels(verzekering.werkelijk, heeftMapping("VERZEKERINGEN")),
+    ...gemeentelijkeLastenWerkelijkNaarPnLBovenEbitdaRegels(gemLasten.werkelijk, heeftMapping("GEMEENTELIJKE_LASTEN")),
+    ...algemeneKostenWerkelijkNaarPnLBovenEbitdaRegels(algemeneKosten.werkelijk, heeftMapping("ALGEMENE_KOSTEN"), gemapt("ALGEMENE_KOSTEN")),
   ];
 
   const resultaat = berekenPnLBoom("WERKELIJK", regels);

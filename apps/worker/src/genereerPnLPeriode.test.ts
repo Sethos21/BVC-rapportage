@@ -128,7 +128,11 @@ describe("genereerPnLPeriode — productie-integratie (echte xlsx-bron + echte P
     // D: reproduceert exact de door GAT-013 bronbewezen H1-EBITDA.
     expect(resultaat.resultaat.ebitda.bedrag.toString()).toBe("311179.66");
     expect(resultaat.resultaat.ebitda.bedrag.toDecimalPlaces(0).toString()).toBe("311180");
-    expect(resultaat.resultaat.ebitda.volledigheid).toEqual({ status: "VOLLEDIG" });
+    // Vervolgtranche 6 (Unknown != zero): de bedragen blijven exact, maar posten zonder bewezen mapping in DEZE mapping-DB (Management, Accountant,
+    // Juridisch en — in dit fixture bewust niet gemapt — Makelaar/taxatie) zijn ONBEKEND in plaats van een bevestigde €0; EBITDA is daardoor ONVOLLEDIG.
+    const ebitdaVolledigheid = resultaat.resultaat.ebitda.volledigheid;
+    expect(ebitdaVolledigheid.status).toBe("ONVOLLEDIG");
+    expect(ebitdaVolledigheid.status === "ONVOLLEDIG" ? ebitdaVolledigheid.ontbrekend.map((o) => o.regelSleutel).sort() : []).toEqual(["ACCOUNTANT", "JURIDISCHE_KOSTEN", "MAKELAARSKOSTEN", "MANAGEMENTVERGOEDING"]);
     expect(resultaat.nietMeegenomen).toEqual([]);
 
     // Renderer: het geschreven HTML-rapport bevat de EBITDA-uitkomst, geen eigen herberekening.
