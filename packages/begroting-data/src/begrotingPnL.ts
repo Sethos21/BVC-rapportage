@@ -19,6 +19,8 @@ import {
   nietVerrekenbareBtwEstimatedNaarPnLBovenEbitdaRegels,
   onderhoudBegrotingNaarPnLBovenEbitdaRegels,
   onderhoudEstimatedTotaalNaarPnLBovenEbitdaRegels,
+  renteBegrotingNaarPnLOnderEbitdaRegels,
+  renteEstimatedNaarPnLOnderEbitdaRegels,
   verzekeringEstimatedNaarPnLBovenEbitdaRegels,
   verzekeringenBegrotingNaarPnLBovenEbitdaRegels,
   type BgBeheerResultaat,
@@ -26,6 +28,7 @@ import {
   type BgManagementResultaat,
   type BgOnderhoudKwartaal,
   type PurePnLBovenEbitdaRegel,
+  type PurePnLBronRegel,
   type WerkelijkBeheerResultaat,
   type WerkelijkHuurResultaat,
   type WerkelijkManagementResultaat,
@@ -34,6 +37,7 @@ import {
   type WerkelijkLeegstandResultaat,
   type WerkelijkNietVerrekenbareBtwResultaat,
   type WerkelijkOnderhoudResultaat,
+  type WerkelijkRenteResultaat,
   type WerkelijkVerzekeringResultaat,
 } from "@bvc/reporting";
 import { leesAlgemeneKostenEstimatedResultaat } from "./algemeneKostenEstimated.js";
@@ -48,10 +52,12 @@ import { leesFrozenNietVerrekenbareBtwResultaat } from "./frozenNietVerrekenbare
 import { leesFrozenBegrotingsresultaat } from "./frozenResultaat.js";
 import { leesFrozenVerzekeringResultaat } from "./frozenVerzekeringResultaat.js";
 import { leesGemeentelijkeLastenEstimatedResultaat } from "./gemeentelijkeLastenEstimated.js";
-import { herberekenBegroting, type HerberekendNietVerrekenbareBtwResultaat } from "./herberekenen.js";
+import { herberekenBegroting, type HerberekendNietVerrekenbareBtwResultaat, type HerberekendRenteResultaat } from "./herberekenen.js";
 import { leesLeegstandEstimatedResultaat } from "./leegstandEstimated.js";
 import { leesNietVerrekenbareBtwEstimatedResultaat } from "./nietVerrekenbareBtwEstimatedVerwachting.js";
 import { leesOnderhoudTotaalResultaat } from "./onderhoudOrchestratie.js";
+import { leesRenteEstimatedResultaat } from "./renteEstimatedVerwachting.js";
+import { leesFrozenRenteResultaat } from "./frozenRenteResultaat.js";
 import { leesVerzekeringEstimatedResultaat } from "./verzekeringEstimated.js";
 
 /**
@@ -78,8 +84,13 @@ function naarPureNietVerrekenbareBtwBegroting(b: HerberekendNietVerrekenbareBtwR
   return { ...b, regels: b.regels.map((r) => r.regel) };
 }
 
-/** Begroting → regels; faalt op een niet-bestaande versie. */
-export function leesBegrotingPnLRegels(db: DatabaseSync, versieId: string): PurePnLBovenEbitdaRegel[] {
+/** Herberekend/bevroren resultaat (met regel-ids, PER CATEGORIE) terug naar de pure vorm — alleen de regel-uitkomsten worden uitgepakt. */
+function naarPureRenteBegroting(b: HerberekendRenteResultaat) {
+  return { ...b, perCategorie: b.perCategorie.map((c) => ({ ...c, regels: c.regels.map((r) => r.regel) })) };
+}
+
+/** Begroting → regels; faalt op een niet-bestaande versie. Bevat zowel boven- als onder-EBITDA-regels (Rente, Tranche 10). */
+export function leesBegrotingPnLRegels(db: DatabaseSync, versieId: string): PurePnLBronRegel[] {
   const versie = leesBegrotingsversie(db, versieId);
   if (versie === null) {
     throw new Error(`Begrotingsversie ${versieId} bestaat niet.`);
@@ -95,6 +106,7 @@ export function leesBegrotingPnLRegels(db: DatabaseSync, versieId: string): Pure
   let algemeneKosten: Parameters<typeof algemeneKostenBegrotingNaarPnLBovenEbitdaRegels>[0];
   let leegstand: Parameters<typeof leegstandBegrotingNaarPnLBovenEbitdaRegels>[0];
   let nietVerrekenbareBtw: HerberekendNietVerrekenbareBtwResultaat;
+  let rente: HerberekendRenteResultaat;
 
   if (versie.status === "VASTGESTELD") {
     const frozen12 = leesFrozenBegrotingsresultaat(db, versieId);
@@ -105,7 +117,18 @@ export function leesBegrotingPnLRegels(db: DatabaseSync, versieId: string): Pure
     const frozenAk = leesFrozenAlgemeneKostenResultaat(db, versieId);
     const frozenLeegstand = leesFrozenLeegstandResultaat(db, versieId);
     const frozenBtw = leesFrozenNietVerrekenbareBtwResultaat(db, versieId);
-    if (frozen12 === null || frozenGepland === null || frozenCorrectief === null || frozenVerzekering === null || frozenGl === null || frozenAk === null || frozenLeegstand === null || frozenBtw === null) {
+    const frozenRente = leesFrozenRenteResultaat(db, versieId);
+    if (
+      frozen12 === null ||
+      frozenGepland === null ||
+      frozenCorrectief === null ||
+      frozenVerzekering === null ||
+      frozenGl === null ||
+      frozenAk === null ||
+      frozenLeegstand === null ||
+      frozenBtw === null ||
+      frozenRente === null
+    ) {
       throw new Error(`Begrotingsversie ${versieId} is VASTGESTELD, maar (een deel van) de bevroren begroting-output ontbreekt (interne inconsistentie).`);
     }
     m1 = frozen12.module1;
@@ -118,6 +141,7 @@ export function leesBegrotingPnLRegels(db: DatabaseSync, versieId: string): Pure
     algemeneKosten = frozenAk;
     leegstand = frozenLeegstand;
     nietVerrekenbareBtw = frozenBtw;
+    rente = frozenRente;
   } else {
     const b = herberekenBegroting(db, versieId);
     m1 = b.module1;
@@ -130,6 +154,7 @@ export function leesBegrotingPnLRegels(db: DatabaseSync, versieId: string): Pure
     algemeneKosten = b.algemeneKosten;
     leegstand = b.leegstand;
     nietVerrekenbareBtw = b.nietVerrekenbareBtw;
+    rente = b.rente;
   }
 
   return [
@@ -142,6 +167,7 @@ export function leesBegrotingPnLRegels(db: DatabaseSync, versieId: string): Pure
     ...algemeneKostenBegrotingNaarPnLBovenEbitdaRegels(algemeneKosten),
     ...leegstandBegrotingNaarPnLBovenEbitdaRegels(leegstand),
     ...nietVerrekenbareBtwBegrotingNaarPnLBovenEbitdaRegels(naarPureNietVerrekenbareBtwBegroting(nietVerrekenbareBtw)),
+    ...renteBegrotingNaarPnLOnderEbitdaRegels(naarPureRenteBegroting(rente)),
   ];
 }
 
@@ -190,10 +216,16 @@ export interface EstimatedPnLInvoer {
    * kwartaal-/maandverdeling, geen vergelijking met de Begroting).
    */
   nietVerrekenbareBtw: { werkelijk: WerkelijkNietVerrekenbareBtwResultaat; dekkingBevestigd: boolean };
+  /**
+   * Rente (Tranche 10): `Estimated = Werkelijk t/m afgesloten periode + handmatige resterende verwachting`, per post
+   * (Rentekosten/Rente opbrengsten) een eigen bedrag. `gemapteCategorieen` (optioneel; `bepaalGemapteCategorieen` voor
+   * MODULE RENTE): een post zonder bewezen mapping is ONBEKEND, ook met een ingevulde verwachting.
+   */
+  rente: { werkelijk: WerkelijkRenteResultaat; dekkingBevestigd: boolean; gemapteCategorieen?: ReadonlySet<string> };
 }
 
-/** Estimated → regels voor Huur, Beheer, Management, Onderhoud (totaal), Verzekeringen, Gemeentelijke lasten en Algemene kosten (zie moduledoc). */
-export function leesEstimatedPnLRegels(db: DatabaseSync, versieId: string, invoer: EstimatedPnLInvoer): PurePnLBovenEbitdaRegel[] {
+/** Estimated → regels voor Huur, Beheer, Management, Onderhoud (totaal), Verzekeringen, Gemeentelijke lasten, Algemene kosten, Niet verrekenbare BTW en Rente (zie moduledoc). Bevat zowel boven- als onder-EBITDA-regels. */
+export function leesEstimatedPnLRegels(db: DatabaseSync, versieId: string, invoer: EstimatedPnLInvoer): PurePnLBronRegel[] {
   const basis = leesHuurBeheerManagementBegroting(db, versieId);
   const huur = berekenEstimatedHuur(basis.module1, invoer.huur.werkelijk, invoer.huur.dekkingBevestigd, invoer.resterendeMaanden);
   const beheer = berekenEstimatedBeheer(basis.module1, basis.module2, invoer.beheer.werkelijk, invoer.beheer.dekkingBevestigd, invoer.resterendeMaanden);
@@ -204,6 +236,7 @@ export function leesEstimatedPnLRegels(db: DatabaseSync, versieId: string, invoe
   const algemeneKosten = leesAlgemeneKostenEstimatedResultaat(db, versieId, invoer.algemeneKosten.werkelijk, invoer.algemeneKosten.dekkingBevestigd);
   const leegstand = leesLeegstandEstimatedResultaat(db, versieId, invoer.leegstand.werkelijk, invoer.leegstand.resterendeKwartalen);
   const nietVerrekenbareBtw = leesNietVerrekenbareBtwEstimatedResultaat(db, versieId, invoer.nietVerrekenbareBtw.werkelijk, invoer.nietVerrekenbareBtw.dekkingBevestigd);
+  const rente = leesRenteEstimatedResultaat(db, versieId, invoer.rente.werkelijk);
 
   return [
     ...huurEstimatedNaarPnLBovenEbitdaRegels(huur),
@@ -234,5 +267,7 @@ export function leesEstimatedPnLRegels(db: DatabaseSync, versieId: string, invoe
     // Niet verrekenbare BTW (technische afsluiting Tranche 9, Master Contract §7): Werkelijk + handmatige resterende
     // verwachting op moduleniveau.
     ...nietVerrekenbareBtwEstimatedNaarPnLBovenEbitdaRegels(nietVerrekenbareBtw),
+    // Rente (Tranche 10): twee onafhankelijke onder-EBITDA-posten, Werkelijk + handmatige resterende verwachting per post.
+    ...renteEstimatedNaarPnLOnderEbitdaRegels(rente, invoer.rente.werkelijk, invoer.rente.dekkingBevestigd, invoer.rente.gemapteCategorieen),
   ];
 }

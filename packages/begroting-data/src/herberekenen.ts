@@ -967,7 +967,7 @@ function naarPureRenteRegelInvoer(regel: RenteRegel): BgRenteRegelInvoer {
  * CATEGORIE positioneel, exact hetzelfde principe en dezelfde defensieve
  * lengte-controle als `berekenLeegstandUitInvoer`.
  */
-function berekenRenteUitInvoer(
+export function berekenRenteUitInvoer(
   versieId: string,
   begrotingsjaar: number,
   regels: readonly RenteRegel[],

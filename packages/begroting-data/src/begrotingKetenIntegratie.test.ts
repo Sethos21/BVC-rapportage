@@ -17,10 +17,11 @@ import {
   berekenWerkelijkGemeentelijkeLasten,
   berekenWerkelijkNietVerrekenbareBtw,
   berekenWerkelijkOnderhoud,
+  berekenWerkelijkRente,
   berekenWerkelijkVerzekeringen,
   vergelijkPnLResultaten,
   type BgManagementInvoer,
-  type PurePnLBovenEbitdaRegel,
+  type PurePnLBronRegel,
 } from "@bvc/reporting";
 import { schrijfAlgemeneKostenCategorieState } from "./algemeneKostenCategorieState.js";
 import { schrijfAlgemeneKostenEstimatedVerwachting } from "./algemeneKostenEstimatedVerwachting.js";
@@ -39,6 +40,8 @@ import { schrijfGeplandeVerkoopBeoordeeld } from "./geplandeVerkoopBeoordeeld.js
 import { schrijfNietVerrekenbareBtwEstimatedVerwachting } from "./nietVerrekenbareBtwEstimatedVerwachting.js";
 import { schrijfNietVerrekenbareBtwRegels } from "./nietVerrekenbareBtwRegels.js";
 import { schrijfNietVerrekenbareBtwState } from "./nietVerrekenbareBtwState.js";
+import { schrijfRenteEstimatedVerwachting } from "./renteEstimatedVerwachting.js";
+import { schrijfRenteRegels } from "./renteRegels.js";
 import { schrijfGeplandOnderhoudActiviteiten } from "./geplandOnderhoudActiviteiten.js";
 import { schrijfGeplandOnderhoudBeoordeeld } from "./geplandOnderhoudBeoordeeld.js";
 import { schrijfGeplandOnderhoudEstimatedVerwachtingen } from "./geplandOnderhoudEstimated.js";
@@ -154,12 +157,13 @@ function bouwVersie(bedrijfsnr: string, opties: OpzetOpties = {}) {
   return { id, activiteitId: activiteit.id, correctiefId: correctief.id };
 }
 
-const regelWaarde = (regels: readonly PurePnLBovenEbitdaRegel[], sleutel: string) => regels.find((r) => r.regelSleutel === sleutel)!.waarde;
-const bedrag = (regels: readonly PurePnLBovenEbitdaRegel[], sleutel: string): string => {
+const regelWaarde = (regels: readonly PurePnLBronRegel[], sleutel: string) => regels.find((r) => r.regelSleutel === sleutel)!.waarde;
+const bedrag = (regels: readonly PurePnLBronRegel[], sleutel: string): string => {
   const w = regelWaarde(regels, sleutel);
   return w.status === "ONBEKEND" ? "ONBEKEND" : w.bedrag.toString();
 };
-const serialiseer = (regels: readonly PurePnLBovenEbitdaRegel[]) => JSON.stringify(regels.map((r) => [r.regelSleutel, r.groep, r.waarde.status, r.waarde.status === "ONBEKEND" ? r.waarde.dekkingReden : r.waarde.bedrag.toString()]));
+const serialiseer = (regels: readonly PurePnLBronRegel[]) =>
+  JSON.stringify(regels.map((r) => [r.regelSleutel, r.boomPositie === "BOVEN_EBITDA" ? r.groep : "ONDER_EBITDA", r.waarde.status, r.waarde.status === "ONBEKEND" ? r.waarde.dekkingReden : r.waarde.bedrag.toString()]));
 
 const LEEGSTAND_NUL = { q1: null, q2: null, q3: D(0), q4: D(0) };
 function leegstandVerwachting(o: Partial<Record<"NUTS_LEEGSTAND" | "SERVICEKOSTEN_LEEGSTAND" | "OVERIGE_LEEGSTANDSKOSTEN", { q1: Decimal | null; q2: Decimal | null; q3: Decimal | null; q4: Decimal | null }>>): LeegstandEstimatedVerwachting {
@@ -184,6 +188,11 @@ function estimatedInvoer(overrides: Partial<EstimatedPnLInvoer> = {}): Estimated
       resterendeKwartalen: ["Q3", "Q4"],
     },
     nietVerrekenbareBtw: { werkelijk: berekenWerkelijkNietVerrekenbareBtw([{ economischeCategorie: "NIET_VERREKENBARE_BTW", saldo: D(4000) }]), dekkingBevestigd: true },
+    rente: {
+      werkelijk: berekenWerkelijkRente([{ ogbKostensoort: "R1", saldo: D(4000) }], [{ ogbKostensoort: "R1", ogbKostensoortOmschrijving: "Rente lening", categorie: "RENTEKOSTEN" }]),
+      dekkingBevestigd: true,
+      gemapteCategorieen: new Set(["RENTEKOSTEN", "RENTE_OPBRENGSTEN"]),
+    },
     ...overrides,
   };
 }
@@ -518,7 +527,7 @@ describe("Leegstandskosten door de hele keten: één P&L-post (Vervolgtranche 8)
       { id: null, categorie: "SERVICEKOSTEN_LEEGSTAND", complexnummer: null, complexomschrijving: null, omschrijving: "Service (NTB)", q1: D(50), q2: D(50), q3: D(50), q4: D(50) },
       { id: null, categorie: "OVERIGE_LEEGSTANDSKOSTEN", complexnummer: null, complexomschrijving: null, omschrijving: "Overig", q1: D(0), q2: D(0), q3: D(25), q4: D(25) },
     ]);
-  const leegstandRegelsIn = (regels: readonly PurePnLBovenEbitdaRegel[]) => regels.filter((r) => r.regelSleutel.startsWith("LEEGSTANDSKOSTEN"));
+  const leegstandRegelsIn = (regels: readonly PurePnLBronRegel[]) => regels.filter((r) => r.regelSleutel.startsWith("LEEGSTANDSKOSTEN"));
 
   it("23. Begroting: Nuts 400 + Servicekosten 200 + Overige 50 = één P&L-regel Leegstandskosten (650); bewust €0 zonder regels is een bekende €0; complex en NTB toegestaan", () => {
     zetMappings();
@@ -602,7 +611,7 @@ describe("Niet verrekenbare BTW door de hele keten: één P&L-post boven EBITDA,
     schrijfNietVerrekenbareBtwRegels(db, a.id, [{ id: null, omschrijving: "BTW", complexnummer: null, jaarbedrag: D(1200) }]);
     const regel = leesBegrotingPnLRegels(db, a.id).find((r) => r.regelSleutel === "NIET_VERREKENBARE_BTW")!;
     expect(regel.boomPositie).toBe("BOVEN_EBITDA");
-    expect(regel.groep).toBe("EXPLOITATIE_LASTEN");
+    expect(regel.boomPositie === "BOVEN_EBITDA" ? regel.groep : null).toBe("EXPLOITATIE_LASTEN");
     const boom = berekenPnLBoom("BEGROTING_NIEUW_JAAR", leesBegrotingPnLRegels(db, a.id));
     expect(boom.exploitatieLasten.regels.some((r) => r.regelSleutel === "NIET_VERREKENBARE_BTW")).toBe(true);
   });
@@ -669,5 +678,70 @@ describe("Niet verrekenbare BTW door de hele keten: één P&L-post boven EBITDA,
     schrijfNietVerrekenbareBtwRegels(db, a070.id, [{ id: null, omschrijving: "BTW", complexnummer: null, jaarbedrag: D(333) }]);
     schrijfNietVerrekenbareBtwRegels(db, a003.id, [{ id: null, omschrijving: "BTW", complexnummer: null, jaarbedrag: D(333) }]);
     expect(bedrag(leesBegrotingPnLRegels(db, a070.id), "NIET_VERREKENBARE_BTW")).toBe(bedrag(leesBegrotingPnLRegels(db, a003.id), "NIET_VERREKENBARE_BTW"));
+  });
+});
+
+describe("Rente door de hele keten: twee onafhankelijke onder-EBITDA-posten, geen leningmodel (Tranche 10)", () => {
+  it("Begroting: bewust €0 zonder regels is een bekende €0; handmatige regels tellen op tot de post, boomPositie ONDER_EBITDA, raakt EBITDA nooit", () => {
+    zetMappings();
+    const a = bouwVersie("070"); // bouwVersie beoordeelt Rente bewust, zonder regels
+    expect(bedrag(leesBegrotingPnLRegels(db, a.id), "RENTEKOSTEN")).toBe("0");
+    const ebitdaVoor = berekenPnLBoom("BEGROTING_NIEUW_JAAR", leesBegrotingPnLRegels(db, a.id)).ebitda.bedrag.toString();
+
+    schrijfRenteRegels(db, a.id, [
+      { id: null, categorie: "RENTEKOSTEN", omschrijving: "Lening", complexnummer: null, ogbReferentie: null, laatstBekendSaldo: D(999999), rentepercentage: D(50), begrotingsbedrag: D(5000) },
+    ]);
+    const regels = leesBegrotingPnLRegels(db, a.id);
+    const rentekosten = regels.find((r) => r.regelSleutel === "RENTEKOSTEN")!;
+    expect(rentekosten.boomPositie).toBe("ONDER_EBITDA");
+    expect(bedrag(regels, "RENTEKOSTEN")).toBe("5000"); // NIET de rekenhulp (999999 x 50%) — geen renteberekeningsengine
+    const boom = berekenPnLBoom("BEGROTING_NIEUW_JAAR", regels);
+    expect(boom.onderEbitda.some((r) => r.regelSleutel === "RENTEKOSTEN")).toBe(true);
+    expect(boom.ebitda.bedrag.toString()).toBe(ebitdaVoor); // onder EBITDA raakt EBITDA nooit, ook niet met een gevuld bedrag
+  });
+
+  it("levenscyclus-pariteit en immutability: dezelfde P&L-regels voor en na vaststellen; de vastgestelde Begroting blijft ongewijzigd", () => {
+    zetMappings();
+    const a = bouwVersie("070");
+    schrijfRenteRegels(db, a.id, [{ id: null, categorie: "RENTE_OPBRENGSTEN", omschrijving: "Bankrente", complexnummer: null, ogbReferentie: null, laatstBekendSaldo: null, rentepercentage: null, begrotingsbedrag: D(300) }]);
+    const voor = serialiseer(leesBegrotingPnLRegels(db, a.id));
+    stelBegrotingVast(db, a.id, new Date(Date.UTC(2026, 8, 25)));
+    expect(serialiseer(leesBegrotingPnLRegels(db, a.id))).toBe(voor);
+  });
+
+  it("Estimated: Werkelijk + handmatige resterende verwachting per post; expliciet €0 = Actual; leeg = onbekend; wijzigen na vaststellen muteert de vastgestelde Begroting niet", () => {
+    zetMappings();
+    const a = bouwVersie("070");
+    schrijfRenteRegels(db, a.id, [{ id: null, categorie: "RENTEKOSTEN", omschrijving: "Lening", complexnummer: null, ogbReferentie: null, laatstBekendSaldo: null, rentepercentage: null, begrotingsbedrag: D(900) }]);
+    stelBegrotingVast(db, a.id, new Date(Date.UTC(2026, 8, 25)));
+    const begrotingVoor = serialiseer(leesBegrotingPnLRegels(db, a.id));
+
+    schrijfRenteEstimatedVerwachting(db, a.id, { RENTEKOSTEN: D(2500), RENTE_OPBRENGSTEN: null });
+    expect(bedrag(leesEstimatedPnLRegels(db, a.id, estimatedInvoer()), "RENTEKOSTEN")).toBe("6500"); // 4000 (default Werkelijk) + 2500
+
+    schrijfRenteEstimatedVerwachting(db, a.id, { RENTEKOSTEN: D(0), RENTE_OPBRENGSTEN: null });
+    expect(bedrag(leesEstimatedPnLRegels(db, a.id, estimatedInvoer()), "RENTEKOSTEN")).toBe("4000"); // expliciet €0 -> Estimated = Actual
+
+    expect(bedrag(leesEstimatedPnLRegels(db, a.id, estimatedInvoer()), "RENTE_OPBRENGSTEN")).toBe("ONBEKEND"); // nooit ingevuld -> onbekend, nooit €0
+    expect(serialiseer(leesBegrotingPnLRegels(db, a.id))).toBe(begrotingVoor); // vastgestelde post (900) blijft ongewijzigd
+    expect(leesBegrotingsversie(db, a.id)!.status).toBe("VASTGESTELD");
+  });
+
+  it("Estimated: Werkelijk-dekking niet bevestigd -> geen verzonnen totaal, ongeacht een bekende verwachting", () => {
+    zetMappings();
+    const a = bouwVersie("070");
+    schrijfRenteEstimatedVerwachting(db, a.id, { RENTEKOSTEN: D(2500), RENTE_OPBRENGSTEN: null });
+    const basis = estimatedInvoer();
+    const regels = leesEstimatedPnLRegels(db, a.id, { ...basis, rente: { ...basis.rente, dekkingBevestigd: false } });
+    expect(regelWaarde(regels, "RENTEKOSTEN").status).toBe("ONBEKEND");
+  });
+
+  it("geen 070-hardcoding: dezelfde code, administratie 003, dezelfde uitkomst voor dezelfde invoer", () => {
+    zetMappings();
+    const a070 = bouwVersie("070");
+    const a003 = bouwVersie("003");
+    schrijfRenteRegels(db, a070.id, [{ id: null, categorie: "RENTEKOSTEN", omschrijving: "Lening", complexnummer: null, ogbReferentie: null, laatstBekendSaldo: null, rentepercentage: null, begrotingsbedrag: D(333) }]);
+    schrijfRenteRegels(db, a003.id, [{ id: null, categorie: "RENTEKOSTEN", omschrijving: "Lening", complexnummer: null, ogbReferentie: null, laatstBekendSaldo: null, rentepercentage: null, begrotingsbedrag: D(333) }]);
+    expect(bedrag(leesBegrotingPnLRegels(db, a070.id), "RENTEKOSTEN")).toBe(bedrag(leesBegrotingPnLRegels(db, a003.id), "RENTEKOSTEN"));
   });
 });

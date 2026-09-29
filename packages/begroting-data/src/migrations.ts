@@ -4362,6 +4362,32 @@ export const MIGRATIONS: readonly Migration[] = [
       )`,
     ],
   },
+  /**
+   * Migratie 40 — Rente: Estimated-persistentie (Tranche 10): de handmatige RESTERENDE VERWACHTING per post
+   * (Rentekosten / Rente opbrengsten), het tweede deel van `Estimated = Werkelijk t/m afgesloten periode +
+   * resterende verwachting`. Exact het Estimated-patroon van migratie 34 (Algemene kosten): PER CATEGORIE, BEWUST
+   * GEEN VASTGESTELD-triggers en geen CONCEPT-check — Estimated blijft het hele jaar wijzigbaar en wordt NOOIT
+   * bevroren; de vastgestelde Begroting wordt er nooit door gemuteerd. Een rij bevat altijd een bedrag (NOT NULL;
+   * expliciet '0' is een geldige keuze), GEEN rij = nog niet ingevuld (onbekend, nooit stil 0).
+   *
+   * TEKENCONVENTIE (zie `rentePnLAdapters.ts`'s moduledoc): `resterend_bedrag` wordt voor BEIDE categorieën
+   * opgeslagen in dezelfde RUWE (CAL-FIN-001) tekenconventie als `WerkelijkRenteResultaat.categorieTotaal`, waarmee
+   * `berekenEstimatedRente` (ongewijzigd) het optelt — voor RENTE_OPBRENGSTEN is een grotere verwachte opbrengst dus
+   * een NEGATIEVER getal. Deze migratie legt uitsluitend het schema vast; de tekenconventie zelf is geen
+   * database-invariant (geen CHECK mogelijk op een economische betekenis) maar staat vast in de aanroepende laag.
+   */
+  {
+    version: 40,
+    description: "Rente: Estimated-persistentie (handmatige resterende verwachting per post)",
+    ddl: [
+      `CREATE TABLE begroting_rente_estimated_verwachting (
+        begroting_versie_id TEXT NOT NULL REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        categorie TEXT NOT NULL CHECK (categorie IN ('RENTEKOSTEN', 'RENTE_OPBRENGSTEN')),
+        resterend_bedrag TEXT NOT NULL,
+        PRIMARY KEY (begroting_versie_id, categorie)
+      )`,
+    ],
+  },
 ];
 
 function schemaMetaTableExists(db: DatabaseSync): boolean {
