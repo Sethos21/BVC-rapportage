@@ -7,6 +7,8 @@ Behoort bij `BEGROTING_MASTER_CONTRACT.md`.
 ## 1. Bron
 Claude leest vóór iedere tranche de contractset in `docs/begroting/` op de geaccepteerde branch/HEAD. Deze GitHub-versie is leidend. Oudere Drive-kopieën zijn archief.
 
+Vanaf UX-overdracht commit `5379798` leest Claude voor UI-/workflowwerk ook `docs/begroting/ux/README.md`, de relevante secties van `09_Begrotingsmodule_UX_Vastgesteld.md`, de UX-index en alleen de relevante ontwerpen/prototypebron. Prototype en JPG's zijn visuele/interactiereferentie, geen zelfstandige businesslogica. Latere expliciete Master-Contractbesluiten gaan voor.
+
 ## 2. Gates
 A Functioneel → ontbreekt: `BUSINESSBESLISSING`.  
 B Contract → echte strijd: `CONTRACTCONFLICT`.  
@@ -74,4 +76,4 @@ Eind-HEAD `50121a7`. Rente leningen + Opbrengst rente zijn aangesloten op Budget
 
 ## 10. Eerstvolgende build
 
-Tranche 11: assembleer de eerste volledige end-to-end exploitatie-P&L met bestaande modules. Bouw geen nieuwe financiële domeinlogica; behoud unknown-statussen; Verkoopresultaat blijft buiten scope.
+Tranche 11: bouw de eerste geïntegreerde, daadwerkelijk invulbare exploitatiebegrotingsworkflow en begrotings-P&L volgens de vastgestelde UX. Dit is geen managementrapportage. Er bestaat nog geen echte financiële begroting die als bestaande output mag worden verondersteld. Hergebruik de bestaande Budget/Werkelijk/Estimated/P&L-motor; vergelijkingsdata ondersteunen het opstellen van `Jouw begroting` voor het nieuwe jaar. Geen fictieve begrotingswaarden. OPEN UX-punten niet zelf ontwerpen; gebruik de STOP-codes. Canon/Erfpacht en Verkoopresultaat blijven buiten scope.
