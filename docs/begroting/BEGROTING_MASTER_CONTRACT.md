@@ -10,12 +10,14 @@ Vanaf 29-09-2026 is de contractset in deze repository de leidende bouwwaarheid v
 
 Volgorde:
 1. FO + addendum;
-2. vastgestelde UX-documentatie;
+2. vastgestelde UX-documentatie in `docs/begroting/ux/` (overgedragen in commit `5379798`);
 3. expliciet later geaccepteerde business-/architectuurbesluiten in deze contractset;
 4. bewezen technische architectuur;
 5. code.
 
 Google Drive blijft projectarchief/bronmateriaal, maar een oudere Drive-kopie overschrijft deze GitHub-contractset niet. Bij echte strijd: `CONTRACTCONFLICT`.
+
+De vastgestelde UX-set is vanaf commit `5379798` rechtstreeks in GitHub beschikbaar. Leidende UX-bronnen: `ux/FO_Exploitatiebegroting_v1.0.md`, het addendum en `ux/09_Begrotingsmodule_UX_Vastgesteld.md`. `ux/10_Begrotingsmodule_UX_Ontwerpen_Index.md`, de 13 ontwerpen en `ux/prototype/` zijn visuele/interactiereferentie en introduceren geen zelfstandige businesslogica. Latere expliciete besluiten in dit Master Contract hebben voorrang. Canon/Erfpacht blijft HOLD ondanks het aanwezige UX-ontwerp.
 
 ## 2. Harde invarianten
 
@@ -139,6 +141,10 @@ Exact: `BUSINESSBESLISSING`, `CONTRACTCONFLICT`, `BRONGAT`, `ARCHITECTUURPUNT`. 
 
 Rente leningen en Opbrengst rente zijn technisch aangesloten op Budget/Werkelijk/Estimated/P&L. Budget is handmatig; geen lening-/renteberekeningsengine. Estimated = Actual + handmatige resterende verwachting. Werkelijk uitsluitend via bewezen GL/OGB; 070 blijft BRONGAT. Voor Rente opbrengsten mag de interne ruwe boekhoudconventie negatief zijn, maar toekomstige gebruikersinvoer toont/aanvaardt een positief opbrengstbedrag en vertaalt dit aan de invoergrens.
 
-## 11. Volgende fase
+## 11. Volgende fase — Tranche 11
 
-Tranche 11 assembleert de eerste volledige end-to-end exploitatie-P&L uit bestaande geaccepteerde modules. Geen nieuwe financiële businesslogica. Minimaal: Vorige begroting | Werkelijk | Estimated | Nieuwe begroting. Onbekend blijft onbekend. Verkoopresultaat blijft buiten deze eerste rapportage.
+Tranche 11 is **geen managementrapportage** en veronderstelt niet dat al een echte financiële begroting is opgesteld. Doel is de eerste geïntegreerde, daadwerkelijk invulbare exploitatiebegrotingsworkflow volgens de vastgestelde UX-set: **Nieuwe begroting → invullen → controleren → vaststellen → terugkijken**.
+
+Het hoofdscherm is de vergelijkende P&L-werkweergave voor het opstellen van de nieuwe begroting. Vergelijkingsperspectieven zijn: Begroting vorig jaar | Realisatie huidig jaar | Estimated huidig jaar | Voorstel nieuw begrotingsjaar | Jouw begroting nieuw jaar. Vergelijkingsdata zijn onderbouwing; `Jouw begroting` is het nieuwe begrotingsproduct.
+
+Tranche 11 hergebruikt uitsluitend bestaande geaccepteerde financiële rekenlogica en bouwt de integratie/productie-UI volgens de vastgestelde UX. Geen test- of fictieve waarden presenteren als echte begrotingsdata. Ontbrekende historische begroting blijft ontbrekend/onbekend. OPEN UX-punten uit hoofdstuk 12 van `09_Begrotingsmodule_UX_Vastgesteld.md` worden niet door Claude ingevuld: waar noodzakelijk volgt `BUSINESSBESLISSING` of `CONTRACTCONFLICT`. Canon/Erfpacht en Verkoopresultaat blijven buiten scope.
