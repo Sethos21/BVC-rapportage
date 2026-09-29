@@ -1,8 +1,8 @@
 # BEGROTING_BUILD_MATRIX
 
 Bijgewerkt: 29 september 2026  
-Geaccepteerde code-HEAD: `aaca9c7`  
-Eerstvolgende delta: Estimated Niet verrekenbare BTW technisch afronden.
+Geaccepteerde code-HEAD: `cda3baf`  
+Tranche 9: TECHNISCH VOLLEDIG GESLOTEN.
 
 | Module | Begroting | Werkelijk | Estimated | P&L-integratie | Productie/UI | Resterend gat |
 |---|---|---|---|---|---|---|
@@ -17,7 +17,7 @@ Eerstvolgende delta: Estimated Niet verrekenbare BTW technisch afronden.
 | └ Nuts | GEREED | BRONGAT | GEREED | onderbouwing | UI niet gebouwd | bewezen mapping |
 | └ Servicekosten | GEREED | GEREED voor 070 GL4350+OGB4319 via §8.10 | GEREED | GEREED | UI niet gebouwd | overige mappings |
 | └ Overige | GEREED | BRONGAT | GEREED | onderbouwing | UI niet gebouwd | bewezen mapping |
-| Niet verrekenbare BTW | GEREED | GEREED 070 | BESLOTEN; technische delta resteert | GEREED Budget/Werkelijk | UI niet gebouwd | Estimated implementeren |
+| Niet verrekenbare BTW | GEREED | GEREED 070 | GEREED | GEREED | UI niet gebouwd | geen kernlogica-gat |
 | Canon erfpacht | HOLD | HOLD | HOLD | HOLD | HOLD | uit scope |
 | Opbrengst rente | niet gestart | niet gestart | niet gestart | niet gestart | niet gestart | eigen tranche |
 | Rente leningen | niet gestart | niet gestart | niet gestart | niet gestart | niet gestart | bronmodel |
@@ -30,7 +30,7 @@ Eerstvolgende delta: Estimated Niet verrekenbare BTW technisch afronden.
 - Tranche 6: `650607f` — ketenintegratie en unknown≠zero fixes.
 - Tranche 7: `de2ae0e` — Estimated Huur/Beheer/Management.
 - Tranche 8: `5125289` — Leegstandskosten Budget/Werkelijk/Estimated/P&L.
-- Tranche 9: `aaca9c7` — §8.10 gesloten; Niet verrekenbare BTW Budget/Werkelijk/P&L gebouwd.
+- Tranche 9: `cda3baf` — TECHNISCH VOLLEDIG GESLOTEN; §8.10 + Niet verrekenbare BTW Budget/Werkelijk/Estimated/P&L.
 
 ## Besluit §8.10 — 29-09-2026
 
