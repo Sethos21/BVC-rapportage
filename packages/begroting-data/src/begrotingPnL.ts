@@ -15,6 +15,8 @@ import {
   leegstandEstimatedNaarPnLBovenEbitdaRegels,
   managementBegrotingNaarPnLBovenEbitdaRegels,
   managementEstimatedNaarPnLBovenEbitdaRegels,
+  nietVerrekenbareBtwBegrotingNaarPnLBovenEbitdaRegels,
+  nietVerrekenbareBtwEstimatedNietOndersteundNaarPnLBovenEbitdaRegels,
   onderhoudBegrotingNaarPnLBovenEbitdaRegels,
   onderhoudEstimatedTotaalNaarPnLBovenEbitdaRegels,
   verzekeringEstimatedNaarPnLBovenEbitdaRegels,
@@ -41,10 +43,11 @@ import { leesFrozenGemeentelijkeLastenResultaat } from "./frozenGemeentelijkeLas
 import { leesFrozenLeegstandResultaat } from "./frozenLeegstandResultaat.js";
 import { leesFrozenGeplandOnderhoudResultaat } from "./frozenGeplandOnderhoudResultaat.js";
 import { leesFrozenModule3Resultaat } from "./frozenModule3Resultaat.js";
+import { leesFrozenNietVerrekenbareBtwResultaat } from "./frozenNietVerrekenbareBtwResultaat.js";
 import { leesFrozenBegrotingsresultaat } from "./frozenResultaat.js";
 import { leesFrozenVerzekeringResultaat } from "./frozenVerzekeringResultaat.js";
 import { leesGemeentelijkeLastenEstimatedResultaat } from "./gemeentelijkeLastenEstimated.js";
-import { herberekenBegroting } from "./herberekenen.js";
+import { herberekenBegroting, type HerberekendNietVerrekenbareBtwResultaat } from "./herberekenen.js";
 import { leesLeegstandEstimatedResultaat } from "./leegstandEstimated.js";
 import { leesOnderhoudTotaalResultaat } from "./onderhoudOrchestratie.js";
 import { leesVerzekeringEstimatedResultaat } from "./verzekeringEstimated.js";
@@ -68,6 +71,11 @@ import { leesVerzekeringEstimatedResultaat } from "./verzekeringEstimated.js";
  * Werkelijk komt uit de aparte Werkelijk-keten (`berekenPnLPeriode`), niet uit dit bestand.
  */
 
+/** Herberekend/bevroren resultaat (met regel-ids) terug naar de pure vorm — alleen de regel-uitkomsten worden uitgepakt. */
+function naarPureNietVerrekenbareBtwBegroting(b: HerberekendNietVerrekenbareBtwResultaat) {
+  return { ...b, regels: b.regels.map((r) => r.regel) };
+}
+
 /** Begroting → regels; faalt op een niet-bestaande versie. */
 export function leesBegrotingPnLRegels(db: DatabaseSync, versieId: string): PurePnLBovenEbitdaRegel[] {
   const versie = leesBegrotingsversie(db, versieId);
@@ -84,6 +92,7 @@ export function leesBegrotingPnLRegels(db: DatabaseSync, versieId: string): Pure
   let gemeentelijkeLasten: Parameters<typeof gemeentelijkeLastenBegrotingNaarPnLBovenEbitdaRegels>[0];
   let algemeneKosten: Parameters<typeof algemeneKostenBegrotingNaarPnLBovenEbitdaRegels>[0];
   let leegstand: Parameters<typeof leegstandBegrotingNaarPnLBovenEbitdaRegels>[0];
+  let nietVerrekenbareBtw: HerberekendNietVerrekenbareBtwResultaat;
 
   if (versie.status === "VASTGESTELD") {
     const frozen12 = leesFrozenBegrotingsresultaat(db, versieId);
@@ -93,7 +102,8 @@ export function leesBegrotingPnLRegels(db: DatabaseSync, versieId: string): Pure
     const frozenGl = leesFrozenGemeentelijkeLastenResultaat(db, versieId);
     const frozenAk = leesFrozenAlgemeneKostenResultaat(db, versieId);
     const frozenLeegstand = leesFrozenLeegstandResultaat(db, versieId);
-    if (frozen12 === null || frozenGepland === null || frozenCorrectief === null || frozenVerzekering === null || frozenGl === null || frozenAk === null || frozenLeegstand === null) {
+    const frozenBtw = leesFrozenNietVerrekenbareBtwResultaat(db, versieId);
+    if (frozen12 === null || frozenGepland === null || frozenCorrectief === null || frozenVerzekering === null || frozenGl === null || frozenAk === null || frozenLeegstand === null || frozenBtw === null) {
       throw new Error(`Begrotingsversie ${versieId} is VASTGESTELD, maar (een deel van) de bevroren begroting-output ontbreekt (interne inconsistentie).`);
     }
     m1 = frozen12.module1;
@@ -105,6 +115,7 @@ export function leesBegrotingPnLRegels(db: DatabaseSync, versieId: string): Pure
     gemeentelijkeLasten = frozenGl;
     algemeneKosten = frozenAk;
     leegstand = frozenLeegstand;
+    nietVerrekenbareBtw = frozenBtw;
   } else {
     const b = herberekenBegroting(db, versieId);
     m1 = b.module1;
@@ -116,6 +127,7 @@ export function leesBegrotingPnLRegels(db: DatabaseSync, versieId: string): Pure
     gemeentelijkeLasten = b.gemeentelijkeLasten;
     algemeneKosten = b.algemeneKosten;
     leegstand = b.leegstand;
+    nietVerrekenbareBtw = b.nietVerrekenbareBtw;
   }
 
   return [
@@ -127,6 +139,7 @@ export function leesBegrotingPnLRegels(db: DatabaseSync, versieId: string): Pure
     ...gemeentelijkeLastenBegrotingNaarPnLBovenEbitdaRegels(gemeentelijkeLasten),
     ...algemeneKostenBegrotingNaarPnLBovenEbitdaRegels(algemeneKosten),
     ...leegstandBegrotingNaarPnLBovenEbitdaRegels(leegstand),
+    ...nietVerrekenbareBtwBegrotingNaarPnLBovenEbitdaRegels(naarPureNietVerrekenbareBtwBegroting(nietVerrekenbareBtw)),
   ];
 }
 
@@ -209,5 +222,9 @@ export function leesEstimatedPnLRegels(db: DatabaseSync, versieId: string, invoe
         waarde: { status: "ONBEKEND", dekkingReden: "NIET_GEMAPT", toelichting: `Estimated Algemene kosten (${regel.regelSleutel}): voor deze administratie bestaat geen bewezen bronmapping naar deze categorie — Werkelijk onbekend, dus Estimated onbekend.` },
       };
     }),
+    // Niet verrekenbare BTW (Vervolgtranche 9 Deel B): GEEN Estimated-calculator — de resterende-verwachtingsmethode is
+    // niet contractueel eenduidig vastgesteld (STOP: BUSINESSBESLISSING). Blijft altijd ONBEKEND/TECHNISCH_NIET_ONDERSTEUND,
+    // zodat de Estimated-P&L eerlijk ONVOLLEDIG blijft i.p.v. de regel stilzwijgend weg te laten.
+    ...nietVerrekenbareBtwEstimatedNietOndersteundNaarPnLBovenEbitdaRegels(),
   ];
 }

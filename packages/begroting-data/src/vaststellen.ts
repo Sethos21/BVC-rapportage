@@ -14,6 +14,7 @@ import { schrijfFrozenGeplandeVerkoopResultaatZonderTransactie } from "./frozenG
 import { schrijfFrozenGeplandOnderhoudResultaatZonderTransactie } from "./frozenGeplandOnderhoudResultaat.js";
 import { schrijfFrozenLeegstandResultaatZonderTransactie, type FrozenLeegstandResultaat } from "./frozenLeegstandResultaat.js";
 import { schrijfFrozenModule3ResultaatZonderTransactie } from "./frozenModule3Resultaat.js";
+import { schrijfFrozenNietVerrekenbareBtwResultaatZonderTransactie } from "./frozenNietVerrekenbareBtwResultaat.js";
 import { schrijfFrozenRenteResultaatZonderTransactie, type FrozenRenteResultaat } from "./frozenRenteResultaat.js";
 import { schrijfFrozenBegrotingsresultaatZonderTransactie } from "./frozenResultaat.js";
 import { schrijfFrozenVerzekeringResultaatZonderTransactie } from "./frozenVerzekeringResultaat.js";
@@ -23,6 +24,7 @@ import {
   type HerberekendCorrectiefDagelijksResultaat,
   type HerberekendGeplandeVerkoopResultaat,
   type HerberekendGeplandOnderhoudResultaat,
+  type HerberekendNietVerrekenbareBtwResultaat,
   type HerberekendVerzekeringResultaat,
 } from "./herberekenen.js";
 
@@ -172,6 +174,7 @@ export interface VastgesteldeBegroting {
   leegstand: FrozenLeegstandResultaat;
   rente: FrozenRenteResultaat;
   geplandeVerkoop: HerberekendGeplandeVerkoopResultaat;
+  nietVerrekenbareBtw: HerberekendNietVerrekenbareBtwResultaat;
 }
 
 /**
@@ -245,7 +248,7 @@ export function stelBegrotingVast(db: DatabaseSync, versieId: string, vastgestel
       );
     }
 
-    const { module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud, verzekering, gemeentelijkeLasten, algemeneKosten, leegstand, rente, geplandeVerkoop } =
+    const { module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud, verzekering, gemeentelijkeLasten, algemeneKosten, leegstand, rente, geplandeVerkoop, nietVerrekenbareBtw } =
       berekenBegrotingUitInvoer(versieId, invoer);
     // Lokale, expliciete narrowing: `module3` is hier altijd niet-null, want `invoer.module3Invoer !== null`
     // is hierboven al gecontroleerd en `berekenBegrotingUitInvoer` berekent Module 3 uitsluitend (en dan
@@ -374,6 +377,17 @@ export function stelBegrotingVast(db: DatabaseSync, versieId: string, vastgestel
       throw new Error(`Begrotingsversie ${versieId}: Geplande Verkoop bevat één of meer KRITIEKE controls — vaststellen is niet mogelijk vóórdat deze zijn opgelost.`);
     }
 
+    // Niet-Verrekenbare-BTW-lifecycle-validatie (Vervolgtranche 9 Deel B, Master Contract) — UITSLUITEND lokaal voor
+    // Niet verrekenbare BTW, wijzigt niets aan hoe de eerdere modules' eigen controleVereist wordt behandeld hierboven.
+    // GEEN categoriedimensie (deze post kent er geen, zie `begroteNietVerrekenbareBtw.ts`'s moduledoc) — één
+    // module-brede beoordeeld-vlag, exact hetzelfde patroon als Geplande Verkoop.
+    if (!nietVerrekenbareBtw.beoordeeld) {
+      throw new Error(`Begrotingsversie ${versieId}: Niet verrekenbare BTW is niet beoordeeld (beoordeeld !== true) — vaststellen is niet mogelijk zonder expliciete beoordeling.`);
+    }
+    if (nietVerrekenbareBtw.controleVereist.some((c) => c.ernst === "KRITIEK")) {
+      throw new Error(`Begrotingsversie ${versieId}: Niet verrekenbare BTW bevat één of meer KRITIEKE controls — vaststellen is niet mogelijk vóórdat deze zijn opgelost.`);
+    }
+
     schrijfFrozenBegrotingsresultaatZonderTransactie(db, versieId, { module1, module2 });
     schrijfFrozenModule3ResultaatZonderTransactie(db, versieId, module3);
     schrijfFrozenGeplandOnderhoudResultaatZonderTransactie(db, versieId, geplandOnderhoud);
@@ -384,6 +398,7 @@ export function stelBegrotingVast(db: DatabaseSync, versieId: string, vastgestel
     schrijfFrozenLeegstandResultaatZonderTransactie(db, versieId, leegstand);
     schrijfFrozenRenteResultaatZonderTransactie(db, versieId, rente);
     schrijfFrozenGeplandeVerkoopResultaatZonderTransactie(db, versieId, geplandeVerkoop);
+    schrijfFrozenNietVerrekenbareBtwResultaatZonderTransactie(db, versieId, nietVerrekenbareBtw);
     markeerVastgesteld(db, versieId, vastgesteldAt); // allerlaatste schrijfactie vóór commit
 
     const versie = leesBegrotingsversie(db, versieId);
@@ -413,6 +428,7 @@ export function stelBegrotingVast(db: DatabaseSync, versieId: string, vastgestel
       leegstand,
       rente,
       geplandeVerkoop,
+      nietVerrekenbareBtw,
     };
   });
 }

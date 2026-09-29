@@ -10,6 +10,7 @@ import {
   bepaalWozVoorstelControle,
   berekenBegroteGemeentelijkeLastenPerGrootboek,
   berekenBegroteGeplandeVerkoop,
+  berekenBegroteNietVerrekenbareBtw,
   wozVoorstelVerschilControleItem,
   berekenBegroteGeplandOnderhoud,
   berekenBegroteHuuropbrengsten,
@@ -55,6 +56,9 @@ import {
   type BgLeegstandResultaat,
   type BgManagementInvoer,
   type BgManagementResultaat,
+  type BgNietVerrekenbareBtwRegelInvoer,
+  type BgNietVerrekenbareBtwRegelUitkomst,
+  type BgNietVerrekenbareBtwResultaat,
   type BgRenteCategorie,
   type BgRenteCategorieAannames,
   type BgRenteCategorieResultaat,
@@ -95,6 +99,8 @@ import {
 } from "./leegstandCategorieState.js";
 import { leesLeegstandRegels, type LeegstandRegel } from "./leegstandRegels.js";
 import { leesModule1Aannames } from "./module1Aannames.js";
+import { leesNietVerrekenbareBtwRegels, type NietVerrekenbareBtwRegel } from "./nietVerrekenbareBtwRegels.js";
+import { leesNietVerrekenbareBtwState, type NietVerrekenbareBtwState } from "./nietVerrekenbareBtwState.js";
 import {
   leesRenteCategorieState,
   type RenteCategorieStateInvoer,
@@ -261,6 +267,7 @@ export interface HerberekendeBegroting {
   leegstand: HerberekendLeegstandResultaat;
   rente: HerberekendRenteResultaat;
   geplandeVerkoop: HerberekendGeplandeVerkoopResultaat;
+  nietVerrekenbareBtw: HerberekendNietVerrekenbareBtwResultaat;
 }
 
 /** Koppelt een berekende activiteit-uitkomst terug aan haar persistente `id` — uitsluitend positioneel bepaald, nooit herzocht op inhoud (zie moduledoc). */
@@ -388,6 +395,17 @@ export interface HerberekendGeplandeVerkoopResultaat extends Omit<BgGeplandeVerk
   regels: readonly GeplandeVerkoopRegelUitkomstMetId[];
 }
 
+/** Koppelt een berekende Niet-Verrekenbare-BTW-regel-uitkomst terug aan haar persistente `id` — uitsluitend positioneel bepaald, GEEN categoriedimensie (zie `begroteNietVerrekenbareBtw.ts`'s moduledoc). */
+export interface NietVerrekenbareBtwRegelUitkomstMetId {
+  persistentieId: number;
+  regel: BgNietVerrekenbareBtwRegelUitkomst;
+}
+
+/** `BgNietVerrekenbareBtwResultaat` met uitsluitend `regels` vervangen door de ID-geannoteerde variant — alle overige velden (incl. `moduleTotaal`/`vorigJaarWerkelijk`) ongewijzigd, rechtstreeks van de pure calculator. */
+export interface HerberekendNietVerrekenbareBtwResultaat extends Omit<BgNietVerrekenbareBtwResultaat, "regels"> {
+  regels: readonly NietVerrekenbareBtwRegelUitkomstMetId[];
+}
+
 /** Kleine, herbruikbare read-transactie-helper — zelfde BEGIN/COMMIT/ROLLBACK-idioom als elders in dit package (bewust hier gedupliceerd, zie 1D.5-rapport). */
 function withReadTransaction<T>(db: DatabaseSync, fn: () => T): T {
   db.exec("BEGIN");
@@ -454,6 +472,10 @@ export interface HerberekenInvoer {
   geplandeVerkoopRegels: readonly GeplandeVerkoopRegel[];
   /** `leesGeplandeVerkoopBeoordeeld`'s "geen rij → false"-semantiek, ongewijzigd doorgegeven. */
   geplandeVerkoopBeoordeeld: boolean;
+  /** Rauwe Niet-Verrekenbare-BTW-Begrotingsregelpersistence (Vervolgtranche 9 Deel B) — GEEN pure-module-vorm; de mapping naar `BgNietVerrekenbareBtwRegelInvoer` gebeurt pas in `berekenBegrotingUitInvoer`. GEEN Estimated hier — bewust niet gebouwd (STOP: BUSINESSBESLISSING). */
+  nietVerrekenbareBtwRegels: readonly NietVerrekenbareBtwRegel[];
+  /** `leesNietVerrekenbareBtwState`'s "geen rij → beoordeeld false, vorigJaarWerkelijk null"-semantiek, ongewijzigd doorgegeven. */
+  nietVerrekenbareBtwState: NietVerrekenbareBtwState;
 }
 
 /**
@@ -509,6 +531,8 @@ export function leesHerberekenInvoerZonderTransactie(db: DatabaseSync, versieId:
     renteCategorieState: leesRenteCategorieState(db, versieId),
     geplandeVerkoopRegels: leesGeplandeVerkoopRegels(db, versieId),
     geplandeVerkoopBeoordeeld: leesGeplandeVerkoopBeoordeeld(db, versieId),
+    nietVerrekenbareBtwRegels: leesNietVerrekenbareBtwRegels(db, versieId),
+    nietVerrekenbareBtwState: leesNietVerrekenbareBtwState(db, versieId),
   };
 }
 
@@ -1025,6 +1049,45 @@ function berekenGeplandeVerkoopUitInvoer(
   return { ...resultaat, regels: regelsMetId };
 }
 
+/** Letterlijke veldkopie, GEEN transformatie/validatie — GEEN OGB-koppeling (zie `begroteNietVerrekenbareBtw.ts`'s moduledoc). */
+function naarPureNietVerrekenbareBtwInvoer(regel: NietVerrekenbareBtwRegel): BgNietVerrekenbareBtwRegelInvoer {
+  return { omschrijving: regel.omschrijving, complexnummer: regel.complexnummer, jaarbedrag: regel.jaarbedrag };
+}
+
+/**
+ * Roept de pure Niet-Verrekenbare-BTW-Begroting-calculator aan (Vervolgtranche 9 Deel B) en koppelt
+ * uitsluitend persistentie-ID's terug aan de resulterende regel-uitkomsten — positioneel
+ * (`invoer[i] ↔ resultaat.regels[i]`), zelfde principe en defensieve lengte-controle als
+ * `berekenGeplandeVerkoopUitInvoer` (geen categoriedimensie, zie `begroteNietVerrekenbareBtw.ts`'s moduledoc).
+ * GEEN Estimated: bewust niet gebouwd (STOP: BUSINESSBESLISSING).
+ */
+export function berekenNietVerrekenbareBtwUitInvoer(
+  versieId: string,
+  begrotingsjaar: number,
+  regels: readonly NietVerrekenbareBtwRegel[],
+  state: NietVerrekenbareBtwState,
+): HerberekendNietVerrekenbareBtwResultaat {
+  let resultaat: BgNietVerrekenbareBtwResultaat;
+  try {
+    resultaat = berekenBegroteNietVerrekenbareBtw(regels.map(naarPureNietVerrekenbareBtwInvoer), { begrotingsjaar, beoordeeld: state.beoordeeld, vorigJaarWerkelijk: state.vorigJaarWerkelijk });
+  } catch (error) {
+    throw new Error(`Berekening van begrotingsversie ${versieId} is mislukt tijdens Niet verrekenbare BTW: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+  }
+
+  if (resultaat.regels.length !== regels.length) {
+    throw new Error(
+      `Interne fout: begrotingsversie ${versieId}: Niet-Verrekenbare-BTW-calculator gaf ${resultaat.regels.length} regel-uitkomsten terug voor ${regels.length} ingevoerde regels — positionele id-correlatie geschonden.`,
+    );
+  }
+
+  const regelsMetId: NietVerrekenbareBtwRegelUitkomstMetId[] = resultaat.regels.map((regelUitkomst, index) => ({
+    persistentieId: regels[index]!.id,
+    regel: regelUitkomst,
+  }));
+
+  return { ...resultaat, regels: regelsMetId };
+}
+
 /**
  * Voert de pure Module-1-, Module-2-, (indien aanwezig) Module-3- en
  * Gepland-Onderhoud-berekening uit op reeds-gelezen invoer — GEEN eigen
@@ -1059,6 +1122,7 @@ export function berekenBegrotingUitInvoer(
   leegstand: HerberekendLeegstandResultaat;
   rente: HerberekendRenteResultaat;
   geplandeVerkoop: HerberekendGeplandeVerkoopResultaat;
+  nietVerrekenbareBtw: HerberekendNietVerrekenbareBtwResultaat;
 } {
   let module1: BgHuurResultaat;
   try {
@@ -1131,7 +1195,9 @@ export function berekenBegrotingUitInvoer(
 
   const geplandeVerkoop = berekenGeplandeVerkoopUitInvoer(versieId, invoer.versie.begrotingsjaar, invoer.geplandeVerkoopRegels, invoer.geplandeVerkoopBeoordeeld);
 
-  return { module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud, verzekering, gemeentelijkeLasten, algemeneKosten, leegstand, rente, geplandeVerkoop };
+  const nietVerrekenbareBtw = berekenNietVerrekenbareBtwUitInvoer(versieId, invoer.versie.begrotingsjaar, invoer.nietVerrekenbareBtwRegels, invoer.nietVerrekenbareBtwState);
+
+  return { module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud, verzekering, gemeentelijkeLasten, algemeneKosten, leegstand, rente, geplandeVerkoop, nietVerrekenbareBtw };
 }
 
 /**
@@ -1157,7 +1223,7 @@ export function berekenBegrotingUitInvoer(
  */
 export function herberekenBegroting(db: DatabaseSync, versieId: string): HerberekendeBegroting {
   const invoer = withReadTransaction(db, () => leesHerberekenInvoerZonderTransactie(db, versieId));
-  const { module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud, verzekering, gemeentelijkeLasten, algemeneKosten, leegstand, rente, geplandeVerkoop } =
+  const { module1, module2, module3, geplandOnderhoud, correctiefDagelijksOnderhoud, verzekering, gemeentelijkeLasten, algemeneKosten, leegstand, rente, geplandeVerkoop, nietVerrekenbareBtw } =
     berekenBegrotingUitInvoer(versieId, invoer);
   return {
     versie: invoer.versie,
@@ -1172,5 +1238,6 @@ export function herberekenBegroting(db: DatabaseSync, versieId: string): Herbere
     leegstand,
     rente,
     geplandeVerkoop,
+    nietVerrekenbareBtw,
   };
 }

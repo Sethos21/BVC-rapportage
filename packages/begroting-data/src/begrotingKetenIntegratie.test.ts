@@ -35,6 +35,8 @@ import { schrijfGemeentelijkeLastenModule, schrijfWozSetBevestigd } from "./geme
 import { schrijfGemeentelijkeLastenRegels } from "./gemeentelijkeLastenRegels.js";
 import { neemWozVoorstelOver } from "./gemeentelijkeLastenVoorstelOvername.js";
 import { schrijfGeplandeVerkoopBeoordeeld } from "./geplandeVerkoopBeoordeeld.js";
+import { schrijfNietVerrekenbareBtwRegels } from "./nietVerrekenbareBtwRegels.js";
+import { schrijfNietVerrekenbareBtwState } from "./nietVerrekenbareBtwState.js";
 import { schrijfGeplandOnderhoudActiviteiten } from "./geplandOnderhoudActiviteiten.js";
 import { schrijfGeplandOnderhoudBeoordeeld } from "./geplandOnderhoudBeoordeeld.js";
 import { schrijfGeplandOnderhoudEstimatedVerwachtingen } from "./geplandOnderhoudEstimated.js";
@@ -144,6 +146,7 @@ function bouwVersie(bedrijfsnr: string, opties: OpzetOpties = {}) {
   schrijfLeegstandCategorieState(db, id, Object.fromEntries(LEEGSTAND_CATEGORIEEN.map((c) => [c, { beoordeeld: true, laatstBekendServicekostenvoorschotJaar: null, laatstBekendServicekostenvoorschotJaarHerkomst: null, verwachteLeegstandsperiodeMaanden: null }])) as never);
   schrijfRenteCategorieState(db, id, Object.fromEntries(RENTE_CATEGORIEEN.map((c) => [c, { beoordeeld: true }])) as never);
   schrijfGeplandeVerkoopBeoordeeld(db, id, true);
+  schrijfNietVerrekenbareBtwState(db, id, { beoordeeld: true, vorigJaarWerkelijk: null });
   // Leegstandskosten: bewust beoordeeld zonder regels (bewuste €0-begroting) en een bewuste resterende verwachting €0 voor Q3 en Q4.
   schrijfLeegstandEstimatedVerwachting(db, id, leegstandVerwachting({}));
   return { id, activiteitId: activiteit.id, correctiefId: correctief.id };
@@ -344,8 +347,11 @@ describe("Estimated → P&L: Werkelijk exact éénmaal; Estimated muteert de vas
     expect(boom.managementEnBeheer.volledigheid.status).toBe("ONVOLLEDIG");
     expect(boom.managementEnBeheer.volledigheid.status === "ONVOLLEDIG" ? boom.managementEnBeheer.volledigheid.ontbrekend.map((o) => o.regelSleutel) : []).toEqual(["MANAGEMENTVERGOEDING"]);
     expect(boom.ebitda.volledigheid.status).toBe("ONVOLLEDIG");
-    // Met bevestigde dekking voor alle modules en alle verwachtingen ingevuld is Estimated-EBITDA volledig; het BRONGAT is dan de enige oorzaak geweest.
-    expect(berekenPnLBoom("ESTIMATED", leesEstimatedPnLRegels(db, id, invoer)).ebitda.volledigheid).toEqual({ status: "VOLLEDIG" });
+    // Met bevestigde dekking voor alle modules en alle verwachtingen ingevuld blijft alleen Niet verrekenbare BTW over
+    // (Vervolgtranche 9: Estimated BTW is een STOP, geen eigen methode aangenomen) — het Management-BRONGAT is dus opgelost.
+    const volledigOpManagementNa = berekenPnLBoom("ESTIMATED", leesEstimatedPnLRegels(db, id, invoer)).ebitda.volledigheid;
+    expect(volledigOpManagementNa.status).toBe("ONVOLLEDIG");
+    expect(volledigOpManagementNa.status === "ONVOLLEDIG" ? volledigOpManagementNa.ontbrekend.map((o) => o.regelSleutel) : []).toEqual(["NIET_VERREKENBARE_BTW"]);
   });
 
   it("14c. Huur/Beheer/Management Estimated volgen de Begroting van de versie: na vaststellen uit de bevroren output, en muteren die niet", () => {
@@ -379,7 +385,10 @@ describe("Estimated → P&L: Werkelijk exact éénmaal; Estimated muteert de vas
     const estimated = berekenPnLBoom("ESTIMATED", leesEstimatedPnLRegels(db, id, estimatedInvoer()));
     const v = vergelijkPnLResultaten(estimated, begroting);
     expect(v.algemeneKosten.afwijking.toString()).toBe(begroting.algemeneKosten.besteWetenSom.minus(estimated.algemeneKosten.besteWetenSom).toString());
-    expect(v.ebitda.volledigheid).toEqual({ status: "VOLLEDIG" });
+    // Vervolgtranche 9: Estimated Niet verrekenbare BTW is een STOP (geen eigen methode aangenomen) — blijft dus altijd
+    // ONVOLLEDIG, ongeacht de dekking van de overige modules.
+    expect(v.ebitda.volledigheid.status).toBe("ONVOLLEDIG");
+    expect(v.ebitda.volledigheid.status === "ONVOLLEDIG" ? v.ebitda.volledigheid.ontbrekend.map((o) => o.regelSleutel) : []).toEqual(["NIET_VERREKENBARE_BTW"]);
     const invoer = estimatedInvoer();
     const metGat = berekenPnLBoom("ESTIMATED", leesEstimatedPnLRegels(db, id, { ...invoer, management: { ...invoer.management, dekkingBevestigd: false } }));
     expect(vergelijkPnLResultaten(metGat, begroting).ebitda.volledigheid.status).toBe("ONVOLLEDIG");
@@ -570,5 +579,55 @@ describe("Leegstandskosten door de hele keten: één P&L-post (Vervolgtranche 8)
     schrijfLeegstandEstimatedVerwachting(db, a003.id, leegstandVerwachting({ NUTS_LEEGSTAND: { q1: null, q2: null, q3: D(15), q4: D(25) } }));
     schrijfLeegstandEstimatedVerwachting(db, a070.id, leegstandVerwachting({ NUTS_LEEGSTAND: { q1: null, q2: null, q3: D(15), q4: D(25) } }));
     expect(bedrag(leesEstimatedPnLRegels(db, a003.id, estimatedInvoer()), "LEEGSTANDSKOSTEN")).toBe(bedrag(leesEstimatedPnLRegels(db, a070.id, estimatedInvoer()), "LEEGSTANDSKOSTEN"));
+  });
+});
+
+describe("Niet verrekenbare BTW door de hele keten: één P&L-post boven EBITDA, Estimated blijft een STOP (Vervolgtranche 9 Deel B)", () => {
+  it("9. Begroting: bewust €0 zonder regels is een bekende €0; handmatige regels tellen op tot de ene P&L-post", () => {
+    zetMappings();
+    const a = bouwVersie("070"); // bouwVersie beoordeelt BTW bewust, zonder regels
+    expect(bedrag(leesBegrotingPnLRegels(db, a.id), "NIET_VERREKENBARE_BTW")).toBe("0");
+    schrijfNietVerrekenbareBtwRegels(db, a.id, [{ id: null, omschrijving: "BTW jaarafrekening", complexnummer: null, jaarbedrag: D(4750) }]);
+    const regels = leesBegrotingPnLRegels(db, a.id);
+    expect(regels.filter((r) => r.regelSleutel.startsWith("NIET_VERREKENBARE_BTW"))).toHaveLength(1);
+    expect(bedrag(regels, "NIET_VERREKENBARE_BTW")).toBe("4750");
+  });
+
+  it("14/15. één zelfstandige P&L-regel boven EBITDA, groep EXPLOITATIE_LASTEN", () => {
+    zetMappings();
+    const a = bouwVersie("070");
+    schrijfNietVerrekenbareBtwRegels(db, a.id, [{ id: null, omschrijving: "BTW", complexnummer: null, jaarbedrag: D(1200) }]);
+    const regel = leesBegrotingPnLRegels(db, a.id).find((r) => r.regelSleutel === "NIET_VERREKENBARE_BTW")!;
+    expect(regel.boomPositie).toBe("BOVEN_EBITDA");
+    expect(regel.groep).toBe("EXPLOITATIE_LASTEN");
+    const boom = berekenPnLBoom("BEGROTING_NIEUW_JAAR", leesBegrotingPnLRegels(db, a.id));
+    expect(boom.exploitatieLasten.regels.some((r) => r.regelSleutel === "NIET_VERREKENBARE_BTW")).toBe(true);
+  });
+
+  it("17. levenscyclus-pariteit en immutability: dezelfde P&L-regel voor en na vaststellen; de vastgestelde Begroting blijft ongewijzigd", () => {
+    zetMappings();
+    const a = bouwVersie("070");
+    schrijfNietVerrekenbareBtwRegels(db, a.id, [{ id: null, omschrijving: "BTW", complexnummer: null, jaarbedrag: D(900) }]);
+    const voor = serialiseer(leesBegrotingPnLRegels(db, a.id));
+    stelBegrotingVast(db, a.id, new Date(Date.UTC(2026, 8, 25)));
+    expect(serialiseer(leesBegrotingPnLRegels(db, a.id))).toBe(voor);
+  });
+
+  it("18. Estimated Niet verrekenbare BTW blijft altijd ONBEKEND/TECHNISCH_NIET_ONDERSTEUND — geen eigen methode aangenomen, blokkeert de overige Estimated-posten niet", () => {
+    zetMappings();
+    const a = bouwVersie("070");
+    const regels = leesEstimatedPnLRegels(db, a.id, estimatedInvoer());
+    const btwRegel = regels.find((r) => r.regelSleutel === "NIET_VERREKENBARE_BTW")!;
+    expect(btwRegel.waarde).toMatchObject({ status: "ONBEKEND", dekkingReden: "TECHNISCH_NIET_ONDERSTEUND" });
+    expect(bedrag(regels, "MANAGEMENTVERGOEDING")).toBe("6000"); // overige, wel-gebouwde Estimated-posten blijven onaangetast
+  });
+
+  it("13/19. geen 070-hardcoding: dezelfde code, administratie 003, dezelfde uitkomst voor dezelfde invoer", () => {
+    zetMappings();
+    const a070 = bouwVersie("070");
+    const a003 = bouwVersie("003");
+    schrijfNietVerrekenbareBtwRegels(db, a070.id, [{ id: null, omschrijving: "BTW", complexnummer: null, jaarbedrag: D(333) }]);
+    schrijfNietVerrekenbareBtwRegels(db, a003.id, [{ id: null, omschrijving: "BTW", complexnummer: null, jaarbedrag: D(333) }]);
+    expect(bedrag(leesBegrotingPnLRegels(db, a070.id), "NIET_VERREKENBARE_BTW")).toBe(bedrag(leesBegrotingPnLRegels(db, a003.id), "NIET_VERREKENBARE_BTW"));
   });
 });

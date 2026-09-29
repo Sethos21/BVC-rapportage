@@ -38,6 +38,7 @@ import { leesRenteClassificatie, schrijfRenteClassificatie, type RenteClassifica
 import { schrijfRenteRegels, type RenteRegelInvoer } from "./renteRegels.js";
 import { leesFrozenRenteResultaat } from "./frozenRenteResultaat.js";
 import { schrijfGeplandeVerkoopBeoordeeld } from "./geplandeVerkoopBeoordeeld.js";
+import { schrijfNietVerrekenbareBtwState } from "./nietVerrekenbareBtwState.js";
 import { leesGeplandeVerkoopClassificatie, schrijfGeplandeVerkoopClassificatie, type GeplandeVerkoopClassificatieRegel } from "./geplandeVerkoopClassificatie.js";
 import { leesGeplandeVerkoopGrootboekClassificatie, schrijfGeplandeVerkoopGrootboekClassificatie } from "./geplandeVerkoopGrootboekClassificatie.js";
 import { schrijfGeplandeVerkoopRegels, type GeplandeVerkoopRegelInvoer } from "./geplandeVerkoopRegels.js";
@@ -241,6 +242,7 @@ describe("stelBegrotingVast — status- en invoersemantiek", () => {
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
     stelBegrotingVast(db, versie.id, new Date());
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow(/CONCEPT/);
@@ -266,6 +268,7 @@ describe("stelBegrotingVast — status- en invoersemantiek", () => {
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.module1.contracten).toEqual([]);
   });
@@ -283,6 +286,7 @@ describe("stelBegrotingVast — status- en invoersemantiek", () => {
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
     expect(() => stelBegrotingVast(db, versie.id)).not.toThrow();
   });
 
@@ -299,6 +303,7 @@ describe("stelBegrotingVast — status- en invoersemantiek", () => {
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.module2.complexen).toEqual([]);
   });
@@ -318,6 +323,7 @@ describe("stelBegrotingVast — recomputatie tegen huidige input, niet tegen oud
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     // Bewust afwijkende, tijdelijke frozen output neerzetten (een eerdere, inmiddels-stale CONCEPT-poging).
     const stale = herberekenBegroting(db, versie.id);
@@ -357,6 +363,7 @@ describe("stelBegrotingVast — controls blokkeren niet", () => {
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     const resultaat = stelBegrotingVast(db, versie.id); // mag NIET gooien ondanks de controls
     expect(resultaat.module1.controleVereist.length).toBeGreaterThan(0);
@@ -379,6 +386,7 @@ describe("stelBegrotingVast — succesvolle vaststelling, timestamp, read-back",
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     const timestamp = new Date("2026-12-20T10:15:30.123Z");
     const resultaat = stelBegrotingVast(db, versie.id, timestamp);
@@ -405,6 +413,7 @@ describe("stelBegrotingVast — succesvolle vaststelling, timestamp, read-back",
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     const resultaat = stelBegrotingVast(db, versie.id, new Date("2026-12-20T10:15:30.123Z"));
     const gelezen = leesFrozenBegrotingsresultaat(db, versie.id)!;
@@ -427,6 +436,7 @@ describe("stelBegrotingVast — succesvolle vaststelling, timestamp, read-back",
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     const dump = () => ({
       snapshot: db.prepare(`SELECT * FROM begroting_contract_snapshot`).all(),
@@ -459,6 +469,7 @@ describe("stelBegrotingVast — immutability na vaststellen (alle publieke write
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
     const resultaat = stelBegrotingVast(db, versie.id);
 
     expect(() => wijzigConceptNaamNotitie(db, versie.id, { naam: "mag niet" })).toThrow();
@@ -488,6 +499,7 @@ describe("stelBegrotingVast — atomiciteit / rollback", () => {
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     // Al een geldige, tijdelijke frozen output vóór de poging.
     const vorigeFrozen = herberekenBegroting(db, versie.id);
@@ -529,6 +541,7 @@ describe("stelBegrotingVast — atomiciteit / rollback", () => {
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     // Al een geldige, tijdelijke frozen output vóór de poging.
     const vorigeFrozen = herberekenBegroting(db, versie.id);
@@ -571,6 +584,7 @@ describe("stelBegrotingVast — atomiciteit / rollback", () => {
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     const vorigeFrozen = herberekenBegroting(db, versie.id);
     schrijfFrozenBegrotingsresultaat(db, versie.id, vorigeFrozen);
@@ -639,6 +653,7 @@ describe("stelBegrotingVast — 070 end-to-end", () => {
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     const timestamp = new Date("2026-12-20T10:15:30.123Z");
     const resultaat = stelBegrotingVast(db, versie.id, timestamp);
@@ -704,6 +719,7 @@ describe("stelBegrotingVast — Fase 2C.5: Module 3 verplicht bij vaststellen", 
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     const resultaat = stelBegrotingVast(db, versie.id);
 
@@ -736,6 +752,7 @@ describe("stelBegrotingVast — Fase 2C.5: Module 3 verplicht bij vaststellen", 
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     const resultaat = stelBegrotingVast(db, versie.id);
 
@@ -763,6 +780,7 @@ describe("stelBegrotingVast — Fase 2C.5: Module 3 verplicht bij vaststellen", 
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     const resultaat = stelBegrotingVast(db, versie.id);
 
@@ -785,6 +803,7 @@ describe("stelBegrotingVast — Fase 2C.5: Module 3 verplicht bij vaststellen", 
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     const resultaat = stelBegrotingVast(db, versie.id);
 
@@ -815,6 +834,7 @@ describe("stelBegrotingVast — Fase 2C.5: Module 3 verplicht bij vaststellen", 
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     // Al een geldige, tijdelijke frozen output vóór de poging (Module 1/2 én Module 3).
     const vorigeFrozen = herberekenBegroting(db, versie.id);
@@ -862,6 +882,7 @@ describe("stelBegrotingVast — Fase 2C.5: Module 3 verplicht bij vaststellen", 
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     const vorigeFrozen = herberekenBegroting(db, versie.id);
     schrijfFrozenBegrotingsresultaat(db, versie.id, vorigeFrozen);
@@ -905,6 +926,7 @@ describe("stelBegrotingVast — Fase 2C.5: Module 3 verplicht bij vaststellen", 
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
     const eersteResultaat = stelBegrotingVast(db, versie.id);
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow();
@@ -970,6 +992,7 @@ describe("stelBegrotingVast — Gepland Onderhoud lifecycle-blokkade (GO-P3)", (
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow(/KRITIEKE controls/);
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
@@ -988,6 +1011,7 @@ describe("stelBegrotingVast — Gepland Onderhoud lifecycle-blokkade (GO-P3)", (
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     expect(() => stelBegrotingVast(db, versie.id)).not.toThrow();
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("VASTGESTELD");
@@ -1005,6 +1029,7 @@ describe("stelBegrotingVast — Gepland Onderhoud lifecycle-blokkade (GO-P3)", (
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     expect(() => stelBegrotingVast(db, versie.id)).not.toThrow();
   });
@@ -1020,6 +1045,7 @@ describe("stelBegrotingVast — Gepland Onderhoud lifecycle-blokkade (GO-P3)", (
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.geplandOnderhoud.reviewStatus).toBe("REVIEWED_ZERO_ACTIVITIES");
@@ -1045,6 +1071,7 @@ describe("stelBegrotingVast — Gepland Onderhoud lifecycle-blokkade (GO-P3)", (
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow(/KRITIEKE controls/);
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
@@ -1062,6 +1089,7 @@ describe("stelBegrotingVast — Gepland Onderhoud lifecycle-blokkade (GO-P3)", (
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow(/KRITIEKE controls/);
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
@@ -1079,6 +1107,7 @@ describe("stelBegrotingVast — Gepland Onderhoud lifecycle-blokkade (GO-P3)", (
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow(/KRITIEKE controls/);
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
@@ -1096,6 +1125,7 @@ describe("stelBegrotingVast — Gepland Onderhoud lifecycle-blokkade (GO-P3)", (
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.geplandOnderhoud.activiteiten[0]?.activiteit.q1.toString()).toBe("-500");
@@ -1125,6 +1155,7 @@ describe("stelBegrotingVast — Gepland Onderhoud lifecycle-blokkade (GO-P3)", (
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     const resultaat = stelBegrotingVast(db, versie.id); // mag NIET gooien ondanks de Module-1-controls
     expect(resultaat.module1.controleVereist.length).toBeGreaterThan(0);
@@ -1143,6 +1174,7 @@ describe("stelBegrotingVast — Gepland Onderhoud lifecycle-blokkade (GO-P3)", (
     schrijfLeegstandCategorieState(db, versieZonder.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versieZonder.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versieZonder.id, true);
+    schrijfNietVerrekenbareBtwState(db, versieZonder.id, { beoordeeld: true, vorigJaarWerkelijk: null });
     const resultaatZonder = stelBegrotingVast(db, versieZonder.id);
 
     const versieMet = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
@@ -1157,6 +1189,7 @@ describe("stelBegrotingVast — Gepland Onderhoud lifecycle-blokkade (GO-P3)", (
     schrijfLeegstandCategorieState(db, versieMet.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versieMet.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versieMet.id, true);
+    schrijfNietVerrekenbareBtwState(db, versieMet.id, { beoordeeld: true, vorigJaarWerkelijk: null });
     const resultaatMet = stelBegrotingVast(db, versieMet.id);
 
     expect(normaliseer(resultaatZonder.module1)).toEqual(normaliseer(resultaatMet.module1));
@@ -1204,6 +1237,7 @@ describe("stelBegrotingVast — Gepland Onderhoud: volledige pipeline en frozen 
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("VASTGESTELD");
@@ -1233,6 +1267,7 @@ describe("stelBegrotingVast — Gepland Onderhoud: volledige pipeline en frozen 
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     const dump = () => ({
       activiteiten: db.prepare(`SELECT * FROM begroting_gepland_onderhoud_activiteit`).all(),
@@ -1289,6 +1324,7 @@ describe("stelBegrotingVast — Gepland Onderhoud atomiciteit (GO-P3)", () => {
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     // Test-only trigger: blokkeert ELKE INSERT op de GO-activiteit-frozen-tabel — die wordt, volgens de
     // schrijfvolgorde in vaststellen.ts, bereikt NADAT Module 1/2 EN Module 3 al succesvol binnen DEZE
@@ -1326,6 +1362,7 @@ describe("stelBegrotingVast — Gepland Onderhoud atomiciteit (GO-P3)", () => {
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     // Test-only trigger: blokkeert specifiek de CONCEPT→VASTGESTELD-overgang zelf. Op het moment dat deze
     // vuurt, zijn Module 1, Module 2, Module 3 ÉN Gepland Onderhoud binnen DEZE mislukte poging al
@@ -1406,6 +1443,7 @@ describe("stelBegrotingVast — Correctief/Dagelijks Onderhoud lifecycle-blokkad
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow(/KRITIEKE controls/);
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
@@ -1423,6 +1461,7 @@ describe("stelBegrotingVast — Correctief/Dagelijks Onderhoud lifecycle-blokkad
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow(/KRITIEKE controls/);
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
@@ -1443,6 +1482,7 @@ describe("stelBegrotingVast — Correctief/Dagelijks Onderhoud lifecycle-blokkad
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow(/KRITIEKE controls/);
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
@@ -1459,6 +1499,7 @@ describe("stelBegrotingVast — Correctief/Dagelijks Onderhoud lifecycle-blokkad
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     expect(() => stelBegrotingVast(db, versie.id)).not.toThrow();
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("VASTGESTELD");
@@ -1475,6 +1516,7 @@ describe("stelBegrotingVast — Correctief/Dagelijks Onderhoud lifecycle-blokkad
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     expect(() => stelBegrotingVast(db, versie.id)).not.toThrow();
   });
@@ -1489,6 +1531,7 @@ describe("stelBegrotingVast — Correctief/Dagelijks Onderhoud lifecycle-blokkad
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.correctiefDagelijksOnderhoud.reviewStatus).toBe("REVIEWED_ZERO_RULES");
@@ -1514,6 +1557,7 @@ describe("stelBegrotingVast — Correctief/Dagelijks Onderhoud lifecycle-blokkad
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.correctiefDagelijksOnderhoud.totaalJaar.toString()).toBe("700");
@@ -1544,6 +1588,7 @@ describe("stelBegrotingVast — Correctief/Dagelijks Onderhoud lifecycle-blokkad
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.module1.controleVereist.some((c) => c.contractnummer === "0000000028" && c.bericht.includes("meerdere indexatiepercentage-overrides"))).toBe(true);
@@ -1561,6 +1606,7 @@ describe("stelBegrotingVast — Correctief/Dagelijks Onderhoud lifecycle-blokkad
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.correctiefDagelijksOnderhoud).toBeDefined();
@@ -1594,6 +1640,7 @@ describe("stelBegrotingVast — Correctief/Dagelijks Onderhoud atomiciteit (CD-P
     schrijfLeegstandCategorieState(db, versieId, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versieId, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versieId, true);
+    schrijfNietVerrekenbareBtwState(db, versieId, { beoordeeld: true, vorigJaarWerkelijk: null });
   }
 
   it("11. geforceerde fout tijdens schrijven frozen Correctief/Dagelijks Onderhoud laat volledige rollback zien — status blijft CONCEPT, geen enkele frozen output (Module 1/2/3/GO/CD)", () => {
@@ -1677,6 +1724,7 @@ describe("stelBegrotingVast — Correctief/Dagelijks Onderhoud immutability (CD-
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
     stelBegrotingVast(db, versie.id);
 
     expect(() =>
@@ -1723,6 +1771,7 @@ describe("stelBegrotingVast — Correctief/Dagelijks Onderhoud immutability (CD-
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
     stelBegrotingVast(db, versie.id);
 
     expect(() =>
@@ -1759,6 +1808,7 @@ describe("stelBegrotingVast — Correctief/Dagelijks Onderhoud frozen-onafhankel
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
     stelBegrotingVast(db, versie.id);
 
     const vóórDirecteMutatie = leesFrozenCorrectiefDagelijksOnderhoudResultaat(db, versie.id)!;
@@ -1833,6 +1883,7 @@ describe("stelBegrotingVast — Verzekeringen lifecycle-blokkade (OB-032)", () =
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow(/KRITIEKE controls/);
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
@@ -1849,6 +1900,7 @@ describe("stelBegrotingVast — Verzekeringen lifecycle-blokkade (OB-032)", () =
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow(/KRITIEKE controls/);
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
@@ -1864,6 +1916,7 @@ describe("stelBegrotingVast — Verzekeringen lifecycle-blokkade (OB-032)", () =
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow(/KRITIEKE controls/);
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
@@ -1879,6 +1932,7 @@ describe("stelBegrotingVast — Verzekeringen lifecycle-blokkade (OB-032)", () =
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow(/KRITIEKE controls/);
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
@@ -1894,6 +1948,7 @@ describe("stelBegrotingVast — Verzekeringen lifecycle-blokkade (OB-032)", () =
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     expect(() => stelBegrotingVast(db, versie.id)).not.toThrow();
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("VASTGESTELD");
@@ -1909,6 +1964,7 @@ describe("stelBegrotingVast — Verzekeringen lifecycle-blokkade (OB-032)", () =
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.verzekering.totaalBerekendBegroot.toString()).toBe("12180");
@@ -1923,6 +1979,7 @@ describe("stelBegrotingVast — Verzekeringen lifecycle-blokkade (OB-032)", () =
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.verzekering.reviewStatus).toBe("REVIEWED_ZERO_POLICIES");
@@ -1945,6 +2002,7 @@ describe("stelBegrotingVast — Verzekeringen lifecycle-blokkade (OB-032)", () =
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.verzekering.totaalBerekendBegroot.toString()).toBe("6000");
@@ -1964,6 +2022,7 @@ describe("stelBegrotingVast — Verzekeringen lifecycle-blokkade (OB-032)", () =
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.verzekering.totaalBerekendBegroot.toString()).toBe("0");
@@ -1980,6 +2039,7 @@ describe("stelBegrotingVast — Verzekeringen lifecycle-blokkade (OB-032)", () =
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.verzekering.totaalBerekendBegroot.toString()).toBe("12360");
@@ -1998,6 +2058,7 @@ describe("stelBegrotingVast — Verzekeringen lifecycle-blokkade (OB-032)", () =
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.verzekering.totaalBerekendBegroot.toString()).toBe("12180");
@@ -2025,6 +2086,7 @@ describe("stelBegrotingVast — Verzekeringen lifecycle-blokkade (OB-032)", () =
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(
@@ -2043,6 +2105,7 @@ describe("stelBegrotingVast — Verzekeringen lifecycle-blokkade (OB-032)", () =
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.verzekering).toBeDefined();
@@ -2080,6 +2143,7 @@ describe("stelBegrotingVast — Verzekeringen atomiciteit (OB-032)", () => {
     schrijfLeegstandCategorieState(db, versieId, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versieId, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versieId, true);
+    schrijfNietVerrekenbareBtwState(db, versieId, { beoordeeld: true, vorigJaarWerkelijk: null });
   }
 
   it("15. geforceerde fout tijdens schrijven frozen Verzekeringen laat volledige rollback zien — status blijft CONCEPT, geen enkele frozen output", () => {
@@ -2165,6 +2229,7 @@ describe("stelBegrotingVast — Verzekeringen immutability (OB-032)", () => {
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
     stelBegrotingVast(db, versie.id);
 
     expect(() =>
@@ -2206,6 +2271,7 @@ describe("stelBegrotingVast — Verzekeringen immutability (OB-032)", () => {
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
     stelBegrotingVast(db, versie.id);
 
     expect(() => db.prepare(`UPDATE begroting_verzekering_regel SET verzekeraar = 'x' WHERE id = ?`).run(regel!.id)).toThrow(/immutable/);
@@ -2244,6 +2310,7 @@ describe("stelBegrotingVast — Verzekeringen frozen-onafhankelijkheid (OB-032)"
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
     stelBegrotingVast(db, versie.id);
 
     const vóórDirecteMutatie = leesFrozenVerzekeringResultaat(db, versie.id)!;
@@ -2309,6 +2376,7 @@ describe("stelBegrotingVast — Gemeentelijke Lasten/WOZ lifecycle-blokkade (OB-
     schrijfLeegstandCategorieState(db, versieId, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versieId, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versieId, true);
+    schrijfNietVerrekenbareBtwState(db, versieId, { beoordeeld: true, vorigJaarWerkelijk: null });
   }
 
   it("1. beoordeeld=false blokkeert vaststellen, ondanks een verder volledig geldig WOZ-object", () => {
@@ -2581,6 +2649,7 @@ describe("stelBegrotingVast — Gemeentelijke Lasten/WOZ atomiciteit (OB-033, fa
     schrijfLeegstandCategorieState(db, versieId, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versieId, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versieId, true);
+    schrijfNietVerrekenbareBtwState(db, versieId, { beoordeeld: true, vorigJaarWerkelijk: null });
   }
 
   it("16 (scenario U). geforceerde fout tijdens schrijven frozen Gemeentelijke-Lasten laat volledige rollback zien — status blijft CONCEPT, geen enkele frozen output (ook niet van eerder geschreven modules)", () => {
@@ -2675,6 +2744,7 @@ describe("stelBegrotingVast — Gemeentelijke Lasten/WOZ immutability (OB-033, f
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
     stelBegrotingVast(db, versie.id);
 
     expect(() =>
@@ -2737,6 +2807,7 @@ describe("stelBegrotingVast — Gemeentelijke Lasten/WOZ immutability (OB-033, f
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
     stelBegrotingVast(db, versie.id);
 
     expect(() => db.prepare(`UPDATE begroting_woz_object SET complexnummer = 'x' WHERE id = ?`).run(wozObject!.id)).toThrow(/immutable/);
@@ -2783,6 +2854,7 @@ describe("stelBegrotingVast — Gemeentelijke Lasten/WOZ frozen-onafhankelijkhei
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
     stelBegrotingVast(db, versie.id);
 
     const vóórDirecteMutatie = leesFrozenGemeentelijkeLastenResultaat(db, versie.id)!;
@@ -2856,6 +2928,7 @@ describe("stelBegrotingVast — Algemene Kosten lifecycle-blokkade (OB-035/036, 
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow(/JURIDISCHE_KOSTEN is niet beoordeeld/);
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
@@ -2872,6 +2945,7 @@ describe("stelBegrotingVast — Algemene Kosten lifecycle-blokkade (OB-035/036, 
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow(/KRITIEKE controls/);
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
@@ -2886,6 +2960,7 @@ describe("stelBegrotingVast — Algemene Kosten lifecycle-blokkade (OB-035/036, 
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow(/KRITIEKE controls/);
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
@@ -2899,6 +2974,7 @@ describe("stelBegrotingVast — Algemene Kosten lifecycle-blokkade (OB-035/036, 
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     expect(() => stelBegrotingVast(db, versie.id)).not.toThrow();
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("VASTGESTELD");
@@ -2911,6 +2987,7 @@ describe("stelBegrotingVast — Algemene Kosten lifecycle-blokkade (OB-035/036, 
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     const resultaat = stelBegrotingVast(db, versie.id);
     for (const c of resultaat.algemeneKosten.perCategorie) {
@@ -2942,6 +3019,7 @@ describe("stelBegrotingVast — Algemene Kosten lifecycle-blokkade (OB-035/036, 
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.algemeneKosten.accountantskosten.toString()).toBe("4000");
@@ -2961,6 +3039,7 @@ describe("stelBegrotingVast — Algemene Kosten lifecycle-blokkade (OB-035/036, 
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     stelBegrotingVast(db, versie.id);
     const frozen = leesFrozenAlgemeneKostenResultaat(db, versie.id)!;
@@ -2974,6 +3053,7 @@ describe("stelBegrotingVast — Algemene Kosten lifecycle-blokkade (OB-035/036, 
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.algemeneKosten).toBeDefined();
@@ -3003,6 +3083,7 @@ describe("stelBegrotingVast — Algemene Kosten atomiciteit (OB-035/036, fase P3
     schrijfLeegstandCategorieState(db, versieId, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versieId, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versieId, true);
+    schrijfNietVerrekenbareBtwState(db, versieId, { beoordeeld: true, vorigJaarWerkelijk: null });
   }
 
   it("9. geforceerde fout tijdens schrijven frozen Algemene-Kosten laat volledige rollback zien — status blijft CONCEPT, geen enkele frozen output", () => {
@@ -3084,6 +3165,7 @@ describe("stelBegrotingVast — Algemene Kosten immutability (OB-035/036, fase P
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
     stelBegrotingVast(db, versie.id);
 
     expect(() =>
@@ -3130,6 +3212,7 @@ describe("stelBegrotingVast — Algemene Kosten immutability (OB-035/036, fase P
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
     stelBegrotingVast(db, versie.id);
 
     expect(() => db.prepare(`UPDATE begroting_algemene_kosten_regel SET omschrijving = 'x' WHERE id = ?`).run(regel!.id)).toThrow(/immutable/);
@@ -3166,6 +3249,7 @@ describe("stelBegrotingVast — Algemene Kosten frozen-onafhankelijkheid (OB-035
     schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
     stelBegrotingVast(db, versie.id);
 
     const vóórDirecteMutatie = leesFrozenAlgemeneKostenResultaat(db, versie.id)!;
@@ -3232,6 +3316,7 @@ describe("stelBegrotingVast — Leegstand lifecycle-blokkade (OB-031, fase P3)",
     schrijfAlgemeneKostenCategorieState(db, versieId, ALGEMENE_KOSTEN_ZERO_REGELS);
     schrijfRenteCategorieState(db, versieId, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versieId, true);
+    schrijfNietVerrekenbareBtwState(db, versieId, { beoordeeld: true, vorigJaarWerkelijk: null });
   }
 
   it("1. één categorie NOT_REVIEWED blokkeert vaststellen, ondanks twee andere volledig beoordeelde categorieën", () => {
@@ -3334,6 +3419,7 @@ describe("stelBegrotingVast — Leegstand atomiciteit (OB-031, fase P3)", () => 
     );
     schrijfRenteCategorieState(db, versieId, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versieId, true);
+    schrijfNietVerrekenbareBtwState(db, versieId, { beoordeeld: true, vorigJaarWerkelijk: null });
   }
 
   it("1. geforceerde fout tijdens schrijven frozen Leegstand laat volledige rollback zien — status blijft CONCEPT, geen enkele frozen output", () => {
@@ -3412,6 +3498,7 @@ describe("stelBegrotingVast — Leegstand immutability (OB-031, fase P3)", () =>
     );
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
     stelBegrotingVast(db, versie.id);
 
     expect(() =>
@@ -3451,6 +3538,7 @@ describe("stelBegrotingVast — Leegstand immutability (OB-031, fase P3)", () =>
     );
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
     stelBegrotingVast(db, versie.id);
 
     expect(() => db.prepare(`UPDATE begroting_leegstand_regel SET omschrijving = 'x' WHERE id = ?`).run(regel!.id)).toThrow(/immutable/);
@@ -3501,6 +3589,7 @@ describe("stelBegrotingVast — Leegstand frozen-onafhankelijkheid (OB-031, fase
     );
     schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
     // 070-bewezen classificatie (bronproef 2026-09): OGB 4319 = "Servicekosten leegstand".
     schrijfLeegstandClassificatie(db, NIEUWE_VERSIE_INPUT.bedrijfsnr, [
       { ogbKostensoort: "4319", ogbKostensoortOmschrijving: "Servicekosten leegstand", categorie: "SERVICEKOSTEN_LEEGSTAND" },
@@ -3588,6 +3677,7 @@ describe("stelBegrotingVast — Rente lifecycle-blokkade (OB-037/038, fase P3)",
     schrijfAlgemeneKostenCategorieState(db, versieId, ALGEMENE_KOSTEN_ZERO_REGELS);
     schrijfLeegstandCategorieState(db, versieId, LEEGSTAND_ZERO_REGELS);
     schrijfGeplandeVerkoopBeoordeeld(db, versieId, true);
+    schrijfNietVerrekenbareBtwState(db, versieId, { beoordeeld: true, vorigJaarWerkelijk: null });
   }
 
   it("1. één categorie NOT_REVIEWED blokkeert vaststellen, ondanks de andere volledig beoordeelde categorie", () => {
@@ -3687,6 +3777,7 @@ describe("stelBegrotingVast — Rente atomiciteit (OB-037/038, fase P3)", () => 
       Object.fromEntries(RENTE_CATEGORIEEN.map((categorie) => [categorie, { beoordeeld: true }])) as Record<BgRenteCategorie, RenteCategorieStateInvoer>,
     );
     schrijfGeplandeVerkoopBeoordeeld(db, versieId, true);
+    schrijfNietVerrekenbareBtwState(db, versieId, { beoordeeld: true, vorigJaarWerkelijk: null });
   }
 
   it("1. geforceerde fout tijdens schrijven frozen Rente laat volledige rollback zien — status blijft CONCEPT, geen enkele frozen output", () => {
@@ -3763,6 +3854,7 @@ describe("stelBegrotingVast — Rente immutability (OB-037/038, fase P3)", () =>
       Object.fromEntries(RENTE_CATEGORIEEN.map((categorie) => [categorie, { beoordeeld: true }])) as Record<BgRenteCategorie, RenteCategorieStateInvoer>,
     );
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
     stelBegrotingVast(db, versie.id);
 
     expect(() =>
@@ -3798,6 +3890,7 @@ describe("stelBegrotingVast — Rente immutability (OB-037/038, fase P3)", () =>
       Object.fromEntries(RENTE_CATEGORIEEN.map((categorie) => [categorie, { beoordeeld: true }])) as Record<BgRenteCategorie, RenteCategorieStateInvoer>,
     );
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
     stelBegrotingVast(db, versie.id);
 
     expect(() => db.prepare(`UPDATE begroting_rente_regel SET omschrijving = 'x' WHERE id = ?`).run(regel!.id)).toThrow(/immutable/);
@@ -3847,6 +3940,7 @@ describe("stelBegrotingVast — Rente frozen-onafhankelijkheid (OB-037/038, fase
     const klassificatie023: RenteClassificatieRegel[] = [{ ogbKostensoort: "4604", ogbKostensoortOmschrijving: "Rente lening .500", categorie: "RENTEKOSTEN" }];
     schrijfRenteClassificatie(db, NIEUWE_VERSIE_INPUT.bedrijfsnr, klassificatie023);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     // Stap 1: vaststellen.
     stelBegrotingVast(db, versie.id);
@@ -3933,6 +4027,7 @@ describe("stelBegrotingVast — Geplande Verkoop lifecycle-blokkade (OB-039, fas
     zetMinimaleBasisNeer(versie.id);
     schrijfGeplandeVerkoopRegels(db, versie.id, [regelInvoer({ objectreferentie: "  " })]);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow(/Geplande Verkoop bevat één of meer KRITIEKE controls/);
   });
@@ -3942,6 +4037,7 @@ describe("stelBegrotingVast — Geplande Verkoop lifecycle-blokkade (OB-039, fas
     zetMinimaleBasisNeer(versie.id);
     schrijfGeplandeVerkoopRegels(db, versie.id, [regelInvoer({ omschrijving: "" })]);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow(/Geplande Verkoop bevat één of meer KRITIEKE controls/);
   });
@@ -3951,6 +4047,7 @@ describe("stelBegrotingVast — Geplande Verkoop lifecycle-blokkade (OB-039, fas
     zetMinimaleBasisNeer(versie.id);
     schrijfGeplandeVerkoopRegels(db, versie.id, [regelInvoer({ geplandeVerkoopdatum: null })]);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     expect(() => stelBegrotingVast(db, versie.id)).toThrow(/Geplande Verkoop bevat één of meer KRITIEKE controls/);
   });
@@ -3962,6 +4059,7 @@ describe("stelBegrotingVast — Geplande Verkoop lifecycle-blokkade (OB-039, fas
       regelInvoer({ verwachteVerkoopopbrengst: null, verwachteBoekwaarde: null, verwachteVerkoopkosten: null }),
     ]);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     expect(() => stelBegrotingVast(db, versie.id)).not.toThrow();
     expect(leesBegrotingsversie(db, versie.id)!.status).toBe("VASTGESTELD");
@@ -3971,6 +4069,7 @@ describe("stelBegrotingVast — Geplande Verkoop lifecycle-blokkade (OB-039, fas
     const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
     zetMinimaleBasisNeer(versie.id);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     stelBegrotingVast(db, versie.id);
     const frozen = leesFrozenGeplandeVerkoopResultaat(db, versie.id)!;
@@ -3983,6 +4082,7 @@ describe("stelBegrotingVast — Geplande Verkoop lifecycle-blokkade (OB-039, fas
     zetMinimaleBasisNeer(versie.id);
     schrijfGeplandeVerkoopRegels(db, versie.id, [regelInvoer()]);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
     const resultaat = stelBegrotingVast(db, versie.id);
     expect(resultaat.geplandeVerkoop).toBeDefined();
@@ -4017,6 +4117,7 @@ describe("stelBegrotingVast — Geplande Verkoop atomiciteit (OB-039, fase P3)",
       },
     ]);
     schrijfGeplandeVerkoopBeoordeeld(db, versieId, true);
+    schrijfNietVerrekenbareBtwState(db, versieId, { beoordeeld: true, vorigJaarWerkelijk: null });
   }
 
   it("1. geforceerde fout tijdens schrijven frozen Geplande Verkoop laat volledige rollback zien — status blijft CONCEPT, geen enkele frozen output", () => {
@@ -4101,6 +4202,7 @@ describe("stelBegrotingVast — Geplande Verkoop immutability (OB-039, fase P3)"
       },
     ]);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
     stelBegrotingVast(db, versie.id);
 
     expect(() =>
@@ -4141,6 +4243,7 @@ describe("stelBegrotingVast — Geplande Verkoop immutability (OB-039, fase P3)"
       },
     ]);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
     stelBegrotingVast(db, versie.id);
 
     expect(() => db.prepare(`UPDATE begroting_geplande_verkoop_regel SET omschrijving = 'gewijzigd' WHERE id = ?`).run(regel!.id)).toThrow(/immutable/);
@@ -4192,6 +4295,7 @@ describe("stelBegrotingVast — Geplande Verkoop frozen-onafhankelijkheid (OB-03
       },
     ]);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
     // 023-bewezen classificatie (bronproef 2026-09): OGB 3010 = "afwaardering ASW" -> BOEKWAARDE_AFBOEKING.
     const klassificatie023: GeplandeVerkoopClassificatieRegel[] = [{ ogbKostensoort: "3010", ogbKostensoortOmschrijving: "afwaardering ASW", component: "BOEKWAARDE_AFBOEKING" }];
     schrijfGeplandeVerkoopClassificatie(db, NIEUWE_VERSIE_INPUT.bedrijfsnr, klassificatie023);
@@ -4254,6 +4358,7 @@ describe("stelBegrotingVast — Geplande Verkoop frozen-onafhankelijkheid (OB-03
       },
     ]);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
     // 023-bewezen: GL 08830 "Opbrengst verkoop pand" droeg op BEIDE geconstateerde boekingen GEEN OGB-kostensoort.
     schrijfGeplandeVerkoopGrootboekClassificatie(db, NIEUWE_VERSIE_INPUT.bedrijfsnr, [
       { grootboekrekening: "08830", grootboekOmschrijving: "Opbrengst verkoop pand", component: "VERKOOPOPBRENGST" },

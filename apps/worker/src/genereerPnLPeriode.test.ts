@@ -99,6 +99,8 @@ describe("genereerPnLPeriode — productie-integratie (echte xlsx-bron + echte P
       boekingRij("4990", 449.14, "4995", "Bankkosten"),
       // Servicekosten Eigenaar (GL4350/OGB4319).
       boekingRij("4350", 199.08, "4319", "Servicekosten leegstand"),
+      // Niet verrekenbare BTW (Vervolgtranche 9 Deel B, GL4903 - bewezen bron voor 070, packages/config/README.md).
+      boekingRij("4903", 610.42),
     ]);
 
     const mappingDb = openOrCreateDatabase(pnlBronmappingDatabasePad(root, ADMINISTRATIE_ID));
@@ -116,23 +118,25 @@ describe("genereerPnLPeriode — productie-integratie (echte xlsx-bron + echte P
       voegMapping(mappingDb, { grootboekrekening: "4990", economischeModule: "ALGEMENE_KOSTEN", economischeCategorie: "ALGEMENE_KOSTEN" });
       voegMapping(mappingDb, { grootboekrekening: "4990", ogbKostensoort: "4995", economischeModule: "ALGEMENE_KOSTEN", economischeCategorie: "BANKKOSTEN" });
       voegMapping(mappingDb, { grootboekrekening: "4350", ogbKostensoort: "4319", economischeModule: "SERVICEKOSTEN_EIGENAAR", economischeCategorie: "SERVICEKOSTEN_LEEGSTAND" });
+      voegMapping(mappingDb, { grootboekrekening: "4903", economischeModule: "NIET_VERREKENBARE_BTW", economischeCategorie: "NIET_VERREKENBARE_BTW" });
     } finally {
       mappingDb.close();
     }
 
     const resultaat = genereerPnLPeriode(root, ADMINISTRATIE_ID, { boekjaar: 2026, boekperiodeTotEnMet: "06" });
 
-    // A: bewijst dat de Worker daadwerkelijk de acht productieketens + berekenPnLBoom heeft aangeroepen (echte, niet-triviale bedragen).
+    // A: bewijst dat de Worker daadwerkelijk de acht (nu negen) productieketens + berekenPnLBoom heeft aangeroepen (echte, niet-triviale bedragen).
     expect(resultaat.resultaat.totaalOpbrengsten.besteWetenSom.toString()).toBe("341734.81");
-    expect(resultaat.resultaat.totaalKosten.besteWetenSom.toString()).toBe("30555.15");
-    // D: reproduceert exact de door GAT-013 bronbewezen H1-EBITDA.
-    expect(resultaat.resultaat.ebitda.bedrag.toString()).toBe("311179.66");
-    expect(resultaat.resultaat.ebitda.bedrag.toDecimalPlaces(0).toString()).toBe("311180");
+    // Vervolgtranche 9 Deel B: +610.42 (GL4903, Niet verrekenbare BTW, nu voor het eerst bewezen gemapt) t.o.v. de eerdere 30555.15.
+    expect(resultaat.resultaat.totaalKosten.besteWetenSom.toString()).toBe("31165.57");
+    // D: reproduceert de door GAT-013 bronbewezen H1-uitkomst, aangevuld met de nieuwe, bewezen BTW-post.
+    expect(resultaat.resultaat.ebitda.bedrag.toString()).toBe("310569.24");
     // Vervolgtranche 6 (Unknown != zero): de bedragen blijven exact, maar posten zonder bewezen mapping in DEZE mapping-DB (Management, Accountant,
     // Juridisch en — in dit fixture bewust niet gemapt — Makelaar/taxatie) zijn ONBEKEND in plaats van een bevestigde €0; EBITDA is daardoor ONVOLLEDIG.
-    // Vervolgtranche 9 (sluit ARCHITECTUURPUNT §8.10): GL4350/OGB4319 (€199,08) wordt nu, via `PNL_PRESENTATIEMAPPINGEN`, onder Leegstandskosten
+    // Vervolgtranche 9 Deel A (sluit ARCHITECTUURPUNT §8.10): GL4350/OGB4319 (€199,08) wordt nu, via `PNL_PRESENTATIEMAPPINGEN`, onder Leegstandskosten
     // gepresenteerd i.p.v. onder Servicekosten Eigenaar — het bedrag zelf verandert niet (zelfde EXPLOITATIE_LASTEN-groep), alleen de post
     // Leegstandskosten is daardoor gedeeltelijk (niet meer volledig) onbekend: Nuts/Overige blijven ontbreken via LEEGSTANDSKOSTEN_ONBEKEND_ONDERDEEL.
+    // Vervolgtranche 9 Deel B: NIET_VERREKENBARE_BTW (GL4903) is nu voor het eerst bewezen gemapt en dus BEKEND — verdwijnt uit ontbrekend.
     const ebitdaVolledigheid = resultaat.resultaat.ebitda.volledigheid;
     expect(ebitdaVolledigheid.status).toBe("ONVOLLEDIG");
     expect(ebitdaVolledigheid.status === "ONVOLLEDIG" ? ebitdaVolledigheid.ontbrekend.map((o) => o.regelSleutel).sort() : []).toEqual([
@@ -149,6 +153,10 @@ describe("genereerPnLPeriode — productie-integratie (echte xlsx-bron + echte P
     expect(leegstandRegel.waarde.status).toBe("BEKEND");
     expect(leegstandRegel.waarde.status === "BEKEND" ? leegstandRegel.waarde.bedrag.toString() : null).toBe("199.08");
     expect(resultaat.resultaat.exploitatieLasten.regels.find((r) => r.regelSleutel === "SERVICEKOSTEN_LEEGSTAND")).toBeUndefined();
+    // Niet verrekenbare BTW (Vervolgtranche 9 Deel B): één zelfstandige, BEKENDE P&L-regel.
+    const btwRegel = resultaat.resultaat.exploitatieLasten.regels.find((r) => r.regelSleutel === "NIET_VERREKENBARE_BTW")!;
+    expect(btwRegel.waarde.status).toBe("BEKEND");
+    expect(btwRegel.waarde.status === "BEKEND" ? btwRegel.waarde.bedrag.toString() : null).toBe("610.42");
 
     // Renderer: het geschreven HTML-rapport bevat de EBITDA-uitkomst, geen eigen herberekening.
     const geschrevenHtml = readFileSync(resultaat.pad, "utf-8");

@@ -4169,6 +4169,177 @@ export const MIGRATIONS: readonly Migration[] = [
       )`,
     ],
   },
+  /**
+   * Migratie 38 — Niet verrekenbare BTW: concept-input + bevroren Begroting-output (Vervolgtranche 9 Deel B,
+   * Master Contract). GEEN Estimated-tabel: de resterende-verwachtingsmethode is bewust NIET contractueel
+   * eenduidig vastgesteld (STOP: BUSINESSBESLISSING) — uitsluitend Begroting/Werkelijk/P&L worden gebouwd.
+   *
+   * GEEN CATEGORIEDIMENSIE (zelfde patroon als Geplande Verkoop/migratie 22-23): "Niet verrekenbare BTW" is
+   * één homogene regelsoort — `begroting_niet_verrekenbare_btw_module` draagt de module-brede `beoordeeld`-vlag
+   * PLUS `vorig_jaar_werkelijk` (de puur informatieve, apart doorgegeven voorstelbron — Master Contract: "voorstel
+   * mag gebaseerd zijn op Werkelijk vorig jaar"; NULL = geen betrouwbare historische bron, blokkeert niet).
+   *
+   * `begroting_niet_verrekenbare_btw_regel` — complete-list-save concept-input, zelfde vorm als
+   * `begroting_algemene_kosten_regel` maar zonder OGB-koppeling (geen classificatieconcept voor deze post).
+   *
+   * Bevroren output (drie tabellen, zelfde patroon als migratie 23): `begroting_frozen_niet_verrekenbare_btw_
+   * resultaat` (module-breed: beoordeeld/review_status/module_totaal/vorig_jaar_werkelijk — GEDENORMALISEERD
+   * moduleTotaal, geen categorieën om over te herberekenen), `_regel` (PK regel_id, inclusief de reeds berekende
+   * veilige `jaarbedrag`-bijdrage) en `_control`.
+   *
+   * FROZEN-STATE INVARIANTEN: `CHECK (beoordeeld = 1)` en `CHECK (review_status IN ('REVIEWED_ZERO_RULES',
+   * 'REVIEWED_WITH_RULES'))` (nooit `NOT_REVIEWED`).
+   *
+   * Immutability: dezelfde drie triggers per CONCEPT/frozen-tabel.
+   */
+  {
+    version: 38,
+    description: "Niet verrekenbare BTW: concept-input (module + regels) + bevroren Begroting-output",
+    ddl: [
+      `CREATE TABLE begroting_niet_verrekenbare_btw_module (
+        begroting_versie_id TEXT PRIMARY KEY REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        beoordeeld INTEGER NOT NULL CHECK (beoordeeld IN (0, 1)),
+        vorig_jaar_werkelijk TEXT NULL
+      )`,
+      `CREATE TABLE begroting_niet_verrekenbare_btw_regel (
+        id INTEGER PRIMARY KEY,
+        begroting_versie_id TEXT NOT NULL REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        omschrijving TEXT NOT NULL,
+        complexnummer TEXT NULL,
+        jaarbedrag TEXT NULL
+      )`,
+      `CREATE INDEX idx_begroting_niet_verrekenbare_btw_regel_versie ON begroting_niet_verrekenbare_btw_regel(begroting_versie_id)`,
+      `CREATE TRIGGER trg_begroting_niet_verrekenbare_btw_module_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_niet_verrekenbare_btw_module
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_niet_verrekenbare_btw_module: begrotingsversie is VASTGESTELD, module-state is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_niet_verrekenbare_btw_module_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_niet_verrekenbare_btw_module
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_niet_verrekenbare_btw_module: begrotingsversie is VASTGESTELD, module-state is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_niet_verrekenbare_btw_module_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_niet_verrekenbare_btw_module
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_niet_verrekenbare_btw_module: begrotingsversie is VASTGESTELD, module-state is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_niet_verrekenbare_btw_regel_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_niet_verrekenbare_btw_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_niet_verrekenbare_btw_regel: begrotingsversie is VASTGESTELD, regels zijn immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_niet_verrekenbare_btw_regel_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_niet_verrekenbare_btw_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_niet_verrekenbare_btw_regel: begrotingsversie is VASTGESTELD, regels zijn immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_niet_verrekenbare_btw_regel_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_niet_verrekenbare_btw_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_niet_verrekenbare_btw_regel: begrotingsversie is VASTGESTELD, regels zijn immutable');
+       END`,
+      `CREATE TABLE begroting_frozen_niet_verrekenbare_btw_resultaat (
+        begroting_versie_id TEXT PRIMARY KEY REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        beoordeeld INTEGER NOT NULL CHECK (beoordeeld = 1),
+        review_status TEXT NOT NULL CHECK (review_status IN ('REVIEWED_ZERO_RULES', 'REVIEWED_WITH_RULES')),
+        module_totaal TEXT NOT NULL,
+        vorig_jaar_werkelijk TEXT NULL
+      )`,
+      `CREATE TABLE begroting_frozen_niet_verrekenbare_btw_regel (
+        begroting_versie_id TEXT NOT NULL REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        regel_id INTEGER NOT NULL,
+        omschrijving TEXT NOT NULL,
+        complexnummer TEXT NULL,
+        jaarbedrag TEXT NULL,
+        financiele_bijdrage TEXT NOT NULL,
+        PRIMARY KEY (begroting_versie_id, regel_id)
+      )`,
+      `CREATE TABLE begroting_frozen_niet_verrekenbare_btw_control (
+        begroting_versie_id TEXT NOT NULL REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        volgnr INTEGER NOT NULL,
+        regel_id INTEGER NULL,
+        ernst TEXT NOT NULL CHECK (ernst IN ('KRITIEK', 'WAARSCHUWING', 'INFORMATIEF')),
+        bericht TEXT NOT NULL,
+        PRIMARY KEY (begroting_versie_id, volgnr)
+      )`,
+      `CREATE TRIGGER trg_begroting_frozen_niet_verrekenbare_btw_resultaat_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_frozen_niet_verrekenbare_btw_resultaat
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_niet_verrekenbare_btw_resultaat: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_niet_verrekenbare_btw_resultaat_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_frozen_niet_verrekenbare_btw_resultaat
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_niet_verrekenbare_btw_resultaat: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_niet_verrekenbare_btw_resultaat_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_frozen_niet_verrekenbare_btw_resultaat
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_niet_verrekenbare_btw_resultaat: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_niet_verrekenbare_btw_regel_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_frozen_niet_verrekenbare_btw_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_niet_verrekenbare_btw_regel: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_niet_verrekenbare_btw_regel_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_frozen_niet_verrekenbare_btw_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_niet_verrekenbare_btw_regel: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_niet_verrekenbare_btw_regel_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_frozen_niet_verrekenbare_btw_regel
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_niet_verrekenbare_btw_regel: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_niet_verrekenbare_btw_control_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_frozen_niet_verrekenbare_btw_control
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_niet_verrekenbare_btw_control: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_niet_verrekenbare_btw_control_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_frozen_niet_verrekenbare_btw_control
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_niet_verrekenbare_btw_control: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_niet_verrekenbare_btw_control_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_frozen_niet_verrekenbare_btw_control
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_niet_verrekenbare_btw_control: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+    ],
+  },
 ];
 
 function schemaMetaTableExists(db: DatabaseSync): boolean {

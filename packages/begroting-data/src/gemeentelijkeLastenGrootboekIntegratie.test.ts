@@ -13,6 +13,7 @@ import { leesFrozenGemeentelijkeLastenResultaat } from "./frozenGemeentelijkeLas
 import { schrijfGemeentelijkeLastenModule, schrijfWozSetBevestigd } from "./gemeentelijkeLastenModule.js";
 import { leesGemeentelijkeLastenRegels, schrijfGemeentelijkeLastenRegels, type GemeentelijkeLastenRegelInvoer } from "./gemeentelijkeLastenRegels.js";
 import { schrijfGeplandeVerkoopBeoordeeld } from "./geplandeVerkoopBeoordeeld.js";
+import { schrijfNietVerrekenbareBtwState } from "./nietVerrekenbareBtwState.js";
 import { schrijfGeplandOnderhoudBeoordeeld } from "./geplandOnderhoudBeoordeeld.js";
 import { herberekenBegroting } from "./herberekenen.js";
 import { schrijfLeegstandCategorieState } from "./leegstandCategorieState.js";
@@ -110,6 +111,7 @@ function zetBasisNeer(versieId: string, glRegels: readonly GemeentelijkeLastenRe
   );
   schrijfRenteCategorieState(db, versieId, Object.fromEntries(RENTE_CATEGORIEEN.map((c) => [c, { beoordeeld: true }])) as never);
   schrijfGeplandeVerkoopBeoordeeld(db, versieId, true);
+  schrijfNietVerrekenbareBtwState(db, versieId, { beoordeeld: true, vorigJaarWerkelijk: null });
 }
 
 const kritiek = (c: readonly { ernst: string }[]) => c.filter((x) => x.ernst === "KRITIEK");

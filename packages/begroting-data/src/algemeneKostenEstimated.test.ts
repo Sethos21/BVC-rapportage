@@ -23,6 +23,7 @@ import { openOrCreateDatabase } from "./database.js";
 import { leesFrozenAlgemeneKostenResultaat } from "./frozenAlgemeneKostenResultaat.js";
 import { schrijfGemeentelijkeLastenModule } from "./gemeentelijkeLastenModule.js";
 import { schrijfGeplandeVerkoopBeoordeeld } from "./geplandeVerkoopBeoordeeld.js";
+import { schrijfNietVerrekenbareBtwState } from "./nietVerrekenbareBtwState.js";
 import { schrijfGeplandOnderhoudBeoordeeld } from "./geplandOnderhoudBeoordeeld.js";
 import { schrijfLeegstandCategorieState } from "./leegstandCategorieState.js";
 import { schrijfModule1Aannames } from "./module1Aannames.js";
@@ -95,6 +96,7 @@ function zetBasisNeer(versieId: string): void {
   );
   schrijfRenteCategorieState(db, versieId, Object.fromEntries(RENTE_CATEGORIEEN.map((c) => [c, { beoordeeld: true }])) as never);
   schrijfGeplandeVerkoopBeoordeeld(db, versieId, true);
+  schrijfNietVerrekenbareBtwState(db, versieId, { beoordeeld: true, vorigJaarWerkelijk: null });
 }
 
 /** Werkelijk t/m afgesloten periode: per post een boeking (fixture), plus optioneel een niet-geclassificeerde. */
