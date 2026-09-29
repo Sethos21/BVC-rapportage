@@ -1,8 +1,8 @@
 # BEGROTING_BUILD_MATRIX
 
 Bijgewerkt: 29 september 2026  
-Geaccepteerde code-HEAD: `cda3baf`  
-Tranche 9: TECHNISCH VOLLEDIG GESLOTEN.
+Geaccepteerde code-HEAD: `50121a7`  
+Tranche 10: TECHNISCH AFGEROND. Volgende: end-to-end exploitatie-P&L.
 
 | Module | Begroting | Werkelijk | Estimated | P&L-integratie | Productie/UI | Resterend gat |
 |---|---|---|---|---|---|---|
@@ -19,8 +19,8 @@ Tranche 9: TECHNISCH VOLLEDIG GESLOTEN.
 | └ Overige | GEREED | BRONGAT | GEREED | onderbouwing | UI niet gebouwd | bewezen mapping |
 | Niet verrekenbare BTW | GEREED | GEREED 070 | GEREED | GEREED | UI niet gebouwd | geen kernlogica-gat |
 | Canon erfpacht | HOLD | HOLD | HOLD | HOLD | HOLD | uit scope |
-| Opbrengst rente | niet gestart | niet gestart | niet gestart | niet gestart | niet gestart | eigen tranche |
-| Rente leningen | niet gestart | niet gestart | niet gestart | niet gestart | niet gestart | bronmodel |
+| Opbrengst rente | GEREED | BRONGAT 070 / bewezen 013 | GEREED | GEREED onder EBITDA | UI niet gebouwd | mapping 070; positieve UI-invoer later |
+| Rente leningen | GEREED | BRONGAT 070 / bewezen 023 | GEREED | GEREED onder EBITDA | UI niet gebouwd | mapping 070 |
 | Geplande verkoop | HOLD | HOLD | n.v.t./afhankelijk | HOLD | HOLD | UX/integratiebesluit |
 
 ## Geaccepteerde tranchehistorie
@@ -31,6 +31,7 @@ Tranche 9: TECHNISCH VOLLEDIG GESLOTEN.
 - Tranche 7: `de2ae0e` — Estimated Huur/Beheer/Management.
 - Tranche 8: `5125289` — Leegstandskosten Budget/Werkelijk/Estimated/P&L.
 - Tranche 9: `cda3baf` — TECHNISCH VOLLEDIG GESLOTEN; §8.10 + Niet verrekenbare BTW Budget/Werkelijk/Estimated/P&L.
+- Tranche 10: `50121a7` — Rente leningen + Opbrengst rente Budget/Werkelijk/Estimated/P&L; migratie 40.
 
 ## Besluit §8.10 — 29-09-2026
 
