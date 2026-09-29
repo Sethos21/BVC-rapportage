@@ -55,7 +55,7 @@ Geaccepteerde tranche-HEADs:
 - Tranche 6: `650607f`.
 - Tranche 7: `de2ae0e`.
 - Tranche 8: `5125289`.
-- **Tranche 9: `aaca9c7` — geaccepteerd 29-09-2026.**
+- **Tranche 9: `cda3baf` — TECHNISCH VOLLEDIG GESLOTEN 29-09-2026.**
 
 ### Huur
 Budget/Werkelijk/Estimated/P&L gereed. Estimated gebruikt frozen Budget-contractsnapshot + Actual; refreshed-contract-state forecast is toekomstig werk.
@@ -124,7 +124,7 @@ Regels:
 - geen maand- of kwartaalverdeling;
 - wijziging van de resterende verwachting muteert de vastgestelde Budget niet.
 
-De eerdere `BUSINESSBESLISSING` voor Estimated BTW is hiermee inhoudelijk opgelost. Technische implementatie hiervan is de eerstvolgende kleine delta.
+De eerdere `BUSINESSBESLISSING` voor Estimated BTW is opgelost en technisch geïmplementeerd in `cda3baf` (migratie 39). Geen rij = onbekend; expliciet €0 blijft onderscheidbaar; Estimated blijft wijzigbaar zonder de vastgestelde Budget te muteren.
 
 ## 8. Nog niet starten
 
@@ -134,6 +134,6 @@ Canon/Erfpacht; rente leningen zonder bewezen bronmodel; Opbrengst rente tot eig
 
 Exact: `BUSINESSBESLISSING`, `CONTRACTCONFLICT`, `BRONGAT`, `ARCHITECTUURPUNT`. STOP is een geldige gate-uitkomst.
 
-## 10. Eerstvolgende technische delta
+## 10. Volgende fase
 
-Sluit Tranche 9 volledig technisch af door uitsluitend de nu vastgestelde Estimated-methodiek voor Niet verrekenbare BTW te implementeren. Daarna pas een nieuwe functionele Tranche 10 starten.
+Tranche 9 is volledig gesloten. De volgende functionele bouwopdracht is Tranche 10. Kies die vanuit de Build Matrix; heropen Tranche 9 niet zonder concrete regressie.
