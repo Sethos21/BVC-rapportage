@@ -5,91 +5,71 @@ Bijgewerkt: 29 september 2026
 Behoort bij `BEGROTING_MASTER_CONTRACT.md`.
 
 ## 1. Bron
+Claude leest vóór iedere tranche de contractset in `docs/begroting/` op de geaccepteerde branch/HEAD. Deze GitHub-versie is leidend. Oudere Drive-kopieën zijn archief.
 
-Claude leest vóór iedere tranche de contractset in `docs/begroting/` op de geaccepteerde branch/HEAD. Deze GitHub-versie is leidend voor implementatie. Oudere Drive-kopieën zijn archief en mogen GitHub niet overschrijven.
+## 2. Gates
+A Functioneel → ontbreekt: `BUSINESSBESLISSING`.  
+B Contract → echte strijd: `CONTRACTCONFLICT`.  
+C Architectuur → invariantwijziging nodig: `ARCHITECTUURPUNT`.  
+D Bron → betrouwbare bron ontbreekt: `BRONGAT`.
 
-## 2. Gates per module
-
-A Functioneel: ontbrekende businessregel → `BUSINESSBESLISSING`.  
-B Contract: echte strijd → `CONTRACTCONFLICT`.  
-C Architectuur: wijziging bewezen invariant nodig → `ARCHITECTUURPUNT`.  
-D Bron: betrouwbare bron ontbreekt → `BRONGAT`.
-
-Geen gate met aannames omzeilen. Een STOP op één onderdeel blokkeert andere groene onderdelen niet automatisch.
+Geen gate met aannames omzeilen.
 
 ## 3. Delta Build
-
-Per module:
-1. inspecteer relevante contractsectie + bestaande code;
-2. bewijs wat al bestaat;
-3. voer Gate A-D uit;
-4. bouw kleinste correcte delta;
-5. migrations alleen volgens bestaand patroon;
-6. targeted tests;
-7. package/integratieregressie;
-8. worker-tests indien geraakt;
-9. `pnpm -r typecheck`;
-10. `git diff --check`;
-11. logische commits;
-12. tranche-acceptatierapport.
+Inspecteer relevante contractsectie en bestaande code; bewijs wat al bestaat; Gate A-D; kleinste correcte delta; migrations volgens bestaand patroon; targeted tests; regressie; worker-tests indien geraakt; typecheck; `git diff --check`; logische commits; acceptatierapport.
 
 Geen unrelated cleanup. `.vscode/` en `AGENTS.md` niet meenemen tenzij expliciet opgedragen.
 
 ## 4. Harde bouwregels
-
-Claude mag technische namen/helpers/teststructuur zelfstandig kiezen binnen bestaande conventies.
-
-Claude mag NIET:
-- financiële definities wijzigen;
-- mappings of bronbetekenis raden;
-- onbekend naar €0 converteren;
-- vrije tekst/omschrijving classificeren;
-- 070 hardcoden als generieke waarheid;
-- Actual dubbel tellen;
-- kunstmatig verdelen;
-- nieuwe UX ontwerpen waar die open is;
-- een geaccepteerde fase opnieuw ontwerpen;
-- Estimated Budget laten muteren.
+Geen financiële definities wijzigen; geen mapping raden; onbekend niet naar €0; geen vrije-tekstclassificatie; 070 niet als generieke waarheid hardcoden; Actual niet dubbel tellen; niet kunstmatig verdelen; geen open UX ontwerpen; geaccepteerde fases niet opnieuw ontwerpen; Estimated muteert Budget niet.
 
 ## 5. Cross-domain P&L-presentatie
-
-Vanaf besluit 29-09-2026 is cross-domain economische P&L-presentatie uitsluitend toegestaan via een expliciet bewezen GL+OGB-presentatiemapping conform Master Contract §6.
-
-Dit verandert het bron-hoofddomein niet. De boeking moet exact één keer in de uiteindelijke P&L voorkomen.
+Expliciet bewezen GL+OGB mag via aparte P&L-presentatiemapping worden gerouteerd zonder het bron-hoofddomein te wijzigen. Exact één keer in de P&L.
 
 Bewezen eerste mapping:
 `070 / GL4350 + OGB4319 → Leegstandskosten / Servicekosten`.
 
-Geen generieke afleiding naar andere administraties of OGB's.
+Tranche 9 implementeerde dit mechanisme; §8.10 is gesloten.
 
-## 6. Tranche 9
+## 6. Tranche 9 — geaccepteerd
+Start code-HEAD `5125289`; eind-HEAD `aaca9c7`.
 
-Start vanaf geaccepteerde HEAD `5125289`.
+Gebouwd:
+- generiek P&L-presentatiemechanisme + bewezen 070 Servicekosten-leegstand-routing;
+- Niet verrekenbare BTW Budget;
+- Niet verrekenbare BTW Werkelijk;
+- Niet verrekenbare BTW P&L;
+- persistence/lifecycle, migratie 38.
 
-Deel A:
-- sluit §8.10 technisch af voor de bewezen 070-combinatie;
-- geen heel-GL4350-herclassificatie;
-- bewijs geen dubbeltelling en onveranderd Actual-totaal.
+Tests/regressies/typecheck/diff-check volgens acceptatierapport groen.
 
-Deel B: Niet verrekenbare BTW.
-- Gate A-D;
-- Budget: voorstel vorig Werkelijk waar betrouwbaar + handmatige override + bewust €0;
-- Werkelijk via bewezen administratiegebonden mapping; 070/GL4903 verifiëren;
-- geen btw-pro-rata;
-- ontbrekende historie/mapping = onbekend;
-- Estimated is OPEN: zonder eenduidig contract STOP `BUSINESSBESLISSING`;
-- P&L één zelfstandige post boven EBITDA;
-- geen andere module starten.
+De oorspronkelijke STOP voor Estimated BTW is op 29-09-2026 door de opdrachtgever opgelost.
 
-## 7. Acceptatierapport
+## 7. Vastgestelde Estimated Niet verrekenbare BTW
+Formule:
+`Estimated = Werkelijk t/m afgesloten periode + handmatige resterende verwachting`.
 
-Rapporteer:
-- start/eind-HEAD en commits;
-- gates;
-- bronbewijs;
-- persistence/migrations;
-- Begroting/Werkelijk/Estimated/P&L;
-- STOPs;
-- tests/regressies/typecheck/diff-check;
-- bijgewerkte integratiematrix;
-- expliciet: geen verzonnen mapping/businesslogica, onbekend ≠ €0, Actual exact één keer.
+Contract:
+- één resterend bedrag op moduleniveau;
+- leeg = onbekend;
+- expliciet €0 = geldig;
+- geen automatische extrapolatie;
+- geen Budget-minus-Werkelijk;
+- geen vorig-jaar-formule;
+- geen percentage van huur/omzet/kosten;
+- geen pro-rata;
+- geen maand-/kwartaalverdeling;
+- Budget blijft immutable.
+
+## 8. Eerstvolgende Delta
+Start vanaf `aaca9c7` plus deze contractdocumentatiecommit(s).
+
+Bouw uitsluitend §7 technisch af:
+- pure Estimated-calculator;
+- persistence voor handmatige resterende verwachting volgens bestaand patroon;
+- concept/frozen lifecycle voor zover nodig om bestaande Estimated-architectuur correct te volgen;
+- P&L Estimated-adapter van TECHNISCH_NIET_ONDERSTEUND naar bekende/ONBEKEND-status volgens input;
+- tests voor null versus expliciet €0, Actual exact één keer en Budget immutable;
+- migratie alleen indien werkelijk nodig.
+
+Start nog geen andere functionele module. Na acceptatie hiervan kan Tranche 10 worden gekozen.
