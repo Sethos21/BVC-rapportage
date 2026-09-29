@@ -23,6 +23,8 @@ import { berekenWerkelijkAlgemeneKostenViaCentraleMapping } from "./begroting/al
 import { algemeneKostenWerkelijkNaarPnLBovenEbitdaRegels } from "./begroting/algemeneKostenWerkelijkPnLAdapter.js";
 import { berekenWerkelijkNietVerrekenbareBtwViaCentraleMapping } from "./begroting/nietVerrekenbareBtwCentraleMapping.js";
 import { nietVerrekenbareBtwWerkelijkNaarPnLBovenEbitdaRegels } from "./begroting/nietVerrekenbareBtwPnLAdapters.js";
+import { berekenWerkelijkRenteViaCentraleMapping } from "./begroting/renteCentraleMapping.js";
+import { renteWerkelijkNaarPnLOnderEbitdaRegels } from "./begroting/rentePnLAdapters.js";
 import { vindPnLPresentatieRouting, type PnLPresentatieMappingRegel } from "./pnlPresentatiemapping.js";
 
 /**
@@ -136,6 +138,7 @@ interface ModuleBuckets {
   algemeneKosten: PnLRuweBoekingRegel[];
   leegstand: PnLRuweBoekingRegel[];
   nietVerrekenbareBtw: PnLRuweBoekingRegel[];
+  rente: PnLRuweBoekingRegel[];
 }
 
 interface PartitieResultaat {
@@ -173,6 +176,7 @@ function partitioneerPerModule(context: PnLPeriodeOrchestratieContext, boekingen
     algemeneKosten: [],
     leegstand: [],
     nietVerrekenbareBtw: [],
+    rente: [],
   };
   const nietGemapt: PnLRuweBoekingRegel[] = [];
   const nietOndersteund = new Map<PnLEconomischeModule, PnLRuweBoekingRegel[]>();
@@ -213,6 +217,9 @@ function partitioneerPerModule(context: PnLPeriodeOrchestratieContext, boekingen
         break;
       case "NIET_VERREKENBARE_BTW":
         buckets.nietVerrekenbareBtw.push(boeking);
+        break;
+      case "RENTE":
+        buckets.rente.push(boeking);
         break;
       default: {
         const groep = nietOndersteund.get(module) ?? [];
@@ -267,6 +274,7 @@ export function berekenPnLPeriode(
   const algemeneKosten = berekenWerkelijkAlgemeneKostenViaCentraleMapping(invoer, buckets.algemeneKosten.map(naarBasisRegel), mappingregels);
   const leegstand = berekenWerkelijkLeegstandViaCentraleMapping(invoer, buckets.leegstand.map(naarRegelMetComplex), mappingregels);
   const nietVerrekenbareBtw = berekenWerkelijkNietVerrekenbareBtwViaCentraleMapping(invoer, buckets.nietVerrekenbareBtw.map(naarBasisRegel), mappingregels);
+  const rente = berekenWerkelijkRenteViaCentraleMapping(invoer, buckets.rente.map(naarBasisRegel), mappingregels);
 
   // Bronmapping-DEKKING (Vervolgtranche 6): alle boekingen van de administratie/periode worden verwerkt, dus een module
   // waarvoor de administratie GEEN enkele bewezen mapping heeft is niet "€0" maar ONBEKEND (NIET_GEMAPT). Alleen een
@@ -310,6 +318,8 @@ export function berekenPnLPeriode(
     ...leegstandWerkelijkNaarPnLBovenEbitdaRegels(leegstand.werkelijk, true, gemapt("LEEGSTAND"), leegstandGerouteerd),
     // Niet verrekenbare BTW (Vervolgtranche 9 Deel B): één zelfstandige P&L-regel, alleen bekend met een bewezen mapping van deze administratie.
     ...nietVerrekenbareBtwWerkelijkNaarPnLBovenEbitdaRegels(nietVerrekenbareBtw.werkelijk, heeftMapping("NIET_VERREKENBARE_BTW")),
+    // Rente (Tranche 10): twee onafhankelijke onder-EBITDA-posten (Rentekosten/Rente opbrengsten), per categorie alleen bekend met een bewezen mapping van deze administratie.
+    ...renteWerkelijkNaarPnLOnderEbitdaRegels(rente.werkelijk, heeftMapping("RENTE"), gemapt("RENTE")),
   ];
 
   const resultaat = berekenPnLBoom("WERKELIJK", regels);

@@ -138,29 +138,75 @@ describe("berekenPnLPeriode — completeness bij boekingen buiten de acht produc
     expect(resultaat.totaalKosten.besteWetenSom.toString()).toBe("0");
   });
 
-  it("een boeking op een GL die naar een WEL bestaand, maar nog niet aangesloten hoofddomein (bv. RENTE) mapt, komt in nietMeegenomen terecht — nooit zelf als P&L-regel geconstrueerd", () => {
-    const renteMapping = mappingRegel({ grootboekrekening: "4600", economischeModule: "RENTE", economischeCategorie: "RENTEKOSTEN" });
-    const boekingen: PnLRuweBoekingRegel[] = [{ grootboekrekening: "4600", ogbKostensoort: null, ogbKostensoortOmschrijving: null, complexnummer: null, saldo: new Decimal("500") }];
+  it("een boeking op een GL die naar een WEL bestaand, maar nog niet aangesloten hoofddomein (bv. VERKOOP) mapt, komt in nietMeegenomen terecht — nooit zelf als P&L-regel geconstrueerd", () => {
+    const verkoopMapping = mappingRegel({ grootboekrekening: "8830", economischeModule: "VERKOOP", economischeCategorie: "VERKOOPOPBRENGST" });
+    const boekingen: PnLRuweBoekingRegel[] = [{ grootboekrekening: "8830", ogbKostensoort: null, ogbKostensoortOmschrijving: null, complexnummer: null, saldo: new Decimal("500") }];
     const context = { bedrijfsnr: BEDRIJFSNR, boekjaar: BOEKJAAR, boekperiode: "06", opSysteemtijdstip: OP_SYSTEEMTIJDSTIP };
-    const { resultaat, nietMeegenomen } = berekenPnLPeriode(context, boekingen, [renteMapping]);
+    const { resultaat, nietMeegenomen } = berekenPnLPeriode(context, boekingen, [verkoopMapping]);
 
-    expect(nietMeegenomen).toEqual([{ economischeModule: "RENTE", totaal: new Decimal("500"), aantalBoekingen: 1 }]);
-    expect(resultaat.onderEbitda).toEqual([]); // geen fictieve Rente-regel geconstrueerd, noch boven noch onder EBITDA
+    expect(nietMeegenomen).toEqual([{ economischeModule: "VERKOOP", totaal: new Decimal("500"), aantalBoekingen: 1 }]);
+    // Geen fictieve Verkoop-regel geconstrueerd — de enige onder-EBITDA-regels zijn de altijd-aanwezige Rente-regels (Tranche 10),
+    // hier ONBEKEND omdat deze mappingset geen Rente-mapping bevat.
+    expect(resultaat.onderEbitda.map((r) => r.regelSleutel).sort()).toEqual(["RENTEKOSTEN", "RENTE_OPBRENGSTEN"]);
+    expect(resultaat.onderEbitda.every((r) => r.waarde.status === "ONBEKEND")).toBe(true);
     expect(resultaat.totaalKosten.besteWetenSom.toString()).toBe("0");
   });
 
   it("een gemengde batch (bekende + onbekende + niet-ondersteunde boekingen) classificeert elke boeking naar zijn eigen, juiste bestemming", () => {
-    const mapping = [mappingRegel({ grootboekrekening: "4000", economischeModule: "BEHEER", economischeCategorie: "BEHEERKOSTEN" }), mappingRegel({ grootboekrekening: "4600", economischeModule: "RENTE", economischeCategorie: "RENTEKOSTEN" })];
+    const mapping = [mappingRegel({ grootboekrekening: "4000", economischeModule: "BEHEER", economischeCategorie: "BEHEERKOSTEN" }), mappingRegel({ grootboekrekening: "8830", economischeModule: "VERKOOP", economischeCategorie: "VERKOOPOPBRENGST" })];
     const boekingen: PnLRuweBoekingRegel[] = [
       { grootboekrekening: "4000", ogbKostensoort: null, ogbKostensoortOmschrijving: null, complexnummer: null, saldo: new Decimal("1000") },
-      { grootboekrekening: "4600", ogbKostensoort: null, ogbKostensoortOmschrijving: null, complexnummer: null, saldo: new Decimal("200") },
+      { grootboekrekening: "8830", ogbKostensoort: null, ogbKostensoortOmschrijving: null, complexnummer: null, saldo: new Decimal("200") },
       { grootboekrekening: "9999", ogbKostensoort: null, ogbKostensoortOmschrijving: null, complexnummer: null, saldo: new Decimal("50") },
     ];
     const context = { bedrijfsnr: BEDRIJFSNR, boekjaar: BOEKJAAR, boekperiode: "06", opSysteemtijdstip: OP_SYSTEEMTIJDSTIP };
     const { resultaat, nietMeegenomen } = berekenPnLPeriode(context, boekingen, mapping);
 
     expect(resultaat.managementEnBeheer.besteWetenSom.toString()).toBe("1000");
-    expect(nietMeegenomen).toContainEqual({ economischeModule: "RENTE", totaal: new Decimal("200"), aantalBoekingen: 1 });
+    expect(nietMeegenomen).toContainEqual({ economischeModule: "VERKOOP", totaal: new Decimal("200"), aantalBoekingen: 1 });
     expect(nietMeegenomen).toContainEqual({ economischeModule: null, totaal: new Decimal("50"), aantalBoekingen: 1 });
+  });
+});
+
+describe("berekenPnLPeriode — Rente (Tranche 10): bewezen bronproef 023 (Rentekosten/GL4600) en 013 (Rente opbrengsten/GL4620)", () => {
+  const renteMapping023 = (ogb: string) => mappingRegel({ bedrijfsnr: "023", grootboekrekening: "4600", ogbKostensoort: ogb, economischeModule: "RENTE", economischeCategorie: "RENTEKOSTEN" });
+  const renteMapping013 = (ogb: string) => mappingRegel({ bedrijfsnr: "013", grootboekrekening: "4620", ogbKostensoort: ogb, economischeModule: "RENTE", economischeCategorie: "RENTE_OPBRENGSTEN" });
+
+  it("023: Rentekosten via bewezen GL4600+OGB, exact één keer meegeteld, correcte tekenrichting (positief blijft positief)", () => {
+    const context = { bedrijfsnr: "023", boekjaar: BOEKJAAR, boekperiode: "06", opSysteemtijdstip: OP_SYSTEEMTIJDSTIP };
+    const boekingen: PnLRuweBoekingRegel[] = [{ grootboekrekening: "4600", ogbKostensoort: "4601", ogbKostensoortOmschrijving: "Rente lening .962", complexnummer: null, saldo: new Decimal("1148524.51") }];
+    const { resultaat, nietMeegenomen } = berekenPnLPeriode(context, boekingen, [renteMapping023("4601")]);
+
+    expect(nietMeegenomen).toEqual([]);
+    const rentekosten = resultaat.onderEbitda.find((r) => r.regelSleutel === "RENTEKOSTEN")!;
+    expect(rentekosten.waarde).toEqual({ status: "BEKEND", bedrag: new Decimal("1148524.51") });
+    const renteOpbrengsten = resultaat.onderEbitda.find((r) => r.regelSleutel === "RENTE_OPBRENGSTEN")!;
+    expect(renteOpbrengsten.waarde).toMatchObject({ status: "ONBEKEND", dekkingReden: "NIET_GEMAPT" }); // 023 heeft geen bewezen RENTE_OPBRENGSTEN-mapping
+    expect(resultaat.ebitda.bedrag.toString()).toBe("0"); // onder EBITDA raakt EBITDA nooit
+  });
+
+  it("013: Rente opbrengsten via bewezen GL4620+OGB — ruw negatief, na normalisatie positief gepresenteerd", () => {
+    const context = { bedrijfsnr: "013", boekjaar: BOEKJAAR, boekperiode: "06", opSysteemtijdstip: OP_SYSTEEMTIJDSTIP };
+    const boekingen: PnLRuweBoekingRegel[] = [{ grootboekrekening: "4620", ogbKostensoort: "4604", ogbKostensoortOmschrijving: "Rente r/c", complexnummer: null, saldo: new Decimal("-1250.09") }];
+    const { resultaat } = berekenPnLPeriode(context, boekingen, [renteMapping013("4604")]);
+
+    const renteOpbrengsten = resultaat.onderEbitda.find((r) => r.regelSleutel === "RENTE_OPBRENGSTEN")!;
+    expect(renteOpbrengsten.waarde).toEqual({ status: "BEKEND", bedrag: new Decimal("1250.09") });
+  });
+
+  it("administratiegebonden: dezelfde GL+OGB-combinatie bij een andere administratie zonder eigen mapping levert ONBEKEND, geen kopie van 023 naar 013", () => {
+    const context = { bedrijfsnr: "013", boekjaar: BOEKJAAR, boekperiode: "06", opSysteemtijdstip: OP_SYSTEEMTIJDSTIP };
+    const boekingen: PnLRuweBoekingRegel[] = [{ grootboekrekening: "4600", ogbKostensoort: "4601", ogbKostensoortOmschrijving: "Rente lening .962", complexnummer: null, saldo: new Decimal("100") }];
+    const { resultaat, nietMeegenomen } = berekenPnLPeriode(context, boekingen, [renteMapping023("4601")]); // mapping hoort bij 023, niet bij 013
+
+    expect(nietMeegenomen).toEqual([{ economischeModule: null, totaal: new Decimal("100"), aantalBoekingen: 1 }]);
+    expect(resultaat.onderEbitda.find((r) => r.regelSleutel === "RENTEKOSTEN")!.waarde.status).toBe("ONBEKEND");
+  });
+
+  it("zonder enige Rente-mapping voor de administratie: beide posten ONBEKEND, nooit een bevestigde €0", () => {
+    const context = { bedrijfsnr: "070", boekjaar: BOEKJAAR, boekperiode: "06", opSysteemtijdstip: OP_SYSTEEMTIJDSTIP };
+    const { resultaat } = berekenPnLPeriode(context, [], []);
+    expect(resultaat.onderEbitda.find((r) => r.regelSleutel === "RENTEKOSTEN")!.waarde.status).toBe("ONBEKEND");
+    expect(resultaat.onderEbitda.find((r) => r.regelSleutel === "RENTE_OPBRENGSTEN")!.waarde.status).toBe("ONBEKEND");
   });
 });

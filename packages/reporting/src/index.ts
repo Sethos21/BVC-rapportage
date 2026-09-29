@@ -102,6 +102,7 @@ export * from "./begroting/begroteLeegstandEstimatedKwartalen.js";
 export * from "./begroting/begroteAlgemeneKosten.js";
 export * from "./begroting/begroteLeegstand.js";
 export * from "./begroting/begroteRente.js";
+export * from "./begroting/rentePnLAdapters.js";
 export * from "./begroting/begroteNietVerrekenbareBtw.js";
 export * from "./begroting/werkelijkNietVerrekenbareBtw.js";
 export * from "./begroting/nietVerrekenbareBtwCentraleMapping.js";
