@@ -2,7 +2,7 @@
 
 Bijgewerkt: 29 september 2026  
 Geaccepteerde code-HEAD: `50121a7`  
-Tranche 10: TECHNISCH AFGEROND. Volgende: end-to-end exploitatie-P&L.
+Tranche 10: TECHNISCH AFGEROND. UX-set geborgd in `5379798`. Volgende: geïntegreerde invulbare exploitatiebegrotingsworkflow + begrotings-P&L.
 
 | Module | Begroting | Werkelijk | Estimated | P&L-integratie | Productie/UI | Resterend gat |
 |---|---|---|---|---|---|---|
@@ -42,6 +42,10 @@ Expliciet bewezen `070 / GL4350 + OGB4319` mag economisch worden gepresenteerd a
 `Estimated = Werkelijk t/m afgesloten periode + handmatige resterende verwachting`.
 
 Eén resterend bedrag; leeg = onbekend; expliciet €0 = geldig. Geen automatische extrapolatie, Budget-minus-Werkelijk, vorig-jaar-formule, pro-rata, percentage van huur/omzet/kosten of maand-/kwartaalverdeling.
+
+## UX-overdracht en volgende bouwfase
+
+Vastgestelde UX-set: `docs/begroting/ux/`, commit `5379798`. De Productie/UI-kolom hierboven betekent dat de financiële motor grotendeels gereed is, maar de daadwerkelijke begrotingswerkflow nog moet worden aangesloten. Tranche 11 bouwt die workflow volgens de vastgestelde UX; niet een managementrapportage. Er is nog geen echte financiële begroting opgesteld, dus historische/nieuwe begrotingswaarden mogen niet worden verzonnen. De vergelijkende P&L ondersteunt het maken van de nieuwe begroting.
 
 ## Open beslissingen
 - startflow.
