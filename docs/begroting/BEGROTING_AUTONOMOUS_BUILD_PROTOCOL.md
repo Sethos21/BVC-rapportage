@@ -32,14 +32,15 @@ Bewezen eerste mapping:
 Tranche 9 implementeerde dit mechanisme; §8.10 is gesloten.
 
 ## 6. Tranche 9 — geaccepteerd
-Start code-HEAD `5125289`; eind-HEAD `aaca9c7`.
+Start code-HEAD `5125289`; eind-HEAD **`cda3baf`**.
 
 Gebouwd:
 - generiek P&L-presentatiemechanisme + bewezen 070 Servicekosten-leegstand-routing;
 - Niet verrekenbare BTW Budget;
 - Niet verrekenbare BTW Werkelijk;
 - Niet verrekenbare BTW P&L;
-- persistence/lifecycle, migratie 38.
+- persistence/lifecycle, migratie 38;
+- Estimated Niet verrekenbare BTW volledig gebouwd in `cda3baf`, migratie 39.
 
 Tests/regressies/typecheck/diff-check volgens acceptatierapport groen.
 
@@ -61,30 +62,8 @@ Contract:
 - geen maand-/kwartaalverdeling;
 - Budget blijft immutable.
 
-## 8. Eerstvolgende Delta
-Start vanaf `aaca9c7` plus deze contractdocumentatiecommit(s).
+## 8. Tranche 9 gesloten
 
-Bouw uitsluitend §7 technisch af:
-- pure Estimated-calculator;
-- persistence voor handmatige resterende verwachting volgens bestaand patroon;
-- concept/frozen lifecycle voor zover nodig om bestaande Estimated-architectuur correct te volgen;
-- P&L Estimated-adapter van TECHNISCH_NIET_ONDERSTEUND naar bekende/ONBEKEND-status volgens input;
-- tests voor null versus expliciet €0, Actual exact één keer en Budget immutable;
-- migratie alleen indien werkelijk nodig.
+Estimated BTW is technisch gereed. Migratie 39 bewaart uitsluitend de handmatige resterende verwachting; geen rij = onbekend, expliciet €0 geldig. De P&L Estimated-adapter is actief en Actual wordt exact één keer toegevoegd. Vastgestelde Budget blijft immutable.
 
-Start nog geen andere functionele module. Na acceptatie hiervan kan Tranche 10 worden gekozen.
-
-
-## 8. Vastgestelde Estimated Niet verrekenbare BTW
-
-`Estimated = Werkelijk t/m afgesloten periode + handmatige resterende verwachting`.
-
-- één resterend bedrag op moduleniveau;
-- leeg = onbekend;
-- expliciet €0 = geldig;
-- geen automatische extrapolatie, Budget-minus-Werkelijk, vorig-jaar-formule, percentage van huur/omzet/kosten of pro-rata;
-- geen maand-/kwartaalverdeling;
-- Budget blijft immutable.
-
-### Eerstvolgende delta
-Start vanaf `aaca9c7` plus de actuele docs-HEAD. Bouw uitsluitend deze Estimated-methodiek technisch af (calculator, noodzakelijke persistence/lifecycle, P&L Estimated-adapter en tests). Start nog geen andere functionele module. Daarna kan Tranche 10 worden gekozen.
+Start geen verdere Tranche-9-delta. De volgende opdracht is Tranche 10 conform de actuele Build Matrix.
