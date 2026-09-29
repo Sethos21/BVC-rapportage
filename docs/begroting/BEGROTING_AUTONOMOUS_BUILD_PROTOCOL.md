@@ -73,3 +73,18 @@ Bouw uitsluitend §7 technisch af:
 - migratie alleen indien werkelijk nodig.
 
 Start nog geen andere functionele module. Na acceptatie hiervan kan Tranche 10 worden gekozen.
+
+
+## 8. Vastgestelde Estimated Niet verrekenbare BTW
+
+`Estimated = Werkelijk t/m afgesloten periode + handmatige resterende verwachting`.
+
+- één resterend bedrag op moduleniveau;
+- leeg = onbekend;
+- expliciet €0 = geldig;
+- geen automatische extrapolatie, Budget-minus-Werkelijk, vorig-jaar-formule, percentage van huur/omzet/kosten of pro-rata;
+- geen maand-/kwartaalverdeling;
+- Budget blijft immutable.
+
+### Eerstvolgende delta
+Start vanaf `aaca9c7` plus de actuele docs-HEAD. Bouw uitsluitend deze Estimated-methodiek technisch af (calculator, noodzakelijke persistence/lifecycle, P&L Estimated-adapter en tests). Start nog geen andere functionele module. Daarna kan Tranche 10 worden gekozen.
