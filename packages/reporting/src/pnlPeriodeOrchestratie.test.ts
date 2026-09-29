@@ -47,6 +47,7 @@ describe("berekenPnLPeriode — 070 H1 2026, ÉÉN gemengde boekingenstroom (nie
     expect(onbekend(resultaat.totaalKosten.volledigheid)).toEqual([
       ["MANAGEMENTVERGOEDING", "GEEN_BEOORDELING"],
       ["LEEGSTANDSKOSTEN", "NIET_GEMAPT"], // Vervolgtranche 8: geen bewezen LEEGSTAND-mapping voor 070 (Nuts/Servicekosten/Overige)
+      ["NIET_VERREKENBARE_BTW", "GEEN_BEOORDELING"], // Vervolgtranche 9: geen bewezen NIET_VERREKENBARE_BTW-mapping in DEZE fixture-mappingset (070 heeft dat in productie wel via GL4903, hier niet toegevoegd)
       ["ACCOUNTANT", "NIET_GEMAPT"],
       ["JURIDISCHE_KOSTEN", "NIET_GEMAPT"],
     ]);
