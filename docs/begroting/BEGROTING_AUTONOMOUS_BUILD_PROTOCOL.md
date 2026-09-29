@@ -67,3 +67,11 @@ Contract:
 Estimated BTW is technisch gereed. Migratie 39 bewaart uitsluitend de handmatige resterende verwachting; geen rij = onbekend, expliciet €0 geldig. De P&L Estimated-adapter is actief en Actual wordt exact één keer toegevoegd. Vastgestelde Budget blijft immutable.
 
 Start geen verdere Tranche-9-delta. De volgende opdracht is Tranche 10 conform de actuele Build Matrix.
+
+## 9. Tranche 10 — geaccepteerd
+
+Eind-HEAD `50121a7`. Rente leningen + Opbrengst rente zijn aangesloten op Budget/Werkelijk/Estimated/P&L; migratie 40 bewaart Estimated resterende verwachting. Geen renteberekeningsengine. 070 Actual blijft BRONGAT. Toekomstige UI voor renteopbrengst gebruikt positieve gebruikersinvoer en vertaalt intern naar de ruwe boekhoudconventie.
+
+## 10. Eerstvolgende build
+
+Tranche 11: assembleer de eerste volledige end-to-end exploitatie-P&L met bestaande modules. Bouw geen nieuwe financiële domeinlogica; behoud unknown-statussen; Verkoopresultaat blijft buiten scope.
