@@ -1,5 +1,6 @@
 import Decimal from "decimal.js";
 import type { BgControleErnst } from "./begroteHuuropbrengsten.js";
+import type { WerkelijkNietVerrekenbareBtwResultaat } from "./werkelijkNietVerrekenbareBtw.js";
 
 /**
  * Begrote Niet verrekenbare BTW — Vervolgtranche 9 Deel B (Master Contract): een
@@ -28,8 +29,9 @@ import type { BgControleErnst } from "./begroteHuuropbrengsten.js";
  * `jaarbedrag` op een regel triggert een KRITIEKE control maar telt financieel
  * veilig als 0 mee — "functioneel onvolledig ≠ financieel onberekenbaar".
  *
- * BUITEN SCOPE (deze fase, expliciet niet gebouwd): Werkelijk/Estimated/
- * P&L-rendering/UI/persistence (zie afzonderlijke modules/`@bvc/begroting-data`).
+ * BUITEN SCOPE (deze module, expliciet niet gebouwd): P&L-rendering/UI/persistence
+ * (zie `werkelijkNietVerrekenbareBtw.ts`, `nietVerrekenbareBtwPnLAdapters.ts` en `@bvc/begroting-data`).
+ * Werkelijk staat in `werkelijkNietVerrekenbareBtw.ts`; Estimated staat onderaan dit bestand.
  */
 
 export interface BgNietVerrekenbareBtwControleItem {
@@ -136,4 +138,43 @@ export function berekenBegroteNietVerrekenbareBtw(regelsInvoer: readonly BgNietV
     vorigJaarWerkelijk: aannames.vorigJaarWerkelijk,
     controleVereist,
   };
+}
+
+// ── Estimated (technische afsluiting Tranche 9, Master Contract §7 — definitief businessbesluit 29-09-2026) ────────
+//
+// `Estimated = Werkelijk t/m afgesloten periode + handmatig ingevoerde verwachting resterend jaar`. GEEN
+// categoriedimensie, GEEN kwartaal-/maandverdeling (bewust anders dan Leegstand/Verzekeringen — het besluit
+// specificeert expliciet ÉÉN handmatig resterend bedrag op moduleniveau). GEEN automatische extrapolatie, GEEN
+// Begroting-minus-Werkelijk, GEEN vorig-jaar-doortrekking, GEEN percentage van huur/omzet/kosten, GEEN btw-pro-rata
+// — `verwachtingResterendJaar` is een PUUR handmatige, expliciete businessaanname (`Decimal | null`), zonder enige
+// interne afleidingslogica in deze module (zelfde grens als Gemeentelijke Lasten se `berekenEstimatedGemeentelijkeLasten`).
+//
+// WERKELIJK-DEKKING ALS AANVULLENDE, EXPLICIETE VOORWAARDE (GAT-001B §5, herhaald): `estimatedTotaal` is uitsluitend
+// niet-`null` wanneer zowel Werkelijk-dekking bevestigd is (`werkelijkDekkingBevestigd` én
+// `werkelijk.nietGeclassificeerdTotaal === 0`) als `verwachtingResterendJaar` een geldige Decimal is. Ontbrekende
+// verwachting (`null`) is onbekend, nooit een stilzwijgende €0; een expliciete `Decimal(0)` is een geldige, bekende
+// keuze ("geen resterende BTW meer verwacht") en telt volledig mee.
+
+export interface EstimatedNietVerrekenbareBtwResultaat {
+  werkelijkTotaal: Decimal;
+  /** `false` zodra Werkelijk-dekking voor de afgesloten periode niet expliciet bevestigd is, of er niet-geclassificeerde boekingen zijn. */
+  werkelijkVoldoendeBekend: boolean;
+  /** Handmatige, expliciet aangeleverde aanname op moduleniveau — `null` = nog niet ingevuld (onbekend, geen €0). */
+  verwachtingResterendJaar: Decimal | null;
+  /** `werkelijkTotaal + verwachtingResterendJaar`, uitsluitend wanneer Werkelijk voldoende bekend is EN de verwachting een geldige Decimal is. Anders `null`. */
+  estimatedTotaal: Decimal | null;
+}
+
+function isGeldigeVerwachting(waarde: Decimal | null): waarde is Decimal {
+  return waarde !== null && !waarde.isNaN();
+}
+
+export function berekenEstimatedNietVerrekenbareBtw(
+  werkelijk: WerkelijkNietVerrekenbareBtwResultaat,
+  werkelijkDekkingBevestigd: boolean,
+  verwachtingResterendJaar: Decimal | null,
+): EstimatedNietVerrekenbareBtwResultaat {
+  const werkelijkVoldoendeBekend = werkelijkDekkingBevestigd && werkelijk.nietGeclassificeerdTotaal.isZero();
+  const estimatedTotaal = werkelijkVoldoendeBekend && isGeldigeVerwachting(verwachtingResterendJaar) ? werkelijk.moduleTotaal.plus(verwachtingResterendJaar) : null;
+  return { werkelijkTotaal: werkelijk.moduleTotaal, werkelijkVoldoendeBekend, verwachtingResterendJaar, estimatedTotaal };
 }

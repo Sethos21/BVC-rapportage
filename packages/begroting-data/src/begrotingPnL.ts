@@ -16,7 +16,7 @@ import {
   managementBegrotingNaarPnLBovenEbitdaRegels,
   managementEstimatedNaarPnLBovenEbitdaRegels,
   nietVerrekenbareBtwBegrotingNaarPnLBovenEbitdaRegels,
-  nietVerrekenbareBtwEstimatedNietOndersteundNaarPnLBovenEbitdaRegels,
+  nietVerrekenbareBtwEstimatedNaarPnLBovenEbitdaRegels,
   onderhoudBegrotingNaarPnLBovenEbitdaRegels,
   onderhoudEstimatedTotaalNaarPnLBovenEbitdaRegels,
   verzekeringEstimatedNaarPnLBovenEbitdaRegels,
@@ -32,6 +32,7 @@ import {
   type WerkelijkAlgemeneKostenResultaat,
   type WerkelijkGemeentelijkeLastenResultaat,
   type WerkelijkLeegstandResultaat,
+  type WerkelijkNietVerrekenbareBtwResultaat,
   type WerkelijkOnderhoudResultaat,
   type WerkelijkVerzekeringResultaat,
 } from "@bvc/reporting";
@@ -49,6 +50,7 @@ import { leesFrozenVerzekeringResultaat } from "./frozenVerzekeringResultaat.js"
 import { leesGemeentelijkeLastenEstimatedResultaat } from "./gemeentelijkeLastenEstimated.js";
 import { herberekenBegroting, type HerberekendNietVerrekenbareBtwResultaat } from "./herberekenen.js";
 import { leesLeegstandEstimatedResultaat } from "./leegstandEstimated.js";
+import { leesNietVerrekenbareBtwEstimatedResultaat } from "./nietVerrekenbareBtwEstimatedVerwachting.js";
 import { leesOnderhoudTotaalResultaat } from "./onderhoudOrchestratie.js";
 import { leesVerzekeringEstimatedResultaat } from "./verzekeringEstimated.js";
 
@@ -182,6 +184,12 @@ export interface EstimatedPnLInvoer {
    * laatst afgesloten periode.
    */
   leegstand: { werkelijk: WerkelijkLeegstandResultaat; dekkingBevestigd: boolean; gemapteCategorieen?: ReadonlySet<string>; resterendeKwartalen: readonly BgOnderhoudKwartaal[] };
+  /**
+   * Niet verrekenbare BTW (technische afsluiting Tranche 9, Master Contract §7): `Estimated = Werkelijk t/m
+   * afgesloten periode + handmatig ingevoerde verwachting resterend jaar`, één bedrag op moduleniveau (geen
+   * kwartaal-/maandverdeling, geen vergelijking met de Begroting).
+   */
+  nietVerrekenbareBtw: { werkelijk: WerkelijkNietVerrekenbareBtwResultaat; dekkingBevestigd: boolean };
 }
 
 /** Estimated → regels voor Huur, Beheer, Management, Onderhoud (totaal), Verzekeringen, Gemeentelijke lasten en Algemene kosten (zie moduledoc). */
@@ -195,6 +203,7 @@ export function leesEstimatedPnLRegels(db: DatabaseSync, versieId: string, invoe
   const gemeentelijkeLasten = leesGemeentelijkeLastenEstimatedResultaat(db, versieId, invoer.gemeentelijkeLasten.werkelijk, invoer.gemeentelijkeLasten.dekkingBevestigd);
   const algemeneKosten = leesAlgemeneKostenEstimatedResultaat(db, versieId, invoer.algemeneKosten.werkelijk, invoer.algemeneKosten.dekkingBevestigd);
   const leegstand = leesLeegstandEstimatedResultaat(db, versieId, invoer.leegstand.werkelijk, invoer.leegstand.resterendeKwartalen);
+  const nietVerrekenbareBtw = leesNietVerrekenbareBtwEstimatedResultaat(db, versieId, invoer.nietVerrekenbareBtw.werkelijk, invoer.nietVerrekenbareBtw.dekkingBevestigd);
 
   return [
     ...huurEstimatedNaarPnLBovenEbitdaRegels(huur),
@@ -222,9 +231,8 @@ export function leesEstimatedPnLRegels(db: DatabaseSync, versieId: string, invoe
         waarde: { status: "ONBEKEND", dekkingReden: "NIET_GEMAPT", toelichting: `Estimated Algemene kosten (${regel.regelSleutel}): voor deze administratie bestaat geen bewezen bronmapping naar deze categorie — Werkelijk onbekend, dus Estimated onbekend.` },
       };
     }),
-    // Niet verrekenbare BTW (Vervolgtranche 9 Deel B): GEEN Estimated-calculator — de resterende-verwachtingsmethode is
-    // niet contractueel eenduidig vastgesteld (STOP: BUSINESSBESLISSING). Blijft altijd ONBEKEND/TECHNISCH_NIET_ONDERSTEUND,
-    // zodat de Estimated-P&L eerlijk ONVOLLEDIG blijft i.p.v. de regel stilzwijgend weg te laten.
-    ...nietVerrekenbareBtwEstimatedNietOndersteundNaarPnLBovenEbitdaRegels(),
+    // Niet verrekenbare BTW (technische afsluiting Tranche 9, Master Contract §7): Werkelijk + handmatige resterende
+    // verwachting op moduleniveau.
+    ...nietVerrekenbareBtwEstimatedNaarPnLBovenEbitdaRegels(nietVerrekenbareBtw),
   ];
 }

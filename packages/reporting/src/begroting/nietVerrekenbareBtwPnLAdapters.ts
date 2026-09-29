@@ -1,4 +1,4 @@
-import type { BgNietVerrekenbareBtwResultaat } from "./begroteNietVerrekenbareBtw.js";
+import type { BgNietVerrekenbareBtwResultaat, EstimatedNietVerrekenbareBtwResultaat } from "./begroteNietVerrekenbareBtw.js";
 import { NIET_VERREKENBARE_BTW_WERKELIJK_CATEGORIEEN, type NietVerrekenbareBtwWerkelijkCategorie, type WerkelijkNietVerrekenbareBtwResultaat } from "./werkelijkNietVerrekenbareBtw.js";
 import type { PnLBronBijdrage, PurePnLBovenEbitdaRegel } from "../pnlEngine.js";
 
@@ -66,30 +66,31 @@ export function nietVerrekenbareBtwWerkelijkNaarPnLBovenEbitdaRegels(resultaat: 
   return regels;
 }
 
-// ── Estimated — GEEN Estimated-calculator (STOP: BUSINESSBESLISSING) ────────
+// ── Estimated (technische afsluiting Tranche 9, Master Contract §7) ────────
 
 /**
- * Vervolgtranche 9 Deel B: de resterende-verwachtingsmethode voor Estimated
- * Niet verrekenbare BTW is BEWUST NIET contractueel eenduidig vastgesteld
- * (Master Contract laat dit expliciet open — geen FO/addendum/eerder
- * geaccepteerd besluit bepaalt "Werkelijk t/m afgesloten periode + [welke
- * resterende verwachting?]"). Er is daarom GEEN pure Estimated-calculator
- * gebouwd — deze functie is uitsluitend de expliciete, generieke
- * P&L-presentatie van die STOP: één regel, altijd ONBEKEND/
- * TECHNISCH_NIET_ONDERSTEUND, zodat de Estimated-P&L eerlijk ONVOLLEDIG
- * blijft in plaats van de regel stilzwijgend weg te laten (wat volledigheid
- * zou vervalsen). Bouwt GEEN eigen methode (nooit Begroting-Werkelijk,
- * lineaire extrapolatie, vorig jaar, handmatige verwachting, huur-pro-rata,
- * percentage van kosten/omzet — dat zijn businesskeuzes, zie moduledoc-
- * toelichting in het acceptatierapport).
+ * `estimatedTotaal = werkelijkTotaal + verwachtingResterendJaar` — reeds bepaald door de pure calculator
+ * (`berekenEstimatedNietVerrekenbareBtw`). Deze adapter kiest uitsluitend de juiste `PnLDekkingReden` (Unknown != zero,
+ * nooit €0 bij `estimatedTotaal === null`) — zelfde patroon als `gemeentelijkeLastenEstimatedPnLAdapter.ts`.
  */
-export function nietVerrekenbareBtwEstimatedNietOndersteundNaarPnLBovenEbitdaRegels(): PurePnLBovenEbitdaRegel[] {
+export function nietVerrekenbareBtwEstimatedNaarPnLBovenEbitdaRegels(resultaat: EstimatedNietVerrekenbareBtwResultaat): PurePnLBovenEbitdaRegel[] {
+  if (resultaat.estimatedTotaal !== null) {
+    return [kostenRegel(NIET_VERREKENBARE_BTW_PNL_SLEUTEL, { status: "BEKEND", bedrag: resultaat.estimatedTotaal })];
+  }
+  if (!resultaat.werkelijkVoldoendeBekend) {
+    return [
+      kostenRegel(NIET_VERREKENBARE_BTW_PNL_SLEUTEL, {
+        status: "ONBEKEND",
+        dekkingReden: "NIET_GEMAPT",
+        toelichting: "Estimated Niet verrekenbare BTW: Werkelijk-dekking voor de afgesloten periode is niet voldoende bevestigd.",
+      }),
+    ];
+  }
   return [
     kostenRegel(NIET_VERREKENBARE_BTW_PNL_SLEUTEL, {
       status: "ONBEKEND",
-      dekkingReden: "TECHNISCH_NIET_ONDERSTEUND",
-      toelichting:
-        "Estimated Niet verrekenbare BTW is niet gebouwd: de resterende-verwachtingsmethode (Werkelijk t/m afgesloten periode + welke resterende verwachting?) is niet contractueel eenduidig vastgesteld — STOP: BUSINESSBESLISSING (Vervolgtranche 9).",
+      dekkingReden: "GEEN_BEOORDELING",
+      toelichting: "Estimated Niet verrekenbare BTW: resterende-jaarverwachting is nog niet ingevuld — leeg is onbekend, nooit €0.",
     }),
   ];
 }

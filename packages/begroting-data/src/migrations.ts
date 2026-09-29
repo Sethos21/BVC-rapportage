@@ -4340,6 +4340,28 @@ export const MIGRATIONS: readonly Migration[] = [
        END`,
     ],
   },
+  /**
+   * Migratie 39 — Niet verrekenbare BTW: Estimated-persistentie (technische afsluiting Tranche 9, Master Contract
+   * §7 — definitief businessbesluit 29-09-2026): de handmatige RESTERENDE VERWACHTING op moduleniveau (geen
+   * categorieën, geen kwartaal-/maandverdeling — zie `begroteNietVerrekenbareBtw.ts`'s moduledoc), het tweede deel
+   * van `Estimated = Werkelijk t/m afgesloten periode + resterende verwachting`.
+   *
+   * Exact het Estimated-patroon van migratie 35/36 (Gemeentelijke lasten): BEWUST GEEN VASTGESTELD-triggers en geen
+   * CONCEPT-check — Estimated blijft het hele jaar wijzigbaar en wordt NOOIT bevroren; de vastgestelde Begroting
+   * wordt er nooit door gemuteerd. Eén rij per versie (PK = begroting_versie_id, geen categorie-/kwartaalkolom
+   * nodig): een rij bevat altijd een bedrag (NOT NULL; expliciet '0' = "geen kosten meer verwacht" is een geldige
+   * keuze), GEEN rij = nog niet ingevuld (onbekend, nooit stil 0).
+   */
+  {
+    version: 39,
+    description: "Niet verrekenbare BTW: Estimated-persistentie (handmatige resterende verwachting op moduleniveau)",
+    ddl: [
+      `CREATE TABLE begroting_niet_verrekenbare_btw_estimated_verwachting (
+        begroting_versie_id TEXT PRIMARY KEY REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        resterend_bedrag TEXT NOT NULL
+      )`,
+    ],
+  },
 ];
 
 function schemaMetaTableExists(db: DatabaseSync): boolean {

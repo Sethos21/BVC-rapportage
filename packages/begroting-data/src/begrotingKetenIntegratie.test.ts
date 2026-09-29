@@ -15,6 +15,7 @@ import {
   berekenWerkelijkLeegstand,
   berekenWerkelijkManagement,
   berekenWerkelijkGemeentelijkeLasten,
+  berekenWerkelijkNietVerrekenbareBtw,
   berekenWerkelijkOnderhoud,
   berekenWerkelijkVerzekeringen,
   vergelijkPnLResultaten,
@@ -35,6 +36,7 @@ import { schrijfGemeentelijkeLastenModule, schrijfWozSetBevestigd } from "./geme
 import { schrijfGemeentelijkeLastenRegels } from "./gemeentelijkeLastenRegels.js";
 import { neemWozVoorstelOver } from "./gemeentelijkeLastenVoorstelOvername.js";
 import { schrijfGeplandeVerkoopBeoordeeld } from "./geplandeVerkoopBeoordeeld.js";
+import { schrijfNietVerrekenbareBtwEstimatedVerwachting } from "./nietVerrekenbareBtwEstimatedVerwachting.js";
 import { schrijfNietVerrekenbareBtwRegels } from "./nietVerrekenbareBtwRegels.js";
 import { schrijfNietVerrekenbareBtwState } from "./nietVerrekenbareBtwState.js";
 import { schrijfGeplandOnderhoudActiviteiten } from "./geplandOnderhoudActiviteiten.js";
@@ -164,7 +166,7 @@ function leegstandVerwachting(o: Partial<Record<"NUTS_LEEGSTAND" | "SERVICEKOSTE
   return { NUTS_LEEGSTAND: LEEGSTAND_NUL, SERVICEKOSTEN_LEEGSTAND: LEEGSTAND_NUL, OVERIGE_LEEGSTANDSKOSTEN: LEEGSTAND_NUL, ...o };
 }
 
-/** Werkelijk t/m afgesloten periode (testfixture): Onderhoud 3000 (Gebouwen), Verzekeringen 700, Gemeentelijke lasten 4000, Accountant 1000. */
+/** Werkelijk t/m afgesloten periode (testfixture): Onderhoud 3000 (Gebouwen), Verzekeringen 700, Gemeentelijke lasten 4000, Accountant 1000, Niet verrekenbare BTW 4000. */
 function estimatedInvoer(overrides: Partial<EstimatedPnLInvoer> = {}): EstimatedPnLInvoer {
   return {
     resterendeMaanden: [7, 8, 9, 10, 11, 12],
@@ -181,6 +183,7 @@ function estimatedInvoer(overrides: Partial<EstimatedPnLInvoer> = {}): Estimated
       gemapteCategorieen: new Set(["NUTS_LEEGSTAND", "SERVICEKOSTEN_LEEGSTAND", "OVERIGE_LEEGSTANDSKOSTEN"]),
       resterendeKwartalen: ["Q3", "Q4"],
     },
+    nietVerrekenbareBtw: { werkelijk: berekenWerkelijkNietVerrekenbareBtw([{ economischeCategorie: "NIET_VERREKENBARE_BTW", saldo: D(4000) }]), dekkingBevestigd: true },
     ...overrides,
   };
 }
@@ -582,7 +585,7 @@ describe("Leegstandskosten door de hele keten: één P&L-post (Vervolgtranche 8)
   });
 });
 
-describe("Niet verrekenbare BTW door de hele keten: één P&L-post boven EBITDA, Estimated blijft een STOP (Vervolgtranche 9 Deel B)", () => {
+describe("Niet verrekenbare BTW door de hele keten: één P&L-post boven EBITDA, Estimated volledig gebouwd (Vervolgtranche 9 + technische afsluiting)", () => {
   it("9. Begroting: bewust €0 zonder regels is een bekende €0; handmatige regels tellen op tot de ene P&L-post", () => {
     zetMappings();
     const a = bouwVersie("070"); // bouwVersie beoordeelt BTW bewust, zonder regels
@@ -613,13 +616,50 @@ describe("Niet verrekenbare BTW door de hele keten: één P&L-post boven EBITDA,
     expect(serialiseer(leesBegrotingPnLRegels(db, a.id))).toBe(voor);
   });
 
-  it("18. Estimated Niet verrekenbare BTW blijft altijd ONBEKEND/TECHNISCH_NIET_ONDERSTEUND — geen eigen methode aangenomen, blokkeert de overige Estimated-posten niet", () => {
+  it("18A. Estimated = Werkelijk + handmatige resterende verwachting, exact éénmaal Werkelijk (4000 + 2500 = 6500)", () => {
     zetMappings();
     const a = bouwVersie("070");
+    schrijfNietVerrekenbareBtwEstimatedVerwachting(db, a.id, D(2500));
     const regels = leesEstimatedPnLRegels(db, a.id, estimatedInvoer());
-    const btwRegel = regels.find((r) => r.regelSleutel === "NIET_VERREKENBARE_BTW")!;
-    expect(btwRegel.waarde).toMatchObject({ status: "ONBEKEND", dekkingReden: "TECHNISCH_NIET_ONDERSTEUND" });
-    expect(bedrag(regels, "MANAGEMENTVERGOEDING")).toBe("6000"); // overige, wel-gebouwde Estimated-posten blijven onaangetast
+    expect(bedrag(regels, "NIET_VERREKENBARE_BTW")).toBe("6500");
+    expect(bedrag(regels, "MANAGEMENTVERGOEDING")).toBe("6000"); // overige Estimated-posten blijven onaangetast
+  });
+
+  it("18B. resterende verwachting expliciet €0 -> Estimated = Werkelijk (4000)", () => {
+    zetMappings();
+    const a = bouwVersie("070");
+    schrijfNietVerrekenbareBtwEstimatedVerwachting(db, a.id, D(0));
+    expect(bedrag(leesEstimatedPnLRegels(db, a.id, estimatedInvoer()), "NIET_VERREKENBARE_BTW")).toBe("4000");
+  });
+
+  it("18C. resterende verwachting niet ingevuld (leeg/null) -> ONBEKEND, nooit €0; blokkeert de overige Estimated-posten niet", () => {
+    zetMappings();
+    const a = bouwVersie("070"); // geen schrijfNietVerrekenbareBtwEstimatedVerwachting aanroep
+    const regels = leesEstimatedPnLRegels(db, a.id, estimatedInvoer());
+    expect(regels.find((r) => r.regelSleutel === "NIET_VERREKENBARE_BTW")!.waarde).toMatchObject({ status: "ONBEKEND", dekkingReden: "GEEN_BEOORDELING" });
+    expect(bedrag(regels, "MANAGEMENTVERGOEDING")).toBe("6000");
+    expect(berekenPnLBoom("ESTIMATED", regels).exploitatieLasten.volledigheid.status).toBe("ONVOLLEDIG");
+  });
+
+  it("18D. Werkelijk-dekking niet bevestigd + resterende verwachting wel bekend -> geen verzonnen totaal, ONBEKEND", () => {
+    zetMappings();
+    const a = bouwVersie("070");
+    schrijfNietVerrekenbareBtwEstimatedVerwachting(db, a.id, D(2500));
+    const basis = estimatedInvoer();
+    const regels = leesEstimatedPnLRegels(db, a.id, { ...basis, nietVerrekenbareBtw: { ...basis.nietVerrekenbareBtw, dekkingBevestigd: false } });
+    expect(regels.find((r) => r.regelSleutel === "NIET_VERREKENBARE_BTW")!.waarde.status).toBe("ONBEKEND");
+  });
+
+  it("17/24. Estimated wijzigen na vaststellen muteert de vastgestelde Begroting niet", () => {
+    zetMappings();
+    const a = bouwVersie("070");
+    schrijfNietVerrekenbareBtwRegels(db, a.id, [{ id: null, omschrijving: "BTW", complexnummer: null, jaarbedrag: D(900) }]);
+    stelBegrotingVast(db, a.id, new Date(Date.UTC(2026, 8, 25)));
+    const begrotingVoor = serialiseer(leesBegrotingPnLRegels(db, a.id));
+    schrijfNietVerrekenbareBtwEstimatedVerwachting(db, a.id, D(2500));
+    expect(bedrag(leesEstimatedPnLRegels(db, a.id, estimatedInvoer()), "NIET_VERREKENBARE_BTW")).toBe("6500");
+    expect(serialiseer(leesBegrotingPnLRegels(db, a.id))).toBe(begrotingVoor); // vastgestelde post (900) blijft ongewijzigd
+    expect(leesBegrotingsversie(db, a.id)!.status).toBe("VASTGESTELD");
   });
 
   it("13/19. geen 070-hardcoding: dezelfde code, administratie 003, dezelfde uitkomst voor dezelfde invoer", () => {
