@@ -7,6 +7,7 @@ import { resolveBron } from "./sourceResolver.js";
 import { ExcelBronAdapter } from "./bronAdapter.js";
 import { leesAdministratieConfig } from "./administratie.js";
 import { administratieRapportenDir, pnlBronmappingDatabasePad } from "./paths.js";
+import { PNL_PRESENTATIEMAPPINGEN } from "./pnlPresentatiemappingen.js";
 
 /**
  * DELTA BUILD (2026-09-18) — "Pure P&L → Worker + Renderer": DE EERSTE
@@ -39,6 +40,13 @@ import { administratieRapportenDir, pnlBronmappingDatabasePad } from "./paths.js
  * de acht bestaande calculators/adapters + `berekenPnLBoom`) is de ENIGE
  * plek die classificeert/optelt. Dit bestand vertaalt uitsluitend
  * ruwe-rij-vormen.
+ *
+ * P&L-PRESENTATIEMAPPING (Vervolgtranche 9, sluit ARCHITECTUURPUNT §8.10):
+ * `PNL_PRESENTATIEMAPPINGEN` (`pnlPresentatiemappingen.ts`) is de EERSTE en
+ * enige productie-aanroeper van dit mechanisme — administratiegebonden DATA
+ * (momenteel uitsluitend de bewezen 070/GL4350/OGB4319-regel), geen
+ * businesslogica. Het generieke routeringsmechanisme zelf blijft in
+ * `@bvc/reporting`.
  */
 
 export interface GenereerPnLPeriodeOpties {
@@ -112,7 +120,7 @@ export function haalPnLPeriodeResultaatOp(root: string, administratieId: string,
   }
 
   const context = { bedrijfsnr: config.bedrijfsnr, boekjaar: opties.boekjaar, boekperiode: opties.boekperiodeTotEnMet, opSysteemtijdstip: new Date() };
-  return berekenPnLPeriode(context, boekingen, mappingregels);
+  return berekenPnLPeriode(context, boekingen, mappingregels, PNL_PRESENTATIEMAPPINGEN);
 }
 
 export function genereerPnLPeriode(root: string, administratieId: string, opties: GenereerPnLPeriodeOpties): GenereerPnLPeriodeResultaat {

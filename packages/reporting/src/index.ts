@@ -48,6 +48,7 @@ export * from "./boekingenJarenDiagnose.js";
 export * from "./begroting/begroteGeplandeVerkoop.js";
 export * from "./pnlBronmapping.js";
 export * from "./pnlBronmappingClassificatie.js";
+export * from "./pnlPresentatiemapping.js";
 export * from "./pnlEngine.js";
 export * from "./pnlPeriodeOrchestratie.js";
 export * from "./renderPnLPeriode.js";

@@ -130,16 +130,72 @@ describe("genereerPnLPeriode — productie-integratie (echte xlsx-bron + echte P
     expect(resultaat.resultaat.ebitda.bedrag.toDecimalPlaces(0).toString()).toBe("311180");
     // Vervolgtranche 6 (Unknown != zero): de bedragen blijven exact, maar posten zonder bewezen mapping in DEZE mapping-DB (Management, Accountant,
     // Juridisch en — in dit fixture bewust niet gemapt — Makelaar/taxatie) zijn ONBEKEND in plaats van een bevestigde €0; EBITDA is daardoor ONVOLLEDIG.
+    // Vervolgtranche 9 (sluit ARCHITECTUURPUNT §8.10): GL4350/OGB4319 (€199,08) wordt nu, via `PNL_PRESENTATIEMAPPINGEN`, onder Leegstandskosten
+    // gepresenteerd i.p.v. onder Servicekosten Eigenaar — het bedrag zelf verandert niet (zelfde EXPLOITATIE_LASTEN-groep), alleen de post
+    // Leegstandskosten is daardoor gedeeltelijk (niet meer volledig) onbekend: Nuts/Overige blijven ontbreken via LEEGSTANDSKOSTEN_ONBEKEND_ONDERDEEL.
     const ebitdaVolledigheid = resultaat.resultaat.ebitda.volledigheid;
     expect(ebitdaVolledigheid.status).toBe("ONVOLLEDIG");
-    expect(ebitdaVolledigheid.status === "ONVOLLEDIG" ? ebitdaVolledigheid.ontbrekend.map((o) => o.regelSleutel).sort() : []).toEqual(["ACCOUNTANT", "JURIDISCHE_KOSTEN", "LEEGSTANDSKOSTEN", "MAKELAARSKOSTEN", "MANAGEMENTVERGOEDING"]);
+    expect(ebitdaVolledigheid.status === "ONVOLLEDIG" ? ebitdaVolledigheid.ontbrekend.map((o) => o.regelSleutel).sort() : []).toEqual([
+      "ACCOUNTANT",
+      "JURIDISCHE_KOSTEN",
+      "LEEGSTANDSKOSTEN_ONBEKEND_ONDERDEEL",
+      "MAKELAARSKOSTEN",
+      "MANAGEMENTVERGOEDING",
+    ]);
     expect(resultaat.nietMeegenomen).toEqual([]);
+    // De post Leegstandskosten zelf is nu BEKEND=199.08 (som van de bekende onderdelen — beste weten), en SERVICEKOSTEN_LEEGSTAND
+    // verschijnt niet meer als eigen Servicekosten-Eigenaar-regel (geen dubbeltelling, Actual exact één keer).
+    const leegstandRegel = resultaat.resultaat.exploitatieLasten.regels.find((r) => r.regelSleutel === "LEEGSTANDSKOSTEN")!;
+    expect(leegstandRegel.waarde.status).toBe("BEKEND");
+    expect(leegstandRegel.waarde.status === "BEKEND" ? leegstandRegel.waarde.bedrag.toString() : null).toBe("199.08");
+    expect(resultaat.resultaat.exploitatieLasten.regels.find((r) => r.regelSleutel === "SERVICEKOSTEN_LEEGSTAND")).toBeUndefined();
 
     // Renderer: het geschreven HTML-rapport bevat de EBITDA-uitkomst, geen eigen herberekening.
     const geschrevenHtml = readFileSync(resultaat.pad, "utf-8");
     expect(geschrevenHtml).toBe(resultaat.html);
     expect(geschrevenHtml).toContain("Winst- en verliesrekening");
     expect(geschrevenHtml).toContain("EBITDA");
+  });
+
+  it("Vervolgtranche 9, §8.10: administratiegebonden — een andere administratie met dezelfde GL4350/OGB4319-mapping erft de 070-presentatiemapping niet, blijft onder Servicekosten Eigenaar", () => {
+    const ANDERE_ADMINISTRATIE_ID = "071_andere";
+    mkdirSync(administratieDir(root, ANDERE_ADMINISTRATIE_ID), { recursive: true });
+    schrijfAdministratieConfig(root, ANDERE_ADMINISTRATIE_ID, nieuweAdministratieConfig("071", "Andere Administratie"));
+
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "boekingen.xlsx"), [
+      { ...boekingRij("4350", 250, "4319", "Servicekosten leegstand"), Bedrijfsnr: "071" },
+    ]);
+    const mappingDb = openOrCreateDatabase(pnlBronmappingDatabasePad(root, ANDERE_ADMINISTRATIE_ID));
+    try {
+      voegPnLBronmappingMutatieToe(mappingDb, {
+        bedrijfsnr: "071",
+        grootboekrekening: "4350",
+        grootboekOmschrijving: null,
+        ogbKostensoort: "4319",
+        ogbKostensoortOmschrijving: null,
+        economischeModule: "SERVICEKOSTEN_EIGENAAR",
+        economischeCategorie: "SERVICEKOSTEN_LEEGSTAND",
+        geldigVanafBoekjaar: 2025,
+        geldigVanafPeriode: "01",
+        geldigTotBoekjaar: null,
+        geldigTotPeriode: null,
+        type: "NIEUWE_MAPPING_VANAF_PERIODE",
+        vorigeMappingId: null,
+        gewijzigdOp: new Date("2026-09-18T00:00:00.000Z"),
+        gebruiker: "test",
+        wijzigingsreden: "Delta Build test-seed",
+      });
+    } finally {
+      mappingDb.close();
+    }
+
+    const resultaat = genereerPnLPeriode(root, ANDERE_ADMINISTRATIE_ID, { boekjaar: 2026, boekperiodeTotEnMet: "06" });
+
+    const skeRegel = resultaat.resultaat.exploitatieLasten.regels.find((r) => r.regelSleutel === "SERVICEKOSTEN_LEEGSTAND")!;
+    expect(skeRegel.waarde).toEqual({ status: "BEKEND", bedrag: expect.anything() });
+    expect(skeRegel.waarde.status === "BEKEND" ? skeRegel.waarde.bedrag.toString() : null).toBe("250");
+    const leegstandRegel = resultaat.resultaat.exploitatieLasten.regels.find((r) => r.regelSleutel === "LEEGSTANDSKOSTEN")!;
+    expect(leegstandRegel.waarde.status).toBe("ONBEKEND"); // geen presentatiemapping voor 071 — blijft ongewijzigd onbekend
   });
 
   it("routeert boekingen buiten de acht productieketens (niet gemapt) zichtbaar naar nietMeegenomen, nooit stilzwijgend weggelaten", () => {

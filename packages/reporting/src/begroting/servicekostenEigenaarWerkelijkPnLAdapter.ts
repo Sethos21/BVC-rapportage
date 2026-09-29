@@ -43,25 +43,42 @@ import type { PnLBronBijdrage, PurePnLBovenEbitdaRegel } from "../pnlEngine.js";
  * `brondekkingBevestigd` (GAT-001B §5, herhaald): `nietGeclassificeerdTotaal
  * === 0` is NOODZAKELIJK maar NIET VOLDOENDE bewijs van volledige dekking.
  * Zonder expliciete bevestiging blijven beide categorieën ONBEKEND.
+ *
+ * `categorieenElders` (Vervolgtranche 9, sluit ARCHITECTUURPUNT §8.10): een
+ * expliciet BEWEZEN P&L-presentatiemapping (`pnlPresentatiemapping.ts`) kan
+ * één van beide categorieën elders laten PRESENTEREN (bv. onder
+ * Leegstandskosten) — haar bron-hoofddomein/-categorie blijft ongewijzigd
+ * SERVICEKOSTEN_EIGENAAR, maar haar EIGEN regel verschijnt dan hier NIET
+ * meer (Actual telt exact één keer, geen dubbeltelling). Standaard leeg —
+ * bestaand gedrag ongewijzigd.
  */
 
 const SERVICEKOSTEN_EIGENAAR_NIET_GECLASSIFICEERD_SLEUTEL = "SERVICEKOSTEN_EIGENAAR_NIET_GECLASSIFICEERD";
 
-export function servicekostenEigenaarWerkelijkNaarPnLBovenEbitdaRegels(resultaat: WerkelijkServicekostenEigenaarResultaat, brondekkingBevestigd: boolean): PurePnLBovenEbitdaRegel[] {
-  function categorieBijdrage(categorie: ServicekostenEigenaarWerkelijkCategorie): PnLBronBijdrage {
-    if (!brondekkingBevestigd) {
-      return { status: "ONBEKEND", dekkingReden: "GEEN_BEOORDELING", toelichting: `Bron-/mappingdekking voor Servicekosten-Eigenaar-Werkelijk (${categorie}) is niet expliciet bevestigd door de aanroepende laag.` };
-    }
-    const categorieResultaat = resultaat.perCategorie.find((c) => c.categorie === categorie)!;
-    return { status: "BEKEND", bedrag: categorieResultaat.categorieTotaal };
+/** Losse, herbruikbare bijdrage-berekening per categorie (Vervolgtranche 9) — ook bruikbaar door een aanroeper die deze categorie elders presenteert. */
+export function servicekostenEigenaarCategorieBijdrage(
+  resultaat: WerkelijkServicekostenEigenaarResultaat,
+  categorie: ServicekostenEigenaarWerkelijkCategorie,
+  brondekkingBevestigd: boolean,
+): PnLBronBijdrage {
+  if (!brondekkingBevestigd) {
+    return { status: "ONBEKEND", dekkingReden: "GEEN_BEOORDELING", toelichting: `Bron-/mappingdekking voor Servicekosten-Eigenaar-Werkelijk (${categorie}) is niet expliciet bevestigd door de aanroepende laag.` };
   }
+  const categorieResultaat = resultaat.perCategorie.find((c) => c.categorie === categorie)!;
+  return { status: "BEKEND", bedrag: categorieResultaat.categorieTotaal };
+}
 
-  const regels: PurePnLBovenEbitdaRegel[] = SERVICEKOSTEN_EIGENAAR_WERKELIJK_CATEGORIEEN.map((categorie) => ({
+export function servicekostenEigenaarWerkelijkNaarPnLBovenEbitdaRegels(
+  resultaat: WerkelijkServicekostenEigenaarResultaat,
+  brondekkingBevestigd: boolean,
+  categorieenElders: ReadonlySet<ServicekostenEigenaarWerkelijkCategorie> = new Set(),
+): PurePnLBovenEbitdaRegel[] {
+  const regels: PurePnLBovenEbitdaRegel[] = SERVICEKOSTEN_EIGENAAR_WERKELIJK_CATEGORIEEN.filter((categorie) => !categorieenElders.has(categorie)).map((categorie) => ({
     regelSleutel: categorie,
     boomPositie: "BOVEN_EBITDA",
     groep: "EXPLOITATIE_LASTEN",
     contributieAard: "KOSTEN",
-    waarde: categorieBijdrage(categorie),
+    waarde: servicekostenEigenaarCategorieBijdrage(resultaat, categorie, brondekkingBevestigd),
   }));
 
   if (brondekkingBevestigd && !resultaat.nietGeclassificeerdTotaal.isZero()) {

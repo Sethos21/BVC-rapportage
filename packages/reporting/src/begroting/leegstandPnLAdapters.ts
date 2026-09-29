@@ -97,21 +97,56 @@ export function leegstandBegrotingNaarPnLBovenEbitdaRegels(begroting: LeegstandB
 // ── Werkelijk ───────────────────────────────────────────────────────────────
 
 /**
+ * Eén elders (via een bewezen P&L-presentatiemapping, `pnlPresentatiemapping.ts`) berekende bijdrage die onder een
+ * Leegstand-kostensoort wordt GEPRESENTEERD — haar bron-hoofddomein blijft ongewijzigd, alleen haar WEERGAVE landt hier
+ * (Vervolgtranche 9, sluit ARCHITECTUURPUNT §8.10). `bron` is uitsluitend diagnostisch (foutmeldingen).
+ */
+export interface LeegstandWerkelijkPresentatieBijdrage {
+  categorie: BgLeegstandCategorie;
+  waarde: PnLBronBijdrage;
+  bron: string;
+}
+
+/** Som van meerdere gerouteerde bijdragen voor DEZELFDE categorie (per M4b onvermijdelijk uit verschillende, disjuncte GL's) — ONBEKEND is dominant, nooit stil als bekend behandeld. */
+function combineerGerouteerdeBijdragen(bijdragen: readonly PnLBronBijdrage[]): PnLBronBijdrage {
+  const onbekend = bijdragen.find((b): b is Extract<PnLBronBijdrage, { status: "ONBEKEND" }> => b.status === "ONBEKEND");
+  if (onbekend !== undefined) return onbekend;
+  return { status: "BEKEND", bedrag: bijdragen.reduce((totaal, b) => totaal.plus((b as { bedrag: Decimal }).bedrag), new Decimal(0)) };
+}
+
+/**
  * Werkelijk Leegstand (hoofddomein LEEGSTAND, per administratie via de centrale mapping): een kostensoort is alleen BEKEND
  * als de dekking is bevestigd én de administratie voor deze kostensoort een bewezen mapping heeft (`gemapteCategorieen`,
  * `bepaalGemapteCategorieen`). Zonder mapping is het Werkelijk ONBEKEND — geen bevestigde €0. Niet-geclassificeerde
  * boekingen (op een LEEGSTAND-GL zonder bekende OGB) komen als aparte ONBEKEND-regel; zij worden nooit over kostensoorten
  * verdeeld. Servicekosten die volgens de mapping onder het domein Servicekosten eigenaar vallen (GL4350-achtige GL's met een
- * leegstand-OGB) zijn NIET deze categorie en komen hier nooit terecht: een OGB creëert geen ander hoofddomein.
+ * leegstand-OGB) zijn NIET deze categorie en komen hier normaliter nooit terecht: een OGB creëert geen ander hoofddomein.
+ *
+ * `gerouteerdeBijdragen` (Vervolgtranche 9, §8.10): een expliciet bewezen P&L-presentatiemapping kan zo'n
+ * Servicekosten-Eigenaar-bijdrage hier alsnog laten PRESENTEREN — haar bron-hoofddomein blijft SERVICEKOSTEN_EIGENAAR
+ * (M4b ongewijzigd), alleen haar WEERGAVE verhuist. Heeft het domein Leegstand voor diezelfde categorie ZELF ook al een
+ * bewezen mapping (`eigenGemapt`), dan is combineren van twee onafhankelijk bewezen bronnen voor dezelfde P&L-categorie
+ * geen technische keuze meer — dat vereist een expliciet businessbesluit, dus faalt dit hard i.p.v. stil te kiezen.
  */
 export function leegstandWerkelijkNaarPnLBovenEbitdaRegels(
   resultaat: WerkelijkLeegstandResultaat,
   brondekkingBevestigd: boolean,
   gemapteCategorieen?: ReadonlySet<string>,
+  gerouteerdeBijdragen: readonly LeegstandWerkelijkPresentatieBijdrage[] = [],
 ): PurePnLBovenEbitdaRegel[] {
   const onderdelen: Onderdeel[] = LEEGSTAND_CATEGORIEEN.map((categorie) => {
+    const eigenGemapt = brondekkingBevestigd && gemapteCategorieen !== undefined && gemapteCategorieen.has(categorie);
+    const gerouteerd = gerouteerdeBijdragen.filter((g) => g.categorie === categorie);
+
     let waarde: PnLBronBijdrage;
-    if (!brondekkingBevestigd) {
+    if (gerouteerd.length > 0) {
+      if (eigenGemapt) {
+        throw new Error(
+          `Interne fout: Leegstand-kostensoort ${categorie} heeft zowel een bewezen mapping binnen het domein Leegstand zelf als een gerouteerde P&L-presentatiebijdrage (${gerouteerd.map((g) => g.bron).join(", ")}) — het combineren van twee onafhankelijk bewezen bronnen voor dezelfde P&L-categorie vereist een expliciet businessbesluit, geen stilzwijgende keuze.`,
+        );
+      }
+      waarde = combineerGerouteerdeBijdragen(gerouteerd.map((g) => g.waarde));
+    } else if (!brondekkingBevestigd) {
       waarde = { status: "ONBEKEND", dekkingReden: "GEEN_BEOORDELING", toelichting: "Bron-/mappingdekking voor Leegstand-Werkelijk is niet expliciet bevestigd door de aanroepende laag." };
     } else if (gemapteCategorieen !== undefined && !gemapteCategorieen.has(categorie)) {
       waarde = { status: "ONBEKEND", dekkingReden: "NIET_GEMAPT", toelichting: `voor deze administratie bestaat geen bewezen bronmapping naar ${categorie} in het domein Leegstand — onbekend, geen bevestigde €0.` };

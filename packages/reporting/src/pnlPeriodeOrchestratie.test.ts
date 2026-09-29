@@ -1,6 +1,7 @@
 import Decimal from "decimal.js";
 import { describe, expect, it } from "vitest";
 import { berekenPnLPeriode, type PnLRuweBoekingRegel } from "./pnlPeriodeOrchestratie.js";
+import type { PnLPresentatieMappingRegel } from "./pnlPresentatiemapping.js";
 import { mappingRegel } from "./begroting/gat013_070Fixtures.js";
 import { ALLE_BOEKINGEN_070, ALLE_MAPPING_070, BEDRIJFSNR, BOEKJAAR, OP_SYSTEEMTIJDSTIP, inBereik, type RuweRegel } from "./begroting/gat013_070Fixtures.js";
 
@@ -68,6 +69,60 @@ describe("berekenPnLPeriode — 070 H1 2026, ÉÉN gemengde boekingenstroom (nie
     expect(beheerRegel.waarde).toEqual({ status: "BEKEND", bedrag: new Decimal("6445.64") });
     const skeRegel = resultaat.exploitatieLasten.regels.find((r) => r.regelSleutel === "SERVICEKOSTEN_LEEGSTAND")!;
     expect(skeRegel.waarde).toEqual({ status: "BEKEND", bedrag: new Decimal("199.08") });
+  });
+});
+
+describe("berekenPnLPeriode — P&L-presentatiemapping (Vervolgtranche 9, sluit ARCHITECTUURPUNT §8.10): 070/GL4350/OGB4319 -> Leegstandskosten/Servicekosten", () => {
+  const h1Boekingen = ALLE_BOEKINGEN_070.filter((r) => inBereik(r.periode, "01", "06")).map(naarPnLRuweBoekingRegel);
+  const context = { bedrijfsnr: BEDRIJFSNR, boekjaar: BOEKJAAR, boekperiode: "06", opSysteemtijdstip: OP_SYSTEEMTIJDSTIP };
+  const presentatiemapping: PnLPresentatieMappingRegel[] = [
+    { bedrijfsnr: "070", bronHoofddomein: "SERVICEKOSTEN_EIGENAAR", bronCategorie: "SERVICEKOSTEN_LEEGSTAND", doelHoofddomein: "LEEGSTAND", doelCategorie: "SERVICEKOSTEN_LEEGSTAND" },
+  ];
+
+  it("1. de bewezen GL4350+OGB4319-bijdrage (€199,08) wordt onder Leegstandskosten gepresenteerd i.p.v. onder Servicekosten Eigenaar", () => {
+    const { resultaat } = berekenPnLPeriode(context, h1Boekingen, ALLE_MAPPING_070, presentatiemapping);
+    const leegstandRegel = resultaat.exploitatieLasten.regels.find((r) => r.regelSleutel === "LEEGSTANDSKOSTEN")!;
+    expect(leegstandRegel.waarde).toEqual({ status: "BEKEND", bedrag: new Decimal("199.08") });
+    expect(leegstandRegel.specificaties!.find((s) => s.label === "SERVICEKOSTEN_LEEGSTAND")!.waarde).toEqual({ status: "BEKEND", bedrag: new Decimal("199.08") });
+  });
+
+  it("3. dezelfde boeking verdwijnt uit de Servicekosten-Eigenaar-presentatie — geen dubbeltelling", () => {
+    const { resultaat } = berekenPnLPeriode(context, h1Boekingen, ALLE_MAPPING_070, presentatiemapping);
+    expect(resultaat.exploitatieLasten.regels.find((r) => r.regelSleutel === "SERVICEKOSTEN_LEEGSTAND")).toBeUndefined();
+  });
+
+  it("2. GL4350 zonder OGB4319 (REGULIER) wordt niet automatisch mee geherclassificeerd — alleen de bewezen GL+OGB-combinatie routeert", () => {
+    const regulierBoeking: PnLRuweBoekingRegel = { grootboekrekening: "4350", ogbKostensoort: "4400", ogbKostensoortOmschrijving: "Overige servicekosten", complexnummer: "001", saldo: new Decimal("77") };
+    const mappingMetRegulier = [...ALLE_MAPPING_070, mappingRegel({ grootboekrekening: "4350", ogbKostensoort: "4400", economischeModule: "SERVICEKOSTEN_EIGENAAR", economischeCategorie: "SERVICEKOSTEN_EIGENAAR_REGULIER" })];
+    const { resultaat } = berekenPnLPeriode(context, [...h1Boekingen, regulierBoeking], mappingMetRegulier, presentatiemapping);
+    const regulierRegel = resultaat.exploitatieLasten.regels.find((r) => r.regelSleutel === "SERVICEKOSTEN_EIGENAAR_REGULIER")!;
+    expect(regulierRegel.waarde).toEqual({ status: "BEKEND", bedrag: new Decimal("77") });
+    const leegstandRegel = resultaat.exploitatieLasten.regels.find((r) => r.regelSleutel === "LEEGSTANDSKOSTEN")!;
+    expect(leegstandRegel.waarde).toEqual({ status: "BEKEND", bedrag: new Decimal("199.08") }); // REGULIER routeert niet mee
+  });
+
+  it("4. Actual totaal (opbrengsten/kosten/EBITDA) verandert niet door de herclassificatie — uitsluitend een presentatieverschuiving binnen dezelfde groep", () => {
+    const zonder = berekenPnLPeriode(context, h1Boekingen, ALLE_MAPPING_070).resultaat;
+    const met = berekenPnLPeriode(context, h1Boekingen, ALLE_MAPPING_070, presentatiemapping).resultaat;
+    expect(met.totaalOpbrengsten.besteWetenSom.toString()).toBe(zonder.totaalOpbrengsten.besteWetenSom.toString());
+    expect(met.totaalKosten.besteWetenSom.toString()).toBe(zonder.totaalKosten.besteWetenSom.toString());
+    expect(met.ebitda.bedrag.toString()).toBe(zonder.ebitda.bedrag.toString());
+    expect(met.exploitatieLasten.besteWetenSom.toString()).toBe(zonder.exploitatieLasten.besteWetenSom.toString());
+  });
+
+  it("6. administratiegebonden: een andere administratie erft deze presentatiemapping niet — GL4350/OGB4319 blijft daar (indien bewezen) gewoon onder Servicekosten Eigenaar", () => {
+    const andereContext = { ...context, bedrijfsnr: "071" };
+    const mapping071 = [mappingRegel({ bedrijfsnr: "071", grootboekrekening: "4350", ogbKostensoort: "4319", economischeModule: "SERVICEKOSTEN_EIGENAAR", economischeCategorie: "SERVICEKOSTEN_LEEGSTAND" })];
+    const boeking071: PnLRuweBoekingRegel = { grootboekrekening: "4350", ogbKostensoort: "4319", ogbKostensoortOmschrijving: "Servicekosten leegstand", complexnummer: "001", saldo: new Decimal("50") };
+    const { resultaat } = berekenPnLPeriode(andereContext, [boeking071], mapping071, presentatiemapping);
+    expect(resultaat.exploitatieLasten.regels.find((r) => r.regelSleutel === "SERVICEKOSTEN_LEEGSTAND")!.waarde).toEqual({ status: "BEKEND", bedrag: new Decimal("50") });
+    // De post Leegstandskosten bestaat altijd (eigen, ongeroerd domein) maar blijft voor 071 ONBEKEND: geen bewezen LEEGSTAND-mapping EN geen presentatiemapping voor 071.
+    expect(resultaat.exploitatieLasten.regels.find((r) => r.regelSleutel === "LEEGSTANDSKOSTEN")!.waarde.status).toBe("ONBEKEND");
+  });
+
+  it("faalt hard op een presentatiemapping naar een niet-ondersteund doel — nooit stilzwijgend genegeerd", () => {
+    const onbekendDoel: PnLPresentatieMappingRegel[] = [{ bedrijfsnr: "070", bronHoofddomein: "SERVICEKOSTEN_EIGENAAR", bronCategorie: "SERVICEKOSTEN_LEEGSTAND", doelHoofddomein: "RENTE", doelCategorie: "RENTEKOSTEN" }];
+    expect(() => berekenPnLPeriode(context, h1Boekingen, ALLE_MAPPING_070, onbekendDoel)).toThrow(/niet-ondersteund presentatiedoel/);
   });
 });
 

@@ -134,6 +134,40 @@ describe("Werkelijk Leegstandskosten → P&L: onbekend zonder bewezen mapping; A
   });
 });
 
+describe("Werkelijk Leegstandskosten → P&L: gerouteerdeBijdragen (Vervolgtranche 9, sluit ARCHITECTUURPUNT §8.10)", () => {
+  it("1/3/4. een gerouteerde bijdrage (bv. vanuit Servicekosten Eigenaar) vult de kostensoort zonder eigen Leegstand-mapping; Actual exact één keer (geen eigen bevestigde bron ernaast)", () => {
+    const regels = leegstandWerkelijkNaarPnLBovenEbitdaRegels(werkelijk({ NUTS_LEEGSTAND: 30, OVERIGE_LEEGSTANDSKOSTEN: 5 }), true, new Set(["NUTS_LEEGSTAND", "OVERIGE_LEEGSTANDSKOSTEN"]), [
+      { categorie: "SERVICEKOSTEN_LEEGSTAND", waarde: { status: "BEKEND", bedrag: D(199.08) }, bron: "SERVICEKOSTEN_EIGENAAR/SERVICEKOSTEN_LEEGSTAND" },
+    ]);
+    expect(regels).toHaveLength(1);
+    expect(hoofd(regels).waarde).toEqual({ status: "BEKEND", bedrag: D(234.08) });
+  });
+
+  it("6. een gerouteerde ONBEKEND-bijdrage propageert (Unknown != zero blijft gelden voor de gerouteerde bron zelf)", () => {
+    const regels = leegstandWerkelijkNaarPnLBovenEbitdaRegels(werkelijk({ NUTS_LEEGSTAND: 30, OVERIGE_LEEGSTANDSKOSTEN: 5 }), true, new Set(["NUTS_LEEGSTAND", "OVERIGE_LEEGSTANDSKOSTEN"]), [
+      { categorie: "SERVICEKOSTEN_LEEGSTAND", waarde: { status: "ONBEKEND", dekkingReden: "GEEN_BEOORDELING", toelichting: "niet bevestigd" }, bron: "test" },
+    ]);
+    expect(regels.some((r) => r.regelSleutel === LEEGSTANDSKOSTEN_ONBEKEND_ONDERDEEL_SLEUTEL)).toBe(true);
+  });
+
+  it("faalt hard wanneer zowel het domein Leegstand zelf als een gerouteerde bijdrage voor DEZELFDE kostensoort bewezen zijn — geen stilzwijgende keuze tussen twee bewezen bronnen", () => {
+    expect(() =>
+      leegstandWerkelijkNaarPnLBovenEbitdaRegels(werkelijk({ SERVICEKOSTEN_LEEGSTAND: 20 }), true, new Set(["SERVICEKOSTEN_LEEGSTAND"]), [
+        { categorie: "SERVICEKOSTEN_LEEGSTAND", waarde: { status: "BEKEND", bedrag: D(199.08) }, bron: "test" },
+      ]),
+    ).toThrow(/expliciet businessbesluit/);
+  });
+
+  it("zonder gerouteerdeBijdragen blijft het bestaande gedrag ongewijzigd", () => {
+    const regels = leegstandWerkelijkNaarPnLBovenEbitdaRegels(
+      werkelijk({ NUTS_LEEGSTAND: 30, SERVICEKOSTEN_LEEGSTAND: 20, OVERIGE_LEEGSTANDSKOSTEN: 5 }),
+      true,
+      new Set<string>(LEEGSTAND_CATEGORIEEN),
+    );
+    expect(hoofd(regels).waarde).toEqual({ status: "BEKEND", bedrag: D(55) });
+  });
+});
+
 describe("Estimated Leegstandskosten → P&L", () => {
   const begroting = begroot([regel("NUTS_LEEGSTAND", [100, 100, 100, 100])]);
   const gemapt = new Set<string>(LEEGSTAND_CATEGORIEEN);

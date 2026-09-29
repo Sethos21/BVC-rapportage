@@ -10,15 +10,18 @@ import { managementWerkelijkNaarPnLBovenEbitdaRegels } from "./begroting/managem
 import { berekenWerkelijkOnderhoudViaCentraleMapping } from "./begroting/onderhoudCentraleMapping.js";
 import { onderhoudWerkelijkNaarPnLBovenEbitdaRegels } from "./begroting/onderhoudWerkelijkPnLAdapter.js";
 import { berekenWerkelijkServicekostenEigenaarViaCentraleMapping } from "./begroting/servicekostenEigenaarCentraleMapping.js";
-import { servicekostenEigenaarWerkelijkNaarPnLBovenEbitdaRegels } from "./begroting/servicekostenEigenaarWerkelijkPnLAdapter.js";
+import { servicekostenEigenaarCategorieBijdrage, servicekostenEigenaarWerkelijkNaarPnLBovenEbitdaRegels } from "./begroting/servicekostenEigenaarWerkelijkPnLAdapter.js";
+import { SERVICEKOSTEN_EIGENAAR_WERKELIJK_CATEGORIEEN, type ServicekostenEigenaarWerkelijkCategorie } from "./begroting/werkelijkServicekostenEigenaar.js";
 import { berekenWerkelijkVerzekeringenViaCentraleMapping } from "./begroting/verzekeringCentraleMapping.js";
 import { verzekeringWerkelijkNaarPnLBovenEbitdaRegels } from "./begroting/verzekeringWerkelijkPnLAdapter.js";
 import { berekenWerkelijkGemeentelijkeLastenViaCentraleMapping } from "./begroting/gemeentelijkeLastenCentraleMapping.js";
 import { gemeentelijkeLastenWerkelijkNaarPnLBovenEbitdaRegels } from "./begroting/gemeentelijkeLastenWerkelijkPnLAdapter.js";
 import { berekenWerkelijkLeegstandViaCentraleMapping } from "./begroting/leegstandCentraleMapping.js";
-import { leegstandWerkelijkNaarPnLBovenEbitdaRegels } from "./begroting/leegstandPnLAdapters.js";
+import { LEEGSTAND_CATEGORIEEN, type BgLeegstandCategorie } from "./begroting/begroteLeegstand.js";
+import { leegstandWerkelijkNaarPnLBovenEbitdaRegels, type LeegstandWerkelijkPresentatieBijdrage } from "./begroting/leegstandPnLAdapters.js";
 import { berekenWerkelijkAlgemeneKostenViaCentraleMapping } from "./begroting/algemeneKostenCentraleMapping.js";
 import { algemeneKostenWerkelijkNaarPnLBovenEbitdaRegels } from "./begroting/algemeneKostenWerkelijkPnLAdapter.js";
+import { vindPnLPresentatieRouting, type PnLPresentatieMappingRegel } from "./pnlPresentatiemapping.js";
 
 /**
  * DELTA BUILD (2026-09-18) — "Pure P&L → Worker + Renderer": de dunne
@@ -70,6 +73,20 @@ import { algemeneKostenWerkelijkNaarPnLBovenEbitdaRegels } from "./begroting/alg
  * `berekenPnLBoom` blijft de ENIGE plek die optelt/EBITDA berekent — deze
  * module roept hem exact één keer aan, met de samengevoegde regels van de
  * acht bestaande adapters, en wijzigt zijn uitkomst nooit.
+ *
+ * P&L-PRESENTATIEMAPPING (Vervolgtranche 9, sluit ARCHITECTUURPUNT §8.10):
+ * `presentatieMappingRegels` (standaard leeg — bestaand gedrag ongewijzigd)
+ * kan een expliciet BEWEZEN Servicekosten-Eigenaar-categorie (bv. 070/GL4350/
+ * OGB4319 → SERVICEKOSTEN_LEEGSTAND) laten PRESENTEREN onder Leegstandskosten
+ * i.p.v. onder haar eigen Servicekosten-Eigenaar-regel — haar bron-
+ * hoofddomein blijft ongewijzigd SERVICEKOSTEN_EIGENAAR (M4b), alleen de
+ * WEERGAVE routeert. Deze module bevat GEEN administratie-specifieke code:
+ * de concrete, bewezen regel is data, aangeleverd door de aanroeper (zie
+ * `apps/worker`'s presentatiemapping-configuratie) — hier wordt uitsluitend
+ * generiek gecontroleerd of een categorie is gerouteerd en, zo ja, naar welk
+ * (vooralsnog uitsluitend Leegstand-)doel; alle overige combinaties zijn
+ * ONGEWIJZIGD hun eigen, bestaande adapter. Zie `pnlPresentatiemapping.ts`
+ * voor de volledige regels van dit mechanisme.
  */
 
 export interface PnLRuweBoekingRegel {
@@ -191,6 +208,10 @@ function partitioneerPerModule(context: PnLPeriodeOrchestratieContext, boekingen
   return { buckets, nietGemapt, nietOndersteund };
 }
 
+function isBgLeegstandCategorie(waarde: string): waarde is BgLeegstandCategorie {
+  return (LEEGSTAND_CATEGORIEEN as readonly string[]).includes(waarde);
+}
+
 function naarBasisRegel(b: PnLRuweBoekingRegel) {
   return { grootboekrekening: b.grootboekrekening, ogbKostensoort: b.ogbKostensoort, ogbKostensoortOmschrijving: b.ogbKostensoortOmschrijving, saldo: b.saldo };
 }
@@ -210,7 +231,12 @@ function naarRegelMetComplex(b: PnLRuweBoekingRegel) {
  * administratie/periode verwerkt (geen partiële/voorgefilterde
  * deelverzameling) — exact dezelfde aanname als GAT-013's bewezen harness.
  */
-export function berekenPnLPeriode(context: PnLPeriodeOrchestratieContext, boekingen: readonly PnLRuweBoekingRegel[], mappingregels: readonly PnLBronmappingRegel[]): PnLPeriodeOrchestratieResultaat {
+export function berekenPnLPeriode(
+  context: PnLPeriodeOrchestratieContext,
+  boekingen: readonly PnLRuweBoekingRegel[],
+  mappingregels: readonly PnLBronmappingRegel[],
+  presentatieMappingRegels: readonly PnLPresentatieMappingRegel[] = [],
+): PnLPeriodeOrchestratieResultaat {
   const { buckets, nietGemapt, nietOndersteund } = partitioneerPerModule(context, boekingen, mappingregels);
   const invoer = { bedrijfsnr: context.bedrijfsnr, boekjaar: context.boekjaar, boekperiode: context.boekperiode, opSysteemtijdstip: context.opSysteemtijdstip };
 
@@ -231,19 +257,39 @@ export function berekenPnLPeriode(context: PnLPeriodeOrchestratieContext, boekin
   const gemapt = (economischeModule: PnLEconomischeModule) => bepaalGemapteCategorieen(mappingregels, { ...invoer, economischeModule });
   const heeftMapping = (economischeModule: PnLEconomischeModule) => gemapt(economischeModule).size > 0;
 
+  // P&L-presentatiemapping (Vervolgtranche 9, §8.10): welke Servicekosten-Eigenaar-categorieën worden elders gepresenteerd?
+  // Bron-hoofddomein blijft ongewijzigd SERVICEKOSTEN_EIGENAAR — uitsluitend de WEERGAVE routeert. Generiek: geen 070-code hier,
+  // de concrete regel(s) zijn data, aangeleverd door de aanroeper.
+  const skeCategorieenElders = new Set<ServicekostenEigenaarWerkelijkCategorie>();
+  const leegstandGerouteerd: LeegstandWerkelijkPresentatieBijdrage[] = [];
+  for (const categorie of SERVICEKOSTEN_EIGENAAR_WERKELIJK_CATEGORIEEN) {
+    const routing = vindPnLPresentatieRouting(presentatieMappingRegels, context.bedrijfsnr, "SERVICEKOSTEN_EIGENAAR", categorie);
+    if (routing === null) continue;
+    skeCategorieenElders.add(categorie);
+    if (routing.doelHoofddomein !== "LEEGSTAND" || !isBgLeegstandCategorie(routing.doelCategorie)) {
+      throw new Error(
+        `Interne fout: P&L-presentatiemapping (bedrijfsnr=${context.bedrijfsnr}, bron=SERVICEKOSTEN_EIGENAAR/${categorie}) wijst naar een niet-ondersteund presentatiedoel "${routing.doelHoofddomein}/${routing.doelCategorie}" — hier is nog geen adapter op aangesloten.`,
+      );
+    }
+    leegstandGerouteerd.push({
+      categorie: routing.doelCategorie,
+      waarde: servicekostenEigenaarCategorieBijdrage(ske.werkelijk, categorie, heeftMapping("SERVICEKOSTEN_EIGENAAR")),
+      bron: `SERVICEKOSTEN_EIGENAAR/${categorie}`,
+    });
+  }
+
   const regels: PurePnLBronRegel[] = [
     ...huurWerkelijkNaarPnLBovenEbitdaRegels(huur.werkelijk, heeftMapping("HUUR")),
     ...beheerWerkelijkNaarPnLBovenEbitdaRegels(beheer.werkelijk, heeftMapping("BEHEER")),
     ...managementWerkelijkNaarPnLBovenEbitdaRegels(management.werkelijk, heeftMapping("MANAGEMENT")),
     ...onderhoudWerkelijkNaarPnLBovenEbitdaRegels(onderhoud.werkelijk, heeftMapping("ONDERHOUD")),
-    ...servicekostenEigenaarWerkelijkNaarPnLBovenEbitdaRegels(ske.werkelijk, heeftMapping("SERVICEKOSTEN_EIGENAAR")),
+    ...servicekostenEigenaarWerkelijkNaarPnLBovenEbitdaRegels(ske.werkelijk, heeftMapping("SERVICEKOSTEN_EIGENAAR"), skeCategorieenElders),
     ...verzekeringWerkelijkNaarPnLBovenEbitdaRegels(verzekering.werkelijk, heeftMapping("VERZEKERINGEN")),
     ...gemeentelijkeLastenWerkelijkNaarPnLBovenEbitdaRegels(gemLasten.werkelijk, heeftMapping("GEMEENTELIJKE_LASTEN")),
     ...algemeneKostenWerkelijkNaarPnLBovenEbitdaRegels(algemeneKosten.werkelijk, heeftMapping("ALGEMENE_KOSTEN"), gemapt("ALGEMENE_KOSTEN")),
-    // Leegstandskosten (Vervolgtranche 8): ÉÉN P&L-post; per kostensoort alleen bekend met een bewezen LEEGSTAND-mapping van deze administratie.
-    // Servicekosten leegstand op een GL van het domein SERVICEKOSTEN_EIGENAAR (bv. GL4350/OGB4319 bij 070) staat in de Servicekosten-eigenaar-regels,
-    // niet hier: een OGB creëert geen ander hoofddomein (zie `leegstandWerkelijkNaarPnLBovenEbitdaRegels`).
-    ...leegstandWerkelijkNaarPnLBovenEbitdaRegels(leegstand.werkelijk, true, gemapt("LEEGSTAND")),
+    // Leegstandskosten (Vervolgtranche 8): ÉÉN P&L-post; per kostensoort alleen bekend met een bewezen LEEGSTAND-mapping van deze administratie,
+    // aangevuld (Vervolgtranche 9) met eventuele gerouteerde Servicekosten-Eigenaar-bijdragen (`leegstandGerouteerd`).
+    ...leegstandWerkelijkNaarPnLBovenEbitdaRegels(leegstand.werkelijk, true, gemapt("LEEGSTAND"), leegstandGerouteerd),
   ];
 
   const resultaat = berekenPnLBoom("WERKELIJK", regels);
