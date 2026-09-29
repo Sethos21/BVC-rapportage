@@ -56,6 +56,7 @@ Geaccepteerde tranche-HEADs:
 - Tranche 7: `de2ae0e`.
 - Tranche 8: `5125289`.
 - **Tranche 9: `cda3baf` — TECHNISCH VOLLEDIG GESLOTEN 29-09-2026.**
+- **Tranche 10: `50121a7` — Rente leningen + Opbrengst rente technisch afgerond 29-09-2026.**
 
 ### Huur
 Budget/Werkelijk/Estimated/P&L gereed. Estimated gebruikt frozen Budget-contractsnapshot + Actual; refreshed-contract-state forecast is toekomstig werk.
@@ -134,6 +135,10 @@ Canon/Erfpacht; rente leningen zonder bewezen bronmodel; Opbrengst rente tot eig
 
 Exact: `BUSINESSBESLISSING`, `CONTRACTCONFLICT`, `BRONGAT`, `ARCHITECTUURPUNT`. STOP is een geldige gate-uitkomst.
 
-## 10. Volgende fase
+## 10. Tranche 10 — rente
 
-Tranche 9 is volledig gesloten. De volgende functionele bouwopdracht is Tranche 10. Kies die vanuit de Build Matrix; heropen Tranche 9 niet zonder concrete regressie.
+Rente leningen en Opbrengst rente zijn technisch aangesloten op Budget/Werkelijk/Estimated/P&L. Budget is handmatig; geen lening-/renteberekeningsengine. Estimated = Actual + handmatige resterende verwachting. Werkelijk uitsluitend via bewezen GL/OGB; 070 blijft BRONGAT. Voor Rente opbrengsten mag de interne ruwe boekhoudconventie negatief zijn, maar toekomstige gebruikersinvoer toont/aanvaardt een positief opbrengstbedrag en vertaalt dit aan de invoergrens.
+
+## 11. Volgende fase
+
+Tranche 11 assembleert de eerste volledige end-to-end exploitatie-P&L uit bestaande geaccepteerde modules. Geen nieuwe financiële businesslogica. Minimaal: Vorige begroting | Werkelijk | Estimated | Nieuwe begroting. Onbekend blijft onbekend. Verkoopresultaat blijft buiten deze eerste rapportage.
