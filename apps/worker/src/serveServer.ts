@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { lijstAdministraties, type AdministratieListItem } from "./administratie.js";
+import { handleBegrotingRequest } from "./begrotingRoutes.js";
 import { genereerManagementRapport } from "./genereerManagementRapport.js";
 import { BOEKPERIODES, renderFoutPagina, renderSelectieScherm } from "./serveUi.js";
 
@@ -97,6 +98,11 @@ function stuurHtml(res: ServerResponse, statusCode: number, html: string): void 
 
 async function handleRequest(root: string, req: IncomingMessage, res: ServerResponse): Promise<void> {
   const url = new URL(req.url ?? "/", "http://localhost");
+
+  if (url.pathname === "/begroting" || url.pathname.startsWith("/begroting/")) {
+    const afgehandeld = await handleBegrotingRequest(root, req, res, url);
+    if (afgehandeld) return;
+  }
 
   if (req.method === "GET" && url.pathname === "/") {
     stuurHtml(res, 200, renderSelectieScherm(lijstAdministraties(root)));
