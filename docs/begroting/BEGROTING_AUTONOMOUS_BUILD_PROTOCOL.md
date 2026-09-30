@@ -118,3 +118,8 @@ Voor vervolgwerk geldt bovendien:
 - autosave/locking is functioneel besloten (autosave concept, één bewerker, overname na 15 minuten inactiviteit) maar nog niet volledig geïmplementeerd; niet zelfstandig bouwen vóór de productieproef;
 - algemene export/reporting en nieuwe-versie-UX blijven open;
 - technische versie-lineage die al bestaat niet verwarren met een afgeronde gebruikersflow.
+
+
+## 16. Product-readiness fix — geaccepteerd
+
+Eind-HEAD `9a3381b`. De orphaned Geplande-Verkoop-vaststel-gate is verwijderd en migratie 41 maakt de frozen schema-opslag daarmee consistent. Geplande Verkoop blijft HOLD en krijgt geen UI. Geen verdere tranche starten op basis van deze fix. Eerst de echte single-user BVC-productieacceptatie uitvoeren; alleen concrete bevindingen uit die proef mogen een volgende delta openen.
