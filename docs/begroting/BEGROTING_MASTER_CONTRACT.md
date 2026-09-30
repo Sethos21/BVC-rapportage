@@ -1,7 +1,7 @@
 # BEGROTING_MASTER_CONTRACT
 
 Status: leidend uitvoeringscontract voor de Exploitatiebegroting  
-Bijgewerkt: 29 september 2026  
+Bijgewerkt: 30 september 2026  
 Repository: `Sethos21/BVC-rapportage`
 
 ## 1. Bron van waarheid
@@ -59,6 +59,7 @@ Geaccepteerde tranche-HEADs:
 - Tranche 8: `5125289`.
 - **Tranche 9: `cda3baf` — TECHNISCH VOLLEDIG GESLOTEN 29-09-2026.**
 - **Tranche 10: `50121a7` — Rente leningen + Opbrengst rente technisch afgerond 29-09-2026.**
+- **Tranche 11: `efb6074` — eerste geïntegreerde begrotingswerkomgeving geaccepteerd 30-09-2026.**
 
 ### Huur
 Budget/Werkelijk/Estimated/P&L gereed. Estimated gebruikt frozen Budget-contractsnapshot + Actual; refreshed-contract-state forecast is toekomstig werk.
@@ -141,10 +142,26 @@ Exact: `BUSINESSBESLISSING`, `CONTRACTCONFLICT`, `BRONGAT`, `ARCHITECTUURPUNT`. 
 
 Rente leningen en Opbrengst rente zijn technisch aangesloten op Budget/Werkelijk/Estimated/P&L. Budget is handmatig; geen lening-/renteberekeningsengine. Estimated = Actual + handmatige resterende verwachting. Werkelijk uitsluitend via bewezen GL/OGB; 070 blijft BRONGAT. Voor Rente opbrengsten mag de interne ruwe boekhoudconventie negatief zijn, maar toekomstige gebruikersinvoer toont/aanvaardt een positief opbrengstbedrag en vertaalt dit aan de invoergrens.
 
-## 11. Volgende fase — Tranche 11
+## 11. Tranche 11 — geaccepteerd
 
 Tranche 11 is **geen managementrapportage** en veronderstelt niet dat al een echte financiële begroting is opgesteld. Doel is de eerste geïntegreerde, daadwerkelijk invulbare exploitatiebegrotingsworkflow volgens de vastgestelde UX-set: **Nieuwe begroting → invullen → controleren → vaststellen → terugkijken**.
 
 Het hoofdscherm is de vergelijkende P&L-werkweergave voor het opstellen van de nieuwe begroting. Vergelijkingsperspectieven zijn: Begroting vorig jaar | Realisatie huidig jaar | Estimated huidig jaar | Voorstel nieuw begrotingsjaar | Jouw begroting nieuw jaar. Vergelijkingsdata zijn onderbouwing; `Jouw begroting` is het nieuwe begrotingsproduct.
 
 Tranche 11 hergebruikt uitsluitend bestaande geaccepteerde financiële rekenlogica en bouwt de integratie/productie-UI volgens de vastgestelde UX. Geen test- of fictieve waarden presenteren als echte begrotingsdata. Ontbrekende historische begroting blijft ontbrekend/onbekend. OPEN UX-punten uit hoofdstuk 12 van `09_Begrotingsmodule_UX_Vastgesteld.md` worden niet door Claude ingevuld: waar noodzakelijk volgt `BUSINESSBESLISSING` of `CONTRACTCONFLICT`. Canon/Erfpacht en Verkoopresultaat blijven buiten scope.
+
+
+## 12. Volgende fase — Tranche 12
+
+Tranche 11 eind-HEAD `efb6074` is geaccepteerd als **eerste geïntegreerde begrotingswerkomgeving / technisch gesloten integratieketen**, niet als volledig afgeronde begrotingsmodule.
+
+Geaccepteerd ARCHITECTUURPUNT: de begrotingsworkflow draait voorlopig als sibling-routes `/begroting` op de bestaande lokale Worker serve-server, omdat dit de actuele live `BVC_DATA_ROOT`-gekoppelde applicatieketen is. Dit besluit maakt server-rendered Worker-UI niet automatisch tot de definitieve frontendarchitectuur.
+
+Belangrijke bewijsnuance: de Tranche-11 HTTP-test gebruikt een XLSX-fixture en echte SQLite/mapping-/productiecodepaden. Dit bewijst de end-to-end technische productieketen, maar is niet hetzelfde als een acceptatieproef met een werkelijk BVC-productiebestand. Presenteer fixturebedragen daarom nooit als werkelijk financieel resultaat van administratie 070.
+
+### Tranche 12 — prioriteit
+Bouw de ontbrekende echte Contracten/RentRoll → `Module1Snapshot`-keten en sluit daarmee Huur en Beheersvergoeding functioneel aan op de invulbare begrotingsworkflow. Managementvergoeding mag de contract-afgeleide huurbasis hergebruiken volgens bestaand contract, maar de bekende Actual-mapping-BRONGAT voor 070 blijft gelden.
+
+Doel: een nieuwe begroting gebruikt echte contract-/rentrollbronfeiten voor de huurgrondslag in plaats van lege/handmatig gefabriceerde snapshots. Bronfeiten en begrotingsaannames blijven strikt gescheiden. Geen refreshed-contract-state forecast bouwen tenzij afzonderlijk opgedragen. Daarna moeten Huur en Beheersvergoeding via de vastgestelde detail-UX daadwerkelijk bewerkbaar zijn.
+
+Bouw geen brede visuele redesign en open geen onafhankelijke modules opnieuw. Indien de bronstructuur van Contracten/RentRoll onvoldoende bewezen is: `BRONGAT`; bij noodzakelijke nieuwe functionele keuze: `BUSINESSBESLISSING`.
