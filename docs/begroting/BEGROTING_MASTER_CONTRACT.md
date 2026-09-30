@@ -133,9 +133,16 @@ Regels:
 
 De eerdere `BUSINESSBESLISSING` voor Estimated BTW is opgelost en technisch geïmplementeerd in `cda3baf` (migratie 39). Geen rij = onbekend; expliciet €0 blijft onderscheidbaar; Estimated blijft wijzigbaar zonder de vastgestelde Budget te muteren.
 
-## 8. Nog niet starten
+## 8. Niet zelfstandig starten / actuele productgrenzen
 
-Canon/Erfpacht; rente leningen zonder bewezen bronmodel; Opbrengst rente tot eigen tranche; Geplande verkoop tot UX/integratiebesluit; nieuwe versieflow; autosave/locking; algemene UI/export; refreshed-contract-state huurforecast; bronmappings Management/Accountant/Juridisch tenzij afzonderlijk opgedragen.
+- Canon/Erfpacht blijft HOLD/uit scope.
+- Geplande verkoop blijft HOLD tot een afzonderlijk UX/integratiebesluit. Zolang dit onderdeel HOLD is, is het niet zichtbaar/toepasselijk en mag het **niet deelnemen aan de beoordeling- of vaststel-gate**.
+- Nieuwe versieflow na vaststelling heeft technische lineage-basis (`GEBASEERD_OP_VERSIE` / `based_on_version_id`), maar nog geen vastgestelde gebruikersflow.
+- Autosave/locking is **functioneel reeds besloten** in de eerdere Work-UX: conceptbewerkingen automatisch opslaan; één bewerker tegelijk; bewuste overname na 15 minuten inactiviteit; vastgesteld blijft immutable. Deze concurrency/autosaveflow is nog niet volledig geïmplementeerd en is geen blokkade voor de eerste single-user productieproef.
+- Algemene rapportage/exportlayout blijft open.
+- Refreshed-contract-state huurforecast blijft toekomstig werk.
+- Nieuwe bronmappings voor Management/Accountant/Juridisch uitsluitend na bronbewijs.
+- Rente leningen en Opbrengst rente zijn sinds Tranche 10 technisch gebouwd en hebben sinds Tranche 11 bereikbare invoer-UI; heropen die niet als ontbrekende module.
 
 ## 9. STOP-codes
 
@@ -193,3 +200,14 @@ Een vastgestelde begrotingsversie is immutable. Sinds `e150d93` blijven **alle a
 
 ### Toekomstige contractuele huurkortingen
 Sinds `e150d93` is `contract_prijsregels.xlsx` als optioneel brontype aangesloten op `BgToekomstigeKortingswijziging`. Resolutie gebruikt geen `Status`, geen “nieuwste regel”, geen fuzzy matching en geen vrije tekst. Per contract en exacte toekomstige ingangsdatum geldt: unaniem VS13-bedrag → één wijziging; afwijkende bedragen → lokaal `BRONGAT`, geen verzonnen wijziging. De wijziging werkt via Module 1 door in netto begrote huur en daarmee in de variabele Beheersvergoeding. Het echte bronbestand moet operationeel in de bronmap aanwezig zijn om deze functionaliteit in productie te benutten; dat is een bronvoorwaarde, geen softwaregat.
+
+
+## 16. Product-readiness audit — 30-09-2026
+
+De audit op branch-HEAD `a1f1307` bevestigt dat de dagelijkse keten voor de aangesloten modules bereikbaar is: administratie/start → invullen → vergelijken → controleren → vaststellen → terugkijken. Eén structurele blokkade is gevonden: de historische vaststel-gate vereist nog `geplandeVerkoop.beoordeeld === true`, terwijl Geplande verkoop contractueel HOLD is en geen UI-route heeft. Besluit: **HOLD betekent niet zichtbaar/toepasselijk en daarom geen vaststel-gate**. De kleinste volgende codedelta verwijdert uitsluitend deze orphaned gate en voegt geen Geplande-verkoop-UI toe.
+
+De huidige startflow is voor de eerste productieproef functioneel voldoende: administratie kiezen, bestaande versies tonen/openen, begrotingsjaar, laatst afgesloten boekperiode en algemeen huurindexatiepercentage invoeren en een nieuwe CONCEPT-versie starten. Geen redesign vóór de eerste echte BVC-proef.
+
+Code-inspectie bevestigt tevens dat Niet verrekenbare BTW, Rente leningen en Opbrengst rente reeds bereikbare invoer-UI hebben. Leegstand is als één detailmodule aangesloten met Nuts/Servicekosten/Overige als onderbouwing. Deze onderdelen mogen niet opnieuw als ontbrekende UI worden geclassificeerd.
+
+Na herstel van de Geplande-verkoop-gate volgt eerst een echte single-user BVC-begroting als productacceptatie. Autosave/locking, algemene export/reporting en versiebeheer-UX worden niet vóór die proef gebouwd tenzij de proef een concrete blokkade aantoont.
