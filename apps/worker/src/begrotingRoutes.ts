@@ -395,10 +395,11 @@ async function handleModuleRoute(root: string, req: IncomingMessage, res: Server
   const terugUrl = hoofdschermUrl(administratieId, versieId, laatstAfgeslotenBoekperiode);
   const actieUrl = `${url.pathname}?laatstAfgeslotenBoekperiode=${encodeURIComponent(laatstAfgeslotenBoekperiode)}`;
 
-  // Huur/Beheer blijven ook op een VASTGESTELDE versie leesbaar (UX_13 Terugkijken: onderbouwing blijft zichtbaar) —
-  // alle andere moduleschermen blijven volledig geblokkeerd op niet-CONCEPT, zoals al in Tranche 11.
-  const leesbaarOokNaVaststellen = moduleKey === "huur" || moduleKey === "beheer";
-  if (g.versie.status !== "CONCEPT" && !(leesbaarOokNaVaststellen && req.method === "GET")) {
+  // TRANCHE 14 — generieke read-only lifecycle: ELKE detailpagina blijft leesbaar (GET) op een
+  // VASTGESTELDE versie (UX_13 Terugkijken: onderbouwing blijft overal zichtbaar); uitsluitend
+  // schrijfacties (niet-GET) blijven op niet-CONCEPT geblokkeerd. Dezelfde render-functie/route
+  // wordt hergebruikt — geen tweede read-only UI, zie `moduleFormShell`'s fieldset-mechanisme.
+  if (g.versie.status !== "CONCEPT" && req.method !== "GET") {
     g.db.close();
     stuurHtml(res, 400, renderFoutPagina("Niet meer wijzigbaar", "Deze begrotingsversie is vastgesteld en is alleen-lezen.", terugUrl));
     return true;
@@ -627,7 +628,7 @@ async function handleManagement(req: IncomingMessage, res: ServerResponse, g: Ge
           : huidig.wijze === "INDEXEER_BESTAAND"
             ? { ...leeg, wijze: huidig.wijze, bestaandBedrag: huidig.bestaandBedrag.toString(), bestaandEenheid: huidig.eenheid, indexatiePercentage: huidig.indexatiePercentage.toString(), indexatiedatum: huidig.indexatiedatum.toISOString().slice(0, 10) }
             : { ...leeg, wijze: huidig.wijze, nieuwBedrag: huidig.nieuwBedrag.toString(), nieuweEenheid: huidig.nieuweEenheid };
-    stuurHtml(res, 200, renderManagementForm({ actieUrl, terugUrl, huidig: form }));
+    stuurHtml(res, 200, renderManagementForm({ actieUrl, terugUrl, huidig: form, alleenLezen: g.versie.status !== "CONCEPT" }));
     return true;
   }
 
@@ -704,6 +705,7 @@ async function handleCorrectief(req: IncomingMessage, res: ServerResponse, g: Ge
         terugUrl,
         beoordeeld,
         regels: regels.map((r) => ({ id: r.id, omschrijving: r.omschrijving, complexnummer: r.complexnummer ?? "", grootboekrekening: r.grootboekrekening, ogbKostensoort: r.ogbKostensoort ?? "", jaarbedrag: r.jaarbedrag?.toString() ?? "" })),
+        alleenLezen: g.versie.status !== "CONCEPT",
       }),
     );
     return true;
@@ -766,6 +768,7 @@ async function handleBtw(req: IncomingMessage, res: ServerResponse, g: Geopend, 
         beoordeeld: state.beoordeeld,
         resterendeVerwachting: resterendeVerwachting?.toString() ?? "",
         regels: regels.map((r) => ({ id: r.id, omschrijving: r.omschrijving, complexnummer: r.complexnummer ?? "", jaarbedrag: r.jaarbedrag?.toString() ?? "" })),
+        alleenLezen: g.versie.status !== "CONCEPT",
       }),
     );
     return true;
@@ -811,7 +814,7 @@ async function handleRente(req: IncomingMessage, res: ServerResponse, g: Geopend
     // Ruwe conventie: Rente opbrengsten wordt intern negatief bewaard; de gebruiker ziet en voert altijd een positief bedrag in (Tranche 11 §11).
     const begrotingsbedrag = bestaandeRegel?.begrotingsbedrag !== null && bestaandeRegel?.begrotingsbedrag !== undefined ? (isOpbrengst ? bestaandeRegel.begrotingsbedrag.negated() : bestaandeRegel.begrotingsbedrag).toString() : "";
     const verwachtingWeergave = resterendeVerwachting !== null ? (isOpbrengst ? resterendeVerwachting.negated() : resterendeVerwachting).toString() : "";
-    stuurHtml(res, 200, renderRenteForm({ categorie, actieUrl, terugUrl, begrotingsbedrag, beoordeeld: categorieState[categorie].beoordeeld, resterendeVerwachting: verwachtingWeergave }));
+    stuurHtml(res, 200, renderRenteForm({ categorie, actieUrl, terugUrl, begrotingsbedrag, beoordeeld: categorieState[categorie].beoordeeld, resterendeVerwachting: verwachtingWeergave, alleenLezen: g.versie.status !== "CONCEPT" }));
     return true;
   }
 
@@ -886,7 +889,7 @@ async function handleLeegstand(req: IncomingMessage, res: ServerResponse, g: Geo
       regels: regels.filter((r) => r.categorie === categorie).map((r) => ({ id: r.id, complexnummer: r.complexnummer ?? "", omschrijving: r.omschrijving, q1: r.q1?.toString() ?? "", q2: r.q2?.toString() ?? "", q3: r.q3?.toString() ?? "", q4: r.q4?.toString() ?? "" })),
     }));
     const totaal = som(regels.flatMap((r) => [r.q1, r.q2, r.q3, r.q4]));
-    stuurHtml(res, 200, renderLeegstandForm({ actieUrl, terugUrl, categorieen, portefeuilleTotaal: fmtBedragKort(totaal) }));
+    stuurHtml(res, 200, renderLeegstandForm({ actieUrl, terugUrl, categorieen, portefeuilleTotaal: fmtBedragKort(totaal), alleenLezen: g.versie.status !== "CONCEPT" }));
     return true;
   }
 
@@ -944,7 +947,7 @@ async function handleAlgemeneKosten(req: IncomingMessage, res: ServerResponse, g
       regels: regels.filter((r) => r.categorie === categorie).map((r) => ({ id: r.id, omschrijving: r.omschrijving, complexnummer: r.complexnummer ?? "", ogbKostensoortCode: r.ogbKostensoortCode ?? "", jaarbedrag: r.jaarbedrag?.toString() ?? "" })),
     }));
     const totaal = som(regels.map((r) => r.jaarbedrag));
-    stuurHtml(res, 200, renderAlgemeneKostenForm({ actieUrl, terugUrl, categorieen, portefeuilleTotaal: fmtBedragKort(totaal) }));
+    stuurHtml(res, 200, renderAlgemeneKostenForm({ actieUrl, terugUrl, categorieen, portefeuilleTotaal: fmtBedragKort(totaal), alleenLezen: g.versie.status !== "CONCEPT" }));
     return true;
   }
 
@@ -999,7 +1002,7 @@ async function handleVerzekeringen(req: IncomingMessage, res: ServerResponse, g:
       handmatigBegrootOverride: r.handmatigBegrootOverride?.toString() ?? "",
     }));
     const totaal = som(regels.map((r) => r.handmatigBegrootOverride ?? r.bedrag));
-    stuurHtml(res, 200, renderVerzekeringenForm({ actieUrl, terugUrl, regels: veldRegels, beoordeeld, portefeuilleTotaal: fmtBedragKort(totaal) }));
+    stuurHtml(res, 200, renderVerzekeringenForm({ actieUrl, terugUrl, regels: veldRegels, beoordeeld, portefeuilleTotaal: fmtBedragKort(totaal), alleenLezen: g.versie.status !== "CONCEPT" }));
     return true;
   }
 
@@ -1060,7 +1063,7 @@ async function handleGeplandOnderhoud(req: IncomingMessage, res: ServerResponse,
       notitie: a.notitie ?? "",
     }));
     const jaartotaal = activiteiten.reduce((t, a) => t.plus(a.q1).plus(a.q2).plus(a.q3).plus(a.q4), new Decimal(0));
-    stuurHtml(res, 200, renderGeplandOnderhoudForm({ actieUrl, terugUrl, regels, beoordeeld, jaartotaal: fmtBedragKort(jaartotaal) }));
+    stuurHtml(res, 200, renderGeplandOnderhoudForm({ actieUrl, terugUrl, regels, beoordeeld, jaartotaal: fmtBedragKort(jaartotaal), alleenLezen: g.versie.status !== "CONCEPT" }));
     return true;
   }
 
@@ -1216,6 +1219,7 @@ async function handleGemeentelijkeLasten(req: IncomingMessage, res: ServerRespon
       voorstelMogelijk: voorstelStatus.mogelijk,
       voorstelReden: voorstelStatus.reden,
       portefeuilleTotaal: fmtBedragKort(totaal),
+      alleenLezen: g.versie.status !== "CONCEPT",
     }),
   );
   return true;

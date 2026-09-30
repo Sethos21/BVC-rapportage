@@ -351,14 +351,25 @@ export function renderFoutPagina(titel: string, bericht: string, terugUrl = "/be
   return paginaShell(titel, body, false);
 }
 
-function moduleFormShell(o: { titel: string; terugUrl: string; fouten?: readonly string[]; inhoud: string }): string {
+/**
+ * Tranche 14 — generieke read-only lifecycle: iedere detailpagina gebruikt DEZELFDE render-
+ * functie voor CONCEPT en VASTGESTELD. Bij `alleenLezen` wikkelt deze shell de formulierinhoud
+ * in een `<fieldset disabled>` — dat schakelt ALLE input/select/textarea/button-elementen
+ * daarbinnen in één keer uit (standaard HTML5-gedrag), zonder dat elke render-functie zelf elk
+ * veld hoeft te markeren. De route-laag blokkeert schrijfacties (POST) hoe dan ook al op
+ * niet-CONCEPT (`handleModuleRoute`) — dit is uitsluitend de zichtbare, niet-bewerkbare weergave.
+ */
+function moduleFormShell(o: { titel: string; terugUrl: string; fouten?: readonly string[]; inhoud: string; alleenLezen?: boolean }): string {
   const foutenHtml =
     o.fouten && o.fouten.length > 0 ? `<div class="fouten"><strong>Controleer de invoer:</strong><ul>${o.fouten.map((f) => `<li>${escapeHtml(f)}</li>`).join("")}</ul></div>` : "";
+  const alleenLezenBanner = o.alleenLezen ? `<div class="banner vastgesteld">Vastgesteld — deze onderbouwing is alleen-lezen.</div>` : "";
+  const inhoud = o.alleenLezen ? `<fieldset disabled style="border:none;padding:0;margin:0">${o.inhoud}</fieldset>` : o.inhoud;
   const body = `
-    <div class="eyebrow">Begrotingsonderdeel aanpassen</div>
+    <div class="eyebrow">${o.alleenLezen ? "Begrotingsonderdeel — alleen-lezen" : "Begrotingsonderdeel aanpassen"}</div>
     <h1>${escapeHtml(o.titel)}</h1>
+    ${alleenLezenBanner}
     ${foutenHtml}
-    <div class="card">${o.inhoud}</div>
+    <div class="card">${inhoud}</div>
     <a class="terug" href="${escapeHtml(o.terugUrl)}">← Terug naar de vergelijkende P&L</a>`;
   return paginaShell(o.titel, body, false);
 }
@@ -369,6 +380,7 @@ export interface ManagementFormOpties {
   actieUrl: string;
   terugUrl: string;
   fouten?: readonly string[];
+  alleenLezen?: boolean;
   huidig: { wijze: string; bedrag: string; eenheid: string; ingangsdatum: string; bestaandBedrag: string; bestaandEenheid: string; indexatiePercentage: string; indexatiedatum: string; nieuwBedrag: string; nieuweEenheid: string };
 }
 
@@ -394,7 +406,7 @@ export function renderManagementForm(o: ManagementFormOpties): string {
 
       <button type="submit">Opslaan</button>
     </form>`;
-  return moduleFormShell({ titel: "Managementvergoeding", terugUrl: o.terugUrl, ...(o.fouten !== undefined ? { fouten: o.fouten } : {}), inhoud });
+  return moduleFormShell({ titel: "Managementvergoeding", terugUrl: o.terugUrl, ...(o.fouten !== undefined ? { fouten: o.fouten } : {}), inhoud, alleenLezen: o.alleenLezen === true });
 }
 
 export interface CorrectiefRegelRow {
@@ -406,7 +418,7 @@ export interface CorrectiefRegelRow {
   jaarbedrag: string;
 }
 
-export function renderCorrectiefForm(o: { actieUrl: string; terugUrl: string; fouten?: readonly string[]; regels: readonly CorrectiefRegelRow[]; beoordeeld: boolean }): string {
+export function renderCorrectiefForm(o: { actieUrl: string; terugUrl: string; fouten?: readonly string[]; regels: readonly CorrectiefRegelRow[]; beoordeeld: boolean; alleenLezen?: boolean }): string {
   const rijen = [...o.regels, ...Array.from({ length: Math.max(0, 6 - o.regels.length) }, (): CorrectiefRegelRow => ({ id: null, omschrijving: "", complexnummer: "", grootboekrekening: "", ogbKostensoort: "", jaarbedrag: "" }))];
   const rijHtml = (r: CorrectiefRegelRow, i: number) => `
     <tr>
@@ -426,7 +438,7 @@ export function renderCorrectiefForm(o: { actieUrl: string; terugUrl: string; fo
       <label><input type="checkbox" name="beoordeeld" value="1" style="width:auto;display:inline-block;margin-right:8px"${o.beoordeeld ? " checked" : ""} />Ik heb dit onderdeel beoordeeld</label>
       <button type="submit">Opslaan</button>
     </form>`;
-  return moduleFormShell({ titel: "Correctief / dagelijks onderhoud", terugUrl: o.terugUrl, ...(o.fouten !== undefined ? { fouten: o.fouten } : {}), inhoud });
+  return moduleFormShell({ titel: "Correctief / dagelijks onderhoud", terugUrl: o.terugUrl, ...(o.fouten !== undefined ? { fouten: o.fouten } : {}), inhoud, alleenLezen: o.alleenLezen === true });
 }
 
 export function renderBtwForm(o: {
@@ -436,6 +448,7 @@ export function renderBtwForm(o: {
   regels: readonly { id: number | null; omschrijving: string; complexnummer: string; jaarbedrag: string }[];
   beoordeeld: boolean;
   resterendeVerwachting: string;
+  alleenLezen?: boolean;
 }): string {
   const rijen = [...o.regels, ...Array.from({ length: Math.max(0, 4 - o.regels.length) }, () => ({ id: null as number | null, omschrijving: "", complexnummer: "", jaarbedrag: "" }))];
   const rijHtml = (r: (typeof rijen)[number], i: number) => `
@@ -455,10 +468,10 @@ export function renderBtwForm(o: {
       <input type="text" name="resterendeVerwachting" id="resterendeVerwachting" value="${escapeHtml(o.resterendeVerwachting)}" />
       <button type="submit">Opslaan</button>
     </form>`;
-  return moduleFormShell({ titel: "Niet verrekenbare btw", terugUrl: o.terugUrl, ...(o.fouten !== undefined ? { fouten: o.fouten } : {}), inhoud });
+  return moduleFormShell({ titel: "Niet verrekenbare btw", terugUrl: o.terugUrl, ...(o.fouten !== undefined ? { fouten: o.fouten } : {}), inhoud, alleenLezen: o.alleenLezen === true });
 }
 
-export function renderRenteForm(o: { categorie: "RENTEKOSTEN" | "RENTE_OPBRENGSTEN"; actieUrl: string; terugUrl: string; fouten?: readonly string[]; begrotingsbedrag: string; beoordeeld: boolean; resterendeVerwachting: string }): string {
+export function renderRenteForm(o: { categorie: "RENTEKOSTEN" | "RENTE_OPBRENGSTEN"; actieUrl: string; terugUrl: string; fouten?: readonly string[]; begrotingsbedrag: string; beoordeeld: boolean; resterendeVerwachting: string; alleenLezen?: boolean }): string {
   const isOpbrengst = o.categorie === "RENTE_OPBRENGSTEN";
   const toelichting = isOpbrengst
     ? `<p class="sub">Voer het verwachte bedrag als POSITIEF bedrag in — de vertaling naar de interne boekhoudconventie gebeurt automatisch.</p>`
@@ -473,7 +486,7 @@ export function renderRenteForm(o: { categorie: "RENTEKOSTEN" | "RENTE_OPBRENGST
       <input type="text" name="resterendeVerwachting" id="resterendeVerwachting" value="${escapeHtml(o.resterendeVerwachting)}" />
       <button type="submit">Opslaan</button>
     </form>`;
-  return moduleFormShell({ titel: isOpbrengst ? "Opbrengst rente" : "Rente leningen", terugUrl: o.terugUrl, ...(o.fouten !== undefined ? { fouten: o.fouten } : {}), inhoud });
+  return moduleFormShell({ titel: isOpbrengst ? "Opbrengst rente" : "Rente leningen", terugUrl: o.terugUrl, ...(o.fouten !== undefined ? { fouten: o.fouten } : {}), inhoud, alleenLezen: o.alleenLezen === true });
 }
 
 export interface HuurDetailRegel {
@@ -534,7 +547,7 @@ export function renderHuurDetail(o: {
       <p class="sub">Netto huur portefeuille (Jouw begroting): <strong>${escapeHtml(o.portefeuilleNetto)}</strong></p>
       ${o.alleenLezen ? "" : `<button type="submit">Overrides opslaan</button>`}
     </form>`;
-  return moduleFormShell({ titel: `Huur — contractbasis ${o.begrotingsjaar}`, terugUrl: o.terugUrl, inhoud });
+  return moduleFormShell({ titel: `Huur — contractbasis ${o.begrotingsjaar}`, terugUrl: o.terugUrl, inhoud, alleenLezen: o.alleenLezen });
 }
 
 export interface BeheerDetailRegel {
@@ -591,7 +604,7 @@ export function renderBeheerDetail(o: {
       <p class="sub">Totale beheersvergoeding portefeuille: <strong>${escapeHtml(o.portefeuilleTotaal)}</strong></p>
       ${o.alleenLezen ? "" : `<button type="submit">Configuratie opslaan</button>`}
     </form>`;
-  return moduleFormShell({ titel: "Beheersvergoeding", terugUrl: o.terugUrl, inhoud });
+  return moduleFormShell({ titel: "Beheersvergoeding", terugUrl: o.terugUrl, inhoud, alleenLezen: o.alleenLezen });
 }
 
 function beoordeeldCheckbox(naam: string, aangevinkt: boolean): string {
@@ -606,7 +619,7 @@ export interface LeegstandCategorieOpties {
 }
 
 /** Leegstandskosten (UX/OB-031, Tranche 13): drie categorieën, elk dezelfde compacte structuur Complex|Omschrijving|Q1-Q4. */
-export function renderLeegstandForm(o: { actieUrl: string; terugUrl: string; fouten?: readonly string[]; categorieen: readonly LeegstandCategorieOpties[]; portefeuilleTotaal: string }): string {
+export function renderLeegstandForm(o: { actieUrl: string; terugUrl: string; fouten?: readonly string[]; categorieen: readonly LeegstandCategorieOpties[]; portefeuilleTotaal: string; alleenLezen?: boolean }): string {
   const sectie = (c: LeegstandCategorieOpties, prefix: string) => {
     const rijen = [...c.regels, ...Array.from({ length: Math.max(0, 4 - c.regels.length) }, () => ({ id: null, complexnummer: "", omschrijving: "", q1: "", q2: "", q3: "", q4: "" }))];
     return `<h2>${escapeHtml(c.titel)}</h2>
@@ -635,7 +648,7 @@ export function renderLeegstandForm(o: { actieUrl: string; terugUrl: string; fou
       <p class="sub">Totaal Leegstandskosten (Jouw begroting): <strong>${escapeHtml(o.portefeuilleTotaal)}</strong></p>
       <button type="submit">Opslaan</button>
     </form>`;
-  return moduleFormShell({ titel: "Leegstandskosten", terugUrl: o.terugUrl, ...(o.fouten !== undefined ? { fouten: o.fouten } : {}), inhoud });
+  return moduleFormShell({ titel: "Leegstandskosten", terugUrl: o.terugUrl, ...(o.fouten !== undefined ? { fouten: o.fouten } : {}), inhoud, alleenLezen: o.alleenLezen === true });
 }
 
 export interface AlgemeneKostenCategorieOpties {
@@ -649,7 +662,7 @@ export interface AlgemeneKostenCategorieOpties {
 }
 
 /** Algemene kosten (OB-035/036, Tranche 13): vijf categorieën, elk dezelfde regelvorm (Omschrijving|Complex|OGB|Jaarbedrag); Accountant/Bank tonen aanvullend het informatieve vorig-jaar/verwachte-verhoging-voorstel. */
-export function renderAlgemeneKostenForm(o: { actieUrl: string; terugUrl: string; fouten?: readonly string[]; categorieen: readonly AlgemeneKostenCategorieOpties[]; portefeuilleTotaal: string }): string {
+export function renderAlgemeneKostenForm(o: { actieUrl: string; terugUrl: string; fouten?: readonly string[]; categorieen: readonly AlgemeneKostenCategorieOpties[]; portefeuilleTotaal: string; alleenLezen?: boolean }): string {
   const sectie = (c: AlgemeneKostenCategorieOpties, prefix: string) => {
     const rijen = [...c.regels, ...Array.from({ length: Math.max(0, 3 - c.regels.length) }, () => ({ id: null, omschrijving: "", complexnummer: "", ogbKostensoortCode: "", jaarbedrag: "" }))];
     const voorstelHtml = c.toonVoorstelVelden
@@ -679,7 +692,7 @@ export function renderAlgemeneKostenForm(o: { actieUrl: string; terugUrl: string
       <p class="sub">Totaal Algemene kosten (Jouw begroting): <strong>${escapeHtml(o.portefeuilleTotaal)}</strong></p>
       <button type="submit">Opslaan</button>
     </form>`;
-  return moduleFormShell({ titel: "Algemene kosten", terugUrl: o.terugUrl, ...(o.fouten !== undefined ? { fouten: o.fouten } : {}), inhoud });
+  return moduleFormShell({ titel: "Algemene kosten", terugUrl: o.terugUrl, ...(o.fouten !== undefined ? { fouten: o.fouten } : {}), inhoud, alleenLezen: o.alleenLezen === true });
 }
 
 export interface VerzekeringRegelVeld {
@@ -696,7 +709,7 @@ export interface VerzekeringRegelVeld {
 }
 
 /** Verzekeringen (UX_06, Tranche 13): compacte polisregels Complex|Verzekeraar|Ingangsdatum|Looptijd|Bedrag|Index%|GL|OGB|Override. */
-export function renderVerzekeringenForm(o: { actieUrl: string; terugUrl: string; fouten?: readonly string[]; regels: readonly VerzekeringRegelVeld[]; beoordeeld: boolean; portefeuilleTotaal: string }): string {
+export function renderVerzekeringenForm(o: { actieUrl: string; terugUrl: string; fouten?: readonly string[]; regels: readonly VerzekeringRegelVeld[]; beoordeeld: boolean; portefeuilleTotaal: string; alleenLezen?: boolean }): string {
   const rijen = [...o.regels, ...Array.from({ length: Math.max(0, 6 - o.regels.length) }, (): VerzekeringRegelVeld => ({ id: null, complexnummer: "", verzekeraar: "", grootboekrekening: "", ogbKostensoort: "", ingangsdatum: "", looptijdMaanden: "", bedrag: "", indexPercentage: "", handmatigBegrootOverride: "" }))];
   const rijHtml = (r: VerzekeringRegelVeld, i: number) => `
     <tr>
@@ -721,7 +734,7 @@ export function renderVerzekeringenForm(o: { actieUrl: string; terugUrl: string;
       <p class="sub">Totaal Verzekeringen (Jouw begroting): <strong>${escapeHtml(o.portefeuilleTotaal)}</strong></p>
       <button type="submit">Opslaan</button>
     </form>`;
-  return moduleFormShell({ titel: "Verzekeringen", terugUrl: o.terugUrl, ...(o.fouten !== undefined ? { fouten: o.fouten } : {}), inhoud });
+  return moduleFormShell({ titel: "Verzekeringen", terugUrl: o.terugUrl, ...(o.fouten !== undefined ? { fouten: o.fouten } : {}), inhoud, alleenLezen: o.alleenLezen === true });
 }
 
 export interface GeplandOnderhoudRegelVeld {
@@ -753,6 +766,7 @@ export function renderGeplandOnderhoudForm(o: {
   regels: readonly GeplandOnderhoudRegelVeld[];
   beoordeeld: boolean;
   jaartotaal: string;
+  alleenLezen?: boolean;
 }): string {
   const leeg = (): GeplandOnderhoudRegelVeld => ({ id: null, complexnummer: "", omschrijving: "", grootboekrekening: "", ogbKostensoort: "", aanleidingType: "", aanleidingToelichting: "", q1: "", q2: "", q3: "", q4: "", status: "GEPLAND", leverancier: "", offertebedrag: "", notitie: "" });
   const rijen = [...o.regels, ...Array.from({ length: Math.max(0, 5 - o.regels.length) }, leeg)];
@@ -785,7 +799,7 @@ export function renderGeplandOnderhoudForm(o: {
       <p class="sub">Jaartotaal Gepland onderhoud: <strong>${escapeHtml(o.jaartotaal)}</strong> (telt samen met Correctief/dagelijks op tot de P&L-post Onderhoud)</p>
       <button type="submit">Opslaan</button>
     </form>`;
-  return moduleFormShell({ titel: "Gepland onderhoud", terugUrl: o.terugUrl, ...(o.fouten !== undefined ? { fouten: o.fouten } : {}), inhoud });
+  return moduleFormShell({ titel: "Gepland onderhoud", terugUrl: o.terugUrl, ...(o.fouten !== undefined ? { fouten: o.fouten } : {}), inhoud, alleenLezen: o.alleenLezen === true });
 }
 
 export interface WozObjectVeld {
@@ -823,6 +837,7 @@ export function renderGemeentelijkeLastenForm(o: {
   voorstelMogelijk: boolean;
   voorstelReden: string | null;
   portefeuilleTotaal: string;
+  alleenLezen?: boolean;
 }): string {
   const glRijen = [...o.glRegels, ...Array.from({ length: Math.max(0, 3 - o.glRegels.length) }, (): GemeentelijkeLastenRegelVeld => ({ id: null, grootboekrekening: "", ogbKostensoort: "", jaarbedrag: "" }))];
   const glRijHtml = (r: GemeentelijkeLastenRegelVeld, i: number) => `
@@ -875,7 +890,7 @@ export function renderGemeentelijkeLastenForm(o: {
       <p class="sub">Totaal Gemeentelijke lasten pand (Jouw begroting): <strong>${escapeHtml(o.portefeuilleTotaal)}</strong></p>
       <button type="submit" name="actie" value="opslaan">Opslaan</button>
     </form>`;
-  return moduleFormShell({ titel: "Gemeentelijke lasten / WOZ", terugUrl: o.terugUrl, ...(o.fouten !== undefined ? { fouten: o.fouten } : {}), inhoud });
+  return moduleFormShell({ titel: "Gemeentelijke lasten / WOZ", terugUrl: o.terugUrl, ...(o.fouten !== undefined ? { fouten: o.fouten } : {}), inhoud, alleenLezen: o.alleenLezen === true });
 }
 
 export { geldWaarde };

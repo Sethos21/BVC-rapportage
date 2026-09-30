@@ -198,8 +198,10 @@ describe("Begrotingsworkflow via echte HTTP-routes (Tranche 11) — acceptatiecr
       schrijfGeplandOnderhoudBeoordeeld,
       schrijfCorrectiefDagelijksOnderhoudRegels,
       schrijfCorrectiefDagelijksOnderhoudBeoordeeld,
+      schrijfVerzekeringRegels,
       schrijfVerzekeringBeoordeeld,
       schrijfGemeentelijkeLastenModule,
+      schrijfGemeentelijkeLastenRegels,
       schrijfAlgemeneKostenCategorieState,
       schrijfLeegstandCategorieState,
       schrijfRenteCategorieState,
@@ -215,11 +217,62 @@ describe("Begrotingsworkflow via echte HTTP-routes (Tranche 11) — acceptatiecr
     schrijfModule1Snapshot(db, id, []);
     schrijfModule1Aannames(db, id, { begrotingsjaar: 2027, indexatiePercentage: new Decimal(3) });
     schrijfModule3Invoer(db, id, { wijze: "NIEUWE_VERGOEDING", bedrag: new Decimal(500), eenheid: "MAAND", ingangsdatum: null });
-    schrijfGeplandOnderhoudActiviteiten(db, id, []);
+    schrijfGeplandOnderhoudActiviteiten(db, id, [
+      {
+        id: null,
+        complexnummer: "001",
+        omschrijving: "Dakrenovatie terugkijktest",
+        grootboekrekening: "4300",
+        ogbKostensoort: null,
+        aanleidingType: "MJOP",
+        aanleidingToelichting: "MJOP 2027, dakvervanging conform onderhoudsplan",
+        q1: new Decimal(1000),
+        q2: new Decimal(1000),
+        q3: new Decimal(1000),
+        q4: new Decimal(1000),
+        status: "GEPLAND",
+        leverancier: null,
+        offertebedrag: null,
+        notitie: null,
+      },
+    ]);
     schrijfGeplandOnderhoudBeoordeeld(db, id, true);
     schrijfCorrectiefDagelijksOnderhoudRegels(db, id, []);
     schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, id, true);
+    schrijfVerzekeringRegels(db, id, [
+      {
+        id: null,
+        complexnummer: "001",
+        verzekeraar: "Interpolis terugkijktest",
+        grootboekrekening: "4130",
+        ogbKostensoort: null,
+        ingangsdatum: new Date("2024-01-01T00:00:00.000Z"),
+        looptijdMaanden: 12,
+        bedrag: new Decimal("5180.75"),
+        indexPercentage: new Decimal(3),
+        handmatigBegrootOverride: new Decimal(5300),
+      },
+    ]);
     schrijfVerzekeringBeoordeeld(db, id, true);
+    voegPnLBronmappingMutatieToe(db, {
+      bedrijfsnr: BEDRIJFSNR,
+      grootboekrekening: "4710",
+      grootboekOmschrijving: null,
+      ogbKostensoort: null,
+      ogbKostensoortOmschrijving: null,
+      economischeModule: "GEMEENTELIJKE_LASTEN",
+      economischeCategorie: "GEMEENTELIJKE_LASTEN",
+      geldigVanafBoekjaar: 2020,
+      geldigVanafPeriode: "01",
+      geldigTotBoekjaar: null,
+      geldigTotPeriode: null,
+      type: "NIEUWE_MAPPING_VANAF_PERIODE",
+      vorigeMappingId: null,
+      gewijzigdOp: new Date("2026-01-01T00:00:00.000Z"),
+      gebruiker: "test",
+      wijzigingsreden: "testfixture",
+    });
+    schrijfGemeentelijkeLastenRegels(db, id, [{ id: null, grootboekrekening: "4710", ogbKostensoort: null, jaarbedrag: new Decimal(9500) }]);
     schrijfGemeentelijkeLastenModule(db, id, { werkelijkeGemeentelijkeLasten: null, wozStijgingPercentage: null, lastenPercentageStijging: null, begrotingsPercentageOverride: null, beoordeeld: true });
     schrijfAlgemeneKostenCategorieState(db, id, Object.fromEntries(ALGEMENE_KOSTEN_CATEGORIEEN.map((c: string) => [c, { beoordeeld: true, vorigJaarBedrag: null, verwachteVerhogingPercentage: null }])) as never);
     schrijfLeegstandCategorieState(
@@ -245,6 +298,39 @@ describe("Begrotingsworkflow via echte HTTP-routes (Tranche 11) — acceptatiecr
       });
       expect(schrijfPoging.status).toBe(400);
       expect(await schrijfPoging.text()).toContain("alleen-lezen");
+
+      // Generieke read-only lifecycle (Tranche 14): ELKE aangesloten detailmodule blijft na
+      // VASTGESTELD leesbaar (GET, waarden zichtbaar, `fieldset disabled`) maar weigert schrijfacties
+      // (POST -> 400 "alleen-lezen") -- dezelfde detailpagina/render-functie, geen tweede read-only UI.
+      const moduleUrl = (key: string) => `${baseUrl}/begroting/${ADMINISTRATIE_ID}/${id}/module/${key}?laatstAfgeslotenBoekperiode=06`;
+      const alleenLezenModules: ReadonlyArray<{ key: string; verwachteWaarde: string }> = [
+        { key: "management", verwachteWaarde: "500" },
+        { key: "correctief", verwachteWaarde: "Correctief" },
+        { key: "btw", verwachteWaarde: "btw" },
+        { key: "rente-leningen", verwachteWaarde: "Rente leningen" },
+        { key: "rente-opbrengst", verwachteWaarde: "Opbrengst rente" },
+        { key: "leegstand", verwachteWaarde: "Leegstandskosten" },
+        { key: "algemene-kosten", verwachteWaarde: "Algemene kosten" },
+        { key: "verzekeringen", verwachteWaarde: "Interpolis terugkijktest" },
+        { key: "gepland-onderhoud", verwachteWaarde: "Dakrenovatie terugkijktest" },
+        { key: "gemeentelijke-lasten", verwachteWaarde: "9500" },
+      ];
+      for (const { key, verwachteWaarde } of alleenLezenModules) {
+        const getResp = await fetch(moduleUrl(key));
+        expect.soft(getResp.status, `GET ${key}`).toBe(200);
+        const getHtml = await getResp.text();
+        expect.soft(getHtml, `${key} bevat fieldset disabled`).toContain("<fieldset disabled");
+        expect.soft(getHtml, `${key} bevat alleen-lezen banner`).toContain("alleen-lezen");
+        expect.soft(getHtml, `${key} toont opgeslagen waarde`).toContain(verwachteWaarde);
+
+        const postResp = await fetch(moduleUrl(key), {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ beoordeeld: "1" }).toString(),
+        });
+        expect.soft(postResp.status, `POST ${key} geblokkeerd`).toBe(400);
+        expect.soft(await postResp.text(), `POST ${key} meldt alleen-lezen`).toContain("alleen-lezen");
+      }
     });
   });
 });
