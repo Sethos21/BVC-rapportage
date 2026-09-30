@@ -78,6 +78,12 @@ Eind-HEAD `50121a7`. Rente leningen + Opbrengst rente zijn aangesloten op Budget
 
 Eind-HEAD `efb6074`. Geaccepteerd als eerste geïntegreerde begrotingswerkomgeving en technisch gesloten integratieketen; niet als volledig afgeronde begrotingsmodule. `/begroting` draait voorlopig op de bestaande Worker serve-server. De HTTP-acceptatietest bewijst de productiecodepaden met XLSX-fixture + echte SQLite/mappingketen, maar is geen bewijs van een werkelijk financieel bedrag uit BVC-productiedata.
 
-## 11. Eerstvolgende build — Tranche 12
+## 11. Tranche 12 — geaccepteerd
 
-Prioriteit: bouw de echte Contracten/RentRoll → `Module1Snapshot`-bronadapter en sluit daarna Huur + Beheersvergoeding via de vastgestelde detail-UX aan op de bestaande `/begroting`-workflow. Gebruik bronfeiten voor de contractbasis en houd begrotingsaannames apart. Hergebruik bestaande Budget/Werkelijk/Estimated/P&L-logica; geen financiële formule opnieuw ontwerpen. Managementvergoeding mag de contract-afgeleide huurbasis hergebruiken conform bestaand contract. Geen refreshed-contract-state forecast, brede UI-redesign of onafhankelijke module-uitbreiding. Bron onvoldoende bewezen → `BRONGAT`; functionele keuze nodig → `BUSINESSBESLISSING`.
+Eind-HEAD `7f09561`. Contracten + RentRoll zijn gekoppeld aan `BgContractFeiten[]` en frozen `Module1Snapshot`; Huur en Beheersvergoeding hebben detail-UX binnen de bestaande `/begroting`-workflow. De 070-productieproef is read-only uitgevoerd en reproduceert eerder bewezen contracttotalen. Toekomstige kortingswijzigingen uit `contract_prijsregels.xlsx` zijn nog niet ingelezen.
+
+Definitief: variabele Managementvergoeding gebruikt de netto begrote jaarhuur uit dezelfde contract-afgeleide Module-1-huurbegroting als grondslag. Dit verandert niets aan het Actual-BRONGAT voor Management 070.
+
+## 12. Eerstvolgende build — Tranche 13
+
+Bouw eerst de reeds bronmatig bewezen ingestie/resolutie van toekomstige kortingswijzigingen naar `BgToekomstigeKortingswijziging`. Sluit daarna Gepland onderhoud via de vastgestelde UX aan op de bestaande begrotingsworkflow. Hergebruik bestaande onderhoudslogica; Actual onderhoud blijft totaalniveau en wordt nooit kunstmatig gesplitst. Geen verbreding naar Verzekeringen, Gemeentelijke lasten/WOZ, Algemene kosten of Leegstand in deze tranche.
