@@ -131,6 +131,10 @@ const GROEP_LABELS: Record<PnLGroepBovenEbitda, string> = {
 
 /** Modules met een in deze tranche gebouwde invoerpagina — alle andere posten zijn deze tranche alleen-lezen in de vergelijkende P&L. */
 const BEWERKBARE_MODULES: Record<string, string> = {
+  HUUROPBRENGST_BELAST: "huur",
+  HUUROPBRENGST_ONBELAST: "huur",
+  VERLEENDE_HUURKORTING: "huur",
+  BEHEERKOSTEN: "beheer",
   MANAGEMENTVERGOEDING: "management",
   ONDERHOUD: "correctief",
   NIET_VERREKENBARE_BTW: "btw",
@@ -454,6 +458,124 @@ export function renderRenteForm(o: { categorie: "RENTEKOSTEN" | "RENTE_OPBRENGST
       <button type="submit">Opslaan</button>
     </form>`;
   return moduleFormShell({ titel: isOpbrengst ? "Opbrengst rente" : "Rente leningen", terugUrl: o.terugUrl, ...(o.fouten !== undefined ? { fouten: o.fouten } : {}), inhoud });
+}
+
+export interface HuurDetailRegel {
+  contractnummer: string;
+  huurderNaam: string | null;
+  complexnummer: string | null;
+  belastOnbelast: string;
+  indexatiePercentageGebruikt: string;
+  indexatiePercentageBron: "ALGEMEEN" | "OVERRIDE";
+  effectieveIndexatiedatum: string | null;
+  bruto: string;
+  korting: string;
+  netto: string;
+  overrideWaarde: string;
+}
+
+/**
+ * Huur-detailweergave (UX_01, Tranche 12): toont de bewezen contractbasis per contract —
+ * bronhuur/indexatie/override/resulterende huur/korting blijven zichtbaar onderscheiden zodat
+ * later herleidbaar blijft hoe het bedrag is ontstaan (§10). Rekent zelf niets — alle bedragen
+ * komen kant-en-klaar van de aanroeper (de bestaande, ongewijzigde pure Huur-motor).
+ */
+export function renderHuurDetail(o: {
+  administratieId: string;
+  versieId: string;
+  terugUrl: string;
+  actieUrl: string;
+  begrotingsjaar: number;
+  alleenLezen: boolean;
+  algemeenIndexatiePercentage: string;
+  regels: readonly HuurDetailRegel[];
+  controleVereist: readonly string[];
+  portefeuilleNetto: string;
+}): string {
+  const waarschuwingenHtml = o.controleVereist.length > 0 ? `<div class="banner">${o.controleVereist.map(escapeHtml).join("<br/>")}</div>` : "";
+  const rijenHtml = o.regels
+    .map(
+      (r) => `<tr>
+      <td><span class="naam">${escapeHtml(r.contractnummer)}</span><span class="naam-sub">${escapeHtml(r.huurderNaam ?? "onbekende huurder")} · complex ${escapeHtml(r.complexnummer ?? "-")}</span></td>
+      <td>${escapeHtml(r.belastOnbelast)}</td>
+      <td>${escapeHtml(r.indexatiePercentageGebruikt)}% (${r.indexatiePercentageBron === "OVERRIDE" ? "override" : "algemeen"})</td>
+      <td>${r.effectieveIndexatiedatum ? escapeHtml(r.effectieveIndexatiedatum) : "-"}</td>
+      <td>${escapeHtml(r.bruto)}</td>
+      <td>${escapeHtml(r.korting)}</td>
+      <td>${escapeHtml(r.netto)}</td>
+      <td>${o.alleenLezen ? escapeHtml(r.overrideWaarde || "-") : `<input type="text" name="override_${escapeHtml(r.contractnummer)}" value="${escapeHtml(r.overrideWaarde)}" placeholder="algemeen" style="width:70px" />`}</td>
+    </tr>`,
+    )
+    .join("");
+  const inhoud = `
+    ${waarschuwingenHtml}
+    <div class="sub">Algemeen indexatiepercentage voor ${o.begrotingsjaar}: ${escapeHtml(o.algemeenIndexatiePercentage)}%. Een contractoverride vervangt uitsluitend het toegepaste percentage voor dat contract — de bronfeiten blijven ongewijzigd.</div>
+    <form method="POST" action="${escapeHtml(o.actieUrl)}">
+      <table style="margin-bottom:16px">
+        <thead><tr><th style="text-align:left">Contract</th><th>Belast/onbelast</th><th>Indexatie</th><th>Ingangsdatum indexatie</th><th>Bruto</th><th>Korting</th><th>Netto</th><th>Override %</th></tr></thead>
+        <tbody>${rijenHtml}</tbody>
+      </table>
+      <p class="sub">Netto huur portefeuille (Jouw begroting): <strong>${escapeHtml(o.portefeuilleNetto)}</strong></p>
+      ${o.alleenLezen ? "" : `<button type="submit">Overrides opslaan</button>`}
+    </form>`;
+  return moduleFormShell({ titel: `Huur — contractbasis ${o.begrotingsjaar}`, terugUrl: o.terugUrl, inhoud });
+}
+
+export interface BeheerDetailRegel {
+  complexnummer: string;
+  vastToegepast: boolean;
+  variabelToegepast: boolean;
+  variabelPercentageGebruikt: string | null;
+  nettoHuurGrondslag: string;
+  vastNaIndexatie: string;
+  variabeleVergoeding: string;
+  totaleVergoeding: string;
+  vastBedragJaarInvoer: string;
+  vastIndexatiePercentageInvoer: string;
+  vastIndexatiedatumInvoer: string;
+  variabelPercentageInvoer: string;
+}
+
+/** Beheersvergoeding-detailweergave (UX_02, Tranche 12): vast/variabel apart zichtbaar, variabele grondslag = de nieuwe, contract-afgeleide netto huur uit Module 1. */
+export function renderBeheerDetail(o: {
+  terugUrl: string;
+  actieUrl: string;
+  alleenLezen: boolean;
+  regels: readonly BeheerDetailRegel[];
+  controleVereist: readonly string[];
+  portefeuilleTotaal: string;
+}): string {
+  const waarschuwingenHtml = o.controleVereist.length > 0 ? `<div class="banner">${o.controleVereist.map(escapeHtml).join("<br/>")}</div>` : "";
+  const rijenHtml = o.regels
+    .map((r, i) =>
+      o.alleenLezen
+        ? `<tr>
+      <td class="naam">${escapeHtml(r.complexnummer)}</td>
+      <td>${r.vastToegepast ? escapeHtml(r.vastNaIndexatie) : "-"}</td>
+      <td>${r.variabelToegepast ? `${escapeHtml(r.variabelPercentageGebruikt ?? "-")}% × ${escapeHtml(r.nettoHuurGrondslag)}` : "-"}</td>
+      <td>${escapeHtml(r.totaleVergoeding)}</td>
+    </tr>`
+        : `<tr>
+      <td class="naam">${escapeHtml(r.complexnummer)}</td>
+      <td><input type="hidden" name="complexnummer_${i}" value="${escapeHtml(r.complexnummer)}" /><input type="text" name="vastBedrag_${i}" value="${escapeHtml(r.vastBedragJaarInvoer)}" placeholder="geen vast deel" style="width:90px" /></td>
+      <td><input type="text" name="vastIndex_${i}" value="${escapeHtml(r.vastIndexatiePercentageInvoer)}" placeholder="%" style="width:50px" /></td>
+      <td><input type="date" name="vastIndexDatum_${i}" value="${escapeHtml(r.vastIndexatiedatumInvoer)}" style="width:130px" /></td>
+      <td><input type="text" name="variabelPercentage_${i}" value="${escapeHtml(r.variabelPercentageInvoer)}" placeholder="geen variabel deel" style="width:70px" /> × ${escapeHtml(r.nettoHuurGrondslag)}</td>
+      <td>${escapeHtml(r.totaleVergoeding)}</td>
+    </tr>`,
+    )
+    .join("");
+  const inhoud = `
+    ${waarschuwingenHtml}
+    <form method="POST" action="${escapeHtml(o.actieUrl)}">
+      <table style="margin-bottom:16px">
+        <thead><tr><th style="text-align:left">Complex</th><th>Vast bedrag/jaar</th>${o.alleenLezen ? "" : "<th>Vast index %</th><th>Vast indexatiedatum</th>"}<th>Variabel % × netto huurgrondslag</th><th>Totaal</th></tr></thead>
+        <tbody>${rijenHtml}</tbody>
+      </table>
+      <p class="sub">Totale beheersvergoeding portefeuille: <strong>${escapeHtml(o.portefeuilleTotaal)}</strong></p>
+      ${o.alleenLezen ? "" : `<button type="submit">Configuratie opslaan</button>`}
+    </form>`;
+  return moduleFormShell({ titel: "Beheersvergoeding", terugUrl: o.terugUrl, inhoud });
 }
 
 export { geldWaarde };

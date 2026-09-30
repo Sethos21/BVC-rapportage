@@ -5,6 +5,10 @@ import {
   leesBegrotingsversiesVoorAdministratie,
   leesCorrectiefDagelijksOnderhoudBeoordeeld,
   leesCorrectiefDagelijksOnderhoudRegels,
+  leesModule1Aannames,
+  leesModule1Overrides,
+  leesModule1Snapshot,
+  leesModule2Config,
   leesModule3Invoer,
   leesNietVerrekenbareBtwEstimatedVerwachting,
   leesNietVerrekenbareBtwRegels,
@@ -17,7 +21,9 @@ import {
   schrijfCorrectiefDagelijksOnderhoudBeoordeeld,
   schrijfCorrectiefDagelijksOnderhoudRegels,
   schrijfModule1Aannames,
+  schrijfModule1Overrides,
   schrijfModule1Snapshot,
+  schrijfModule2Config,
   schrijfModule3Invoer,
   schrijfNietVerrekenbareBtwEstimatedVerwachting,
   schrijfNietVerrekenbareBtwRegels,
@@ -28,7 +34,16 @@ import {
   stelBegrotingVast,
   type Begrotingsversie,
 } from "@bvc/begroting-data";
-import { berekenPnLBoom, vergelijkPnLResultaten, type BgManagementInvoer, type BgRenteCategorie } from "@bvc/reporting";
+import {
+  berekenBegroteBeheersvergoeding,
+  berekenBegroteHuuropbrengsten,
+  berekenPnLBoom,
+  vergelijkPnLResultaten,
+  type BgBeheerComplexConfig,
+  type BgContractOverride,
+  type BgManagementInvoer,
+  type BgRenteCategorie,
+} from "@bvc/reporting";
 import { lijstAdministraties, leesAdministratieConfig } from "./administratie.js";
 import { begrotingsversiesDatabasePad } from "./paths.js";
 import { leesBegrotingsWerkomgeving } from "./begrotingWerkelijk.js";
@@ -37,12 +52,16 @@ import { BOEKPERIODES } from "./serveUi.js";
 import {
   renderBegrotingHoofdscherm,
   renderBegrotingKeuzeScherm,
+  renderBeheerDetail,
   renderBtwForm,
   renderControlePagina,
   renderCorrectiefForm,
   renderFoutPagina,
+  renderHuurDetail,
   renderManagementForm,
   renderRenteForm,
+  type BeheerDetailRegel,
+  type HuurDetailRegel,
 } from "./begrotingUi.js";
 
 /**
@@ -327,13 +346,18 @@ async function handleModuleRoute(root: string, req: IncomingMessage, res: Server
   const terugUrl = hoofdschermUrl(administratieId, versieId, laatstAfgeslotenBoekperiode);
   const actieUrl = `${url.pathname}?laatstAfgeslotenBoekperiode=${encodeURIComponent(laatstAfgeslotenBoekperiode)}`;
 
-  if (g.versie.status !== "CONCEPT") {
+  // Huur/Beheer blijven ook op een VASTGESTELDE versie leesbaar (UX_13 Terugkijken: onderbouwing blijft zichtbaar) —
+  // alle andere moduleschermen blijven volledig geblokkeerd op niet-CONCEPT, zoals al in Tranche 11.
+  const leesbaarOokNaVaststellen = moduleKey === "huur" || moduleKey === "beheer";
+  if (g.versie.status !== "CONCEPT" && !(leesbaarOokNaVaststellen && req.method === "GET")) {
     g.db.close();
     stuurHtml(res, 400, renderFoutPagina("Niet meer wijzigbaar", "Deze begrotingsversie is vastgesteld en is alleen-lezen.", terugUrl));
     return true;
   }
 
   try {
+    if (moduleKey === "huur") return await handleHuur(req, res, g, actieUrl, terugUrl);
+    if (moduleKey === "beheer") return await handleBeheer(req, res, g, actieUrl, terugUrl);
     if (moduleKey === "management") return await handleManagement(req, res, g, actieUrl, terugUrl);
     if (moduleKey === "correctief") return await handleCorrectief(req, res, g, actieUrl, terugUrl);
     if (moduleKey === "btw") return await handleBtw(req, res, g, actieUrl, terugUrl);
@@ -344,6 +368,197 @@ async function handleModuleRoute(root: string, req: IncomingMessage, res: Server
   } finally {
     g.db.close();
   }
+}
+
+function fmtBedragKort(d: Decimal): string {
+  const negatief = d.isNegative();
+  const [geheel, decimalen] = d.abs().toFixed(2).split(".");
+  const geheelMetPunten = geheel!.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  return (negatief ? "-€ " : "€ ") + geheelMetPunten + "," + decimalen;
+}
+
+function fmtPercentageVeld(d: Decimal): string {
+  return d.toString();
+}
+
+function fmtDatumVeld(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Huur-detailweergave (UX_01, Tranche 12, §9/§10/§22): roept de ongewijzigde pure
+ * `berekenBegroteHuuropbrengsten` aan met de bevroren Module-1-snapshot + de huidige overrides —
+ * exact dezelfde berekening als de vergelijkende P&L, hier uitsluitend uitgesplitst per contract.
+ * Blijft leesbaar (GET) na vaststellen; schrijven (POST) is uitsluitend op CONCEPT mogelijk (zie
+ * `handleModuleRoute`'s guard).
+ */
+async function handleHuur(req: IncomingMessage, res: ServerResponse, g: Geopend, actieUrl: string, terugUrl: string): Promise<boolean> {
+  const alleenLezen = g.versie.status !== "CONCEPT";
+  const contracten = leesModule1Snapshot(g.db, g.versie.id);
+  const aannames = leesModule1Aannames(g.db, g.versie.id);
+  if (aannames === null) {
+    stuurHtml(res, 400, renderFoutPagina("Nog niet mogelijk", "Er zijn nog geen Module-1-aannames (algemeen indexatiepercentage) voor deze begroting vastgelegd.", terugUrl));
+    return true;
+  }
+
+  if (req.method === "POST" && !alleenLezen) {
+    const velden = Object.fromEntries(new URLSearchParams(await leesBody(req)));
+    try {
+      const overrides: BgContractOverride[] = [];
+      for (const contract of contracten) {
+        const ingevoerd = tekst(velden[`override_${contract.contractnummer}`]);
+        if (ingevoerd.length === 0) continue;
+        const percentage = parseGeld(ingevoerd);
+        if (percentage === null) continue;
+        overrides.push({ contractnummer: contract.contractnummer, indexatiePercentage: percentage, scope: "VERSIE" });
+      }
+      schrijfModule1Overrides(g.db, g.versie.id, overrides);
+      stuurRedirect(res, terugUrl);
+      return true;
+    } catch (error) {
+      stuurHtml(res, 400, renderFoutPagina("Overrides konden niet worden opgeslagen", error instanceof Error ? error.message : String(error), terugUrl));
+      return true;
+    }
+  }
+
+  const overrides = leesModule1Overrides(g.db, g.versie.id);
+  let module1;
+  try {
+    module1 = berekenBegroteHuuropbrengsten(contracten, overrides, aannames, g.versie.bronPeildatum);
+  } catch (error) {
+    stuurHtml(res, 500, renderFoutPagina("Huur kon niet worden berekend", error instanceof Error ? error.message : String(error), terugUrl));
+    return true;
+  }
+
+  const regels: HuurDetailRegel[] = module1.contracten.map((c) => ({
+    contractnummer: c.contractnummer,
+    huurderNaam: c.huurderNaam,
+    complexnummer: c.complexnummer,
+    belastOnbelast: c.belastOnbelast === "BELAST" ? "Belast" : c.belastOnbelast === "ONBELAST" ? "Onbelast" : "Onbekend",
+    indexatiePercentageGebruikt: fmtPercentageVeld(c.indexatiePercentageGebruikt),
+    indexatiePercentageBron: c.indexatiePercentageBron,
+    effectieveIndexatiedatum: c.effectieveIndexatiedatum ? fmtDatumVeld(c.effectieveIndexatiedatum) : null,
+    bruto: fmtBedragKort(c.jaartotaal.brutoHuurMetIndexatie),
+    korting: fmtBedragKort(c.jaartotaal.huurkorting),
+    netto: fmtBedragKort(c.jaartotaal.nettoHuur),
+    overrideWaarde: overrides.find((o) => o.contractnummer === c.contractnummer)?.indexatiePercentage.toString() ?? "",
+  }));
+
+  const portefeuilleNetto = module1.portefeuilleTotalen.nettoHuurBelast.plus(module1.portefeuilleTotalen.nettoHuurOnbelast).plus(module1.portefeuilleTotalen.nettoHuurOnbekendeBtw);
+
+  stuurHtml(
+    res,
+    200,
+    renderHuurDetail({
+      administratieId: g.administratieId,
+      versieId: g.versie.id,
+      terugUrl,
+      actieUrl,
+      begrotingsjaar: g.versie.begrotingsjaar,
+      alleenLezen,
+      algemeenIndexatiePercentage: fmtPercentageVeld(aannames.indexatiePercentage),
+      regels,
+      controleVereist: module1.controleVereist.map((c) => `${c.contractnummer ?? "Algemeen"}: ${c.bericht}`),
+      portefeuilleNetto: fmtBedragKort(portefeuilleNetto),
+    }),
+  );
+  return true;
+}
+
+/**
+ * Beheersvergoeding-detailweergave (UX_02, Tranche 12, §14/§23): gebruikt de Module-1-uitkomst
+ * (mét overrides) als variabele huurgrondslag — exact het bestaande contract, nu voor het eerst
+ * gevoed vanuit de echte contractbasis. Complexen komen uit de Module-1-contracten (elk complex
+ * dat in de contractbasis voorkomt), niet uit een los complexenregister.
+ */
+async function handleBeheer(req: IncomingMessage, res: ServerResponse, g: Geopend, actieUrl: string, terugUrl: string): Promise<boolean> {
+  const alleenLezen = g.versie.status !== "CONCEPT";
+  const contracten = leesModule1Snapshot(g.db, g.versie.id);
+  const aannames = leesModule1Aannames(g.db, g.versie.id);
+  if (aannames === null) {
+    stuurHtml(res, 400, renderFoutPagina("Nog niet mogelijk", "Er zijn nog geen Module-1-aannames (algemeen indexatiepercentage) voor deze begroting vastgelegd.", terugUrl));
+    return true;
+  }
+  const overrides = leesModule1Overrides(g.db, g.versie.id);
+  let module1;
+  try {
+    module1 = berekenBegroteHuuropbrengsten(contracten, overrides, aannames, g.versie.bronPeildatum);
+  } catch (error) {
+    stuurHtml(res, 500, renderFoutPagina("Huur kon niet worden berekend", error instanceof Error ? error.message : String(error), terugUrl));
+    return true;
+  }
+  const complexnummers = [...new Set(module1.contracten.map((c) => c.complexnummer).filter((c): c is string => c !== null))].sort();
+
+  if (req.method === "POST" && !alleenLezen) {
+    const velden = Object.fromEntries(new URLSearchParams(await leesBody(req)));
+    try {
+      const configs: BgBeheerComplexConfig[] = [];
+      for (let i = 0; i < complexnummers.length; i++) {
+        const complexnummer = tekst(velden[`complexnummer_${i}`]);
+        if (complexnummer.length === 0) continue;
+        const vastBedrag = parseGeld(tekst(velden[`vastBedrag_${i}`]));
+        const vastIndex = parseGeld(tekst(velden[`vastIndex_${i}`]));
+        const vastIndexDatumStr = tekst(velden[`vastIndexDatum_${i}`]);
+        const variabelPercentage = parseGeld(tekst(velden[`variabelPercentage_${i}`]));
+        configs.push({
+          complexnummer,
+          vastBedragJaar: vastBedrag,
+          vastIndexatiePercentage: vastIndex,
+          vastIndexatiedatum: vastIndexDatumStr.length > 0 ? new Date(`${vastIndexDatumStr}T00:00:00.000Z`) : null,
+          variabelPercentage,
+        });
+      }
+      schrijfModule2Config(g.db, g.versie.id, configs);
+      stuurRedirect(res, terugUrl);
+      return true;
+    } catch (error) {
+      stuurHtml(res, 400, renderFoutPagina("Configuratie kon niet worden opgeslagen", error instanceof Error ? error.message : String(error), terugUrl));
+      return true;
+    }
+  }
+
+  const configs = leesModule2Config(g.db, g.versie.id);
+  let module2;
+  try {
+    module2 = berekenBegroteBeheersvergoeding(module1, configs);
+  } catch (error) {
+    stuurHtml(res, 500, renderFoutPagina("Beheersvergoeding kon niet worden berekend", error instanceof Error ? error.message : String(error), terugUrl));
+    return true;
+  }
+
+  const regels: BeheerDetailRegel[] = complexnummers.map((complexnummer, i) => {
+    const uitkomst = module2.complexen.find((c) => c.complexnummer === complexnummer);
+    const config = configs.find((c) => c.complexnummer === complexnummer);
+    return {
+      complexnummer,
+      vastToegepast: uitkomst?.vastToegepast ?? false,
+      variabelToegepast: uitkomst?.variabelToegepast ?? false,
+      variabelPercentageGebruikt: uitkomst?.variabelPercentageGebruikt !== null && uitkomst?.variabelPercentageGebruikt !== undefined ? fmtPercentageVeld(uitkomst.variabelPercentageGebruikt) : null,
+      nettoHuurGrondslag: fmtBedragKort(uitkomst?.jaartotaal.nettoHuurGrondslag ?? new Decimal(0)),
+      vastNaIndexatie: fmtBedragKort(uitkomst?.jaartotaal.vastNaIndexatie ?? new Decimal(0)),
+      variabeleVergoeding: fmtBedragKort(uitkomst?.jaartotaal.variabeleVergoeding ?? new Decimal(0)),
+      totaleVergoeding: fmtBedragKort(uitkomst?.jaartotaal.totaleVergoeding ?? new Decimal(0)),
+      vastBedragJaarInvoer: config?.vastBedragJaar?.toString() ?? "",
+      vastIndexatiePercentageInvoer: config?.vastIndexatiePercentage?.toString() ?? "",
+      vastIndexatiedatumInvoer: config?.vastIndexatiedatum ? fmtDatumVeld(config.vastIndexatiedatum) : "",
+      variabelPercentageInvoer: config?.variabelPercentage?.toString() ?? "",
+      // index i hergebruikt de positie van complexnummers voor het formulier; complexnummer_i wordt als hidden veld meegegeven.
+    };
+  });
+
+  stuurHtml(
+    res,
+    200,
+    renderBeheerDetail({
+      terugUrl,
+      actieUrl,
+      alleenLezen,
+      regels,
+      controleVereist: module2.controleVereist.map((c) => `${c.complexnummer ?? "Algemeen"}: ${c.bericht}`),
+      portefeuilleTotaal: fmtBedragKort(module2.portefeuilleTotalen.totaleVergoeding),
+    }),
+  );
+  return true;
 }
 
 async function handleManagement(req: IncomingMessage, res: ServerResponse, g: Geopend, actieUrl: string, terugUrl: string): Promise<boolean> {

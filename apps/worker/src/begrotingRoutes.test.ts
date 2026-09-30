@@ -248,3 +248,120 @@ describe("Begrotingsworkflow via echte HTTP-routes (Tranche 11) — acceptatiecr
     });
   });
 });
+
+function contractRij(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    Bedrijfsnr: BEDRIJFSNR,
+    Contract: "0000000043",
+    Complexnummer: "001",
+    Unitnummer: "0001",
+    Huurdernummer: "00000028",
+    Huurder_Naam_1: "Voorbeeld Huurder BV",
+    Ingangsdatum: "01-01-2020",
+    Expiratie_Expiratiedatum: "31-12-2030",
+    Verhoging_datum: "01-08-2027",
+    Verhoging_opnieuw_na: 12,
+    ...overrides,
+  };
+}
+
+function rentrollRij(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    Bedrijfsnummer: BEDRIJFSNR,
+    Contractnummer: "0000000043",
+    Vorderingsoort: "01",
+    Unitnummer: "0001",
+    Complexnummer: "001",
+    Prolongatie_bedrag_jaar: 120000,
+    BTW_Y_N: "Y",
+    ...overrides,
+  };
+}
+
+/**
+ * TRANCHE 12 — Huur/Beheer via de echte Contracten/RentRoll-bron (fixturebewijs door de echte
+ * productiecodeketen, zie CLAUDE.md/BEGROTING_MASTER_CONTRACT.md §12 over het onderscheid met
+ * werkelijke BVC-productiedata). Bewijst §21's checklist: contractbron inlezen -> snapshot
+ * schrijven -> herladen -> zelfde snapshot -> indexatie -> override -> Jouw begroting verandert
+ * -> bronfeiten/Werkelijk blijven onveranderd.
+ */
+describe("Huur/Beheer via echte HTTP-routes met een echte Contracten/RentRoll-fixture (Tranche 12)", () => {
+  it("nieuwe begroting laadt de contractbasis, toont Huur/Beheer op het hoofdscherm, en een override wijzigt Jouw begroting zonder Voorstel/Werkelijk te raken", async () => {
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "contracten_huidig.xlsx"), [contractRij()]);
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "rentroll.xlsx"), [rentrollRij()]);
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "boekingen.xlsx"), []);
+
+    await metServer(async (baseUrl) => {
+      const nieuw = await fetch(`${baseUrl}/begroting/nieuw`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ administratieId: ADMINISTRATIE_ID, begrotingsjaar: "2028", laatstAfgeslotenBoekperiode: "06", indexatiePercentage: "0" }).toString(),
+        redirect: "manual",
+      });
+      expect(nieuw.status).toBe(302);
+      const hoofdschermUrl = nieuw.headers.get("location")!;
+      expect(hoofdschermUrl).toContain("melding=Contractbasis%20geladen");
+
+      // Hoofdscherm toont de contract-afgeleide Huur/Beheer-waarden (bruto huur 120.000, geen indexatie/override -> 0% algemeen).
+      const hoofdscherm1 = await fetch(baseUrl + hoofdschermUrl);
+      const html1 = await hoofdscherm1.text();
+      expect(html1).toContain("Huuropbrengst belast");
+      expect(html1).toContain("€ 120.000,00");
+
+      // Huur-detailpagina toont het contract.
+      const huurUrl = hoofdschermUrl.replace(/\?.*/, "") + "/module/huur?laatstAfgeslotenBoekperiode=06";
+      const huurDetail1 = await fetch(baseUrl + huurUrl);
+      expect(huurDetail1.status).toBe(200);
+      const huurDetailHtml1 = await huurDetail1.text();
+      expect(huurDetailHtml1).toContain("0000000043");
+      expect(huurDetailHtml1).toContain("Voorbeeld Huurder BV");
+      expect(huurDetailHtml1).toContain("Belast");
+
+      // Override van 10% instellen voor dit contract.
+      const overrideOpslaan = await fetch(baseUrl + huurUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ "override_0000000043": "10" }).toString(),
+        redirect: "manual",
+      });
+      expect(overrideOpslaan.status).toBe(302);
+
+      // Jouw begroting wijkt nu af van 120.000 (10%-override, effectief vanaf de indexatiedatum -> € 125.000,00 met de
+      // bewezen maandgranulariteit); Voorstel (0% algemene indexatie, zonder override) blijft ongewijzigd € 120.000,00;
+      // Werkelijk blijft onbekend/onveranderd.
+      const hoofdscherm2 = await fetch(baseUrl + hoofdschermUrl);
+      const html2 = await hoofdscherm2.text();
+      expect(html2).toContain("€ 125.000,00"); // Jouw begroting mét override
+      expect(html2).toContain("€ 120.000,00"); // Voorstel zonder override blijft zichtbaar ernaast
+
+      // Herladen (nieuwe request): de override-waarde blijft bewaard (roundtrip).
+      const huurDetail2 = await fetch(baseUrl + huurUrl);
+      expect(await huurDetail2.text()).toContain('value="10"');
+
+      // Beheer-detailpagina is bereikbaar en toont het complex uit de contractbasis.
+      const beheerUrl = hoofdschermUrl.replace(/\?.*/, "") + "/module/beheer?laatstAfgeslotenBoekperiode=06";
+      const beheerDetail = await fetch(baseUrl + beheerUrl);
+      expect(beheerDetail.status).toBe(200);
+      expect(await beheerDetail.text()).toContain("001"); // complexnummer uit het contract
+    });
+  });
+
+  it("ontbreekt de Contracten/RentRoll-bron, dan start de begroting leeg met een zichtbare melding, geen misleidende €0", async () => {
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "boekingen.xlsx"), []);
+    // Geen contracten_huidig.xlsx/rentroll.xlsx aangemaakt.
+
+    await metServer(async (baseUrl) => {
+      const nieuw = await fetch(`${baseUrl}/begroting/nieuw`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ administratieId: ADMINISTRATIE_ID, begrotingsjaar: "2028", laatstAfgeslotenBoekperiode: "06", indexatiePercentage: "3" }).toString(),
+        redirect: "manual",
+      });
+      const hoofdschermUrl = nieuw.headers.get("location")!;
+      expect(hoofdschermUrl).toContain("melding=Geen%20Contracten");
+
+      const html = await (await fetch(baseUrl + hoofdschermUrl)).text();
+      expect(html).toContain("Geen Contracten");
+    });
+  });
+});
