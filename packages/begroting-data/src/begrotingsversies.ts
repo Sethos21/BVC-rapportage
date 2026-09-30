@@ -133,6 +133,30 @@ export function leesBegrotingsversie(db: DatabaseSync, id: string): Begrotingsve
 }
 
 /**
+ * Alle begrotingsversies van één administratie, nieuwste begrotingsjaar eerst (bij gelijk
+ * jaar: nieuwst aangemaakt eerst) — TRANCHE 11: puur listing voor de startflow (bestaande
+ * concepten hervatten, "Begroting vorig jaar" opzoeken); rekent en muteert niets.
+ */
+export function leesBegrotingsversiesVoorAdministratie(db: DatabaseSync, bedrijfsnr: string): Begrotingsversie[] {
+  const rows = db.prepare(`SELECT * FROM begrotingsversies WHERE bedrijfsnr = ? ORDER BY begrotingsjaar DESC, created_at DESC`).all(bedrijfsnr) as unknown as BegrotingsversieRow[];
+  return rows.map(rowToBegrotingsversie);
+}
+
+/**
+ * De VASTGESTELDE begrotingsversie van een administratie voor één specifiek begrotingsjaar —
+ * TRANCHE 11: de bron voor de vergelijkingskolom "Begroting vorig jaar". `null` als die niet
+ * bestaat (nooit gereconstrueerd uit Werkelijk/Estimated — FO §7 "Nog niet besloten"/UX §11).
+ * Bij (in theorie onmogelijk geachte) meerdere VASTGESTELDE versies voor hetzelfde jaar: de
+ * laatst vastgestelde, nooit stilzwijgend gecombineerd.
+ */
+export function leesVastgesteldeBegrotingsversieVoorJaar(db: DatabaseSync, bedrijfsnr: string, begrotingsjaar: number): Begrotingsversie | null {
+  const row = db
+    .prepare(`SELECT * FROM begrotingsversies WHERE bedrijfsnr = ? AND begrotingsjaar = ? AND status = 'VASTGESTELD' ORDER BY vastgesteld_at DESC LIMIT 1`)
+    .get(bedrijfsnr, begrotingsjaar) as BegrotingsversieRow | undefined;
+  return row !== undefined ? rowToBegrotingsversie(row) : null;
+}
+
+/**
  * Wijzigt `naam`/`notitie` van een CONCEPT-versie (beide optioneel — alleen
  * de meegegeven velden worden aangepast). Gooit een duidelijke fout als de
  * versie niet bestaat of al VASTGESTELD is — de DB-trigger blokkeert dat

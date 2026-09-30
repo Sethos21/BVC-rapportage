@@ -18,6 +18,8 @@ export {
   leesBegrotingsversie,
   wijzigConceptNaamNotitie,
   verwijderConceptVersie,
+  leesBegrotingsversiesVoorAdministratie,
+  leesVastgesteldeBegrotingsversieVoorJaar,
   type Begrotingsversie,
   type BegrotingsversieStatus,
   type BegrotingsversieOriginType,
@@ -366,6 +368,16 @@ export {
 // Gemeentelijke lasten Estimated (begrotingspost = som GL-regels) en de Begroting/Estimated → pure P&L-verbinding (Vervolgtranche 6).
 export { leesGemeentelijkeLastenEstimatedVerwachting, schrijfGemeentelijkeLastenEstimatedVerwachting, leesGemeentelijkeLastenEstimatedResultaat } from "./gemeentelijkeLastenEstimated.js";
 export { leesBegrotingPnLRegels, leesEstimatedPnLRegels, type EstimatedPnLInvoer } from "./begrotingPnL.js";
+// Niet verrekenbare BTW (Tranche 9) — TRANCHE 11: deze concept-persistence/Estimated-functies bestonden al
+// (Master Contract §7) maar waren nog nooit publiek geëxporteerd omdat er nog geen UI-aanroeper was.
+export { leesNietVerrekenbareBtwRegels, schrijfNietVerrekenbareBtwRegels, type NietVerrekenbareBtwRegel, type NietVerrekenbareBtwRegelInvoer } from "./nietVerrekenbareBtwRegels.js";
+export { leesNietVerrekenbareBtwState, schrijfNietVerrekenbareBtwState, type NietVerrekenbareBtwState } from "./nietVerrekenbareBtwState.js";
+export {
+  leesNietVerrekenbareBtwEstimatedVerwachting,
+  schrijfNietVerrekenbareBtwEstimatedVerwachting,
+  leesNietVerrekenbareBtwEstimatedResultaat,
+} from "./nietVerrekenbareBtwEstimatedVerwachting.js";
+export { leesFrozenNietVerrekenbareBtwResultaat } from "./frozenNietVerrekenbareBtwResultaat.js";
 // Leegstandskosten Estimated (Vervolgtranche 8): handmatige resterende verwachting per kostensoort en kwartaal (nooit bevroren).
 export { leesLeegstandEstimatedVerwachting, schrijfLeegstandEstimatedVerwachting, leesLeegstandEstimatedResultaat, type LeegstandEstimatedVerwachting, type LeegstandEstimatedResultaat } from "./leegstandEstimated.js";
 // Algemene kosten Estimated (Vervolgtranche 5): handmatige resterende verwachting per post + koppeling met Begroting/Werkelijk (nooit bevroren).
@@ -451,6 +463,8 @@ export {
   type RenteRegel,
   type RenteRegelInvoer,
 } from "./renteRegels.js";
+// Rente Estimated-persistentie (Tranche 10) — TRANCHE 11: bestond al maar was nog nooit publiek geëxporteerd (geen UI-aanroeper).
+export { leesRenteEstimatedVerwachting, schrijfRenteEstimatedVerwachting, leesRenteEstimatedResultaat, type RenteEstimatedVerwachting } from "./renteEstimatedVerwachting.js";
 
 // Geplande Verkoop (OB-039) — UITSLUITEND concept-persistence (geen
 // pure-calculator-integratie in dit bestand zelf; herberekening/frozen
@@ -508,3 +522,16 @@ export {
   type PnLMappingMutatieType,
   type PnLMappingWijzigingLogRegel,
 } from "./pnlBronmappingRepository.js";
+
+// De vergelijkende begrotings-P&L (Tranche 11) — assembleert Begroting vorig jaar/Werkelijk/
+// Estimated/Jouw begroting per canonieke P&L-regel, uitsluitend via reeds bestaande functies
+// (leesBegrotingPnLRegels/leesEstimatedPnLRegels/berekenPnLBoom). Zie vergelijkendeBegrotingsPnL.ts's moduledoc.
+export {
+  leesVergelijkendeBegrotingsPnL,
+  bouwEstimatedPnLInvoer,
+  bepaalResterendeMaanden,
+  bepaalResterendeKwartalen,
+  type VergelijkendeBegrotingsPnLResultaat,
+  type VergelijkendeBegrotingsPnLRegel,
+  type VergelijkendeBegrotingsPnLVoorstel,
+} from "./vergelijkendeBegrotingsPnL.js";

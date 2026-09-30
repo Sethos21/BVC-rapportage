@@ -118,9 +118,31 @@ export interface PnLNietMeegenomenGroep {
   aantalBoekingen: number;
 }
 
+/**
+ * Per-module getypeerde Werkelijk-uitkomst + dekking — TRANCHE 11: dezelfde acht/tien
+ * `berekenXWerkelijkViaCentraleMapping`-resultaten die deze functie toch al berekent om de
+ * P&L-boom te vullen, HIER ONVERANDERD ook naar buiten gegeven zodat een aanroeper (de
+ * begrotings-P&L-orchestratie) daaruit `EstimatedPnLInvoer` kan opbouwen zonder Werkelijk een
+ * tweede keer te berekenen. Puur additief — geen enkele bestaande aanroeper die alleen
+ * `resultaat`/`nietMeegenomen` destructureert, wordt hierdoor geraakt.
+ */
+export interface PnLModuleWerkelijkBundel {
+  huur: { werkelijk: ReturnType<typeof berekenWerkelijkHuurViaCentraleMapping>["werkelijk"]; dekkingBevestigd: boolean };
+  beheer: { werkelijk: ReturnType<typeof berekenWerkelijkBeheerViaCentraleMapping>["werkelijk"]; dekkingBevestigd: boolean };
+  management: { werkelijk: ReturnType<typeof berekenWerkelijkManagementViaCentraleMapping>["werkelijk"]; dekkingBevestigd: boolean };
+  onderhoud: { werkelijk: ReturnType<typeof berekenWerkelijkOnderhoudViaCentraleMapping>["werkelijk"]; dekkingBevestigd: boolean };
+  verzekeringen: { werkelijk: ReturnType<typeof berekenWerkelijkVerzekeringenViaCentraleMapping>["werkelijk"]; dekkingBevestigd: boolean };
+  gemeentelijkeLasten: { werkelijk: ReturnType<typeof berekenWerkelijkGemeentelijkeLastenViaCentraleMapping>["werkelijk"]; dekkingBevestigd: boolean };
+  algemeneKosten: { werkelijk: ReturnType<typeof berekenWerkelijkAlgemeneKostenViaCentraleMapping>["werkelijk"]; dekkingBevestigd: boolean; gemapteCategorieen: ReadonlySet<string> };
+  leegstand: { werkelijk: ReturnType<typeof berekenWerkelijkLeegstandViaCentraleMapping>["werkelijk"]; dekkingBevestigd: boolean; gemapteCategorieen: ReadonlySet<string> };
+  nietVerrekenbareBtw: { werkelijk: ReturnType<typeof berekenWerkelijkNietVerrekenbareBtwViaCentraleMapping>["werkelijk"]; dekkingBevestigd: boolean };
+  rente: { werkelijk: ReturnType<typeof berekenWerkelijkRenteViaCentraleMapping>["werkelijk"]; dekkingBevestigd: boolean; gemapteCategorieen: ReadonlySet<string> };
+}
+
 export interface PnLPeriodeOrchestratieResultaat {
   resultaat: PurePnLResultaat;
   nietMeegenomen: readonly PnLNietMeegenomenGroep[];
+  moduleWerkelijk: PnLModuleWerkelijkBundel;
 }
 
 function som(waarden: readonly Decimal[]): Decimal {
@@ -332,5 +354,18 @@ export function berekenPnLPeriode(
     nietMeegenomen.push({ economischeModule, totaal: som(groep.map((b) => b.saldo)), aantalBoekingen: groep.length });
   }
 
-  return { resultaat, nietMeegenomen };
+  const moduleWerkelijk: PnLModuleWerkelijkBundel = {
+    huur: { werkelijk: huur.werkelijk, dekkingBevestigd: heeftMapping("HUUR") },
+    beheer: { werkelijk: beheer.werkelijk, dekkingBevestigd: heeftMapping("BEHEER") },
+    management: { werkelijk: management.werkelijk, dekkingBevestigd: heeftMapping("MANAGEMENT") },
+    onderhoud: { werkelijk: onderhoud.werkelijk, dekkingBevestigd: heeftMapping("ONDERHOUD") },
+    verzekeringen: { werkelijk: verzekering.werkelijk, dekkingBevestigd: heeftMapping("VERZEKERINGEN") },
+    gemeentelijkeLasten: { werkelijk: gemLasten.werkelijk, dekkingBevestigd: heeftMapping("GEMEENTELIJKE_LASTEN") },
+    algemeneKosten: { werkelijk: algemeneKosten.werkelijk, dekkingBevestigd: heeftMapping("ALGEMENE_KOSTEN"), gemapteCategorieen: gemapt("ALGEMENE_KOSTEN") },
+    leegstand: { werkelijk: leegstand.werkelijk, dekkingBevestigd: heeftMapping("LEEGSTAND"), gemapteCategorieen: gemapt("LEEGSTAND") },
+    nietVerrekenbareBtw: { werkelijk: nietVerrekenbareBtw.werkelijk, dekkingBevestigd: heeftMapping("NIET_VERREKENBARE_BTW") },
+    rente: { werkelijk: rente.werkelijk, dekkingBevestigd: heeftMapping("RENTE"), gemapteCategorieen: gemapt("RENTE") },
+  };
+
+  return { resultaat, nietMeegenomen, moduleWerkelijk };
 }
