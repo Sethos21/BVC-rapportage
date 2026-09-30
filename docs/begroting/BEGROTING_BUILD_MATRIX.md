@@ -1,12 +1,12 @@
 # BEGROTING_BUILD_MATRIX
 
 Bijgewerkt: 30 september 2026  
-Geaccepteerde code-HEAD: `007e89f`  
-Tranche 13: GEACCEPTEERD. Bestaande begrotingsmodules geassembleerd in `/begroting`; contractcorrecties na review hieronder vastgelegd.
+Geaccepteerde code-HEAD: `e150d93`  
+Post-Tranche-13 delta: GEACCEPTEERD. Generieke read-only terugblik en toekomstige contractuele huurkortingen gesloten.
 
 | Module | Begroting | Werkelijk | Estimated | P&L-integratie | Productie/UI | Resterend gat |
 |---|---|---|---|---|---|---|
-| Huur | GEREED | GEREED | GEREED | GEREED | hoofd-P&L + detail-UX aangesloten; echte Contracten/RentRoll-snapshot | toekomstige kortingswijzigingen ingestie/resolutie |
+| Huur | GEREED | GEREED | GEREED | GEREED | hoofd-P&L + detail-UX; Contracten/RentRoll + optionele contract_prijsregels | geen kernlogica-gat; echt contract_prijsregels-bestand vereist voor productiegebruik toekomstige kortingen |
 | Beheersvergoeding | GEREED | GEREED | GEREED | GEREED | hoofd-P&L + detail-UX; contract-afgeleide netto huurbasis | geen kernlogica-gat |
 | Managementvergoeding | GEREED | BRONGAT 070 | GEREED, onbekend zonder mapping | GEREED | invoer-UI aangesloten | bestaande Module-3-systematiek; géén percentage-over-huurmechanisme; Actual-mapping 070 blijft BRONGAT |
 | Onderhoud totaal | GEREED | GEREED totaal | GEREED totaal | GEREED | Gepland + Correctief/detail-UI aangesloten | Actual blijft uitsluitend totaalniveau |
@@ -35,6 +35,7 @@ Tranche 13: GEACCEPTEERD. Bestaande begrotingsmodules geassembleerd in `/begroti
 - Tranche 11: `efb6074` — eerste geïntegreerde `/begroting`-werkomgeving; vergelijkende P&L, Werkelijk/Estimated-koppeling, vijf invoermodules, controle/vaststellen/terugkijken. Geaccepteerd als integratieketen, niet als volledig afgeronde module.
 - Tranche 12: `7f09561` — bewezen Contracten/RentRoll-adapter, frozen Module1Snapshot, echte Voorstel/Jouw-begroting-scheiding voor Huur en Huur/Beheer-detailworkflow.
 - Tranche 13: `007e89f` — assemblage Gepland onderhoud, Verzekeringen, Gemeentelijke lasten/WOZ, Algemene kosten en Leegstand; databasepad-unificatie.
+- Post-Tranche-13 delta: `e150d93` — generieke read-only detailterugblik + deterministische toekomstige contractuele huurkortingen.
 
 ## Besluit §8.10 — 29-09-2026
 
@@ -82,5 +83,5 @@ De eerdere tekst over een variabele Managementvergoeding was een terminologiever
 ## Architectuur- en lifecyclebesluit na Tranche 13
 
 - Per administratie één SQLite-bestand voor begrotingsversies/moduledata en P&L-bronmapping. Opnieuw splitsen vereist `ARCHITECTUURPUNT`; bij bestaande historische data tevens een expliciet migratieplan.
-- Vastgestelde begrotingen zijn immutable, maar alle detailonderbouwingen moeten via GET leesbaar blijven. De generieke read-only doortrekking naar de overige detailmodules staat nog OPEN als kleine lifecycle-restdelta.
-- Toekomstige kortingswijzigingen uit `contract_prijsregels.xlsx` blijven OPEN; geen stille kandidaatkeuze.
+- Vastgestelde begrotingen zijn immutable; sinds `e150d93` blijven alle aangesloten detailonderbouwingen generiek via GET leesbaar en zijn schrijfacties geblokkeerd. GESLOTEN.
+- Toekomstige kortingswijzigingen uit `contract_prijsregels.xlsx` zijn sinds `e150d93` aangesloten met deterministische resolutie. Conflict per contract/datum = lokaal `BRONGAT`; geen stille kandidaatkeuze. GESLOTEN als softwaredelta.
