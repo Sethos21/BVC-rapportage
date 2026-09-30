@@ -50,6 +50,13 @@ export const ContractBronSchema = z.object({
   Verhoging_percentage: zDecimalOptional,
   Verhoging_methode: zCodeOptional,
   Omschrijving_indextabel: zCodeOptional,
+  /**
+   * Indexatie-herhalingsinterval in maanden (Tranche 12, Module 1) — bewezen
+   * via kruisvalidatie tegen historische `contract_verhogingen`-regels
+   * (contracten 028/048: exact 12 maanden na de laatst verwerkte indexatie).
+   * Zie `@bvc/reporting`'s `begroteHuuropbrengsten.ts`.
+   */
+  Verhoging_opnieuw_na: zIntOptional,
 });
 
 export type ContractBron = z.infer<typeof ContractBronSchema>;
@@ -76,6 +83,7 @@ export interface GestaagdContract {
   verhogingPercentage: Decimal | null;
   verhogingMethode: string | null;
   omschrijvingIndextabel: string | null;
+  verhogingOpnieuwNa: number | null;
   raw: ContractBron;
 }
 
@@ -102,6 +110,7 @@ function naarGestaagdContract(bron: ContractBron): GestaagdContract {
     verhogingPercentage: bron.Verhoging_percentage,
     verhogingMethode: bron.Verhoging_methode,
     omschrijvingIndextabel: bron.Omschrijving_indextabel,
+    verhogingOpnieuwNa: bron.Verhoging_opnieuw_na,
     raw: bron,
   };
 }

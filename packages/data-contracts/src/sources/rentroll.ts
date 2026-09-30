@@ -25,6 +25,14 @@ export const RentrollregelBronSchema = z.object({
   Gehuurd_oppervlak: zDecimalOptional,
   Contract_expiratiedatum: zDateOptional,
   Contract_opzegdatum: zDateOptional,
+  /**
+   * Belast/onbelast-indicator (Tranche 12, Module 1) — bewezen via het
+   * Module-1-brononderzoek (070_Rooise_Zoom): uitsluitend `"Y"`→BELAST en
+   * `"N"`→ONBELAST zijn bewezen betekenissen; elke andere/inconsistente
+   * waarde over de regels van hetzelfde contract is `ONBEKEND`, nooit
+   * gegokt (zie `@bvc/reporting`'s `begroteHuuropbrengsten.ts`).
+   */
+  BTW_Y_N: zCodeOptional,
 });
 
 export type RentrollregelBron = z.infer<typeof RentrollregelBronSchema>;
@@ -42,6 +50,7 @@ export interface GestaagdeRentrollregel {
   gehuurdOppervlak: Decimal | null;
   contractExpiratiedatum: Date | null;
   contractOpzegdatum: Date | null;
+  btwYn: string | null;
   raw: RentrollregelBron;
 }
 
@@ -59,6 +68,7 @@ function naarGestaagdeRentrollregel(bron: RentrollregelBron): GestaagdeRentrollr
     gehuurdOppervlak: bron.Gehuurd_oppervlak,
     contractExpiratiedatum: bron.Contract_expiratiedatum,
     contractOpzegdatum: bron.Contract_opzegdatum,
+    btwYn: bron.BTW_Y_N,
     raw: bron,
   };
 }
