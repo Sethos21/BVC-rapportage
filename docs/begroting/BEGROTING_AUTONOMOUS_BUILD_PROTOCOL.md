@@ -1,7 +1,7 @@
 # BEGROTING_AUTONOMOUS_BUILD_PROTOCOL
 
 Status: leidend bouwprotocol  
-Bijgewerkt: 29 september 2026  
+Bijgewerkt: 30 september 2026  
 Behoort bij `BEGROTING_MASTER_CONTRACT.md`.
 
 ## 1. Bron
@@ -74,6 +74,10 @@ Start geen verdere Tranche-9-delta. De volgende opdracht is Tranche 10 conform d
 
 Eind-HEAD `50121a7`. Rente leningen + Opbrengst rente zijn aangesloten op Budget/Werkelijk/Estimated/P&L; migratie 40 bewaart Estimated resterende verwachting. Geen renteberekeningsengine. 070 Actual blijft BRONGAT. Toekomstige UI voor renteopbrengst gebruikt positieve gebruikersinvoer en vertaalt intern naar de ruwe boekhoudconventie.
 
-## 10. Eerstvolgende build
+## 10. Tranche 11 — geaccepteerd
 
-Tranche 11: bouw de eerste geïntegreerde, daadwerkelijk invulbare exploitatiebegrotingsworkflow en begrotings-P&L volgens de vastgestelde UX. Dit is geen managementrapportage. Er bestaat nog geen echte financiële begroting die als bestaande output mag worden verondersteld. Hergebruik de bestaande Budget/Werkelijk/Estimated/P&L-motor; vergelijkingsdata ondersteunen het opstellen van `Jouw begroting` voor het nieuwe jaar. Geen fictieve begrotingswaarden. OPEN UX-punten niet zelf ontwerpen; gebruik de STOP-codes. Canon/Erfpacht en Verkoopresultaat blijven buiten scope.
+Eind-HEAD `efb6074`. Geaccepteerd als eerste geïntegreerde begrotingswerkomgeving en technisch gesloten integratieketen; niet als volledig afgeronde begrotingsmodule. `/begroting` draait voorlopig op de bestaande Worker serve-server. De HTTP-acceptatietest bewijst de productiecodepaden met XLSX-fixture + echte SQLite/mappingketen, maar is geen bewijs van een werkelijk financieel bedrag uit BVC-productiedata.
+
+## 11. Eerstvolgende build — Tranche 12
+
+Prioriteit: bouw de echte Contracten/RentRoll → `Module1Snapshot`-bronadapter en sluit daarna Huur + Beheersvergoeding via de vastgestelde detail-UX aan op de bestaande `/begroting`-workflow. Gebruik bronfeiten voor de contractbasis en houd begrotingsaannames apart. Hergebruik bestaande Budget/Werkelijk/Estimated/P&L-logica; geen financiële formule opnieuw ontwerpen. Managementvergoeding mag de contract-afgeleide huurbasis hergebruiken conform bestaand contract. Geen refreshed-contract-state forecast, brede UI-redesign of onafhankelijke module-uitbreiding. Bron onvoldoende bewezen → `BRONGAT`; functionele keuze nodig → `BUSINESSBESLISSING`.
