@@ -14,14 +14,14 @@ Post-Tranche-13 delta: GEACCEPTEERD. Generieke read-only terugblik en toekomstig
 | Gemeentelijke lasten / WOZ | GEREED | GEREED | GEREED | GEREED | detail-UI aangesloten | geen domeingat |
 | Algemene kosten | GEREED | 070: Overige/Makelaar/Bank GEREED; Accountant/Juridisch BRONGAT | GEREED | GEREED | detail-UI aangesloten | mappings Accountant/Juridisch |
 | Leegstandskosten totaal | GEREED | Servicekosten 070 bewezen; Nuts/Overige BRONGAT | GEREED | GEREED één post | detail-UI aangesloten | mappings Nuts/Overige/overige admins |
-| └ Nuts | GEREED | BRONGAT | GEREED | onderbouwing | UI niet gebouwd | bewezen mapping |
-| └ Servicekosten | GEREED | GEREED voor 070 GL4350+OGB4319 via §8.10 | GEREED | GEREED | UI niet gebouwd | overige mappings |
-| └ Overige | GEREED | BRONGAT | GEREED | onderbouwing | UI niet gebouwd | bewezen mapping |
-| Niet verrekenbare BTW | GEREED | GEREED 070 | GEREED | GEREED | UI niet gebouwd | geen kernlogica-gat |
+| └ Nuts | GEREED | BRONGAT | GEREED | onderbouwing | via aangesloten Leegstand-detailmodule | bewezen mapping |
+| └ Servicekosten | GEREED | GEREED voor 070 GL4350+OGB4319 via §8.10 | GEREED | GEREED | via aangesloten Leegstand-detailmodule | overige mappings |
+| └ Overige | GEREED | BRONGAT | GEREED | onderbouwing | via aangesloten Leegstand-detailmodule | bewezen mapping |
+| Niet verrekenbare BTW | GEREED | GEREED 070 | GEREED | GEREED | invoer-UI aangesloten | geen kernlogica-gat |
 | Canon erfpacht | HOLD | HOLD | HOLD | HOLD | HOLD | uit scope |
-| Opbrengst rente | GEREED | BRONGAT 070 / bewezen 013 | GEREED | GEREED onder EBITDA | UI niet gebouwd | mapping 070; positieve UI-invoer later |
-| Rente leningen | GEREED | BRONGAT 070 / bewezen 023 | GEREED | GEREED onder EBITDA | UI niet gebouwd | mapping 070 |
-| Geplande verkoop | HOLD | HOLD | n.v.t./afhankelijk | HOLD | HOLD | UX/integratiebesluit |
+| Opbrengst rente | GEREED | BRONGAT 070 / bewezen 013 | GEREED | GEREED onder EBITDA | invoer-UI aangesloten | mapping 070 |
+| Rente leningen | GEREED | BRONGAT 070 / bewezen 023 | GEREED | GEREED onder EBITDA | invoer-UI aangesloten | mapping 070 |
+| Geplande verkoop | HOLD | HOLD | n.v.t./afhankelijk | HOLD | HOLD | uit vaststel-gate verwijderen; geen UI bouwen |
 
 ## Geaccepteerde tranchehistorie
 
@@ -51,14 +51,19 @@ Eén resterend bedrag; leeg = onbekend; expliciet €0 = geldig. Geen automatisc
 
 Vastgestelde UX-set: `docs/begroting/ux/`, commit `5379798`. De Productie/UI-kolom hierboven betekent dat de financiële motor grotendeels gereed is, maar de daadwerkelijke begrotingswerkflow nog moet worden aangesloten. Tranche 11 bouwt die workflow volgens de vastgestelde UX; niet een managementrapportage. Er is nog geen echte financiële begroting opgesteld, dus historische/nieuwe begrotingswaarden mogen niet worden verzonnen. De vergelijkende P&L ondersteunt het maken van de nieuwe begroting.
 
-## Open beslissingen
-- startflow.
-- aanvullende huur-UX.
-- autosave/locking.
-- algemene export/reporting.
-- versiebeheer-UX na vaststelling.
-- nog niet ontworpen module-UX.
-- toekomstige mappings uitsluitend na bronbewijs.
+## Actuele productstatus / resterende beslissingen
+- Startflow: functioneel gebouwd en voldoende voor eerste productieproef; geen redesign nu.
+- Aanvullende huur-UX: deels gebouwd; geen blokkade voor eerste productieproef. Alleen uitbreiden bij concreet aangetoond gebruiksgat.
+- Autosave/locking: functioneel besloten in Work (autosave concept; één bewerker; overname na 15 minuten inactiviteit), nog niet volledig geïmplementeerd; na eerste single-user productieproef prioriteren.
+- Algemene export/reporting: werkelijk open.
+- Versiebeheer-UX na vaststelling: werkelijk open; technische lineage-basis bestaat al.
+- Geplande verkoop: HOLD en daarom niet toepasselijk voor beoordeling/vaststellen. Historische orphaned gate is de eerstvolgende minimale codedelta.
+- Canon/Erfpacht: HOLD.
+- Toekomstige mappings: uitsluitend na bronbewijs.
+
+## Eerstvolgende stap
+
+Geen nieuwe financiële tranche. Verwijder uitsluitend de Geplande-verkoop-HOLD uit de vaststel-gate, test dit gericht en voer regressie uit. Daarna eerst een echte single-user BVC-begroting als productacceptatie: starten → invullen → controleren → vaststellen → terugkijken.
 
 
 ## Tranche 12 — eerstvolgende bouwfase
