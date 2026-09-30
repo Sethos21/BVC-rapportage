@@ -63,6 +63,7 @@ Geaccepteerde tranche-HEADs:
 - **Tranche 12: `7f09561` — Contracten/RentRoll → frozen Module1Snapshot + Huur/Beheer detailworkflow geaccepteerd 30-09-2026.**
 - **Tranche 13: `007e89f` — assemblage bestaande begrotingsmodule geaccepteerd 30-09-2026.**
 - **Post-Tranche-13 delta: `e150d93` — generieke read-only terugblik + toekomstige contractuele huurkortingen geaccepteerd 30-09-2026.**
+- **Product-readiness fix: `9a3381b` — Geplande Verkoop (HOLD) verwijderd uit de vaststel-gate; migratie 41 versoepelt uitsluitend de corresponderende frozen schema-check. Geaccepteerd 30-09-2026.**
 
 ### Huur
 Budget/Werkelijk/Estimated/P&L gereed. Tranche 12 koppelt bewezen Contracten + RentRoll aan `BgContractFeiten[]` en een frozen `Module1Snapshot`; Huur-detail-UX is aangesloten. Voorstel gebruikt contractbasis + algemene indexatie zonder contractoverride; `Jouw begroting` gebruikt de beoordeelde overrides. Estimated gebruikt frozen Budget-contractsnapshot + Actual; refreshed-contract-state forecast is toekomstig werk. Toekomstige kortingswijzigingen uit `contract_prijsregels.xlsx` zijn in `e150d93` aangesloten via een deterministische kandidaat-resolutie op administratie, contract en exacte ingangsdatum. Unanieme VS13-bedragen per datum worden toegepast; conflicterende bedragen leveren lokaal `BRONGAT` zonder giswerk. Ontbrekend optioneel bronbestand behoudt het bestaande fallbackgedrag.
@@ -211,3 +212,10 @@ De huidige startflow is voor de eerste productieproef functioneel voldoende: adm
 Code-inspectie bevestigt tevens dat Niet verrekenbare BTW, Rente leningen en Opbrengst rente reeds bereikbare invoer-UI hebben. Leegstand is als één detailmodule aangesloten met Nuts/Servicekosten/Overige als onderbouwing. Deze onderdelen mogen niet opnieuw als ontbrekende UI worden geclassificeerd.
 
 Na herstel van de Geplande-verkoop-gate volgt eerst een echte single-user BVC-begroting als productacceptatie. Autosave/locking, algemene export/reporting en versiebeheer-UX worden niet vóór die proef gebouwd tenzij de proef een concrete blokkade aantoont.
+
+
+## 17. Product-readiness fix geaccepteerd — `9a3381b`
+
+Commit `9a3381b9731f754f26e0413d33a120a5ee5204b0` is na review geaccepteerd. `stelBegrotingVast` vereist geen beoordeling/KRITIEK-vrije status meer voor Geplande Verkoop zolang deze module HOLD is. Het frozen Geplande-Verkoop-resultaat blijft wel worden geschreven. Migratie 41 staat daarom in uitsluitend deze frozen-resultaattabel `beoordeeld=0` en `review_status='NOT_REVIEWED'` toe; overige geldigheidschecks en immutability van VASTGESTELD blijven intact. Geen Geplande-verkoop-UI is toegevoegd en geen andere financiële modulelogica is gewijzigd.
+
+Hiermee is de structurele blokkade uit de product-readiness audit gesloten. De volgende fase is geen nieuwe bouwtranche maar de eerste echte single-user BVC-productieacceptatie van de volledige begrotingsflow.
