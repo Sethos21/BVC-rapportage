@@ -82,8 +82,20 @@ Eind-HEAD `efb6074`. Geaccepteerd als eerste geïntegreerde begrotingswerkomgevi
 
 Eind-HEAD `7f09561`. Contracten + RentRoll zijn gekoppeld aan `BgContractFeiten[]` en frozen `Module1Snapshot`; Huur en Beheersvergoeding hebben detail-UX binnen de bestaande `/begroting`-workflow. De 070-productieproef is read-only uitgevoerd en reproduceert eerder bewezen contracttotalen. Toekomstige kortingswijzigingen uit `contract_prijsregels.xlsx` zijn nog niet ingelezen.
 
-Definitief: variabele Managementvergoeding gebruikt de netto begrote jaarhuur uit dezelfde contract-afgeleide Module-1-huurbegroting als grondslag. Dit verandert niets aan het Actual-BRONGAT voor Management 070.
+Correctie na Tranche 13: de netto begrote jaarhuur uit Module 1 is de grondslag voor het **variabele deel van de Beheersvergoeding**. Dit mechanisme hoort niet bij Managementvergoeding. Managementvergoeding behoudt de bestaande Module-3-systematiek; voeg daar geen percentage-over-huurmechanisme aan toe. Actual Management 070 blijft BRONGAT.
 
 ## 12. Eerstvolgende build — Tranche 13
 
 Bouw eerst de reeds bronmatig bewezen ingestie/resolutie van toekomstige kortingswijzigingen naar `BgToekomstigeKortingswijziging`. Sluit daarna Gepland onderhoud via de vastgestelde UX aan op de bestaande begrotingsworkflow. Hergebruik bestaande onderhoudslogica; Actual onderhoud blijft totaalniveau en wordt nooit kunstmatig gesplitst. Geen verbreding naar Verzekeringen, Gemeentelijke lasten/WOZ, Algemene kosten of Leegstand in deze tranche.
+
+
+## 13. Tranche 13 — geaccepteerd
+
+Eind-HEAD `007e89f`. De vijf bestaande modules Gepland onderhoud, Verzekeringen, Gemeentelijke lasten/WOZ, Algemene kosten en Leegstand zijn door assemblage aangesloten op `/begroting`; geen financiële motor is opnieuw gebouwd.
+
+Bouwregels vanaf deze acceptatie:
+- Beheersvergoeding: bestaand vast + variabel; variabel = percentage × netto begrote jaarhuur Module 1.
+- Managementvergoeding: bestaande Module-3-systematiek; geen percentage-over-huurmechanisme.
+- Per administratie één SQLite-bestand voor begrotingsversies/moduledata én P&L-bronmapping. Opnieuw splitsen vereist `ARCHITECTUURPUNT`; bij bestaande historische data tevens expliciete migratie.
+- Vastgesteld = immutable, maar alle detailonderbouwingen blijven via GET leesbaar. POST/schrijven blijft geblokkeerd.
+- De huidige GET-read-only-dekking is nog niet generiek voor alle detailmodules; dat is een kleine lifecycle-restdelta.
