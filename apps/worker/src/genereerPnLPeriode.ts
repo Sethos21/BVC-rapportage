@@ -125,7 +125,7 @@ export function haalPnLPeriodeResultaatOp(root: string, administratieId: string,
 
 export function genereerPnLPeriode(root: string, administratieId: string, opties: GenereerPnLPeriodeOpties): GenereerPnLPeriodeResultaat {
   const config = leesAdministratieConfig(root, administratieId);
-  const { resultaat, nietMeegenomen } = haalPnLPeriodeResultaatOp(root, administratieId, opties);
+  const { resultaat, nietMeegenomen, moduleWerkelijk } = haalPnLPeriodeResultaatOp(root, administratieId, opties);
 
   const html = renderPnLPeriodeHtml({
     administratieNaam: config.weergavenaam,
@@ -144,5 +144,5 @@ export function genereerPnLPeriode(root: string, administratieId: string, opties
   const pad = join(rapportenDir, `pnl-periode-${opties.boekjaar}-${opties.boekperiodeTotEnMet}-${tijdstempel}.html`);
   writeFileSync(pad, html, "utf-8");
 
-  return { resultaat, nietMeegenomen, html, pad };
+  return { resultaat, nietMeegenomen, moduleWerkelijk, html, pad };
 }

@@ -135,6 +135,17 @@ export function pnlBronmappingDatabasePad(root: string, administratieId: string)
   return join(administratieDir(root, administratieId), "begroting", "pnl-bronmapping.sqlite");
 }
 
+/**
+ * TRANCHE 11 — de `@bvc/begroting-data`-database (begrotingsversies + alle module-concept-/
+ * frozen-/Estimated-tabellen, `openOrCreateDatabase` draait haar migraties automatisch) leeft
+ * in dezelfde per-administratie `begroting/`-map als de P&L-bronmapping-database hierboven,
+ * als eigen bestand — bewust GEEN gedeeld/portefeuillebreed bestand (elke begroting hoort bij
+ * precies één administratie, CLAUDE.md §6 "geen hardcoded 070").
+ */
+export function begrotingsversiesDatabasePad(root: string, administratieId: string): string {
+  return join(administratieDir(root, administratieId), "begroting", "begrotingsversies.sqlite");
+}
+
 export function administratieRapportenDir(root: string, administratieId: string): string {
   return join(administratieDir(root, administratieId), "rapporten");
 }
