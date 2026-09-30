@@ -98,4 +98,9 @@ Bouwregels vanaf deze acceptatie:
 - Managementvergoeding: bestaande Module-3-systematiek; geen percentage-over-huurmechanisme.
 - Per administratie één SQLite-bestand voor begrotingsversies/moduledata én P&L-bronmapping. Opnieuw splitsen vereist `ARCHITECTUURPUNT`; bij bestaande historische data tevens expliciete migratie.
 - Vastgesteld = immutable, maar alle detailonderbouwingen blijven via GET leesbaar. POST/schrijven blijft geblokkeerd.
-- De huidige GET-read-only-dekking is nog niet generiek voor alle detailmodules; dat is een kleine lifecycle-restdelta.
+- Sinds geaccepteerde delta `e150d93` is GET-read-only generiek voor alle aangesloten detailmodules; niet-GET blijft geblokkeerd.
+
+
+## 14. Post-Tranche-13 delta — geaccepteerd
+
+Eind-HEAD `e150d93`. Generieke read-only terugblik is gesloten: alle aangesloten detailmodules blijven na vaststellen via GET leesbaar met dezelfde renderers en schrijfacties blijven geblokkeerd. `contract_prijsregels.xlsx` is als optionele bron aangesloten; toekomstige VS13-kortingswijzigingen worden deterministisch per administratie + contract + exacte ingangsdatum opgelost. Alleen unanieme bedragen worden toegepast; conflict = lokaal `BRONGAT`. Geen Status-/nieuwste-regel-/fuzzy heuristiek. De resulterende korting loopt via Module 1 door naar netto huur en variabele Beheersvergoeding.
