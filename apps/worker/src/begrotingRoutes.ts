@@ -1,10 +1,19 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import Decimal from "decimal.js";
 import {
+  leesAlgemeneKostenCategorieState,
+  leesAlgemeneKostenRegels,
   leesBegrotingsversie,
   leesBegrotingsversiesVoorAdministratie,
   leesCorrectiefDagelijksOnderhoudBeoordeeld,
   leesCorrectiefDagelijksOnderhoudRegels,
+  leesGemeentelijkeLastenModule,
+  leesGemeentelijkeLastenRegels,
+  leesGemeentelijkeLastenVoorstelStatus,
+  leesGeplandOnderhoudActiviteiten,
+  leesGeplandOnderhoudBeoordeeld,
+  leesLeegstandCategorieState,
+  leesLeegstandRegels,
   leesModule1Aannames,
   leesModule1Overrides,
   leesModule1Snapshot,
@@ -13,13 +22,27 @@ import {
   leesNietVerrekenbareBtwEstimatedVerwachting,
   leesNietVerrekenbareBtwRegels,
   leesNietVerrekenbareBtwState,
+  leesPnLBronmappingRegels,
+  leesRelevanteGemeentelijkeLastenGrootboekenVoorAdministratie,
   leesRenteCategorieState,
   leesRenteEstimatedVerwachting,
   leesRenteRegels,
+  leesVerzekeringBeoordeeld,
+  leesVerzekeringRegels,
+  leesWozObjecten,
   maakBegrotingsversie,
+  neemWozVoorstelOver,
   openOrCreateDatabase,
+  schrijfAlgemeneKostenCategorieState,
+  schrijfAlgemeneKostenRegels,
   schrijfCorrectiefDagelijksOnderhoudBeoordeeld,
   schrijfCorrectiefDagelijksOnderhoudRegels,
+  schrijfGemeentelijkeLastenModule,
+  schrijfGemeentelijkeLastenRegels,
+  schrijfGeplandOnderhoudActiviteiten,
+  schrijfGeplandOnderhoudBeoordeeld,
+  schrijfLeegstandCategorieState,
+  schrijfLeegstandRegels,
   schrijfModule1Aannames,
   schrijfModule1Overrides,
   schrijfModule1Snapshot,
@@ -31,25 +54,41 @@ import {
   schrijfRenteCategorieState,
   schrijfRenteEstimatedVerwachting,
   schrijfRenteRegels,
+  schrijfVerzekeringBeoordeeld,
+  schrijfVerzekeringRegels,
+  schrijfWozObjecten,
+  schrijfWozSetBevestigd,
   stelBegrotingVast,
+  VoorstelOvernameGeweigerdError,
+  type AlgemeneKostenRegelInvoer,
   type Begrotingsversie,
+  type GemeentelijkeLastenRegelInvoer,
+  type GeplandOnderhoudActiviteitInvoer,
+  type LeegstandRegelInvoer,
+  type VerzekeringRegelInvoer,
+  type WozObjectInvoer,
 } from "@bvc/begroting-data";
 import {
+  ALGEMENE_KOSTEN_CATEGORIEEN,
   berekenBegroteBeheersvergoeding,
   berekenBegroteHuuropbrengsten,
   berekenPnLBoom,
+  LEEGSTAND_CATEGORIEEN,
   vergelijkPnLResultaten,
+  type BgAlgemeneKostenCategorie,
   type BgBeheerComplexConfig,
   type BgContractOverride,
+  type BgLeegstandCategorie,
   type BgManagementInvoer,
   type BgRenteCategorie,
 } from "@bvc/reporting";
 import { lijstAdministraties, leesAdministratieConfig } from "./administratie.js";
-import { begrotingsversiesDatabasePad } from "./paths.js";
+import { begrotingsversiesDatabasePad, pnlBronmappingDatabasePad } from "./paths.js";
 import { leesBegrotingsWerkomgeving } from "./begrotingWerkelijk.js";
 import { leesBgContractFeitenVoorAdministratie } from "./contractenRentrollAdapter.js";
 import { BOEKPERIODES } from "./serveUi.js";
 import {
+  renderAlgemeneKostenForm,
   renderBegrotingHoofdscherm,
   renderBegrotingKeuzeScherm,
   renderBeheerDetail,
@@ -57,11 +96,21 @@ import {
   renderControlePagina,
   renderCorrectiefForm,
   renderFoutPagina,
+  renderGemeentelijkeLastenForm,
+  renderGeplandOnderhoudForm,
   renderHuurDetail,
+  renderLeegstandForm,
   renderManagementForm,
   renderRenteForm,
+  renderVerzekeringenForm,
+  type AlgemeneKostenCategorieOpties,
   type BeheerDetailRegel,
+  type GemeentelijkeLastenRegelVeld,
+  type GeplandOnderhoudRegelVeld,
   type HuurDetailRegel,
+  type LeegstandCategorieOpties,
+  type VerzekeringRegelVeld,
+  type WozObjectVeld,
 } from "./begrotingUi.js";
 
 /**
@@ -363,6 +412,11 @@ async function handleModuleRoute(root: string, req: IncomingMessage, res: Server
     if (moduleKey === "btw") return await handleBtw(req, res, g, actieUrl, terugUrl);
     if (moduleKey === "rente-leningen") return await handleRente(req, res, g, actieUrl, terugUrl, "RENTEKOSTEN");
     if (moduleKey === "rente-opbrengst") return await handleRente(req, res, g, actieUrl, terugUrl, "RENTE_OPBRENGSTEN");
+    if (moduleKey === "leegstand") return await handleLeegstand(req, res, g, actieUrl, terugUrl);
+    if (moduleKey === "algemene-kosten") return await handleAlgemeneKosten(req, res, g, actieUrl, terugUrl);
+    if (moduleKey === "verzekeringen") return await handleVerzekeringen(req, res, g, actieUrl, terugUrl);
+    if (moduleKey === "gepland-onderhoud") return await handleGeplandOnderhoud(req, res, g, actieUrl, terugUrl);
+    if (moduleKey === "gemeentelijke-lasten") return await handleGemeentelijkeLasten(req, res, g, root, actieUrl, terugUrl);
     stuurHtml(res, 404, renderFoutPagina("Onbekend onderdeel", `Onbekend begrotingsonderdeel "${moduleKey}".`, terugUrl));
     return true;
   } finally {
@@ -809,5 +863,360 @@ async function handleRente(req: IncomingMessage, res: ServerResponse, g: Geopend
       }),
     );
   }
+  return true;
+}
+
+function som(waarden: readonly (Decimal | null)[]): Decimal {
+  return waarden.reduce((totaal: Decimal, w) => (w !== null ? totaal.plus(w) : totaal), new Decimal(0));
+}
+
+const LEEGSTAND_PREFIXEN: Record<BgLeegstandCategorie, string> = { NUTS_LEEGSTAND: "nuts", SERVICEKOSTEN_LEEGSTAND: "service", OVERIGE_LEEGSTANDSKOSTEN: "overige" };
+const LEEGSTAND_TITELS: Record<BgLeegstandCategorie, string> = { NUTS_LEEGSTAND: "Nuts leegstand", SERVICEKOSTEN_LEEGSTAND: "Servicekosten leegstand", OVERIGE_LEEGSTANDSKOSTEN: "Overige leegstandskosten" };
+const MAX_REGELS_LEEGSTAND = 6;
+
+/** Leegstandskosten (OB-031, Tranche 13): drie categorieën, elk het bestaande complete-list-save-patroon. */
+async function handleLeegstand(req: IncomingMessage, res: ServerResponse, g: Geopend, actieUrl: string, terugUrl: string): Promise<boolean> {
+  if (req.method === "GET") {
+    const state = leesLeegstandCategorieState(g.db, g.versie.id);
+    const regels = leesLeegstandRegels(g.db, g.versie.id);
+    const categorieen: LeegstandCategorieOpties[] = LEEGSTAND_CATEGORIEEN.map((categorie) => ({
+      categorie,
+      titel: LEEGSTAND_TITELS[categorie],
+      beoordeeld: state[categorie].beoordeeld,
+      regels: regels.filter((r) => r.categorie === categorie).map((r) => ({ id: r.id, complexnummer: r.complexnummer ?? "", omschrijving: r.omschrijving, q1: r.q1?.toString() ?? "", q2: r.q2?.toString() ?? "", q3: r.q3?.toString() ?? "", q4: r.q4?.toString() ?? "" })),
+    }));
+    const totaal = som(regels.flatMap((r) => [r.q1, r.q2, r.q3, r.q4]));
+    stuurHtml(res, 200, renderLeegstandForm({ actieUrl, terugUrl, categorieen, portefeuilleTotaal: fmtBedragKort(totaal) }));
+    return true;
+  }
+
+  const velden = Object.fromEntries(new URLSearchParams(await leesBody(req)));
+  try {
+    const alleRegels: LeegstandRegelInvoer[] = [];
+    const nieuweState: Record<string, { beoordeeld: boolean; laatstBekendServicekostenvoorschotJaar: Decimal | null; laatstBekendServicekostenvoorschotJaarHerkomst: null; verwachteLeegstandsperiodeMaanden: null }> = {};
+    const bestaandeState = leesLeegstandCategorieState(g.db, g.versie.id);
+    for (const categorie of LEEGSTAND_CATEGORIEEN) {
+      const prefix = LEEGSTAND_PREFIXEN[categorie];
+      for (let i = 0; i < MAX_REGELS_LEEGSTAND; i++) {
+        const omschrijving = tekst(velden[`${prefix}_omschrijving_${i}`]);
+        const heeftBedrag = ["q1", "q2", "q3", "q4"].some((q) => tekst(velden[`${prefix}_${q}_${i}`]).length > 0);
+        if (omschrijving.length === 0 && !heeftBedrag) continue;
+        if (omschrijving.length === 0) throw new Error(`${LEEGSTAND_TITELS[categorie]} regel ${i + 1}: omschrijving is verplicht.`);
+        alleRegels.push({
+          id: tekst(velden[`${prefix}_id_${i}`]).length > 0 ? Number(tekst(velden[`${prefix}_id_${i}`])) : null,
+          categorie,
+          complexnummer: tekstOfNull(velden[`${prefix}_complex_${i}`]),
+          complexomschrijving: null,
+          omschrijving,
+          q1: parseGeld(tekst(velden[`${prefix}_q1_${i}`])),
+          q2: parseGeld(tekst(velden[`${prefix}_q2_${i}`])),
+          q3: parseGeld(tekst(velden[`${prefix}_q3_${i}`])),
+          q4: parseGeld(tekst(velden[`${prefix}_q4_${i}`])),
+        });
+      }
+      nieuweState[categorie] = { beoordeeld: tekst(velden[`${prefix}_beoordeeld`]) === "1", laatstBekendServicekostenvoorschotJaar: bestaandeState[categorie].laatstBekendServicekostenvoorschotJaar, laatstBekendServicekostenvoorschotJaarHerkomst: null, verwachteLeegstandsperiodeMaanden: null };
+    }
+    schrijfLeegstandRegels(g.db, g.versie.id, alleRegels);
+    schrijfLeegstandCategorieState(g.db, g.versie.id, nieuweState as never);
+    stuurRedirect(res, terugUrl);
+  } catch (error) {
+    stuurHtml(res, 400, renderFoutPagina("Leegstandskosten konden niet worden opgeslagen", error instanceof Error ? error.message : String(error), terugUrl));
+  }
+  return true;
+}
+
+const ALGEMENE_KOSTEN_PREFIXEN: Record<BgAlgemeneKostenCategorie, string> = { ACCOUNTANT: "accountant", JURIDISCHE_KOSTEN: "juridisch", MAKELAARSKOSTEN: "makelaar", ALGEMENE_KOSTEN: "algemeen", BANKKOSTEN: "bank" };
+const ALGEMENE_KOSTEN_TITELS: Record<BgAlgemeneKostenCategorie, string> = { ACCOUNTANT: "Accountantkosten", JURIDISCHE_KOSTEN: "Juridische kosten", MAKELAARSKOSTEN: "Makelaar- en taxatiekosten", ALGEMENE_KOSTEN: "Overige algemene kosten", BANKKOSTEN: "Bankkosten" };
+const MAX_REGELS_AK = 5;
+
+/** Algemene kosten (OB-035/036, Tranche 13): vijf categorieën met hetzelfde regelmodel; Accountant/Bank tonen het bestaande informatieve vorig-jaar-voorstel. */
+async function handleAlgemeneKosten(req: IncomingMessage, res: ServerResponse, g: Geopend, actieUrl: string, terugUrl: string): Promise<boolean> {
+  if (req.method === "GET") {
+    const state = leesAlgemeneKostenCategorieState(g.db, g.versie.id);
+    const regels = leesAlgemeneKostenRegels(g.db, g.versie.id);
+    const categorieen: AlgemeneKostenCategorieOpties[] = ALGEMENE_KOSTEN_CATEGORIEEN.map((categorie) => ({
+      categorie,
+      titel: ALGEMENE_KOSTEN_TITELS[categorie],
+      beoordeeld: state[categorie].beoordeeld,
+      vorigJaarBedrag: state[categorie].vorigJaarBedrag?.toString() ?? "",
+      verwachteVerhogingPercentage: state[categorie].verwachteVerhogingPercentage?.toString() ?? "",
+      toonVoorstelVelden: categorie === "ACCOUNTANT" || categorie === "BANKKOSTEN",
+      regels: regels.filter((r) => r.categorie === categorie).map((r) => ({ id: r.id, omschrijving: r.omschrijving, complexnummer: r.complexnummer ?? "", ogbKostensoortCode: r.ogbKostensoortCode ?? "", jaarbedrag: r.jaarbedrag?.toString() ?? "" })),
+    }));
+    const totaal = som(regels.map((r) => r.jaarbedrag));
+    stuurHtml(res, 200, renderAlgemeneKostenForm({ actieUrl, terugUrl, categorieen, portefeuilleTotaal: fmtBedragKort(totaal) }));
+    return true;
+  }
+
+  const velden = Object.fromEntries(new URLSearchParams(await leesBody(req)));
+  try {
+    const alleRegels: AlgemeneKostenRegelInvoer[] = [];
+    const nieuweState: Record<string, { beoordeeld: boolean; vorigJaarBedrag: Decimal | null; verwachteVerhogingPercentage: Decimal | null }> = {};
+    for (const categorie of ALGEMENE_KOSTEN_CATEGORIEEN) {
+      const prefix = ALGEMENE_KOSTEN_PREFIXEN[categorie];
+      for (let i = 0; i < MAX_REGELS_AK; i++) {
+        const omschrijving = tekst(velden[`${prefix}_omschrijving_${i}`]);
+        const jaarbedragStr = tekst(velden[`${prefix}_jaarbedrag_${i}`]);
+        if (omschrijving.length === 0 && jaarbedragStr.length === 0) continue;
+        if (omschrijving.length === 0) throw new Error(`${ALGEMENE_KOSTEN_TITELS[categorie]} regel ${i + 1}: omschrijving is verplicht.`);
+        alleRegels.push({
+          id: tekst(velden[`${prefix}_id_${i}`]).length > 0 ? Number(tekst(velden[`${prefix}_id_${i}`])) : null,
+          categorie,
+          ogbKostensoortCode: tekstOfNull(velden[`${prefix}_ogb_${i}`]),
+          omschrijving,
+          complexnummer: tekstOfNull(velden[`${prefix}_complex_${i}`]),
+          jaarbedrag: parseGeld(jaarbedragStr),
+        });
+      }
+      nieuweState[categorie] = { beoordeeld: tekst(velden[`${prefix}_beoordeeld`]) === "1", vorigJaarBedrag: parseGeld(tekst(velden[`${prefix}_vorigJaar`])), verwachteVerhogingPercentage: parseGeld(tekst(velden[`${prefix}_verhoging`])) };
+    }
+    schrijfAlgemeneKostenRegels(g.db, g.versie.id, alleRegels);
+    schrijfAlgemeneKostenCategorieState(g.db, g.versie.id, nieuweState as never);
+    stuurRedirect(res, terugUrl);
+  } catch (error) {
+    stuurHtml(res, 400, renderFoutPagina("Algemene kosten konden niet worden opgeslagen", error instanceof Error ? error.message : String(error), terugUrl));
+  }
+  return true;
+}
+
+const MAX_REGELS_VERZEKERING = 8;
+
+/** Verzekeringen (UX_06, OB-032, Tranche 13): bestaand polisregelmodel, module-brede beoordeeld-vlag. Actual per polis blijft BRONGAT — niet gemaskeerd. */
+async function handleVerzekeringen(req: IncomingMessage, res: ServerResponse, g: Geopend, actieUrl: string, terugUrl: string): Promise<boolean> {
+  if (req.method === "GET") {
+    const regels = leesVerzekeringRegels(g.db, g.versie.id);
+    const beoordeeld = leesVerzekeringBeoordeeld(g.db, g.versie.id);
+    const veldRegels: VerzekeringRegelVeld[] = regels.map((r) => ({
+      id: r.id,
+      complexnummer: r.complexnummer ?? "",
+      verzekeraar: r.verzekeraar ?? "",
+      grootboekrekening: r.grootboekrekening,
+      ogbKostensoort: r.ogbKostensoort ?? "",
+      ingangsdatum: r.ingangsdatum ? fmtDatumVeld(r.ingangsdatum) : "",
+      looptijdMaanden: r.looptijdMaanden?.toString() ?? "",
+      bedrag: r.bedrag?.toString() ?? "",
+      indexPercentage: r.indexPercentage?.toString() ?? "",
+      handmatigBegrootOverride: r.handmatigBegrootOverride?.toString() ?? "",
+    }));
+    const totaal = som(regels.map((r) => r.handmatigBegrootOverride ?? r.bedrag));
+    stuurHtml(res, 200, renderVerzekeringenForm({ actieUrl, terugUrl, regels: veldRegels, beoordeeld, portefeuilleTotaal: fmtBedragKort(totaal) }));
+    return true;
+  }
+
+  const velden = Object.fromEntries(new URLSearchParams(await leesBody(req)));
+  try {
+    const regels: VerzekeringRegelInvoer[] = [];
+    for (let i = 0; i < MAX_REGELS_VERZEKERING; i++) {
+      const verzekeraar = tekst(velden[`verzekeraar_${i}`]);
+      const grootboekrekening = tekst(velden[`grootboekrekening_${i}`]);
+      const bedragStr = tekst(velden[`bedrag_${i}`]);
+      if (verzekeraar.length === 0 && grootboekrekening.length === 0 && bedragStr.length === 0) continue;
+      if (grootboekrekening.length === 0) throw new Error(`Regel ${i + 1}: grootboekrekening is verplicht.`);
+      const ingangsdatumStr = tekst(velden[`ingangsdatum_${i}`]);
+      regels.push({
+        id: tekst(velden[`id_${i}`]).length > 0 ? Number(tekst(velden[`id_${i}`])) : null,
+        complexnummer: tekstOfNull(velden[`complex_${i}`]),
+        verzekeraar: tekstOfNull(velden[`verzekeraar_${i}`]),
+        grootboekrekening,
+        ogbKostensoort: tekstOfNull(velden[`ogb_${i}`]),
+        ingangsdatum: ingangsdatumStr.length > 0 ? new Date(`${ingangsdatumStr}T00:00:00.000Z`) : null,
+        looptijdMaanden: tekst(velden[`looptijd_${i}`]).length > 0 ? Number(tekst(velden[`looptijd_${i}`])) : null,
+        bedrag: parseGeld(bedragStr),
+        indexPercentage: parseGeld(tekst(velden[`index_${i}`])),
+        handmatigBegrootOverride: parseGeld(tekst(velden[`override_${i}`])),
+      });
+    }
+    schrijfVerzekeringRegels(g.db, g.versie.id, regels);
+    schrijfVerzekeringBeoordeeld(g.db, g.versie.id, tekst(velden["beoordeeld"]) === "1");
+    stuurRedirect(res, terugUrl);
+  } catch (error) {
+    stuurHtml(res, 400, renderFoutPagina("Verzekeringen konden niet worden opgeslagen", error instanceof Error ? error.message : String(error), terugUrl));
+  }
+  return true;
+}
+
+const MAX_REGELS_GEPLAND = 6;
+
+/** Gepland onderhoud (UX_04, OB-027, Tranche 13): handmatige activiteiten. Werkelijk/Estimated blijven op Onderhoud-totaalniveau (§16/§17) — bewust geen fictieve waarde per activiteit. */
+async function handleGeplandOnderhoud(req: IncomingMessage, res: ServerResponse, g: Geopend, actieUrl: string, terugUrl: string): Promise<boolean> {
+  if (req.method === "GET") {
+    const activiteiten = leesGeplandOnderhoudActiviteiten(g.db, g.versie.id);
+    const beoordeeld = leesGeplandOnderhoudBeoordeeld(g.db, g.versie.id);
+    const regels: GeplandOnderhoudRegelVeld[] = activiteiten.map((a) => ({
+      id: a.id,
+      complexnummer: a.complexnummer,
+      omschrijving: a.omschrijving,
+      grootboekrekening: a.grootboekrekening,
+      ogbKostensoort: a.ogbKostensoort ?? "",
+      aanleidingType: a.aanleidingType ?? "",
+      aanleidingToelichting: a.aanleidingToelichting,
+      q1: a.q1.toString(),
+      q2: a.q2.toString(),
+      q3: a.q3.toString(),
+      q4: a.q4.toString(),
+      status: a.status,
+      leverancier: a.leverancier ?? "",
+      offertebedrag: a.offertebedrag?.toString() ?? "",
+      notitie: a.notitie ?? "",
+    }));
+    const jaartotaal = activiteiten.reduce((t, a) => t.plus(a.q1).plus(a.q2).plus(a.q3).plus(a.q4), new Decimal(0));
+    stuurHtml(res, 200, renderGeplandOnderhoudForm({ actieUrl, terugUrl, regels, beoordeeld, jaartotaal: fmtBedragKort(jaartotaal) }));
+    return true;
+  }
+
+  const velden = Object.fromEntries(new URLSearchParams(await leesBody(req)));
+  try {
+    const activiteiten: GeplandOnderhoudActiviteitInvoer[] = [];
+    for (let i = 0; i < MAX_REGELS_GEPLAND; i++) {
+      const omschrijving = tekst(velden[`omschrijving_${i}`]);
+      const grootboekrekening = tekst(velden[`grootboekrekening_${i}`]);
+      const heeftQ = ["q1", "q2", "q3", "q4"].some((q) => tekst(velden[`${q}_${i}`]).length > 0);
+      if (omschrijving.length === 0 && grootboekrekening.length === 0 && !heeftQ) continue;
+      const complexnummer = tekst(velden[`complex_${i}`]);
+      if (complexnummer.length === 0) throw new Error(`Regel ${i + 1}: complex is verplicht.`);
+      if (omschrijving.length === 0) throw new Error(`Regel ${i + 1}: omschrijving is verplicht.`);
+      if (grootboekrekening.length === 0) throw new Error(`Regel ${i + 1}: grootboekrekening is verplicht.`);
+      const geldigeAanleiding = ["MJOP", "INSPECTIE", "OFFERTE", "OVERIG"];
+      const aanleidingType = tekst(velden[`aanleiding_${i}`]);
+      const geldigeStatussen = ["GEPLAND", "IN_UITVOERING", "UITGESTELD", "VERVALLEN", "AFGEROND", "ONVOORZIEN"];
+      const status = tekst(velden[`status_${i}`]) || "GEPLAND";
+      if (!geldigeStatussen.includes(status)) throw new Error(`Regel ${i + 1}: ongeldige status "${status}".`);
+      activiteiten.push({
+        id: tekst(velden[`id_${i}`]).length > 0 ? Number(tekst(velden[`id_${i}`])) : null,
+        complexnummer,
+        omschrijving,
+        grootboekrekening,
+        ogbKostensoort: tekstOfNull(velden[`ogb_${i}`]),
+        aanleidingType: geldigeAanleiding.includes(aanleidingType) ? aanleidingType : null,
+        aanleidingToelichting: tekst(velden[`toelichting_${i}`]),
+        q1: parseGeld(tekst(velden[`q1_${i}`])) ?? new Decimal(0),
+        q2: parseGeld(tekst(velden[`q2_${i}`])) ?? new Decimal(0),
+        q3: parseGeld(tekst(velden[`q3_${i}`])) ?? new Decimal(0),
+        q4: parseGeld(tekst(velden[`q4_${i}`])) ?? new Decimal(0),
+        status,
+        leverancier: tekstOfNull(velden[`leverancier_${i}`]),
+        offertebedrag: parseGeld(tekst(velden[`offertebedrag_${i}`])),
+        notitie: tekstOfNull(velden[`notitie_${i}`]),
+      });
+    }
+    schrijfGeplandOnderhoudActiviteiten(g.db, g.versie.id, activiteiten);
+    schrijfGeplandOnderhoudBeoordeeld(g.db, g.versie.id, tekst(velden["beoordeeld"]) === "1");
+    stuurRedirect(res, terugUrl);
+  } catch (error) {
+    stuurHtml(res, 400, renderFoutPagina("Gepland onderhoud kon niet worden opgeslagen", error instanceof Error ? error.message : String(error), terugUrl));
+  }
+  return true;
+}
+
+const MAX_REGELS_GL = 3;
+const MAX_REGELS_WOZ = 4;
+
+/** Gemeentelijke lasten / WOZ (UX_08, OB-033, Tranche 13): GL-regels + WOZ-historie + aannames + "Voorstel overnemen" — allemaal bestaande, ongewijzigde functionaliteit. */
+async function handleGemeentelijkeLasten(req: IncomingMessage, res: ServerResponse, g: Geopend, root: string, actieUrl: string, terugUrl: string): Promise<boolean> {
+  const mappingDb = openOrCreateDatabase(pnlBronmappingDatabasePad(root, g.administratieId));
+  let relevanteGrootboeken: string[];
+  try {
+    relevanteGrootboeken = leesRelevanteGemeentelijkeLastenGrootboekenVoorAdministratie(mappingDb, g.bedrijfsnr, g.versie.begrotingsjaar).map((gl) => gl.grootboekrekening);
+  } finally {
+    mappingDb.close();
+  }
+
+  if (req.method === "POST") {
+    const velden = Object.fromEntries(new URLSearchParams(await leesBody(req)));
+
+    if (tekst(velden["actie"]) === "voorstelOvernemen") {
+      try {
+        neemWozVoorstelOver(g.db, g.versie.id);
+        stuurRedirect(res, terugUrl);
+      } catch (error) {
+        stuurHtml(res, 400, renderFoutPagina("Voorstel kon niet worden overgenomen", error instanceof VoorstelOvernameGeweigerdError ? error.message : error instanceof Error ? error.message : String(error), terugUrl));
+      }
+      return true;
+    }
+
+    try {
+      const glRegels: GemeentelijkeLastenRegelInvoer[] = [];
+      for (let i = 0; i < MAX_REGELS_GL; i++) {
+        const grootboekrekening = tekst(velden[`gl_grootboekrekening_${i}`]);
+        const jaarbedragStr = tekst(velden[`gl_jaarbedrag_${i}`]);
+        if (grootboekrekening.length === 0 && jaarbedragStr.length === 0) continue;
+        if (grootboekrekening.length === 0) throw new Error(`GL-regel ${i + 1}: grootboekrekening is verplicht.`);
+        glRegels.push({ id: tekst(velden[`gl_id_${i}`]).length > 0 ? Number(tekst(velden[`gl_id_${i}`])) : null, grootboekrekening, ogbKostensoort: tekstOfNull(velden[`gl_ogb_${i}`]), jaarbedrag: parseGeld(jaarbedragStr) });
+      }
+      const wozObjecten: WozObjectInvoer[] = [];
+      for (let i = 0; i < MAX_REGELS_WOZ; i++) {
+        const complexnummer = tekst(velden[`woz_complex_${i}`]);
+        const werkelijkStr = tekst(velden[`woz_werkelijk_${i}`]);
+        if (complexnummer.length === 0 && werkelijkStr.length === 0) continue;
+        if (complexnummer.length === 0) throw new Error(`WOZ-regel ${i + 1}: complex is verplicht.`);
+        const aanslagjaarStr = tekst(velden[`woz_aanslagjaar_${i}`]);
+        const waardepeildatumStr = tekst(velden[`woz_waardepeildatum_${i}`]);
+        const werkelijkeWoz = parseGeld(werkelijkStr);
+        if (werkelijkeWoz === null || werkelijkeWoz.isNegative()) throw new Error(`WOZ-regel ${i + 1}: werkelijke WOZ is verplicht en moet positief zijn.`);
+        wozObjecten.push({
+          id: tekst(velden[`woz_id_${i}`]).length > 0 ? Number(tekst(velden[`woz_id_${i}`])) : null,
+          complexnummer,
+          objectType: tekst(velden[`woz_objectType_${i}`]) || "GEHEEL_COMPLEX",
+          unitnummer: tekstOfNull(velden[`woz_unit_${i}`]),
+          aanslagjaar: aanslagjaarStr.length > 0 ? Number(aanslagjaarStr) : null,
+          waardepeildatum: waardepeildatumStr.length > 0 ? new Date(`${waardepeildatumStr}T00:00:00.000Z`) : null,
+          werkelijkeWoz,
+          verwachteWozOverride: parseGeld(tekst(velden[`woz_override_${i}`])),
+        });
+      }
+      schrijfGemeentelijkeLastenRegels(g.db, g.versie.id, glRegels);
+      schrijfWozObjecten(g.db, g.versie.id, wozObjecten);
+      schrijfGemeentelijkeLastenModule(g.db, g.versie.id, {
+        werkelijkeGemeentelijkeLasten: parseGeld(tekst(velden["werkelijkeLasten"])),
+        wozStijgingPercentage: parseGeld(tekst(velden["wozStijging"])),
+        lastenPercentageStijging: parseGeld(tekst(velden["lastenStijging"])),
+        begrotingsPercentageOverride: parseGeld(tekst(velden["percentageOverride"])),
+        beoordeeld: tekst(velden["beoordeeld"]) === "1",
+      });
+      schrijfWozSetBevestigd(g.db, g.versie.id, tekst(velden["wozSetBevestigd"]) === "1");
+      stuurRedirect(res, terugUrl);
+      return true;
+    } catch (error) {
+      stuurHtml(res, 400, renderFoutPagina("Gemeentelijke lasten konden niet worden opgeslagen", error instanceof Error ? error.message : String(error), terugUrl));
+      return true;
+    }
+  }
+
+  const glRegels = leesGemeentelijkeLastenRegels(g.db, g.versie.id);
+  const wozObjecten = leesWozObjecten(g.db, g.versie.id);
+  const moduleInvoer = leesGemeentelijkeLastenModule(g.db, g.versie.id);
+  const voorstelStatus = leesGemeentelijkeLastenVoorstelStatus(g.db, g.versie.id);
+  const glVelden: GemeentelijkeLastenRegelVeld[] = glRegels.map((r) => ({ id: r.id, grootboekrekening: r.grootboekrekening, ogbKostensoort: r.ogbKostensoort ?? "", jaarbedrag: r.jaarbedrag?.toString() ?? "" }));
+  const wozVelden: WozObjectVeld[] = wozObjecten.map((w) => ({
+    id: w.id,
+    complexnummer: w.complexnummer ?? "",
+    objectType: w.objectType ?? "GEHEEL_COMPLEX",
+    unitnummer: w.unitnummer ?? "",
+    aanslagjaar: w.aanslagjaar?.toString() ?? "",
+    waardepeildatum: w.waardepeildatum ? fmtDatumVeld(w.waardepeildatum) : "",
+    werkelijkeWoz: w.werkelijkeWoz?.toString() ?? "",
+    verwachteWozOverride: w.verwachteWozOverride?.toString() ?? "",
+  }));
+  const totaal = som(glRegels.map((r) => r.jaarbedrag));
+  stuurHtml(
+    res,
+    200,
+    renderGemeentelijkeLastenForm({
+      actieUrl,
+      terugUrl,
+      relevanteGrootboeken,
+      glRegels: glVelden,
+      wozObjecten: wozVelden,
+      wozStijgingPercentage: moduleInvoer.wozStijgingPercentage?.toString() ?? "",
+      lastenPercentageStijging: moduleInvoer.lastenPercentageStijging?.toString() ?? "",
+      begrotingsPercentageOverride: moduleInvoer.begrotingsPercentageOverride?.toString() ?? "",
+      werkelijkeGemeentelijkeLasten: moduleInvoer.werkelijkeGemeentelijkeLasten?.toString() ?? "",
+      beoordeeld: moduleInvoer.beoordeeld,
+      wozSetBevestigd: moduleInvoer.wozSetBevestigd,
+      voorstelMogelijk: voorstelStatus.mogelijk,
+      voorstelReden: voorstelStatus.reden,
+      portefeuilleTotaal: fmtBedragKort(totaal),
+    }),
+  );
   return true;
 }

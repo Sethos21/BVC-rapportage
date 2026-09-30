@@ -136,14 +136,25 @@ export function pnlBronmappingDatabasePad(root: string, administratieId: string)
 }
 
 /**
- * TRANCHE 11 — de `@bvc/begroting-data`-database (begrotingsversies + alle module-concept-/
- * frozen-/Estimated-tabellen, `openOrCreateDatabase` draait haar migraties automatisch) leeft
- * in dezelfde per-administratie `begroting/`-map als de P&L-bronmapping-database hierboven,
- * als eigen bestand — bewust GEEN gedeeld/portefeuillebreed bestand (elke begroting hoort bij
- * precies één administratie, CLAUDE.md §6 "geen hardcoded 070").
+ * TRANCHE 11/13 — de `@bvc/begroting-data`-database (begrotingsversies + alle module-concept-/
+ * frozen-/Estimated-tabellen) leeft in HETZELFDE per-administratie bestand als de P&L-
+ * bronmapping-database hierboven (`openOrCreateDatabase` draait dezelfde volledige migratielijst
+ * ongeacht welk pad wordt geopend, dus beide schema's bestaan al in één bestand).
+ *
+ * CORRECTIE (Tranche 13): tot en met Tranche 12 was dit bewust een EIGEN bestand
+ * (`begrotingsversies.sqlite`, naast `pnl-bronmapping.sqlite`). Dat bleek een technisch restpunt:
+ * `@bvc/begroting-data`'s `leesRelevanteGemeentelijkeLastenGrootboekenVoorAdministratie` (aangeroepen
+ * ván bínnen `herberekenBegroting`, dus met de begrotingsversies-`db`-connectie) leest de centrale
+ * P&L-bronmapping via DIE ZELFDE `db` — met twee gescheiden bestanden zou de Gemeentelijke-Lasten-
+ * "relevante GL"-controle in productie ALTIJD een lege set zien, ook met een correct geregistreerde
+ * mapping. Beide bestanden samenvoegen tot één is de kleinste correcte fix (geen wijziging aan
+ * `@bvc/begroting-data` zelf nodig) — er was nooit een functionele reden voor twee bestanden, alleen
+ * toevallige historische scheiding; beide zijn en blijven per-administratie (geen gedeeld/
+ * portefeuillebreed bestand, CLAUDE.md §6 "geen hardcoded 070"). Geen bestaande productiedata
+ * getroffen: er bestaat nog geen echte `begrotingsversies.sqlite` bij een klant.
  */
 export function begrotingsversiesDatabasePad(root: string, administratieId: string): string {
-  return join(administratieDir(root, administratieId), "begroting", "begrotingsversies.sqlite");
+  return pnlBronmappingDatabasePad(root, administratieId);
 }
 
 export function administratieRapportenDir(root: string, administratieId: string): string {

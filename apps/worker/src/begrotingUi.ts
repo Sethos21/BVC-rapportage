@@ -130,16 +130,27 @@ const GROEP_LABELS: Record<PnLGroepBovenEbitda, string> = {
 };
 
 /** Modules met een in deze tranche gebouwde invoerpagina — alle andere posten zijn deze tranche alleen-lezen in de vergelijkende P&L. */
-const BEWERKBARE_MODULES: Record<string, string> = {
-  HUUROPBRENGST_BELAST: "huur",
-  HUUROPBRENGST_ONBELAST: "huur",
-  VERLEENDE_HUURKORTING: "huur",
-  BEHEERKOSTEN: "beheer",
-  MANAGEMENTVERGOEDING: "management",
-  ONDERHOUD: "correctief",
-  NIET_VERREKENBARE_BTW: "btw",
-  RENTEKOSTEN: "rente-leningen",
-  RENTE_OPBRENGSTEN: "rente-opbrengst",
+const BEWERKBARE_MODULES: Record<string, readonly { key: string; label: string }[]> = {
+  HUUROPBRENGST_BELAST: [{ key: "huur", label: "Aanpassen" }],
+  HUUROPBRENGST_ONBELAST: [{ key: "huur", label: "Aanpassen" }],
+  VERLEENDE_HUURKORTING: [{ key: "huur", label: "Aanpassen" }],
+  BEHEERKOSTEN: [{ key: "beheer", label: "Aanpassen" }],
+  MANAGEMENTVERGOEDING: [{ key: "management", label: "Aanpassen" }],
+  ONDERHOUD: [
+    { key: "gepland-onderhoud", label: "Gepland onderhoud" },
+    { key: "correctief", label: "Correctief/dagelijks" },
+  ],
+  VERZEKERINGEN: [{ key: "verzekeringen", label: "Aanpassen" }],
+  GEMEENTELIJKE_LASTEN: [{ key: "gemeentelijke-lasten", label: "Aanpassen" }],
+  ACCOUNTANT: [{ key: "algemene-kosten", label: "Aanpassen" }],
+  JURIDISCHE_KOSTEN: [{ key: "algemene-kosten", label: "Aanpassen" }],
+  MAKELAARSKOSTEN: [{ key: "algemene-kosten", label: "Aanpassen" }],
+  ALGEMENE_KOSTEN: [{ key: "algemene-kosten", label: "Aanpassen" }],
+  BANKKOSTEN: [{ key: "algemene-kosten", label: "Aanpassen" }],
+  LEEGSTANDSKOSTEN: [{ key: "leegstand", label: "Aanpassen" }],
+  NIET_VERREKENBARE_BTW: [{ key: "btw", label: "Aanpassen" }],
+  RENTEKOSTEN: [{ key: "rente-leningen", label: "Aanpassen" }],
+  RENTE_OPBRENGSTEN: [{ key: "rente-opbrengst", label: "Aanpassen" }],
 };
 
 export interface AdministratieKeuzeSchermOpties {
@@ -225,13 +236,18 @@ export interface HoofdschermOpties {
 const GROEP_VOLGORDE: readonly PnLGroepBovenEbitda[] = ["OPBRENGSTEN", "MANAGEMENT_EN_BEHEER", "EXPLOITATIE_LASTEN", "ALGEMENE_KOSTEN"];
 
 function regelRij(o: HoofdschermOpties, r: VergelijkendeBegrotingsPnLRegel): string {
-  const moduleKey = BEWERKBARE_MODULES[r.regelSleutel];
-  const bewerkLink =
-    o.versie.status === "CONCEPT" && moduleKey !== undefined
-      ? `<a class="bewerk" href="/begroting/${encodeURIComponent(o.administratieId)}/${encodeURIComponent(o.versie.id)}/module/${moduleKey}?laatstAfgeslotenBoekperiode=${encodeURIComponent(o.laatstAfgeslotenBoekperiode)}">Aanpassen</a>`
+  const moduleLinks = BEWERKBARE_MODULES[r.regelSleutel];
+  const bewerkLinks =
+    o.versie.status === "CONCEPT" && moduleLinks !== undefined
+      ? moduleLinks
+          .map(
+            (m) =>
+              `<a class="bewerk" href="/begroting/${encodeURIComponent(o.administratieId)}/${encodeURIComponent(o.versie.id)}/module/${m.key}?laatstAfgeslotenBoekperiode=${encodeURIComponent(o.laatstAfgeslotenBoekperiode)}">${escapeHtml(m.label)}</a>`,
+          )
+          .join(" · ")
       : "";
   return `<tr>
-    <td><span class="naam">${escapeHtml(label(r.regelSleutel))}</span>${bewerkLink ? `<span class="naam-sub">${bewerkLink}</span>` : ""}</td>
+    <td><span class="naam">${escapeHtml(label(r.regelSleutel))}</span>${bewerkLinks ? `<span class="naam-sub">${bewerkLinks}</span>` : ""}</td>
     <td>${fmtWaarde(r.begrotingVorigJaar)}</td>
     <td>${fmtWaarde(r.werkelijk)}</td>
     <td>${fmtWaarde(r.estimated)}</td>
@@ -576,6 +592,290 @@ export function renderBeheerDetail(o: {
       ${o.alleenLezen ? "" : `<button type="submit">Configuratie opslaan</button>`}
     </form>`;
   return moduleFormShell({ titel: "Beheersvergoeding", terugUrl: o.terugUrl, inhoud });
+}
+
+function beoordeeldCheckbox(naam: string, aangevinkt: boolean): string {
+  return `<label><input type="checkbox" name="${naam}" value="1" style="width:auto;display:inline-block;margin-right:8px"${aangevinkt ? " checked" : ""} />Ik heb dit onderdeel beoordeeld</label>`;
+}
+
+export interface LeegstandCategorieOpties {
+  categorie: string;
+  titel: string;
+  beoordeeld: boolean;
+  regels: readonly { id: number | null; complexnummer: string; omschrijving: string; q1: string; q2: string; q3: string; q4: string }[];
+}
+
+/** Leegstandskosten (UX/OB-031, Tranche 13): drie categorieën, elk dezelfde compacte structuur Complex|Omschrijving|Q1-Q4. */
+export function renderLeegstandForm(o: { actieUrl: string; terugUrl: string; fouten?: readonly string[]; categorieen: readonly LeegstandCategorieOpties[]; portefeuilleTotaal: string }): string {
+  const sectie = (c: LeegstandCategorieOpties, prefix: string) => {
+    const rijen = [...c.regels, ...Array.from({ length: Math.max(0, 4 - c.regels.length) }, () => ({ id: null, complexnummer: "", omschrijving: "", q1: "", q2: "", q3: "", q4: "" }))];
+    return `<h2>${escapeHtml(c.titel)}</h2>
+      <table style="margin-bottom:10px">
+        <thead><tr><th style="text-align:left">Complex</th><th style="text-align:left">Omschrijving</th><th>Q1</th><th>Q2</th><th>Q3</th><th>Q4</th></tr></thead>
+        <tbody>${rijen
+          .map(
+            (r, i) => `<tr>
+          <td><input type="hidden" name="${prefix}_id_${i}" value="${r.id ?? ""}" /><input type="text" name="${prefix}_complex_${i}" value="${escapeHtml(r.complexnummer)}" placeholder="optioneel" style="width:80px" /></td>
+          <td><input type="text" name="${prefix}_omschrijving_${i}" value="${escapeHtml(r.omschrijving)}" /></td>
+          <td><input type="text" name="${prefix}_q1_${i}" value="${escapeHtml(r.q1)}" style="width:70px" /></td>
+          <td><input type="text" name="${prefix}_q2_${i}" value="${escapeHtml(r.q2)}" style="width:70px" /></td>
+          <td><input type="text" name="${prefix}_q3_${i}" value="${escapeHtml(r.q3)}" style="width:70px" /></td>
+          <td><input type="text" name="${prefix}_q4_${i}" value="${escapeHtml(r.q4)}" style="width:70px" /></td>
+        </tr>`,
+          )
+          .join("")}</tbody>
+      </table>
+      ${beoordeeldCheckbox(`${prefix}_beoordeeld`, c.beoordeeld)}`;
+  };
+  const inhoud = `
+    <form method="POST" action="${escapeHtml(o.actieUrl)}">
+      ${sectie(o.categorieen[0]!, "nuts")}
+      ${sectie(o.categorieen[1]!, "service")}
+      ${sectie(o.categorieen[2]!, "overige")}
+      <p class="sub">Totaal Leegstandskosten (Jouw begroting): <strong>${escapeHtml(o.portefeuilleTotaal)}</strong></p>
+      <button type="submit">Opslaan</button>
+    </form>`;
+  return moduleFormShell({ titel: "Leegstandskosten", terugUrl: o.terugUrl, ...(o.fouten !== undefined ? { fouten: o.fouten } : {}), inhoud });
+}
+
+export interface AlgemeneKostenCategorieOpties {
+  categorie: string;
+  titel: string;
+  beoordeeld: boolean;
+  vorigJaarBedrag: string;
+  verwachteVerhogingPercentage: string;
+  toonVoorstelVelden: boolean;
+  regels: readonly { id: number | null; omschrijving: string; complexnummer: string; ogbKostensoortCode: string; jaarbedrag: string }[];
+}
+
+/** Algemene kosten (OB-035/036, Tranche 13): vijf categorieën, elk dezelfde regelvorm (Omschrijving|Complex|OGB|Jaarbedrag); Accountant/Bank tonen aanvullend het informatieve vorig-jaar/verwachte-verhoging-voorstel. */
+export function renderAlgemeneKostenForm(o: { actieUrl: string; terugUrl: string; fouten?: readonly string[]; categorieen: readonly AlgemeneKostenCategorieOpties[]; portefeuilleTotaal: string }): string {
+  const sectie = (c: AlgemeneKostenCategorieOpties, prefix: string) => {
+    const rijen = [...c.regels, ...Array.from({ length: Math.max(0, 3 - c.regels.length) }, () => ({ id: null, omschrijving: "", complexnummer: "", ogbKostensoortCode: "", jaarbedrag: "" }))];
+    const voorstelHtml = c.toonVoorstelVelden
+      ? `<p class="sub">Voorstel (informatief): vorig jaar <input type="text" name="${prefix}_vorigJaar" value="${escapeHtml(c.vorigJaarBedrag)}" style="width:90px;display:inline-block" /> + verwachte verhoging <input type="text" name="${prefix}_verhoging" value="${escapeHtml(c.verwachteVerhogingPercentage)}" style="width:60px;display:inline-block" />%</p>`
+      : "";
+    return `<h2>${escapeHtml(c.titel)}</h2>
+      ${voorstelHtml}
+      <table style="margin-bottom:10px">
+        <thead><tr><th style="text-align:left">Omschrijving</th><th style="text-align:left">Complex</th><th style="text-align:left">OGB</th><th style="text-align:left">Jaarbedrag</th></tr></thead>
+        <tbody>${rijen
+          .map(
+            (r, i) => `<tr>
+          <td><input type="hidden" name="${prefix}_id_${i}" value="${r.id ?? ""}" /><input type="text" name="${prefix}_omschrijving_${i}" value="${escapeHtml(r.omschrijving)}" /></td>
+          <td><input type="text" name="${prefix}_complex_${i}" value="${escapeHtml(r.complexnummer)}" placeholder="optioneel" style="width:80px" /></td>
+          <td><input type="text" name="${prefix}_ogb_${i}" value="${escapeHtml(r.ogbKostensoortCode)}" placeholder="optioneel" style="width:70px" /></td>
+          <td><input type="text" name="${prefix}_jaarbedrag_${i}" value="${escapeHtml(r.jaarbedrag)}" style="width:90px" /></td>
+        </tr>`,
+          )
+          .join("")}</tbody>
+      </table>
+      ${beoordeeldCheckbox(`${prefix}_beoordeeld`, c.beoordeeld)}`;
+  };
+  const prefixen = ["accountant", "juridisch", "makelaar", "algemeen", "bank"];
+  const inhoud = `
+    <form method="POST" action="${escapeHtml(o.actieUrl)}">
+      ${o.categorieen.map((c, i) => sectie(c, prefixen[i]!)).join("<hr style=\"border:none;border-top:1px solid var(--line);margin:20px 0\" />")}
+      <p class="sub">Totaal Algemene kosten (Jouw begroting): <strong>${escapeHtml(o.portefeuilleTotaal)}</strong></p>
+      <button type="submit">Opslaan</button>
+    </form>`;
+  return moduleFormShell({ titel: "Algemene kosten", terugUrl: o.terugUrl, ...(o.fouten !== undefined ? { fouten: o.fouten } : {}), inhoud });
+}
+
+export interface VerzekeringRegelVeld {
+  id: number | null;
+  complexnummer: string;
+  verzekeraar: string;
+  grootboekrekening: string;
+  ogbKostensoort: string;
+  ingangsdatum: string;
+  looptijdMaanden: string;
+  bedrag: string;
+  indexPercentage: string;
+  handmatigBegrootOverride: string;
+}
+
+/** Verzekeringen (UX_06, Tranche 13): compacte polisregels Complex|Verzekeraar|Ingangsdatum|Looptijd|Bedrag|Index%|GL|OGB|Override. */
+export function renderVerzekeringenForm(o: { actieUrl: string; terugUrl: string; fouten?: readonly string[]; regels: readonly VerzekeringRegelVeld[]; beoordeeld: boolean; portefeuilleTotaal: string }): string {
+  const rijen = [...o.regels, ...Array.from({ length: Math.max(0, 6 - o.regels.length) }, (): VerzekeringRegelVeld => ({ id: null, complexnummer: "", verzekeraar: "", grootboekrekening: "", ogbKostensoort: "", ingangsdatum: "", looptijdMaanden: "", bedrag: "", indexPercentage: "", handmatigBegrootOverride: "" }))];
+  const rijHtml = (r: VerzekeringRegelVeld, i: number) => `
+    <tr>
+      <td><input type="hidden" name="id_${i}" value="${r.id ?? ""}" /><input type="text" name="complex_${i}" value="${escapeHtml(r.complexnummer)}" style="width:70px" /></td>
+      <td><input type="text" name="verzekeraar_${i}" value="${escapeHtml(r.verzekeraar)}" style="width:110px" /></td>
+      <td><input type="text" name="grootboekrekening_${i}" value="${escapeHtml(r.grootboekrekening)}" style="width:60px" /></td>
+      <td><input type="text" name="ogb_${i}" value="${escapeHtml(r.ogbKostensoort)}" placeholder="optioneel" style="width:60px" /></td>
+      <td><input type="date" name="ingangsdatum_${i}" value="${escapeHtml(r.ingangsdatum)}" style="width:130px" /></td>
+      <td><input type="text" name="looptijd_${i}" value="${escapeHtml(r.looptijdMaanden)}" style="width:50px" /></td>
+      <td><input type="text" name="bedrag_${i}" value="${escapeHtml(r.bedrag)}" style="width:80px" /></td>
+      <td><input type="text" name="index_${i}" value="${escapeHtml(r.indexPercentage)}" style="width:50px" /></td>
+      <td><input type="text" name="override_${i}" value="${escapeHtml(r.handmatigBegrootOverride)}" placeholder="berekend" style="width:80px" /></td>
+    </tr>`;
+  const inhoud = `
+    <p class="sub">Override laat het berekende voorstel (huidige premie × indexatie) staan tenzij ingevuld.</p>
+    <form method="POST" action="${escapeHtml(o.actieUrl)}">
+      <table style="margin-bottom:16px">
+        <thead><tr><th style="text-align:left">Complex</th><th style="text-align:left">Verzekeraar</th><th style="text-align:left">GL</th><th style="text-align:left">OGB</th><th>Ingangsdatum</th><th>Looptijd (mnd)</th><th>Jaarpremie</th><th>Index %</th><th>Override</th></tr></thead>
+        <tbody>${rijen.map(rijHtml).join("")}</tbody>
+      </table>
+      ${beoordeeldCheckbox("beoordeeld", o.beoordeeld)}
+      <p class="sub">Totaal Verzekeringen (Jouw begroting): <strong>${escapeHtml(o.portefeuilleTotaal)}</strong></p>
+      <button type="submit">Opslaan</button>
+    </form>`;
+  return moduleFormShell({ titel: "Verzekeringen", terugUrl: o.terugUrl, ...(o.fouten !== undefined ? { fouten: o.fouten } : {}), inhoud });
+}
+
+export interface GeplandOnderhoudRegelVeld {
+  id: number | null;
+  complexnummer: string;
+  omschrijving: string;
+  grootboekrekening: string;
+  ogbKostensoort: string;
+  aanleidingType: string;
+  aanleidingToelichting: string;
+  q1: string;
+  q2: string;
+  q3: string;
+  q4: string;
+  status: string;
+  leverancier: string;
+  offertebedrag: string;
+  notitie: string;
+}
+
+const AANLEIDING_OPTIES = ["MJOP", "INSPECTIE", "OFFERTE", "OVERIG"];
+const STATUS_OPTIES = ["GEPLAND", "IN_UITVOERING", "UITGESTELD", "VERVALLEN", "AFGEROND", "ONVOORZIEN"];
+
+/** Gepland onderhoud (UX_04, Tranche 13): handmatige activiteiten per complex, Q1-Q4, bron/status. Werkelijk/Estimated bestaan uitsluitend op Onderhoud-totaalniveau (§16/§17) — hier bewust niet per activiteit getoond. */
+export function renderGeplandOnderhoudForm(o: {
+  actieUrl: string;
+  terugUrl: string;
+  fouten?: readonly string[];
+  regels: readonly GeplandOnderhoudRegelVeld[];
+  beoordeeld: boolean;
+  jaartotaal: string;
+}): string {
+  const leeg = (): GeplandOnderhoudRegelVeld => ({ id: null, complexnummer: "", omschrijving: "", grootboekrekening: "", ogbKostensoort: "", aanleidingType: "", aanleidingToelichting: "", q1: "", q2: "", q3: "", q4: "", status: "GEPLAND", leverancier: "", offertebedrag: "", notitie: "" });
+  const rijen = [...o.regels, ...Array.from({ length: Math.max(0, 5 - o.regels.length) }, leeg)];
+  const opties = (waarden: readonly string[], huidig: string, naam: string) =>
+    `<select name="${naam}"><option value=""${huidig ? "" : " selected"}>-</option>${waarden.map((w) => `<option value="${w}"${w === huidig ? " selected" : ""}>${w}</option>`).join("")}</select>`;
+  const rijHtml = (r: GeplandOnderhoudRegelVeld, i: number) => `
+    <tr>
+      <td><input type="hidden" name="id_${i}" value="${r.id ?? ""}" /><input type="text" name="complex_${i}" value="${escapeHtml(r.complexnummer)}" style="width:60px" /></td>
+      <td><input type="text" name="omschrijving_${i}" value="${escapeHtml(r.omschrijving)}" style="width:130px" /></td>
+      <td><input type="text" name="grootboekrekening_${i}" value="${escapeHtml(r.grootboekrekening)}" style="width:60px" /></td>
+      <td><input type="text" name="ogb_${i}" value="${escapeHtml(r.ogbKostensoort)}" placeholder="optioneel" style="width:60px" /></td>
+      <td>${opties(AANLEIDING_OPTIES, r.aanleidingType, `aanleiding_${i}`)}<input type="text" name="toelichting_${i}" value="${escapeHtml(r.aanleidingToelichting)}" placeholder="toelichting" style="width:100px" /></td>
+      <td><input type="text" name="q1_${i}" value="${escapeHtml(r.q1)}" style="width:60px" /></td>
+      <td><input type="text" name="q2_${i}" value="${escapeHtml(r.q2)}" style="width:60px" /></td>
+      <td><input type="text" name="q3_${i}" value="${escapeHtml(r.q3)}" style="width:60px" /></td>
+      <td><input type="text" name="q4_${i}" value="${escapeHtml(r.q4)}" style="width:60px" /></td>
+      <td>${opties(STATUS_OPTIES, r.status, `status_${i}`)}</td>
+      <td><input type="text" name="leverancier_${i}" value="${escapeHtml(r.leverancier)}" placeholder="optioneel" style="width:90px" /></td>
+      <td><input type="text" name="offertebedrag_${i}" value="${escapeHtml(r.offertebedrag)}" placeholder="optioneel" style="width:70px" /></td>
+      <td><input type="text" name="notitie_${i}" value="${escapeHtml(r.notitie)}" placeholder="optioneel" style="width:90px" /></td>
+    </tr>`;
+  const inhoud = `
+    <p class="sub">Werkelijk is alleen beschikbaar voor Onderhoud totaal (Gepland + Correctief/dagelijks samen) — er is bewust geen Werkelijk per activiteit.</p>
+    <form method="POST" action="${escapeHtml(o.actieUrl)}">
+      <table style="margin-bottom:16px">
+        <thead><tr><th style="text-align:left">Complex</th><th style="text-align:left">Omschrijving</th><th style="text-align:left">GL</th><th style="text-align:left">OGB</th><th style="text-align:left">Bron</th><th>Q1</th><th>Q2</th><th>Q3</th><th>Q4</th><th>Status</th><th style="text-align:left">Leverancier</th><th>Offerte</th><th style="text-align:left">Notitie</th></tr></thead>
+        <tbody>${rijen.map(rijHtml).join("")}</tbody>
+      </table>
+      ${beoordeeldCheckbox("beoordeeld", o.beoordeeld)}
+      <p class="sub">Jaartotaal Gepland onderhoud: <strong>${escapeHtml(o.jaartotaal)}</strong> (telt samen met Correctief/dagelijks op tot de P&L-post Onderhoud)</p>
+      <button type="submit">Opslaan</button>
+    </form>`;
+  return moduleFormShell({ titel: "Gepland onderhoud", terugUrl: o.terugUrl, ...(o.fouten !== undefined ? { fouten: o.fouten } : {}), inhoud });
+}
+
+export interface WozObjectVeld {
+  id: number | null;
+  complexnummer: string;
+  objectType: string;
+  unitnummer: string;
+  aanslagjaar: string;
+  waardepeildatum: string;
+  werkelijkeWoz: string;
+  verwachteWozOverride: string;
+}
+
+export interface GemeentelijkeLastenRegelVeld {
+  id: number | null;
+  grootboekrekening: string;
+  ogbKostensoort: string;
+  jaarbedrag: string;
+}
+
+/** Gemeentelijke lasten / WOZ (UX_08, Tranche 13): GL-regels (het echte P&L-begrotingsbedrag), WOZ-historie (bronbasis voor het voorstel), en de twee aannamepercentages — exact het bestaande, geaccepteerde model. */
+export function renderGemeentelijkeLastenForm(o: {
+  actieUrl: string;
+  terugUrl: string;
+  fouten?: readonly string[];
+  relevanteGrootboeken: readonly string[];
+  glRegels: readonly GemeentelijkeLastenRegelVeld[];
+  wozObjecten: readonly WozObjectVeld[];
+  wozStijgingPercentage: string;
+  lastenPercentageStijging: string;
+  begrotingsPercentageOverride: string;
+  werkelijkeGemeentelijkeLasten: string;
+  beoordeeld: boolean;
+  wozSetBevestigd: boolean;
+  voorstelMogelijk: boolean;
+  voorstelReden: string | null;
+  portefeuilleTotaal: string;
+}): string {
+  const glRijen = [...o.glRegels, ...Array.from({ length: Math.max(0, 3 - o.glRegels.length) }, (): GemeentelijkeLastenRegelVeld => ({ id: null, grootboekrekening: "", ogbKostensoort: "", jaarbedrag: "" }))];
+  const glRijHtml = (r: GemeentelijkeLastenRegelVeld, i: number) => `
+    <tr>
+      <td><input type="hidden" name="gl_id_${i}" value="${r.id ?? ""}" /><input type="text" name="gl_grootboekrekening_${i}" value="${escapeHtml(r.grootboekrekening)}" list="relevanteGrootboeken" style="width:80px" /></td>
+      <td><input type="text" name="gl_ogb_${i}" value="${escapeHtml(r.ogbKostensoort)}" placeholder="optioneel" style="width:70px" /></td>
+      <td><input type="text" name="gl_jaarbedrag_${i}" value="${escapeHtml(r.jaarbedrag)}" style="width:100px" /></td>
+    </tr>`;
+  const wozRijen = [...o.wozObjecten, ...Array.from({ length: Math.max(0, 3 - o.wozObjecten.length) }, (): WozObjectVeld => ({ id: null, complexnummer: "", objectType: "GEHEEL_COMPLEX", unitnummer: "", aanslagjaar: "", waardepeildatum: "", werkelijkeWoz: "", verwachteWozOverride: "" }))];
+  const wozRijHtml = (r: WozObjectVeld, i: number) => `
+    <tr>
+      <td><input type="hidden" name="woz_id_${i}" value="${r.id ?? ""}" /><input type="text" name="woz_complex_${i}" value="${escapeHtml(r.complexnummer)}" style="width:70px" /></td>
+      <td><select name="woz_objectType_${i}"><option value="GEHEEL_COMPLEX"${r.objectType === "GEHEEL_COMPLEX" ? " selected" : ""}>Geheel complex</option><option value="UNIT"${r.objectType === "UNIT" ? " selected" : ""}>Unit</option></select></td>
+      <td><input type="text" name="woz_unit_${i}" value="${escapeHtml(r.unitnummer)}" placeholder="optioneel" style="width:60px" /></td>
+      <td><input type="text" name="woz_aanslagjaar_${i}" value="${escapeHtml(r.aanslagjaar)}" style="width:70px" /></td>
+      <td><input type="date" name="woz_waardepeildatum_${i}" value="${escapeHtml(r.waardepeildatum)}" style="width:130px" /></td>
+      <td><input type="text" name="woz_werkelijk_${i}" value="${escapeHtml(r.werkelijkeWoz)}" style="width:100px" /></td>
+      <td><input type="text" name="woz_override_${i}" value="${escapeHtml(r.verwachteWozOverride)}" placeholder="automatisch" style="width:100px" /></td>
+    </tr>`;
+  const voorstelKnop = o.voorstelMogelijk
+    ? `<button type="submit" name="actie" value="voorstelOvernemen" class="secundair">Voorstel overnemen</button>`
+    : o.voorstelReden !== null
+      ? `<p class="sub">Voorstel overnemen niet mogelijk: ${escapeHtml(o.voorstelReden)}</p>`
+      : "";
+  const inhoud = `
+    <datalist id="relevanteGrootboeken">${o.relevanteGrootboeken.map((gl) => `<option value="${escapeHtml(gl)}">`).join("")}</datalist>
+    <form method="POST" action="${escapeHtml(o.actieUrl)}">
+      <h2>Begroting per grootboekrekening</h2>
+      <table style="margin-bottom:10px">
+        <thead><tr><th style="text-align:left">Grootboek</th><th style="text-align:left">OGB</th><th style="text-align:left">Jaarbedrag</th></tr></thead>
+        <tbody>${glRijen.map(glRijHtml).join("")}</tbody>
+      </table>
+      <p class="sub">Relevante grootboekrekeningen voor deze administratie: ${o.relevanteGrootboeken.length > 0 ? o.relevanteGrootboeken.map(escapeHtml).join(", ") : "geen bewezen mapping gevonden"}.</p>
+      ${voorstelKnop}
+
+      <h2>WOZ-historie</h2>
+      <table style="margin-bottom:10px">
+        <thead><tr><th style="text-align:left">Complex</th><th style="text-align:left">Type</th><th style="text-align:left">Unit</th><th>Aanslagjaar</th><th>Waardepeildatum</th><th>Werkelijke WOZ</th><th>Verwachte WOZ (override)</th></tr></thead>
+        <tbody>${wozRijen.map(wozRijHtml).join("")}</tbody>
+      </table>
+      <label><input type="checkbox" name="wozSetBevestigd" value="1" style="width:auto;display:inline-block;margin-right:8px"${o.wozSetBevestigd ? " checked" : ""} />De WOZ-set is compleet (verplicht om vast te kunnen stellen)</label>
+
+      <h2>Aannames</h2>
+      <label for="wozStijging">Verwachte WOZ-stijging %</label><input type="text" name="wozStijging" id="wozStijging" value="${escapeHtml(o.wozStijgingPercentage)}" />
+      <label for="lastenStijging">Verwachte stijging lastenpercentage %</label><input type="text" name="lastenStijging" id="lastenStijging" value="${escapeHtml(o.lastenPercentageStijging)}" />
+      <label for="percentageOverride">Handmatige override lastenpercentage % (optioneel)</label><input type="text" name="percentageOverride" id="percentageOverride" value="${escapeHtml(o.begrotingsPercentageOverride)}" />
+      <label for="werkelijkeLasten">Werkelijke totale gemeentelijke lasten (optioneel, voor het historisch percentage)</label><input type="text" name="werkelijkeLasten" id="werkelijkeLasten" value="${escapeHtml(o.werkelijkeGemeentelijkeLasten)}" />
+      ${beoordeeldCheckbox("beoordeeld", o.beoordeeld)}
+
+      <p class="sub">Totaal Gemeentelijke lasten pand (Jouw begroting): <strong>${escapeHtml(o.portefeuilleTotaal)}</strong></p>
+      <button type="submit" name="actie" value="opslaan">Opslaan</button>
+    </form>`;
+  return moduleFormShell({ titel: "Gemeentelijke lasten / WOZ", terugUrl: o.terugUrl, ...(o.fouten !== undefined ? { fouten: o.fouten } : {}), inhoud });
 }
 
 export { geldWaarde };
