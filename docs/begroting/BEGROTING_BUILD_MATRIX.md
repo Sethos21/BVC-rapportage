@@ -1,14 +1,14 @@
 # BEGROTING_BUILD_MATRIX
 
-Bijgewerkt: 29 september 2026  
-Geaccepteerde code-HEAD: `50121a7`  
-Tranche 10: TECHNISCH AFGEROND. UX-set geborgd in `5379798`. Volgende: geïntegreerde invulbare exploitatiebegrotingsworkflow + begrotings-P&L.
+Bijgewerkt: 30 september 2026  
+Geaccepteerde code-HEAD: `efb6074`  
+Tranche 11: GEACCEPTEERD als eerste geïntegreerde begrotingswerkomgeving. Volgende: Tranche 12 Contracten/RentRoll → Module1Snapshot + Huur/Beheer detailworkflow.
 
 | Module | Begroting | Werkelijk | Estimated | P&L-integratie | Productie/UI | Resterend gat |
 |---|---|---|---|---|---|---|
-| Huur | GEREED | GEREED | GEREED | GEREED | UI niet gebouwd | refreshed-contract-state forecast; aanvullende belast/onbelast UX |
-| Beheersvergoeding | GEREED | GEREED | GEREED | GEREED | UI niet gebouwd | geen functioneel gat |
-| Managementvergoeding | GEREED | BRONGAT 070 | GEREED, onbekend zonder mapping | GEREED | UI niet gebouwd | Actual-mapping 070 |
+| Huur | GEREED | GEREED | GEREED | GEREED | hoofd-P&L aangesloten; detail editor nog niet | echte Contracten/RentRoll → Module1Snapshot-adapter ontbreekt; detail-UX |
+| Beheersvergoeding | GEREED | GEREED | GEREED | GEREED | hoofd-P&L aangesloten; detail editor nog niet | contract-afgeleide basis via Module1Snapshot + detail-UX |
+| Managementvergoeding | GEREED | BRONGAT 070 | GEREED, onbekend zonder mapping | GEREED | invoer-UI aangesloten | Actual-mapping 070; contract-afgeleide huurbasis na Tranche 12 |
 | Onderhoud totaal | GEREED | GEREED totaal | GEREED totaal | GEREED | UI niet gebouwd | presentatie/rule-key alignment |
 | Verzekeringen | GEREED | GEREED module / BRONGAT per polis | GEREED | GEREED | UI niet gebouwd | presentatie-alignment; Actual per polis |
 | Gemeentelijke lasten / WOZ | GEREED | GEREED | GEREED | GEREED | service voor UI aanwezig | geen domeingat |
@@ -32,6 +32,7 @@ Tranche 10: TECHNISCH AFGEROND. UX-set geborgd in `5379798`. Volgende: geïntegr
 - Tranche 8: `5125289` — Leegstandskosten Budget/Werkelijk/Estimated/P&L.
 - Tranche 9: `cda3baf` — TECHNISCH VOLLEDIG GESLOTEN; §8.10 + Niet verrekenbare BTW Budget/Werkelijk/Estimated/P&L.
 - Tranche 10: `50121a7` — Rente leningen + Opbrengst rente Budget/Werkelijk/Estimated/P&L; migratie 40.
+- Tranche 11: `efb6074` — eerste geïntegreerde `/begroting`-werkomgeving; vergelijkende P&L, Werkelijk/Estimated-koppeling, vijf invoermodules, controle/vaststellen/terugkijken. Geaccepteerd als integratieketen, niet als volledig afgeronde module.
 
 ## Besluit §8.10 — 29-09-2026
 
@@ -55,3 +56,10 @@ Vastgestelde UX-set: `docs/begroting/ux/`, commit `5379798`. De Productie/UI-kol
 - versiebeheer-UX na vaststelling.
 - nog niet ontworpen module-UX.
 - toekomstige mappings uitsluitend na bronbewijs.
+
+
+## Tranche 12 — eerstvolgende bouwfase
+
+Bouw eerst de ontbrekende echte Contracten/RentRoll → `Module1Snapshot`-adapter. Sluit vervolgens Huur en Beheersvergoeding via de vastgestelde detail-UX aan op de bestaande begrotingsworkflow. De contractbron levert feiten; indexatie/overrides en overige begrotingskeuzes blijven aannames. Managementvergoeding hergebruikt de contract-afgeleide huurbasis conform bestaand contract. Geen refreshed-contract-state forecast in deze tranche.
+
+De Tranche-11 test met €1.200 Werkelijk is een XLSX-fixture door de echte productiecodeketen en mag niet worden geregistreerd als werkelijk financieel resultaat van administratie 070.
