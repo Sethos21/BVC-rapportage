@@ -205,7 +205,6 @@ describe("Begrotingsworkflow via echte HTTP-routes (Tranche 11) — acceptatiecr
       schrijfAlgemeneKostenCategorieState,
       schrijfLeegstandCategorieState,
       schrijfRenteCategorieState,
-      schrijfGeplandeVerkoopBeoordeeld,
       schrijfNietVerrekenbareBtwState,
       stelBegrotingVast,
     } = await import("@bvc/begroting-data");
@@ -281,7 +280,9 @@ describe("Begrotingsworkflow via echte HTTP-routes (Tranche 11) — acceptatiecr
       Object.fromEntries(LEEGSTAND_CATEGORIEEN.map((c: string) => [c, { beoordeeld: true, laatstBekendServicekostenvoorschotJaar: null, laatstBekendServicekostenvoorschotJaarHerkomst: null, verwachteLeegstandsperiodeMaanden: null }])) as never,
     );
     schrijfRenteCategorieState(db, id, Object.fromEntries(RENTE_CATEGORIEEN.map((c: string) => [c, { beoordeeld: true }])) as never);
-    schrijfGeplandeVerkoopBeoordeeld(db, id, true);
+    // Geplande Verkoop is contractueel HOLD (Master Contract §8) en neemt bewust NIET deel aan de
+    // vaststel-gate — geen `schrijfGeplandeVerkoopBeoordeeld`-aanroep hier bewijst dat vaststellen via de
+    // volledige begrotingsketen ook zonder deze beoordeling slaagt (product-readiness fix).
     schrijfNietVerrekenbareBtwState(db, id, { beoordeeld: true, vorigJaarWerkelijk: null });
     stelBegrotingVast(db, id, new Date());
     db.close();

@@ -367,15 +367,12 @@ export function stelBegrotingVast(db: DatabaseSync, versieId: string, vastgestel
       throw new Error(`Begrotingsversie ${versieId}: Rente bevat één of meer KRITIEKE controls — vaststellen is niet mogelijk vóórdat deze zijn opgelost.`);
     }
 
-    // Geplande-Verkoop-lifecycle-validatie (OB-039, fase P3, zie moduledoc) — UITSLUITEND lokaal voor
-    // Geplande Verkoop, wijzigt niets aan hoe de eerdere modules' eigen controleVereist wordt behandeld
-    // hierboven. GEEN categoriedimensie (OB-039 kent er geen) — één module-brede beoordeeld-vlag.
-    if (!geplandeVerkoop.beoordeeld) {
-      throw new Error(`Begrotingsversie ${versieId}: Geplande Verkoop is niet beoordeeld (beoordeeld !== true) — vaststellen is niet mogelijk zonder expliciete beoordeling.`);
-    }
-    if (geplandeVerkoop.controleVereist.some((c) => c.ernst === "KRITIEK")) {
-      throw new Error(`Begrotingsversie ${versieId}: Geplande Verkoop bevat één of meer KRITIEKE controls — vaststellen is niet mogelijk vóórdat deze zijn opgelost.`);
-    }
+    // Geplande Verkoop is contractueel HOLD (Master Contract §8, product-readiness audit §16): zolang dit
+    // onderdeel HOLD is, is het niet zichtbaar/toepasselijk en neemt het bewust NIET deel aan de
+    // beoordeling-/vaststel-gate — er is ook geen UI-route om de beoordeeld-vlag ooit te zetten. De
+    // eerdere verplichte `beoordeeld`/KRITIEK-check hier was daarmee een orphaned gate die vaststellen voor
+    // elke begroting structureel blokkeerde; bewust verwijderd. `geplandeVerkoop` wordt hieronder nog
+    // gewoon bevroren (ongewijzigd gedrag), uitsluitend de blokkerende validatie is weg.
 
     // Niet-Verrekenbare-BTW-lifecycle-validatie (Vervolgtranche 9 Deel B, Master Contract) — UITSLUITEND lokaal voor
     // Niet verrekenbare BTW, wijzigt niets aan hoe de eerdere modules' eigen controleVereist wordt behandeld hierboven.

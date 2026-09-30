@@ -3980,11 +3980,11 @@ describe("stelBegrotingVast — Rente frozen-onafhankelijkheid (OB-037/038, fase
   });
 });
 
-describe("stelBegrotingVast — Geplande Verkoop lifecycle-blokkade (OB-039, fase P3)", () => {
-  // OB-039: Geplande Verkoop krijgt, net als Correctief/Dagelijks Onderhoud, een module-brede
-  // vaststel-blokkade (GEEN categoriedimensie, zie begroteGeplandeVerkoop.ts's moduledoc). KRITIEK-
-  // triggers: lege objectreferentie/omschrijving, ontbrekende geplande verkoopdatum — NOOIT een
-  // ontbrekend bedrag (dat mag onbekend blijven, zie OB039-008).
+describe("stelBegrotingVast — Geplande Verkoop is HOLD en neemt niet deel aan de vaststel-gate (Master Contract §8, product-readiness audit §16)", () => {
+  // Geplande Verkoop is contractueel HOLD: niet zichtbaar/toepasselijk, en heeft geen UI-route om
+  // de beoordeeld-vlag te zetten. De vroegere module-brede vaststel-blokkade (OB-039) is daarom
+  // verwijderd uit `stelBegrotingVast` — noch een ontbrekende beoordeling, noch een KRITIEK op een
+  // (voor de huidige UI onbereikbare) Geplande-Verkoop-regel mag vaststellen nog blokkeren.
 
   function regelInvoer(overrides: Partial<GeplandeVerkoopRegelInvoer> = {}): GeplandeVerkoopRegelInvoer {
     return {
@@ -4015,41 +4015,46 @@ describe("stelBegrotingVast — Geplande Verkoop lifecycle-blokkade (OB-039, fas
     schrijfRenteCategorieState(db, versieId, RENTE_ZERO_REGELS);
   }
 
-  it("1. geen beoordeeld-rij blokkeert vaststellen", () => {
+  it("1. geen beoordeeld-rij (default, geen UI-route om dit ooit te zetten) blokkeert vaststellen NIET meer, mits alle overige toepasselijke gates geldig zijn", () => {
     const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
     zetMinimaleBasisNeer(versie.id);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
-    expect(() => stelBegrotingVast(db, versie.id)).toThrow(/Geplande Verkoop is niet beoordeeld/);
+    expect(() => stelBegrotingVast(db, versie.id)).not.toThrow();
+    expect(leesBegrotingsversie(db, versie.id)!.status).toBe("VASTGESTELD");
   });
 
-  it("2. lege objectreferentie: KRITIEK, blokkeert vaststellen", () => {
+  it("2. lege objectreferentie: KRITIEK op de module zelf, maar blokkeert vaststellen niet meer (HOLD, niet toepasselijk)", () => {
     const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
     zetMinimaleBasisNeer(versie.id);
     schrijfGeplandeVerkoopRegels(db, versie.id, [regelInvoer({ objectreferentie: "  " })]);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
     schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
-    expect(() => stelBegrotingVast(db, versie.id)).toThrow(/Geplande Verkoop bevat één of meer KRITIEKE controls/);
+    expect(() => stelBegrotingVast(db, versie.id)).not.toThrow();
+    expect(leesBegrotingsversie(db, versie.id)!.status).toBe("VASTGESTELD");
   });
 
-  it("3. lege omschrijving: KRITIEK, blokkeert vaststellen", () => {
+  it("3. lege omschrijving: KRITIEK op de module zelf, maar blokkeert vaststellen niet meer (HOLD, niet toepasselijk)", () => {
     const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
     zetMinimaleBasisNeer(versie.id);
     schrijfGeplandeVerkoopRegels(db, versie.id, [regelInvoer({ omschrijving: "" })]);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
     schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
-    expect(() => stelBegrotingVast(db, versie.id)).toThrow(/Geplande Verkoop bevat één of meer KRITIEKE controls/);
+    expect(() => stelBegrotingVast(db, versie.id)).not.toThrow();
+    expect(leesBegrotingsversie(db, versie.id)!.status).toBe("VASTGESTELD");
   });
 
-  it("4. ontbrekende geplande verkoopdatum: KRITIEK, blokkeert vaststellen", () => {
+  it("4. ontbrekende geplande verkoopdatum: KRITIEK op de module zelf, maar blokkeert vaststellen niet meer (HOLD, niet toepasselijk)", () => {
     const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
     zetMinimaleBasisNeer(versie.id);
     schrijfGeplandeVerkoopRegels(db, versie.id, [regelInvoer({ geplandeVerkoopdatum: null })]);
     schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
     schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
 
-    expect(() => stelBegrotingVast(db, versie.id)).toThrow(/Geplande Verkoop bevat één of meer KRITIEKE controls/);
+    expect(() => stelBegrotingVast(db, versie.id)).not.toThrow();
+    expect(leesBegrotingsversie(db, versie.id)!.status).toBe("VASTGESTELD");
   });
 
   it("5. ontbrekende verwachte verkoopopbrengst/boekwaarde/kosten: GEEN KRITIEK, mag vaststellen (OB039-008 — planning mag onvolledig zijn)", () => {

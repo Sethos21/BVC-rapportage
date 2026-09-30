@@ -4388,6 +4388,54 @@ export const MIGRATIONS: readonly Migration[] = [
       )`,
     ],
   },
+  /**
+   * Migratie 41 — product-readiness fix: Geplande Verkoop is contractueel HOLD (Master Contract §8,
+   * product-readiness audit §16) en neemt daarom niet meer deel aan `stelBegrotingVast`'s vaststel-gate
+   * (zie `vaststellen.ts`) — er is ook geen UI-route die de beoordeeld-vlag ooit zou kunnen zetten. Zonder
+   * deze migratie zou `schrijfFrozenGeplandeVerkoopResultaatZonderTransactie` nog steeds vastlopen op de
+   * database-eigen `CHECK (beoordeeld = 1)`/`CHECK (review_status IN ('REVIEWED_ZERO_RULES',
+   * 'REVIEWED_WITH_RULES'))` op `begroting_frozen_geplande_verkoop_resultaat` — dezelfde regel als de
+   * verwijderde applicatiegate, alleen op schemaniveau. SQLite ondersteunt geen ALTER TABLE ... ADD/DROP
+   * CHECK, dus de standaard tabelrebuild-procedure (zelfde patroon als migratie 25). Alleen
+   * `begroting_frozen_geplande_verkoop_resultaat` wordt herbouwd — `begroting_frozen_geplande_verkoop_regel`/
+   * `_control` hebben geen `beoordeeld`/`review_status`-kolom en zijn dus ongewijzigd. Geen financiële
+   * logica raakt dit — uitsluitend welke waarden de tabel mag opslaan.
+   */
+  {
+    version: 41,
+    description: "Geplande Verkoop (HOLD): frozen-resultaattabel staat beoordeeld=0/NOT_REVIEWED toe, geen vastgestelde vaststel-gate meer",
+    ddl: [
+      `ALTER TABLE begroting_frozen_geplande_verkoop_resultaat RENAME TO begroting_frozen_geplande_verkoop_resultaat_v40`,
+      `CREATE TABLE begroting_frozen_geplande_verkoop_resultaat (
+        begroting_versie_id TEXT PRIMARY KEY REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        beoordeeld INTEGER NOT NULL CHECK (beoordeeld IN (0, 1)),
+        review_status TEXT NOT NULL CHECK (review_status IN ('NOT_REVIEWED', 'REVIEWED_ZERO_RULES', 'REVIEWED_WITH_RULES'))
+      )`,
+      `INSERT INTO begroting_frozen_geplande_verkoop_resultaat SELECT * FROM begroting_frozen_geplande_verkoop_resultaat_v40`,
+      `DROP TABLE begroting_frozen_geplande_verkoop_resultaat_v40`,
+      `CREATE TRIGGER trg_begroting_frozen_geplande_verkoop_resultaat_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_frozen_geplande_verkoop_resultaat
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_geplande_verkoop_resultaat: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_geplande_verkoop_resultaat_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_frozen_geplande_verkoop_resultaat
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_geplande_verkoop_resultaat: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_frozen_geplande_verkoop_resultaat_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_frozen_geplande_verkoop_resultaat
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_frozen_geplande_verkoop_resultaat: begrotingsversie is VASTGESTELD, frozen output is immutable');
+       END`,
+    ],
+  },
 ];
 
 function schemaMetaTableExists(db: DatabaseSync): boolean {

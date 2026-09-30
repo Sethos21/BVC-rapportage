@@ -178,7 +178,10 @@ describe("atomiciteit / vervangen / rollback", () => {
     const geldigResultaat = berekenMetIds([regelInvoer()], [10]);
     schrijfFrozenGeplandeVerkoopResultaat(db, versie.id, geldigResultaat);
 
-    const kapotResultaat: HerberekendGeplandeVerkoopResultaat = { ...geldigResultaat, reviewStatus: "NOT_REVIEWED" as never };
+    // "NOT_REVIEWED" is sinds migratie 41 een toegestane waarde (Geplande Verkoop is HOLD, zie de
+    // "tweede beschermingslaag"-describe hieronder) — deze rollback-proef forceert de CHECK daarom nu
+    // met een waarde die nooit geldig is/was, ongeacht schemaversie.
+    const kapotResultaat: HerberekendGeplandeVerkoopResultaat = { ...geldigResultaat, reviewStatus: "ONGELDIGE_STATUS" as never };
     expect(() => schrijfFrozenGeplandeVerkoopResultaat(db, versie.id, kapotResultaat)).toThrow(/CHECK constraint failed/);
 
     const naMislukking = leesFrozenGeplandeVerkoopResultaat(db, versie.id)!;
@@ -253,19 +256,33 @@ describe("cascade/FK-gedrag", () => {
   });
 });
 
-describe("frozen CHECKs — tweede beschermingslaag (migratie 23)", () => {
-  it("beoordeeld = 0 wordt geweigerd (frozen output mag alleen ontstaan na een geslaagde vaststel-validatie)", () => {
+describe("frozen CHECKs — schema-invarianten (migratie 23, versoepeld in migratie 41)", () => {
+  it("beoordeeld = 0 is toegestaan (product-readiness fix: Geplande Verkoop is HOLD en neemt niet meer deel aan de vaststel-gate, migratie 41)", () => {
     const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
-    expect(() => db.prepare(`INSERT INTO begroting_frozen_geplande_verkoop_resultaat (begroting_versie_id, beoordeeld, review_status) VALUES (?, 0, 'REVIEWED_ZERO_RULES')`).run(versie.id)).toThrow(
-      /CHECK constraint failed/,
-    );
+    expect(() =>
+      db.prepare(`INSERT INTO begroting_frozen_geplande_verkoop_resultaat (begroting_versie_id, beoordeeld, review_status) VALUES (?, 0, 'NOT_REVIEWED')`).run(versie.id),
+    ).not.toThrow();
   });
 
-  it("review_status = NOT_REVIEWED wordt geweigerd", () => {
+  it("review_status = NOT_REVIEWED is toegestaan (idem, migratie 41)", () => {
     const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
-    expect(() => db.prepare(`INSERT INTO begroting_frozen_geplande_verkoop_resultaat (begroting_versie_id, beoordeeld, review_status) VALUES (?, 1, 'NOT_REVIEWED')`).run(versie.id)).toThrow(
-      /CHECK constraint failed/,
-    );
+    expect(() =>
+      db.prepare(`INSERT INTO begroting_frozen_geplande_verkoop_resultaat (begroting_versie_id, beoordeeld, review_status) VALUES (?, 0, 'NOT_REVIEWED')`).run(versie.id),
+    ).not.toThrow();
+  });
+
+  it("een echt ongeldige review_status-waarde wordt nog steeds geweigerd", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    expect(() =>
+      db.prepare(`INSERT INTO begroting_frozen_geplande_verkoop_resultaat (begroting_versie_id, beoordeeld, review_status) VALUES (?, 1, 'ONGELDIGE_STATUS')`).run(versie.id),
+    ).toThrow(/CHECK constraint failed/);
+  });
+
+  it("een echt ongeldige beoordeeld-waarde wordt nog steeds geweigerd", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    expect(() =>
+      db.prepare(`INSERT INTO begroting_frozen_geplande_verkoop_resultaat (begroting_versie_id, beoordeeld, review_status) VALUES (?, 2, 'REVIEWED_ZERO_RULES')`).run(versie.id),
+    ).toThrow(/CHECK constraint failed/);
   });
 
   it("geldige frozen resultaten roundtrippen nog steeds exact, mét alle CHECKs actief", () => {
