@@ -227,7 +227,7 @@ Andere posten, zoals Algemene kosten, rente, geplande verkoop of een aparte Leeg
 - De controlepagina is een afzonderlijke tweede pagina, geen technisch statuspaneel.
 - Vaststellen vereist bewuste beoordeling van alle zichtbare onderdelen. Aandachtspunten mogen blijven bestaan.
 - Na vaststellen is alles alleen-lezen. De huidige UX toont de vaststellingsdatum en geen naam van een beoordelaar of vaststeller.
-- De huidige werkweergave toont een opgeslagen-status en **Opslaan en sluiten**. Exact autosavegedrag en gelijktijdigheids-/vergrendelingsregels zijn in deze UX-gate niet nader vastgesteld.
+- De oorspronkelijke UX-gate legde het exacte autosave-/lockinggedrag hier nog niet vast. Een later expliciet Work-besluit heeft dit aangevuld: conceptbewerkingen worden automatisch opgeslagen; er is één bewerker tegelijk; na 15 minuten inactiviteit kan een andere gebruiker de bewerksessie bewust overnemen. Deze regels zijn functioneel vastgesteld maar nog niet volledig geïmplementeerd. Vastgesteld blijft immutable.
 
 ## 11. Relatie Begroting — Werkelijk — Estimated
 
@@ -254,16 +254,16 @@ Andere posten, zoals Algemene kosten, rente, geplande verkoop of een aparte Leeg
 - De exacte plaats en presentatie van deze begrotingsgegevens in de komende EBITDA-implementatie is nog niet vastgesteld.
 - Claude moet voor financiële definities en berekeningen de FO en bestaande architectuur raadplegen en conflicten melden.
 
-## 12. OPEN / NIET VASTGESTELD
+## 12. ACTUELE STATUS VAN OORSPRONKELIJK OPEN UX-PUNTEN
 
-Claude mag onderstaande punten niet zelfstandig oplossen:
+De onderstaande status verwerkt latere expliciete Work-besluiten en geaccepteerde implementatie. Claude mag resterende open punten nog steeds niet zelfstandig ontwerpen.
 
-1. De exacte visuele startflow voor een nieuwe begroting, inclusief administratie-/jaarselectie en alle algemene uitgangspunten buiten het huurindexatiepercentage.
-2. Een aanvullende huur-UX voor contractuele indexatiedata, belast/onbelast en het opvoeren van nieuwe contracten, voor zover de FO daarvoor businessregels bevat maar deze Work-UX geen afzonderlijk schermbesluit heeft vastgelegd.
-3. Exact autosavegedrag, overname na inactiviteit en één-bewerker-vergrendeling voor deze exploitatiebegroting.
-4. De algemene rapportage- en exportlayout van de volledige begroting. Alleen de WOZ-historie-CSV is inhoudelijk vastgesteld.
-5. Het maken, vergelijken en beheren van een nieuwe begrotingsversie na vaststelling.
-6. De precieze technische/datamodeluitbreiding voor OGB buiten reeds ondersteunde bronclassificaties.
-7. Afzonderlijke UX voor niet uitgewerkte posten zoals Algemene kosten, rente, geplande verkoop en een zelfstandige Leegstand-module.
-8. De exacte inpassing in de toekomstige EBITDA-implementatie.
+1. **Startflow — voldoende voor eerste productieproef.** De UX-richting Optie 1 is eerder gekozen. De huidige applicatie bevat functioneel administratiekeuze, bestaande begrotingen openen, begrotingsjaar, laatst afgesloten boekperiode en algemeen huurindexatiepercentage, plus starten van een CONCEPT-versie. Geen redesign vóór de eerste echte BVC-proef.
+2. **Aanvullende huur-UX — deels ingevuld, niet blokkerend.** Contractbasis, algemeen indexatiepercentage, contractoverrides en toekomstige contractuele kortingen zijn aangesloten. Nieuwe aanvullende UX alleen bij een concreet gebruiksgat of nieuw besluit.
+3. **Autosave/locking — functioneel vastgesteld, implementatie nog niet volledig.** Conceptbewerkingen automatisch opslaan; één bewerker tegelijk; bewuste overname na 15 minuten inactiviteit. Niet opnieuw als BUSINESSBESLISSING voorleggen.
+4. **Algemene rapportage/export — OPEN.** Alleen de WOZ-historie-CSV is inhoudelijk vastgesteld.
+5. **Nieuwe versie na vaststelling — UX OPEN.** Technische lineage-basis bestaat, maar maken/vergelijken/beheren is nog geen afgeronde gebruikersflow.
+6. **OGB-uitbreiding — geen generiek productgat.** Alleen uitbreiden voor concrete bewezen bronclassificaties; niet zelfstandig generiek ontwerpen.
+7. **Module-UX — grotendeels achterhaald door assemblage.** Algemene kosten, rente en Leegstand hebben inmiddels aangesloten detail-UI. Geplande verkoop blijft HOLD en krijgt geen UI zonder afzonderlijk besluit.
+8. **EBITDA — huidige begrotings-P&L bevat een afgeleide EBITDA-regel.** Een bredere toekomstige rapportage-/presentatie-inpassing blijft buiten deze UX-gate; bestaande financiële definities niet herontwerpen.
 
