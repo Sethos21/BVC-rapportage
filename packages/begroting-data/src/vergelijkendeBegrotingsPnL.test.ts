@@ -19,6 +19,7 @@ import {
   berekenWerkelijkRente,
   berekenWerkelijkVerzekeringen,
   berekenWerkelijkLeegstand,
+  type BgContractFeiten,
   type BgManagementInvoer,
   type PnLBronmappingRegel,
   type PnLRuweBoekingRegel,
@@ -38,13 +39,14 @@ import { schrijfGeplandOnderhoudBeoordeeld } from "./geplandOnderhoudBeoordeeld.
 import { schrijfGeplandeVerkoopBeoordeeld } from "./geplandeVerkoopBeoordeeld.js";
 import { schrijfLeegstandCategorieState } from "./leegstandCategorieState.js";
 import { schrijfModule1Aannames } from "./module1Aannames.js";
+import { schrijfModule1Overrides } from "./module1Overrides.js";
 import { schrijfModule1Snapshot } from "./module1Snapshot.js";
 import { schrijfModule3Invoer } from "./module3Invoer.js";
 import { schrijfNietVerrekenbareBtwState } from "./nietVerrekenbareBtwState.js";
 import { voegPnLBronmappingMutatieToe } from "./pnlBronmappingRepository.js";
 import { schrijfRenteCategorieState } from "./renteCategorieState.js";
 import { schrijfVerzekeringBeoordeeld } from "./verzekeringBeoordeeld.js";
-import { bepaalResterendeKwartalen, bepaalResterendeMaanden, bouwEstimatedPnLInvoer, leesVergelijkendeBegrotingsPnL } from "./vergelijkendeBegrotingsPnL.js";
+import { bepaalResterendeKwartalen, bepaalResterendeMaanden, bouwEstimatedPnLInvoer, leesHuurBeheerVoorstelRegels, leesVergelijkendeBegrotingsPnL } from "./vergelijkendeBegrotingsPnL.js";
 
 /**
  * TRANCHE 11 — bewijst dat de vergelijkende begrotings-P&L uitsluitend reeds bestaande,
@@ -239,5 +241,60 @@ describe("bepaalResterendeMaanden / bepaalResterendeKwartalen", () => {
   it("december (12): geen enkele maand of kwartaal resteert", () => {
     expect(bepaalResterendeMaanden("12")).toEqual([]);
     expect(bepaalResterendeKwartalen("12")).toEqual([]);
+  });
+});
+
+describe("leesHuurBeheerVoorstelRegels / Voorstel vs Jouw begroting voor Huur+Beheer (Tranche 12, §16)", () => {
+  const contract: BgContractFeiten = {
+    bedrijfsnr: "070",
+    contractnummer: "C1",
+    huurdernummer: null,
+    huurderNaam: "Testhuurder",
+    complexnummer: "001",
+    rentrollComponenten: [{ vorderingsoort: "01", bedragJaar: D(120000), btwYn: "Y" }],
+    ingangsdatum: new Date(Date.UTC(2020, 0, 1)),
+    einddatum: null,
+    indexatiedatum: null, // geen indexatiedatum dit jaar -> indexatie-effect blijft 0, override heeft dus geen effect op Huur zelf...
+    indexatieHerhalingMaanden: null,
+    toekomstigeKortingswijzigingen: [],
+  };
+
+  function bouwHuurVersie(): string {
+    const id = bouwVersie("070", 2027, D(0));
+    schrijfModule1Snapshot(db, id, [contract]);
+    return id;
+  }
+
+  it("zonder override: Voorstel en Jouw begroting voor Huuropbrengst belast zijn gelijk (beide = contractbasis + algemene indexatie)", () => {
+    zetGemeentelijkeLastenMapping("070");
+    const id = bouwHuurVersie();
+    const werkelijk = berekenPnLPeriode({ bedrijfsnr: "070", boekjaar: 2026, boekperiode: "06", opSysteemtijdstip: new Date() }, [], []).resultaat;
+    const resultaat = leesVergelijkendeBegrotingsPnL(db, { nieuweVersieId: id, vorigJaarVersieId: null }, werkelijk, estimatedInvoer());
+
+    const regel = vind(resultaat, "HUUROPBRENGST_BELAST");
+    expect(regel.jouwBegroting).toEqual({ status: "BEKEND", bedrag: D(120000) });
+    expect(regel.voorstel).toEqual({ type: "BEDRAG", bedrag: D(120000) });
+  });
+
+  it("met contractoverride: Voorstel blijft de contractbasis zonder override; Jouw begroting verschilt zodra de override een reëel indexatie-effect geeft", () => {
+    zetGemeentelijkeLastenMapping("070");
+    const id = bouwHuurVersie();
+    // Zet een indexatiedatum zodat een indexatiepercentage-override daadwerkelijk effect heeft.
+    schrijfModule1Snapshot(db, id, [{ ...contract, indexatiedatum: new Date(Date.UTC(2027, 0, 1)) }]);
+    schrijfModule1Overrides(db, id, [{ contractnummer: "C1", indexatiePercentage: D(10), scope: "VERSIE" }]);
+
+    const voorstelRegels = leesHuurBeheerVoorstelRegels(db, id)!;
+    const voorstelBelast = voorstelRegels.find((r) => r.regelSleutel === "HUUROPBRENGST_BELAST")!.waarde;
+    expect(voorstelBelast.status).toBe("BEKEND");
+    if (voorstelBelast.status === "BEKEND") expect(voorstelBelast.bedrag.toString()).toBe("123600"); // 120000 x 1.03 -- de algemene indexatie (bouwVersie: 3%), GEEN override
+
+    const werkelijk = berekenPnLPeriode({ bedrijfsnr: "070", boekjaar: 2026, boekperiode: "06", opSysteemtijdstip: new Date() }, [], []).resultaat;
+    const resultaat = leesVergelijkendeBegrotingsPnL(db, { nieuweVersieId: id, vorigJaarVersieId: null }, werkelijk, estimatedInvoer());
+    const regel = vind(resultaat, "HUUROPBRENGST_BELAST");
+
+    expect(regel.voorstel).toEqual({ type: "BEDRAG", bedrag: D(123600) }); // voorstel: algemene indexatie, geen override
+    if (regel.jouwBegroting!.status === "BEKEND") {
+      expect(regel.jouwBegroting!.bedrag.toString()).toBe("132000"); // jouw begroting: 120000 x 1.10, mét de override
+    }
   });
 });

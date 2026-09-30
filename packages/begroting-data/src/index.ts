@@ -531,6 +531,7 @@ export {
   bouwEstimatedPnLInvoer,
   bepaalResterendeMaanden,
   bepaalResterendeKwartalen,
+  leesHuurBeheerVoorstelRegels,
   type VergelijkendeBegrotingsPnLResultaat,
   type VergelijkendeBegrotingsPnLRegel,
   type VergelijkendeBegrotingsPnLVoorstel,

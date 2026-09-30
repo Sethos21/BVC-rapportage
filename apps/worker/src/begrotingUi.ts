@@ -83,7 +83,9 @@ function fmtWaarde(w: PnLBronBijdrage | null | undefined): string {
 }
 
 function fmtVoorstel(v: VergelijkendeBegrotingsPnLRegel["voorstel"]): string {
-  return v.type === "HANDMATIG" ? `<span class="naam-sub" style="display:inline">Handmatig opgebouwd</span>` : escapeHtml(fmtBedrag(v.bedrag));
+  if (v.type === "HANDMATIG") return `<span class="naam-sub" style="display:inline">Handmatig opgebouwd</span>`;
+  if (v.type === "ONBEKEND") return `<span class="onbekend">onbekend</span>`;
+  return escapeHtml(fmtBedrag(v.bedrag));
 }
 
 const LABELS: Record<string, string> = {

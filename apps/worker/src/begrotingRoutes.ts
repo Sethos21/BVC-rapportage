@@ -32,6 +32,7 @@ import { berekenPnLBoom, vergelijkPnLResultaten, type BgManagementInvoer, type B
 import { lijstAdministraties, leesAdministratieConfig } from "./administratie.js";
 import { begrotingsversiesDatabasePad } from "./paths.js";
 import { leesBegrotingsWerkomgeving } from "./begrotingWerkelijk.js";
+import { leesBgContractFeitenVoorAdministratie } from "./contractenRentrollAdapter.js";
 import { BOEKPERIODES } from "./serveUi.js";
 import {
   renderBegrotingHoofdscherm,
@@ -125,8 +126,9 @@ function laatstAfgeslotenBoekperiodeUitQuery(url: URL): string | null {
   return GELDIGE_PERIODES.has(waarde) ? waarde : null;
 }
 
-function hoofdschermUrl(administratieId: string, versieId: string, laatstAfgeslotenBoekperiode: string): string {
-  return `/begroting/${encodeURIComponent(administratieId)}/${encodeURIComponent(versieId)}?laatstAfgeslotenBoekperiode=${encodeURIComponent(laatstAfgeslotenBoekperiode)}`;
+function hoofdschermUrl(administratieId: string, versieId: string, laatstAfgeslotenBoekperiode: string, melding?: string): string {
+  const basis = `/begroting/${encodeURIComponent(administratieId)}/${encodeURIComponent(versieId)}?laatstAfgeslotenBoekperiode=${encodeURIComponent(laatstAfgeslotenBoekperiode)}`;
+  return melding !== undefined ? `${basis}&melding=${encodeURIComponent(melding)}` : basis;
 }
 
 async function toonHoofdscherm(res: ServerResponse, g: Geopend, laatstAfgeslotenBoekperiode: string, melding?: string): Promise<void> {
@@ -211,11 +213,17 @@ export async function handleBegrotingRequest(root: string, req: IncomingMessage,
     try {
       const versie = maakBegrotingsversie(db, { originType: "NIEUW", bedrijfsnr: config.bedrijfsnr, begrotingsjaar, bronPeildatum: new Date() });
       // UX §2 punt 2 / §4: het algemeen indexatiepercentage is het enige vooraf vastgestelde uitgangspunt — zonder deze
-      // Module-1-aannames kan de vergelijkende P&L (`herberekenBegroting`) nog niet rekenen. Module-1-contractsnapshot
-      // (echte rentroll-/contractdata) is in deze tranche nog niet aangesloten — zie het acceptatierapport.
-      schrijfModule1Snapshot(db, versie.id, []);
+      // Module-1-aannames kan de vergelijkende P&L (`herberekenBegroting`) nog niet rekenen.
+      // Tranche 12: de Module-1-contractsnapshot komt nu uit de echte, bewezen Contracten/RentRoll-bron (zie
+      // contractenRentrollAdapter.ts) — bevroren op het moment van aanmaken (UX/FO: "actuele contract-/RentRoll-
+      // snapshot bij het starten"), niet ververst zodra de bron later wijzigt (OB-017).
+      const contractenResultaat = leesBgContractFeitenVoorAdministratie(root, administratieId, config.bedrijfsnr);
+      schrijfModule1Snapshot(db, versie.id, contractenResultaat.contracten);
       schrijfModule1Aannames(db, versie.id, { begrotingsjaar, indexatiePercentage: indexatiePercentage! });
-      stuurRedirect(res, hoofdschermUrl(administratieId, versie.id, laatstAfgeslotenBoekperiode));
+      const melding = contractenResultaat.bronBeschikbaar
+        ? `Contractbasis geladen: ${contractenResultaat.contracten.length} contract(en) uit Contracten/RentRoll (${contractenResultaat.aantalContractenNaFilter} van ${contractenResultaat.aantalRuweContractenRegels} contractregels na administratiefilter).`
+        : "Geen Contracten- en/of RentRoll-bronbestand gevonden voor deze administratie — Huur/Beheer starten leeg (onbekend), niet als bevestigde €0.";
+      stuurRedirect(res, hoofdschermUrl(administratieId, versie.id, laatstAfgeslotenBoekperiode, melding));
     } finally {
       db.close();
     }
@@ -239,7 +247,8 @@ export async function handleBegrotingRequest(root: string, req: IncomingMessage,
       stuurRedirect(res, `/begroting?administratieId=${encodeURIComponent(administratieId)}`);
       return true;
     }
-    await toonHoofdscherm(res, g, laatstAfgeslotenBoekperiode);
+    const melding = url.searchParams.get("melding");
+    await toonHoofdscherm(res, g, laatstAfgeslotenBoekperiode, melding ?? undefined);
     return true;
   }
 

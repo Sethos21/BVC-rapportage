@@ -1,7 +1,11 @@
 import type { DatabaseSync } from "node:sqlite";
 import Decimal from "decimal.js";
 import {
+  beheerBegrotingNaarPnLBovenEbitdaRegels,
+  berekenBegroteBeheersvergoeding,
+  berekenBegroteHuuropbrengsten,
   berekenPnLBoom,
+  huurBegrotingNaarPnLBovenEbitdaRegels,
   type BgOnderhoudKwartaal,
   type PnLBronBijdrage,
   type PnLGroepBovenEbitda,
@@ -11,6 +15,10 @@ import {
   type PurePnLResultaat,
 } from "@bvc/reporting";
 import { leesBegrotingPnLRegels, leesEstimatedPnLRegels, type EstimatedPnLInvoer } from "./begrotingPnL.js";
+import { leesBegrotingsversie } from "./begrotingsversies.js";
+import { leesModule1Aannames } from "./module1Aannames.js";
+import { leesModule1Snapshot } from "./module1Snapshot.js";
+import { leesModule2Config } from "./module2Config.js";
 
 /**
  * TRANCHE 11 — de vergelijkende begrotings-P&L: de werkomgeving waarin de nieuwe
@@ -32,17 +40,50 @@ import { leesBegrotingPnLRegels, leesEstimatedPnLRegels, type EstimatedPnLInvoer
  *
  * VOORSTEL NIEUW BEGROTINGSJAAR (FO §8/§10, UX §3): uitsluitend voor de posten waarvoor de FO
  * al een automatische berekening voorschrijft (Huur belast/onbelast, Beheersvergoeding,
- * Verzekeringen, Gemeentelijke lasten pand) — voor die posten IS de door het systeem berekende
- * "Jouw begroting nieuw jaar" (vóór een eventuele losse handmatige aanpassing) per constructie
- * ook het voorstel, dus wordt hier geen aparte, tweede "voorstel-zonder-overrides"-berekening
- * uitgevoerd (dat is een grotere, aparte uitbreiding — zie acceptatierapport "resterend werk").
- * Elke andere post krijgt `{ type: "HANDMATIG" }` ("Handmatig opgebouwd", UX §3 punt 5) — nooit
- * een verzonnen voorstelalgoritme.
+ * Verzekeringen, Gemeentelijke lasten pand). Elke andere post krijgt `{ type: "HANDMATIG" }`
+ * ("Handmatig opgebouwd", UX §3 punt 5) — nooit een verzonnen voorstelalgoritme.
+ *
+ * HUUR/BEHEER — ECHT VOORSTEL-ZONDER-OVERRIDE (Tranche 12, §16): voor deze twee posten wordt
+ * Voorstel nu daadwerkelijk apart berekend van Jouw begroting: `leesHuurBeheerVoorstelRegels`
+ * roept de ONGEWIJZIGDE pure `berekenBegroteHuuropbrengsten`/`berekenBegroteBeheersvergoeding`
+ * aan met een LEGE overridelijst (`[]`) — exact dezelfde contractsnapshot/aannames/configs als
+ * de echte berekening, alleen zonder de per-contract overrides. Voorstel = contractbasis +
+ * algemene indexatie; Jouw begroting = hetzelfde, mét de eventuele overrides. Geen nieuwe
+ * financiële formule — uitsluitend een tweede aanroep van bestaande, ongewijzigde functies.
+ * Alleen zinvol op een CONCEPT-versie (module1Snapshot/aannames/configs zijn concept-input);
+ * op een VASTGESTELDE versie blijft Voorstel gelijk aan de bevroren Jouw-begroting-waarde, zoals
+ * al in Tranche 11.
+ *
+ * VERZEKERINGEN/GEMEENTELIJKE LASTEN blijven vooralsnog het Tranche-11-gedrag (Voorstel =
+ * Jouw-begroting-waarde) — buiten scope van Tranche 12 (§16 noemt uitdrukkelijk Huur en Beheer).
  */
 
 const VOORSTEL_AUTOMATISCH_SLEUTELS: ReadonlySet<string> = new Set(["HUUROPBRENGST_BELAST", "HUUROPBRENGST_ONBELAST", "BEHEERKOSTEN", "VERZEKERINGEN", "GEMEENTELIJKE_LASTEN"]);
+const HUUR_BEHEER_ECHT_VOORSTEL_SLEUTELS: ReadonlySet<string> = new Set(["HUUROPBRENGST_BELAST", "HUUROPBRENGST_ONBELAST", "BEHEERKOSTEN"]);
 
-export type VergelijkendeBegrotingsPnLVoorstel = { type: "BEDRAG"; bedrag: Decimal } | { type: "HANDMATIG" };
+export type VergelijkendeBegrotingsPnLVoorstel = { type: "BEDRAG"; bedrag: Decimal } | { type: "ONBEKEND" } | { type: "HANDMATIG" };
+
+/**
+ * Voorstel nieuw begrotingsjaar voor Huur + Beheer, ZONDER contractoverrides — hergebruikt de
+ * bestaande, ongewijzigde pure calculators en de bestaande Begroting-P&L-adapters. `null` als er
+ * nog geen Module-1-aannames zijn (kan sowieso nog niet rekenen, zelfde voorwaarde als
+ * `herberekenBegroting`). Leest, schrijft nooit.
+ */
+export function leesHuurBeheerVoorstelRegels(db: DatabaseSync, versieId: string): PurePnLBovenEbitdaRegel[] | null {
+  const versie = leesBegrotingsversie(db, versieId);
+  if (versie === null) {
+    throw new Error(`Begrotingsversie ${versieId} bestaat niet.`);
+  }
+  const aannames = leesModule1Aannames(db, versieId);
+  if (aannames === null) return null;
+
+  const contracten = leesModule1Snapshot(db, versieId);
+  const module1Voorstel = berekenBegroteHuuropbrengsten(contracten, [], aannames, versie.bronPeildatum);
+  const configs = leesModule2Config(db, versieId);
+  const module2Voorstel = berekenBegroteBeheersvergoeding(module1Voorstel, configs);
+
+  return [...huurBegrotingNaarPnLBovenEbitdaRegels(module1Voorstel), ...beheerBegrotingNaarPnLBovenEbitdaRegels(module2Voorstel)];
+}
 
 export interface VergelijkendeBegrotingsPnLRegel {
   regelSleutel: string;
@@ -86,7 +127,12 @@ export function leesVergelijkendeBegrotingsPnL(
   werkelijkResultaat: PurePnLResultaat,
   estimatedInvoer: EstimatedPnLInvoer,
 ): VergelijkendeBegrotingsPnLResultaat {
+  const nieuweVersie = leesBegrotingsversie(db, input.nieuweVersieId);
+  if (nieuweVersie === null) {
+    throw new Error(`Begrotingsversie ${input.nieuweVersieId} bestaat niet.`);
+  }
   const jouwBegroting = berekenPnLBoom("BEGROTING_NIEUW_JAAR", leesBegrotingPnLRegels(db, input.nieuweVersieId));
+  const huurBeheerVoorstelRegels = nieuweVersie.status === "CONCEPT" ? leesHuurBeheerVoorstelRegels(db, input.nieuweVersieId) : null;
 
   let begrotingVorigJaar: PurePnLResultaat | null = null;
   let estimated: PurePnLResultaat | null = null;
@@ -107,8 +153,17 @@ export function leesVergelijkendeBegrotingsPnL(
 
   const regels: VergelijkendeBegrotingsPnLRegel[] = [...canon.entries()].map(([regelSleutel, { boomPositie, groep }]) => {
     const jouwWaarde = vindWaarde(jouwBegroting, regelSleutel);
-    const voorstel: VergelijkendeBegrotingsPnLVoorstel =
-      VOORSTEL_AUTOMATISCH_SLEUTELS.has(regelSleutel) && jouwWaarde !== null && jouwWaarde.status !== "ONBEKEND" ? { type: "BEDRAG", bedrag: jouwWaarde.bedrag } : { type: "HANDMATIG" };
+    const voorstel: VergelijkendeBegrotingsPnLVoorstel = (() => {
+      if (!VOORSTEL_AUTOMATISCH_SLEUTELS.has(regelSleutel)) return { type: "HANDMATIG" };
+      if (HUUR_BEHEER_ECHT_VOORSTEL_SLEUTELS.has(regelSleutel) && huurBeheerVoorstelRegels !== null) {
+        const voorstelWaarde = huurBeheerVoorstelRegels.find((r) => r.regelSleutel === regelSleutel)?.waarde;
+        if (voorstelWaarde === undefined) return { type: "HANDMATIG" };
+        return voorstelWaarde.status === "ONBEKEND" ? { type: "ONBEKEND" } : { type: "BEDRAG", bedrag: voorstelWaarde.bedrag };
+      }
+      // Verzekeringen/Gemeentelijke lasten (Tranche 11-gedrag) en Huur/Beheer op een VASTGESTELDE versie: Voorstel = Jouw begroting.
+      if (jouwWaarde === null) return { type: "HANDMATIG" };
+      return jouwWaarde.status === "ONBEKEND" ? { type: "ONBEKEND" } : { type: "BEDRAG", bedrag: jouwWaarde.bedrag };
+    })();
     return {
       regelSleutel,
       boomPositie,
