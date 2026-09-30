@@ -60,15 +60,18 @@ Geaccepteerde tranche-HEADs:
 - **Tranche 9: `cda3baf` — TECHNISCH VOLLEDIG GESLOTEN 29-09-2026.**
 - **Tranche 10: `50121a7` — Rente leningen + Opbrengst rente technisch afgerond 29-09-2026.**
 - **Tranche 11: `efb6074` — eerste geïntegreerde begrotingswerkomgeving geaccepteerd 30-09-2026.**
+- **Tranche 12: `7f09561` — Contracten/RentRoll → frozen Module1Snapshot + Huur/Beheer detailworkflow geaccepteerd 30-09-2026.**
 
 ### Huur
-Budget/Werkelijk/Estimated/P&L gereed. Estimated gebruikt frozen Budget-contractsnapshot + Actual; refreshed-contract-state forecast is toekomstig werk.
+Budget/Werkelijk/Estimated/P&L gereed. Tranche 12 koppelt bewezen Contracten + RentRoll aan `BgContractFeiten[]` en een frozen `Module1Snapshot`; Huur-detail-UX is aangesloten. Voorstel gebruikt contractbasis + algemene indexatie zonder contractoverride; `Jouw begroting` gebruikt de beoordeelde overrides. Estimated gebruikt frozen Budget-contractsnapshot + Actual; refreshed-contract-state forecast is toekomstig werk. Toekomstige kortingswijzigingen uit `contract_prijsregels.xlsx` zijn bronmatig bewezen maar ingestie/kandidaat-resolutie is nog niet gebouwd.
 
 ### Beheersvergoeding
-Budget/Werkelijk/Estimated/P&L gereed.
+Budget/Werkelijk/Estimated/P&L gereed. Tranche 12 sluit de detail-UX aan en gebruikt de contract-afgeleide netto begrote huur uit Module 1 als grondslag voor de bestaande variabele beheersvergoeding.
 
 ### Managementvergoeding
 Budget/Estimated/P&L gereed; Actual 070 blijft `BRONGAT`.
+
+**Definitief functioneel besluit:** de variabele Managementvergoeding wordt berekend als het vastgelegde percentage over de **netto begrote jaarhuur**. De netto begrote jaarhuur komt uit dezelfde contract-afgeleide Module-1-huurbegroting. Dit is geen Actual-mapping en lost het 070-`BRONGAT` voor Werkelijk Management niet op. Vaste en variabele Managementvergoeding blijven afzonderlijke componenten conform het bestaande functionele ontwerp.
 
 ### Onderhoud
 Budget gereed; Actual en Estimated op totaalniveau; Actual nooit splitsen in gepland/correctief. Werkelijk kan boekhouddimensies Gebouwen/Terrein/Installaties behouden.
@@ -165,3 +168,14 @@ Bouw de ontbrekende echte Contracten/RentRoll → `Module1Snapshot`-keten en slu
 Doel: een nieuwe begroting gebruikt echte contract-/rentrollbronfeiten voor de huurgrondslag in plaats van lege/handmatig gefabriceerde snapshots. Bronfeiten en begrotingsaannames blijven strikt gescheiden. Geen refreshed-contract-state forecast bouwen tenzij afzonderlijk opgedragen. Daarna moeten Huur en Beheersvergoeding via de vastgestelde detail-UX daadwerkelijk bewerkbaar zijn.
 
 Bouw geen brede visuele redesign en open geen onafhankelijke modules opnieuw. Indien de bronstructuur van Contracten/RentRoll onvoldoende bewezen is: `BRONGAT`; bij noodzakelijke nieuwe functionele keuze: `BUSINESSBESLISSING`.
+
+
+## 13. Tranche 12 — geaccepteerd
+
+Eind-HEAD `7f0956139f0d077440d4f656592fc104cb8daa24` is geaccepteerd. De echte bronketen Contracten + RentRoll → `BgContractFeiten[]` → frozen `Module1Snapshot` → Huur → Beheersvergoeding → begrotings-P&L is aangesloten. De read-only productieproef op 070_Rooise_Zoom reproduceerde de eerder bewezen contracttotalen; fixturetests blijven als fixture gelabeld.
+
+Resterend huurpunt: `contract_prijsregels.xlsx` / `contracten_huidig_met_prijzen.xlsx` naar `BgToekomstigeKortingswijziging`, inclusief kandidaat-resolutielaag. Het bronfeit is bewezen; de ingestie/resolutie is nog niet gebouwd. Dit is bouwrestant, geen reden om Tranche 12 te heropenen.
+
+## 14. Volgende fase — Tranche 13
+
+Tranche 13 sluit eerst de ontbrekende toekomstige kortingswijzigingen aan en maakt daarna **Gepland onderhoud** daadwerkelijk invulbaar via de reeds vastgestelde UX. Hergebruik de bestaande onderhouds-Budget/Estimated/P&L-logica. Actual blijft uitsluitend op onderhoud-totaalniveau; splits Actual nooit kunstmatig in gepland/correctief. Bouw geen andere detailmodules in deze tranche.
