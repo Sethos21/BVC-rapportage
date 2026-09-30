@@ -104,3 +104,17 @@ Bouwregels vanaf deze acceptatie:
 ## 14. Post-Tranche-13 delta — geaccepteerd
 
 Eind-HEAD `e150d93`. Generieke read-only terugblik is gesloten: alle aangesloten detailmodules blijven na vaststellen via GET leesbaar met dezelfde renderers en schrijfacties blijven geblokkeerd. `contract_prijsregels.xlsx` is als optionele bron aangesloten; toekomstige VS13-kortingswijzigingen worden deterministisch per administratie + contract + exacte ingangsdatum opgelost. Alleen unanieme bedragen worden toegepast; conflict = lokaal `BRONGAT`. Geen Status-/nieuwste-regel-/fuzzy heuristiek. De resulterende korting loopt via Module 1 door naar netto huur en variabele Beheersvergoeding.
+
+
+## 15. Product-readiness gate en eerstvolgende delta — 30-09-2026
+
+De actuele productaudit heeft één minimale workflowblokkade aangetoond: Geplande verkoop staat contractueel HOLD maar wordt nog door de historische vaststel-gate verplicht beoordeeld. Contractbesluit: een HOLD/niet-toepasselijk onderdeel neemt niet deel aan de vaststel-gate. Bouw **geen** Geplande-verkoop-UI als workaround; verwijder uitsluitend deze orphaned gate met gerichte testdekking en regressie.
+
+Na deze fix geen nieuwe financiële tranche starten. Eerst een echte single-user BVC-begroting doorlopen van start tot terugkijken. Bekende BRONGATs zijn geen workflowblokkade.
+
+Voor vervolgwerk geldt bovendien:
+- huidige functionele startflow niet redesignen vóór de productieproef;
+- BTW, Rente leningen, Opbrengst rente en de aangesloten Leegstand-detailflow zijn reeds UI-aangesloten;
+- autosave/locking is functioneel besloten (autosave concept, één bewerker, overname na 15 minuten inactiviteit) maar nog niet volledig geïmplementeerd; niet zelfstandig bouwen vóór de productieproef;
+- algemene export/reporting en nieuwe-versie-UX blijven open;
+- technische versie-lineage die al bestaat niet verwarren met een afgeronde gebruikersflow.
