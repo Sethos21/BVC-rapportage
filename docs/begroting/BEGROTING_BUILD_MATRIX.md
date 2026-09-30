@@ -1,8 +1,8 @@
 # BEGROTING_BUILD_MATRIX
 
 Bijgewerkt: 30 september 2026  
-Geaccepteerde code-HEAD: `e150d93`  
-Post-Tranche-13 delta: GEACCEPTEERD. Generieke read-only terugblik en toekomstige contractuele huurkortingen gesloten.
+Geaccepteerde code-HEAD: `9a3381b`  
+Post-Tranche-13 delta: GEACCEPTEERD. Generieke read-only terugblik en toekomstige contractuele huurkortingen gesloten. Product-readiness fix `9a3381b`: GEACCEPTEERD; Geplande Verkoop (HOLD) blokkeert vaststellen niet meer.
 
 | Module | Begroting | Werkelijk | Estimated | P&L-integratie | Productie/UI | Resterend gat |
 |---|---|---|---|---|---|---|
@@ -21,7 +21,7 @@ Post-Tranche-13 delta: GEACCEPTEERD. Generieke read-only terugblik en toekomstig
 | Canon erfpacht | HOLD | HOLD | HOLD | HOLD | HOLD | uit scope |
 | Opbrengst rente | GEREED | BRONGAT 070 / bewezen 013 | GEREED | GEREED onder EBITDA | invoer-UI aangesloten | mapping 070 |
 | Rente leningen | GEREED | BRONGAT 070 / bewezen 023 | GEREED | GEREED onder EBITDA | invoer-UI aangesloten | mapping 070 |
-| Geplande verkoop | HOLD | HOLD | n.v.t./afhankelijk | HOLD | HOLD | uit vaststel-gate verwijderen; geen UI bouwen |
+| Geplande verkoop | HOLD | HOLD | n.v.t./afhankelijk | HOLD | HOLD | vaststel-gate verwijderd in `9a3381b`; geen UI bouwen |
 
 ## Geaccepteerde tranchehistorie
 
@@ -36,6 +36,7 @@ Post-Tranche-13 delta: GEACCEPTEERD. Generieke read-only terugblik en toekomstig
 - Tranche 12: `7f09561` — bewezen Contracten/RentRoll-adapter, frozen Module1Snapshot, echte Voorstel/Jouw-begroting-scheiding voor Huur en Huur/Beheer-detailworkflow.
 - Tranche 13: `007e89f` — assemblage Gepland onderhoud, Verzekeringen, Gemeentelijke lasten/WOZ, Algemene kosten en Leegstand; databasepad-unificatie.
 - Post-Tranche-13 delta: `e150d93` — generieke read-only detailterugblik + deterministische toekomstige contractuele huurkortingen.
+- Product-readiness fix: `9a3381b` — Geplande Verkoop (HOLD) uit vaststel-gate + migratie 41; overige gates ongewijzigd.
 
 ## Besluit §8.10 — 29-09-2026
 
@@ -57,13 +58,13 @@ Vastgestelde UX-set: `docs/begroting/ux/`, commit `5379798`. De Productie/UI-kol
 - Autosave/locking: functioneel besloten in Work (autosave concept; één bewerker; overname na 15 minuten inactiviteit), nog niet volledig geïmplementeerd; na eerste single-user productieproef prioriteren.
 - Algemene export/reporting: werkelijk open.
 - Versiebeheer-UX na vaststelling: werkelijk open; technische lineage-basis bestaat al.
-- Geplande verkoop: HOLD en daarom niet toepasselijk voor beoordeling/vaststellen. Historische orphaned gate is de eerstvolgende minimale codedelta.
+- Geplande verkoop: HOLD en daarom niet toepasselijk voor beoordeling/vaststellen. Historische orphaned gate is gesloten in `9a3381b`.
 - Canon/Erfpacht: HOLD.
 - Toekomstige mappings: uitsluitend na bronbewijs.
 
 ## Eerstvolgende stap
 
-Geen nieuwe financiële tranche. Verwijder uitsluitend de Geplande-verkoop-HOLD uit de vaststel-gate, test dit gericht en voer regressie uit. Daarna eerst een echte single-user BVC-begroting als productacceptatie: starten → invullen → controleren → vaststellen → terugkijken.
+Geen nieuwe financiële tranche. Product-readiness fix `9a3381b` is geaccepteerd. Voer nu eerst een echte single-user BVC-begroting als productacceptatie uit: starten → invullen → controleren → vaststellen → terugkijken. Alleen concrete bevindingen uit deze proef openen eventueel een volgende delta.
 
 
 ## Tranche 12 — eerstvolgende bouwfase
