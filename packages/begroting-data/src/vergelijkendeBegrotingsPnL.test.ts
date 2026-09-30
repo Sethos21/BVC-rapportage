@@ -41,6 +41,7 @@ import { schrijfLeegstandCategorieState } from "./leegstandCategorieState.js";
 import { schrijfModule1Aannames } from "./module1Aannames.js";
 import { schrijfModule1Overrides } from "./module1Overrides.js";
 import { schrijfModule1Snapshot } from "./module1Snapshot.js";
+import { schrijfModule2Config } from "./module2Config.js";
 import { schrijfModule3Invoer } from "./module3Invoer.js";
 import { schrijfNietVerrekenbareBtwState } from "./nietVerrekenbareBtwState.js";
 import { voegPnLBronmappingMutatieToe } from "./pnlBronmappingRepository.js";
@@ -296,5 +297,21 @@ describe("leesHuurBeheerVoorstelRegels / Voorstel vs Jouw begroting voor Huur+Be
     if (regel.jouwBegroting!.status === "BEKEND") {
       expect(regel.jouwBegroting!.bedrag.toString()).toBe("132000"); // jouw begroting: 120000 x 1.10, mét de override
     }
+  });
+
+  it("Tranche 13, restpunt Management-grondslag: Beheersvergoeding (variabel deel) gebruikt aantoonbaar de NETTO begrote jaarhuur uit Module 1 (na override/indexatie), nooit de bruto/RentRoll-huur", () => {
+    zetGemeentelijkeLastenMapping("070");
+    const id = bouwHuurVersie();
+    schrijfModule1Snapshot(db, id, [{ ...contract, indexatiedatum: new Date(Date.UTC(2027, 0, 1)) }]);
+    schrijfModule1Overrides(db, id, [{ contractnummer: "C1", indexatiePercentage: D(10), scope: "VERSIE" }]);
+    schrijfModule2Config(db, id, [{ complexnummer: "001", vastBedragJaar: null, vastIndexatiePercentage: null, vastIndexatiedatum: null, variabelPercentage: D(5) }]);
+
+    const werkelijk = berekenPnLPeriode({ bedrijfsnr: "070", boekjaar: 2026, boekperiode: "06", opSysteemtijdstip: new Date() }, [], []).resultaat;
+    const resultaat = leesVergelijkendeBegrotingsPnL(db, { nieuweVersieId: id, vorigJaarVersieId: null }, werkelijk, estimatedInvoer());
+    const beheer = vind(resultaat, "BEHEERKOSTEN");
+
+    // Netto huur mét override/indexatie is 132.000 (zie vorige test) -> 5% variabele beheersvergoeding = 6.600. De bruto
+    // RentRoll-huur (120.000, vóór indexatie/override) zou 6.000 hebben gegeven -- dit bewijst dat NIET die bruto waarde is gebruikt.
+    expect(beheer.jouwBegroting).toEqual({ status: "BEKEND", bedrag: D(6600) });
   });
 });
