@@ -1,14 +1,14 @@
 # BEGROTING_BUILD_MATRIX
 
 Bijgewerkt: 30 september 2026  
-Geaccepteerde code-HEAD: `efb6074`  
-Tranche 11: GEACCEPTEERD als eerste geïntegreerde begrotingswerkomgeving. Volgende: Tranche 12 Contracten/RentRoll → Module1Snapshot + Huur/Beheer detailworkflow.
+Geaccepteerde code-HEAD: `7f09561`  
+Tranche 12: GEACCEPTEERD. Contracten/RentRoll → frozen Module1Snapshot + Huur/Beheer detailworkflow gereed. Volgende: Tranche 13 toekomstige kortingswijzigingen + Gepland onderhoud detailworkflow.
 
 | Module | Begroting | Werkelijk | Estimated | P&L-integratie | Productie/UI | Resterend gat |
 |---|---|---|---|---|---|---|
-| Huur | GEREED | GEREED | GEREED | GEREED | hoofd-P&L aangesloten; detail editor nog niet | echte Contracten/RentRoll → Module1Snapshot-adapter ontbreekt; detail-UX |
-| Beheersvergoeding | GEREED | GEREED | GEREED | GEREED | hoofd-P&L aangesloten; detail editor nog niet | contract-afgeleide basis via Module1Snapshot + detail-UX |
-| Managementvergoeding | GEREED | BRONGAT 070 | GEREED, onbekend zonder mapping | GEREED | invoer-UI aangesloten | Actual-mapping 070; contract-afgeleide huurbasis na Tranche 12 |
+| Huur | GEREED | GEREED | GEREED | GEREED | hoofd-P&L + detail-UX aangesloten; echte Contracten/RentRoll-snapshot | toekomstige kortingswijzigingen ingestie/resolutie |
+| Beheersvergoeding | GEREED | GEREED | GEREED | GEREED | hoofd-P&L + detail-UX; contract-afgeleide netto huurbasis | geen kernlogica-gat |
+| Managementvergoeding | GEREED | BRONGAT 070 | GEREED, onbekend zonder mapping | GEREED | invoer-UI aangesloten | variabele component moet netto begrote jaarhuur uit Module 1 gebruiken; Actual-mapping 070 blijft BRONGAT |
 | Onderhoud totaal | GEREED | GEREED totaal | GEREED totaal | GEREED | UI niet gebouwd | presentatie/rule-key alignment |
 | Verzekeringen | GEREED | GEREED module / BRONGAT per polis | GEREED | GEREED | UI niet gebouwd | presentatie-alignment; Actual per polis |
 | Gemeentelijke lasten / WOZ | GEREED | GEREED | GEREED | GEREED | service voor UI aanwezig | geen domeingat |
@@ -33,6 +33,7 @@ Tranche 11: GEACCEPTEERD als eerste geïntegreerde begrotingswerkomgeving. Volge
 - Tranche 9: `cda3baf` — TECHNISCH VOLLEDIG GESLOTEN; §8.10 + Niet verrekenbare BTW Budget/Werkelijk/Estimated/P&L.
 - Tranche 10: `50121a7` — Rente leningen + Opbrengst rente Budget/Werkelijk/Estimated/P&L; migratie 40.
 - Tranche 11: `efb6074` — eerste geïntegreerde `/begroting`-werkomgeving; vergelijkende P&L, Werkelijk/Estimated-koppeling, vijf invoermodules, controle/vaststellen/terugkijken. Geaccepteerd als integratieketen, niet als volledig afgeronde module.
+- Tranche 12: `7f09561` — bewezen Contracten/RentRoll-adapter, frozen Module1Snapshot, echte Voorstel/Jouw-begroting-scheiding voor Huur en Huur/Beheer-detailworkflow.
 
 ## Besluit §8.10 — 29-09-2026
 
@@ -63,3 +64,15 @@ Vastgestelde UX-set: `docs/begroting/ux/`, commit `5379798`. De Productie/UI-kol
 Bouw eerst de ontbrekende echte Contracten/RentRoll → `Module1Snapshot`-adapter. Sluit vervolgens Huur en Beheersvergoeding via de vastgestelde detail-UX aan op de bestaande begrotingsworkflow. De contractbron levert feiten; indexatie/overrides en overige begrotingskeuzes blijven aannames. Managementvergoeding hergebruikt de contract-afgeleide huurbasis conform bestaand contract. Geen refreshed-contract-state forecast in deze tranche.
 
 De Tranche-11 test met €1.200 Werkelijk is een XLSX-fixture door de echte productiecodeketen en mag niet worden geregistreerd als werkelijk financieel resultaat van administratie 070.
+
+
+## Definitief Managementbesluit — 30-09-2026
+
+De variabele Managementvergoeding gebruikt als grondslag de **netto begrote jaarhuur uit Module 1**. Dit is een Budget-/begrotingsgrondslag en staat los van Werkelijk Management. Het bestaande Actual-BRONGAT voor administratie 070 blijft bestaan en mag niet worden gemaskeerd.
+
+## Tranche 13 — eerstvolgende bouwfase
+
+1. Sluit de reeds bewezen toekomstige kortingswijzigingen uit `contract_prijsregels.xlsx` / `contracten_huidig_met_prijzen.xlsx` aan op `BgToekomstigeKortingswijziging` met expliciete kandidaat-resolutie; geen stille keuze bij conflict.
+2. Sluit daarna Gepland onderhoud via de vastgestelde UX aan op de bestaande begrotingsworkflow.
+3. Actual onderhoud blijft totaalniveau; geen kunstmatige verdeling gepland/correctief.
+4. Verzekeringen, Gemeentelijke lasten/WOZ, Algemene kosten en Leegstand blijven buiten Tranche 13.
