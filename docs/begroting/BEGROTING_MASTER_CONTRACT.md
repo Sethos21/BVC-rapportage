@@ -61,17 +61,16 @@ Geaccepteerde tranche-HEADs:
 - **Tranche 10: `50121a7` — Rente leningen + Opbrengst rente technisch afgerond 29-09-2026.**
 - **Tranche 11: `efb6074` — eerste geïntegreerde begrotingswerkomgeving geaccepteerd 30-09-2026.**
 - **Tranche 12: `7f09561` — Contracten/RentRoll → frozen Module1Snapshot + Huur/Beheer detailworkflow geaccepteerd 30-09-2026.**
+- **Tranche 13: `007e89f` — assemblage bestaande begrotingsmodule geaccepteerd 30-09-2026.**
 
 ### Huur
 Budget/Werkelijk/Estimated/P&L gereed. Tranche 12 koppelt bewezen Contracten + RentRoll aan `BgContractFeiten[]` en een frozen `Module1Snapshot`; Huur-detail-UX is aangesloten. Voorstel gebruikt contractbasis + algemene indexatie zonder contractoverride; `Jouw begroting` gebruikt de beoordeelde overrides. Estimated gebruikt frozen Budget-contractsnapshot + Actual; refreshed-contract-state forecast is toekomstig werk. Toekomstige kortingswijzigingen uit `contract_prijsregels.xlsx` zijn bronmatig bewezen maar ingestie/kandidaat-resolutie is nog niet gebouwd.
 
 ### Beheersvergoeding
-Budget/Werkelijk/Estimated/P&L gereed. Tranche 12 sluit de detail-UX aan en gebruikt de contract-afgeleide netto begrote huur uit Module 1 als grondslag voor de bestaande variabele beheersvergoeding.
+Budget/Werkelijk/Estimated/P&L gereed. Tranche 12 sluit de detail-UX aan. **Definitief functioneel besluit, gecorrigeerd na Tranche 13:** Beheersvergoeding bestaat uit het bestaande vaste en variabele deel; het variabele deel wordt berekend als het vastgelegde percentage over de **netto begrote jaarhuur uit Module 1**. Tranche 13 bewijst deze grondslag technisch. Dit besluit hoort bij Beheersvergoeding, niet bij Managementvergoeding.
 
 ### Managementvergoeding
-Budget/Estimated/P&L gereed; Actual 070 blijft `BRONGAT`.
-
-**Definitief functioneel besluit:** de variabele Managementvergoeding wordt berekend als het vastgelegde percentage over de **netto begrote jaarhuur**. De netto begrote jaarhuur komt uit dezelfde contract-afgeleide Module-1-huurbegroting. Dit is geen Actual-mapping en lost het 070-`BRONGAT` voor Werkelijk Management niet op. Vaste en variabele Managementvergoeding blijven afzonderlijke componenten conform het bestaande functionele ontwerp.
+Budget/Estimated/P&L gereed; Actual 070 blijft `BRONGAT`. Managementvergoeding blijft conform de bestaande Module-3-systematiek (nieuwe vergoeding / bestaand indexeren / bestaand wijzigen). **Er wordt geen percentage-over-huurmechanisme aan Managementvergoeding toegevoegd.** De eerdere contracttekst die een variabele Managementvergoeding aan netto begrote jaarhuur koppelde was een terminologieverwisseling met Beheersvergoeding en is hierbij ingetrokken.
 
 ### Onderhoud
 Budget gereed; Actual en Estimated op totaalniveau; Actual nooit splitsen in gepland/correctief. Werkelijk kan boekhouddimensies Gebouwen/Terrein/Installaties behouden.
@@ -179,3 +178,17 @@ Resterend huurpunt: `contract_prijsregels.xlsx` / `contracten_huidig_met_prijzen
 ## 14. Volgende fase — Tranche 13
 
 Tranche 13 sluit eerst de ontbrekende toekomstige kortingswijzigingen aan en maakt daarna **Gepland onderhoud** daadwerkelijk invulbaar via de reeds vastgestelde UX. Hergebruik de bestaande onderhouds-Budget/Estimated/P&L-logica. Actual blijft uitsluitend op onderhoud-totaalniveau; splits Actual nooit kunstmatig in gepland/correctief. Bouw geen andere detailmodules in deze tranche.
+
+
+## 15. Tranche 13 — geaccepteerd en architectuurcorrecties
+
+Eind-HEAD `007e89fd01a5465ed80093c97390671ac53cad84` is geaccepteerd. Gepland onderhoud, Verzekeringen, Gemeentelijke lasten/WOZ, Algemene kosten en Leegstand zijn via assemblage op de bestaande `/begroting`-workflow aangesloten; bestaande calculators en persistence blijven leidend.
+
+### Databasearchitectuur
+Per administratie gebruikt de begrotingsmodule één SQLite-bestand voor zowel begrotingsversies/moduledata als de P&L-bronmapping. `begrotingsversiesDatabasePad(...)` en `pnlBronmappingDatabasePad(...)` wijzen daarom bewust naar hetzelfde administratiegebonden bestand. Dit is een geaccepteerd architectuurbesluit, niet een tijdelijke testfix. Splits deze functies niet opnieuw over twee databases zonder expliciet `ARCHITECTUURPUNT` en migratieplan. Als ooit data uit een historisch afzonderlijk `begrotingsversies.sqlite` moet worden behouden, is expliciete datamigratie vereist; een padwijziging alleen is dan onvoldoende.
+
+### Read-only terugkijken na vaststellen
+Een vastgestelde begrotingsversie is immutable, maar **alle detailonderbouwingen moeten via GET leesbaar blijven** bij terugkijken. Schrijfacties blijven geblokkeerd. De huidige code laat dit al toe voor Huur/Beheer; het generiek doortrekken naar de overige detailmodules is een kleine lifecycle-restdelta en geen herontwerp.
+
+### Open restpunt
+Toekomstige kortingswijzigingen uit `contract_prijsregels.xlsx` zijn nog niet ingelezen. Kandidaatresolutie mag niet stilzwijgend op `Status` of “nieuwste regel” worden gebaseerd; bij niet-eenduidige bewezen resolutie volgt `BRONGAT`.
