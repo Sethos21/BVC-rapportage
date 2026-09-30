@@ -27,6 +27,7 @@ export const BRON_TYPES = [
   "ouderdomsanalyse",
   "begroting",
   "contract_verhogingen",
+  "contract_prijsregels",
   "vorderingen_met_afboekingen",
 ] as const;
 
@@ -51,6 +52,7 @@ export const BRON_BESTANDSNAAM: Record<BronType, string> = {
   ouderdomsanalyse: "saldo_huurders.xlsx",
   begroting: "begroting.xlsx",
   contract_verhogingen: "contract_verhogingen.xlsx",
+  contract_prijsregels: "contract_prijsregels.xlsx",
   vorderingen_met_afboekingen: "vorderingen_met_afboekingen.xlsx",
 };
 

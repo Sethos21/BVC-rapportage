@@ -15,6 +15,7 @@ import {
   boekingenRijen,
   complexTotalenRijen,
   contractenRijen,
+  contractPrijsregelenRijen,
   contractVerhogingenRijen,
   ouderdomsanalyseRijen,
   rentrollRijen,
@@ -51,6 +52,7 @@ function schrijfAlleGedeeldeBronnen(): void {
   schrijfXlsxFixture(join(dir, "complex_totalen.xlsx"), complexTotalenRijen());
   schrijfXlsxFixture(join(dir, "saldo_huurders.xlsx"), ouderdomsanalyseRijen());
   schrijfXlsxFixture(join(dir, "contract_verhogingen.xlsx"), contractVerhogingenRijen());
+  schrijfXlsxFixture(join(dir, "contract_prijsregels.xlsx"), contractPrijsregelenRijen());
   schrijfXlsxFixture(join(dir, "vorderingen_met_afboekingen.xlsx"), vorderingenMetAfboekingenRijen());
 }
 

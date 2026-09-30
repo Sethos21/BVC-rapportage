@@ -285,7 +285,7 @@ export async function handleBegrotingRequest(root: string, req: IncomingMessage,
       // Tranche 12: de Module-1-contractsnapshot komt nu uit de echte, bewezen Contracten/RentRoll-bron (zie
       // contractenRentrollAdapter.ts) — bevroren op het moment van aanmaken (UX/FO: "actuele contract-/RentRoll-
       // snapshot bij het starten"), niet ververst zodra de bron later wijzigt (OB-017).
-      const contractenResultaat = leesBgContractFeitenVoorAdministratie(root, administratieId, config.bedrijfsnr);
+      const contractenResultaat = leesBgContractFeitenVoorAdministratie(root, administratieId, config.bedrijfsnr, versie.bronPeildatum);
       schrijfModule1Snapshot(db, versie.id, contractenResultaat.contracten);
       schrijfModule1Aannames(db, versie.id, { begrotingsjaar, indexatiePercentage: indexatiePercentage! });
       const melding = contractenResultaat.bronBeschikbaar

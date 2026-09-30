@@ -66,7 +66,7 @@ describe("leesBgContractFeitenVoorAdministratie — Contracten/RentRoll → BgCo
     schrijfXlsxFixture(join(bronGedeeldDir(root), "contracten_huidig.xlsx"), [contractRij()]);
     schrijfXlsxFixture(join(bronGedeeldDir(root), "rentroll.xlsx"), [rentrollRij({ Vorderingsoort: "01", Prolongatie_bedrag_jaar: 12000 }), rentrollRij({ Vorderingsoort: "13", Prolongatie_bedrag_jaar: -500 })]);
 
-    const resultaat = leesBgContractFeitenVoorAdministratie(root, ADMINISTRATIE_ID, BEDRIJFSNR);
+    const resultaat = leesBgContractFeitenVoorAdministratie(root, ADMINISTRATIE_ID, BEDRIJFSNR, new Date("2026-09-01T00:00:00.000Z"));
 
     expect(resultaat.bronBeschikbaar).toBe(true);
     expect(resultaat.contracten).toHaveLength(1);
@@ -80,14 +80,14 @@ describe("leesBgContractFeitenVoorAdministratie — Contracten/RentRoll → BgCo
     expect(c.rentrollComponenten.find((r) => r.vorderingsoort === "01")!.bedragJaar.toString()).toBe("12000");
     expect(c.rentrollComponenten.find((r) => r.vorderingsoort === "01")!.btwYn).toBe("Y");
     expect(c.rentrollComponenten.find((r) => r.vorderingsoort === "13")!.bedragJaar.toString()).toBe("-500");
-    expect(c.toekomstigeKortingswijzigingen).toEqual([]); // niet gebouwd in Tranche 12, zie moduledoc
+    expect(c.toekomstigeKortingswijzigingen).toEqual([]); // geen contract_prijsregels.xlsx-fixture in deze test, zie Tranche 14-tests in contractenRentrollAdapter.test.ts hieronder
   });
 
   it("filtert niet-relevante Vorderingsoort-regels (bv. '12', Compensatie OB) uit rentrollComponenten", () => {
     schrijfXlsxFixture(join(bronGedeeldDir(root), "contracten_huidig.xlsx"), [contractRij()]);
     schrijfXlsxFixture(join(bronGedeeldDir(root), "rentroll.xlsx"), [rentrollRij({ Vorderingsoort: "01" }), rentrollRij({ Vorderingsoort: "12", Prolongatie_bedrag_jaar: 999 })]);
 
-    const resultaat = leesBgContractFeitenVoorAdministratie(root, ADMINISTRATIE_ID, BEDRIJFSNR);
+    const resultaat = leesBgContractFeitenVoorAdministratie(root, ADMINISTRATIE_ID, BEDRIJFSNR, new Date("2026-09-01T00:00:00.000Z"));
     expect(resultaat.contracten[0]!.rentrollComponenten).toHaveLength(1);
     expect(resultaat.contracten[0]!.rentrollComponenten[0]!.vorderingsoort).toBe("01");
   });
@@ -96,7 +96,7 @@ describe("leesBgContractFeitenVoorAdministratie — Contracten/RentRoll → BgCo
     schrijfXlsxFixture(join(bronGedeeldDir(root), "contracten_huidig.xlsx"), [contractRij(), contractRij({ Bedrijfsnr: "003", Contract: "0000000099" })]);
     schrijfXlsxFixture(join(bronGedeeldDir(root), "rentroll.xlsx"), [rentrollRij(), rentrollRij({ Bedrijfsnummer: "003", Contractnummer: "0000000099" })]);
 
-    const resultaat = leesBgContractFeitenVoorAdministratie(root, ADMINISTRATIE_ID, BEDRIJFSNR);
+    const resultaat = leesBgContractFeitenVoorAdministratie(root, ADMINISTRATIE_ID, BEDRIJFSNR, new Date("2026-09-01T00:00:00.000Z"));
     expect(resultaat.contracten).toHaveLength(1);
     expect(resultaat.contracten[0]!.contractnummer).toBe("0000000043");
     expect(resultaat.aantalContractenNaFilter).toBe(1);
@@ -108,7 +108,7 @@ describe("leesBgContractFeitenVoorAdministratie — Contracten/RentRoll → BgCo
     schrijfXlsxFixture(join(bronGedeeldDir(root), "contracten_huidig.xlsx"), [contractRij()]);
     schrijfXlsxFixture(join(bronGedeeldDir(root), "rentroll.xlsx"), []);
 
-    const resultaat = leesBgContractFeitenVoorAdministratie(root, ADMINISTRATIE_ID, BEDRIJFSNR);
+    const resultaat = leesBgContractFeitenVoorAdministratie(root, ADMINISTRATIE_ID, BEDRIJFSNR, new Date("2026-09-01T00:00:00.000Z"));
     expect(resultaat.contracten[0]!.rentrollComponenten).toEqual([]);
   });
 
@@ -116,8 +116,66 @@ describe("leesBgContractFeitenVoorAdministratie — Contracten/RentRoll → BgCo
     schrijfXlsxFixture(join(bronGedeeldDir(root), "contracten_huidig.xlsx"), [contractRij()]);
     // rentroll.xlsx bewust niet aangemaakt.
 
-    const resultaat = leesBgContractFeitenVoorAdministratie(root, ADMINISTRATIE_ID, BEDRIJFSNR);
+    const resultaat = leesBgContractFeitenVoorAdministratie(root, ADMINISTRATIE_ID, BEDRIJFSNR, new Date("2026-09-01T00:00:00.000Z"));
     expect(resultaat.bronBeschikbaar).toBe(false);
     expect(resultaat.contracten).toEqual([]);
+  });
+});
+
+function prijsregelRij(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    Bedrijfsnr: BEDRIJFSNR,
+    Contractnr: "0000000043",
+    Prijs_regelnr: "1",
+    Status: "Nieuw",
+    Ingangsdatum_prijsregel: "01-07-2027",
+    Bedrag_vorderingsoort_13: "0",
+    ...overrides,
+  };
+}
+
+describe("leesBgContractFeitenVoorAdministratie — toekomstigeKortingswijzigingen uit contract_prijsregels.xlsx (Tranche 14, fixturebewijs)", () => {
+  beforeEach(() => {
+    schrijfAdministratieConfig(root, ADMINISTRATIE_ID, nieuweAdministratieConfig(BEDRIJFSNR, "Rooise Zoom"));
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "contracten_huidig.xlsx"), [contractRij()]);
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "rentroll.xlsx"), [rentrollRij({ Vorderingsoort: "13", Prolongatie_bedrag_jaar: -500 })]);
+  });
+
+  it("een eenduidig herleide toekomstige kortingswijziging komt terecht op het juiste contract, GEEN prijsregelIssues", () => {
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "contract_prijsregels.xlsx"), [
+      prijsregelRij({ Prijs_regelnr: "3", Ingangsdatum_prijsregel: "01-11-2024", Bedrag_vorderingsoort_13: "-500" }),
+      prijsregelRij({ Prijs_regelnr: "5", Ingangsdatum_prijsregel: "01-07-2027", Bedrag_vorderingsoort_13: "0" }),
+      prijsregelRij({ Prijs_regelnr: "9", Ingangsdatum_prijsregel: "01-07-2027", Bedrag_vorderingsoort_13: "0" }),
+    ]);
+
+    const resultaat = leesBgContractFeitenVoorAdministratie(root, ADMINISTRATIE_ID, BEDRIJFSNR, new Date("2026-09-01T00:00:00.000Z"));
+    expect(resultaat.prijsregelIssues).toEqual([]);
+    const c = resultaat.contracten.find((c) => c.contractnummer === "0000000043")!;
+    expect(c.toekomstigeKortingswijzigingen).toHaveLength(1);
+    expect(c.toekomstigeKortingswijzigingen[0]!.ingangsdatum.toISOString().slice(0, 10)).toBe("2027-07-01");
+    expect(c.toekomstigeKortingswijzigingen[0]!.nieuweKortingPerMaand.toString()).toBe("0");
+  });
+
+  it("ontbreekt contract_prijsregels.xlsx, dan blijft toekomstigeKortingswijzigingen leeg en bronBeschikbaar onaangetast (optioneel bronbestand)", () => {
+    // contract_prijsregels.xlsx bewust niet aangemaakt.
+    const resultaat = leesBgContractFeitenVoorAdministratie(root, ADMINISTRATIE_ID, BEDRIJFSNR, new Date("2026-09-01T00:00:00.000Z"));
+    expect(resultaat.bronBeschikbaar).toBe(true);
+    expect(resultaat.prijsregelIssues).toEqual([]);
+    expect(resultaat.contracten[0]!.toekomstigeKortingswijzigingen).toEqual([]);
+  });
+
+  it("een niet-eenduidige toekomstige kandidaat meldt een BRONGAT-issue en dat ÉÉN contract levert geen verzonnen wijziging, zonder de rest van de snapshot te beschadigen", () => {
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "contract_prijsregels.xlsx"), [
+      prijsregelRij({ Prijs_regelnr: "1", Ingangsdatum_prijsregel: "01-07-2027", Bedrag_vorderingsoort_13: "0" }),
+      prijsregelRij({ Prijs_regelnr: "2", Ingangsdatum_prijsregel: "01-07-2027", Bedrag_vorderingsoort_13: "-250" }),
+    ]);
+
+    const resultaat = leesBgContractFeitenVoorAdministratie(root, ADMINISTRATIE_ID, BEDRIJFSNR, new Date("2026-09-01T00:00:00.000Z"));
+    expect(resultaat.bronBeschikbaar).toBe(true);
+    expect(resultaat.prijsregelIssues).toHaveLength(1);
+    expect(resultaat.prijsregelIssues[0]!.ernst).toBe("BRONGAT");
+    expect(resultaat.prijsregelIssues[0]!.contractnummer).toBe("0000000043");
+    const c = resultaat.contracten.find((c) => c.contractnummer === "0000000043")!;
+    expect(c.toekomstigeKortingswijzigingen).toEqual([]); // niet eenduidig -- geen giswerk, veilige fallback
   });
 });

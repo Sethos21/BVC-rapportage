@@ -432,6 +432,51 @@ describe("Huur/Beheer via echte HTTP-routes met een echte Contracten/RentRoll-fi
     });
   });
 
+  it("TRANCHE 14: een toekomstige contract_prijsregels-kortingswijziging werkt door in de netto begrote huur vanaf de juiste maand, en dus automatisch in de variabele Beheersvergoeding (dezelfde Module-1-grondslag)", async () => {
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "contracten_huidig.xlsx"), [contractRij()]);
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "rentroll.xlsx"), [
+      rentrollRij({ Vorderingsoort: "01", Prolongatie_bedrag_jaar: 120000 }),
+      rentrollRij({ Vorderingsoort: "13", Prolongatie_bedrag_jaar: -12000 }),
+    ]);
+    // Bronfeit-bewezen toekomstige wijziging (zie contractPrijsregelsResolver.ts): vanaf 01-07-2028
+    // vervalt de huurkorting (-1.000/mnd -> 0), eenduidig herleid uit één kandidaatrij.
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "contract_prijsregels.xlsx"), [
+      { Bedrijfsnr: BEDRIJFSNR, Contractnr: "0000000043", Prijs_regelnr: "9", Status: "Nieuw", Ingangsdatum_prijsregel: "01-07-2028", Bedrag_vorderingsoort_13: "0" },
+    ]);
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "boekingen.xlsx"), []);
+
+    await metServer(async (baseUrl) => {
+      const nieuw = await fetch(`${baseUrl}/begroting/nieuw`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ administratieId: ADMINISTRATIE_ID, begrotingsjaar: "2028", laatstAfgeslotenBoekperiode: "06", indexatiePercentage: "0" }).toString(),
+        redirect: "manual",
+      });
+      const hoofdschermUrl = nieuw.headers.get("location")!;
+
+      // Netto begrote huur 2028: jan-jun -1.000/mnd korting (bevroren rentroll-basis, 6.000 totaal),
+      // jul-dec 0 korting (de toekomstige wijziging) -> 120.000 - 6.000 = 114.000. NIET de vlakke
+      // 108.000 (120.000 - 12.000) die zonder deze wijziging het hele jaar zou blijven gelden.
+      const html = await (await fetch(baseUrl + hoofdschermUrl)).text();
+      expect(html).toContain("€ 114.000,00");
+      expect(html).not.toContain("€ 108.000,00");
+
+      // Dezelfde Module-1-grondslag stroomt automatisch door in de variabele Beheersvergoeding.
+      const beheerUrl = hoofdschermUrl.replace(/\?.*/, "") + "/module/beheer?laatstAfgeslotenBoekperiode=06";
+      const configureer = await fetch(baseUrl + beheerUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ complexnummer_0: "001", variabelPercentage_0: "10" }).toString(),
+        redirect: "manual",
+      });
+      expect(configureer.status).toBe(302);
+
+      const beheerDetail = await (await fetch(baseUrl + beheerUrl)).text();
+      expect(beheerDetail).toContain("€ 114.000,00"); // nettoHuurGrondslag -- inclusief de toekomstige kortingswijziging
+      expect(beheerDetail).toContain("€ 11.400,00"); // 10% variabele vergoeding over de bijgewerkte grondslag (niet € 10.800,00)
+    });
+  });
+
   it("ontbreekt de Contracten/RentRoll-bron, dan start de begroting leeg met een zichtbare melding, geen misleidende €0", async () => {
     schrijfXlsxFixture(join(bronGedeeldDir(root), "boekingen.xlsx"), []);
     // Geen contracten_huidig.xlsx/rentroll.xlsx aangemaakt.

@@ -6,6 +6,7 @@ import {
   parseBoekingen,
   parseComplexTotalen,
   parseContracten,
+  parseContractPrijsregels,
   parseContractVerhogingen,
   parseOuderdomsanalyse,
   parseRentroll,
@@ -115,6 +116,10 @@ export function valideerBron(bronType: BronType, buffer: Buffer, context: Valida
     }
     case "contract_verhogingen": {
       const { rijen, issues, duplicaatIssues } = parseContractVerhogingen(ruweRijen);
+      return { rowCount: rijen.length, issues: [...issues, ...controleerBedrijfsnr(rijen, (r) => r.bedrijfsnr, context.verwachtBedrijfsnr)], duplicaatIssues };
+    }
+    case "contract_prijsregels": {
+      const { rijen, issues, duplicaatIssues } = parseContractPrijsregels(ruweRijen);
       return { rowCount: rijen.length, issues: [...issues, ...controleerBedrijfsnr(rijen, (r) => r.bedrijfsnr, context.verwachtBedrijfsnr)], duplicaatIssues };
     }
     case "vorderingen_met_afboekingen": {

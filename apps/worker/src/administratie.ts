@@ -87,6 +87,7 @@ export const DEFAULT_BRONLOCATIES: Record<BronType, BronLocatie> = {
   ouderdomsanalyse: "gedeeld",
   begroting: "eigen",
   contract_verhogingen: "gedeeld",
+  contract_prijsregels: "gedeeld",
   vorderingen_met_afboekingen: "gedeeld",
 };
 

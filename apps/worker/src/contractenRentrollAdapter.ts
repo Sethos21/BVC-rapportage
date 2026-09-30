@@ -1,6 +1,7 @@
-import { parseContracten, parseRentroll, type GestaagdContract, type GestaagdeRentrollregel } from "@bvc/data-contracts";
-import type { BgContractFeiten, BgRentrollComponent } from "@bvc/reporting";
+import { parseContractPrijsregels, parseContracten, parseRentroll, type GestaagdContract, type GestaagdeRentrollregel } from "@bvc/data-contracts";
+import type { BgContractFeiten, BgRentrollComponent, BgToekomstigeKortingswijziging } from "@bvc/reporting";
 import { ExcelBronAdapter } from "./bronAdapter.js";
+import { bepaalToekomstigeKortingswijzigingenPerContract, type ContractPrijsregelIssue } from "./contractPrijsregelsResolver.js";
 import { resolveBron } from "./sourceResolver.js";
 
 /**
@@ -31,13 +32,16 @@ import { resolveBron } from "./sourceResolver.js";
  * negeren, maar deze adapter filtert al vooraf om nooit de indruk te wekken dat elke
  * rentroll-regel is meegewogen.
  *
- * NIET GEBOUWD IN TRANCHE 12: `toekomstigeKortingswijzigingen` blijft altijd een lege lijst.
- * Het bewezen bronbestand daarvoor (`contract_prijsregels.xlsx`/`contracten_huidig_met_
- * prijzen.xlsx`) is geen geregistreerd brontype (`BRON_TYPES`) en heeft geen parser — het
- * bouwen van de kandidaat-resolutielaag ("kiest zelf nooit tussen conflicterende kandidaten",
- * zie `begroteHuuropbrengsten.ts` punt 4) is een aparte, niet-triviale vervolgstap. Zonder deze
- * lijst valt de pure calculator terug op zijn eigen, al bestaande fallback: de huidige korting
- * vlak doorzetten over het hele begrotingsjaar — exact het bestaande, bewezen gedrag.
+ * TRANCHE 14: `toekomstigeKortingswijzigingen` wordt nu gevuld vanuit `contract_prijsregels.xlsx`
+ * (geregistreerd brontype, `@bvc/data-contracts`'s `parseContractPrijsregels`) via
+ * `contractPrijsregelsResolver.ts`'s deterministische kandidaat-resolutie (zie dat bestand voor
+ * de volledige resolutieregel — geen fuzzy matching, geen "Status"/"nieuwste rij"-heuristiek).
+ * Dit bronbestand is OPTIONEEL: ontbreekt het, dan blijft (exact als vóór Tranche 14)
+ * `toekomstigeKortingswijzigingen` een lege lijst voor elk contract — de pure calculator valt dan
+ * terug op zijn eigen, al bestaande fallback (de huidige korting vlak doorzetten over het hele
+ * begrotingsjaar). Een niet-eenduidig te herleiden datum voor één contract (BRONGAT, zie
+ * `contractPrijsregelsResolver.ts`) blokkeert nooit de rest van deze adapter — `prijsregelIssues`
+ * meldt het, `contracten` blijft voor alle contracten gevuld.
  */
 
 export interface ContractenRentrollLeesresultaat {
@@ -53,6 +57,8 @@ export interface ContractenRentrollLeesresultaat {
   /** Parse-issues (KRITIEK/WAARSCHUWING) van beide bronnen — nooit stilzwijgend verworpen. */
   contractenIssues: readonly { ernst: string; bericht: string }[];
   rentrollIssues: readonly { ernst: string; bericht: string }[];
+  /** BRONGAT-meldingen van `contractPrijsregelsResolver.ts` (niet-eenduidige toekomstige kortingskandidaten) — leeg als `contract_prijsregels.xlsx` ontbreekt of alles eenduidig was. */
+  prijsregelIssues: readonly ContractPrijsregelIssue[];
 }
 
 const RELEVANTE_VORDERINGSOORTEN = new Set(["01", "13"]);
@@ -63,7 +69,11 @@ function naarRentrollComponent(regel: GestaagdeRentrollregel): BgRentrollCompone
   return { vorderingsoort: regel.vorderingsoort, bedragJaar: regel.prolongatieBedragJaar, btwYn: regel.btwYn };
 }
 
-function naarBgContractFeiten(contract: GestaagdContract, rentrollregels: readonly GestaagdeRentrollregel[]): BgContractFeiten {
+function naarBgContractFeiten(
+  contract: GestaagdContract,
+  rentrollregels: readonly GestaagdeRentrollregel[],
+  toekomstigeKortingswijzigingen: readonly BgToekomstigeKortingswijziging[],
+): BgContractFeiten {
   const rentrollComponenten = rentrollregels.map(naarRentrollComponent).filter((c): c is BgRentrollComponent => c !== null);
   return {
     bedrijfsnr: contract.bedrijfsnr,
@@ -76,7 +86,7 @@ function naarBgContractFeiten(contract: GestaagdContract, rentrollregels: readon
     einddatum: contract.expiratieExpiratiedatum, // bewezen: NIET Afloopdatum, zie begroteHuuropbrengsten.ts
     indexatiedatum: contract.verhogingDatum,
     indexatieHerhalingMaanden: contract.verhogingOpnieuwNa,
-    toekomstigeKortingswijzigingen: [], // zie moduledoc — niet gebouwd in Tranche 12
+    toekomstigeKortingswijzigingen,
   };
 }
 
@@ -86,7 +96,7 @@ function naarBgContractFeiten(contract: GestaagdContract, rentrollregels: readon
  * onafhankelijk gedeeld) en groepeert tot `BgContractFeiten[]`. Schrijft niets, muteert niets —
  * uitsluitend lezen + vertalen.
  */
-export function leesBgContractFeitenVoorAdministratie(root: string, administratieId: string, bedrijfsnr: string): ContractenRentrollLeesresultaat {
+export function leesBgContractFeitenVoorAdministratie(root: string, administratieId: string, bedrijfsnr: string, bronPeildatum: Date): ContractenRentrollLeesresultaat {
   const leegResultaat = (): ContractenRentrollLeesresultaat => ({
     bronBeschikbaar: false,
     aantalRuweContractenRegels: 0,
@@ -96,6 +106,7 @@ export function leesBgContractFeitenVoorAdministratie(root: string, administrati
     contracten: [],
     contractenIssues: [],
     rentrollIssues: [],
+    prijsregelIssues: [],
   });
 
   const contractenBron = resolveBron(root, administratieId, "contracten_huidig");
@@ -119,7 +130,20 @@ export function leesBgContractFeitenVoorAdministratie(root: string, administrati
     rentrollPerContract.set(regel.contractnummer, lijst);
   }
 
-  const contracten = contractenVanAdministratie.map((c) => naarBgContractFeiten(c, rentrollPerContract.get(c.contract) ?? []));
+  // Optioneel: ontbreekt contract_prijsregels.xlsx, dan blijft toekomstigeKortingswijzigingen
+  // voor elk contract een lege lijst (exact het gedrag van vóór Tranche 14) — zie moduledoc.
+  let prijsregelPerContract: ReadonlyMap<string, readonly BgToekomstigeKortingswijziging[]> = new Map();
+  let prijsregelIssues: readonly ContractPrijsregelIssue[] = [];
+  const prijsregelsBron = resolveBron(root, administratieId, "contract_prijsregels");
+  if (prijsregelsBron.bestaat) {
+    const ruwePrijsregelRijen = adapter.leesRuweRijen(prijsregelsBron);
+    const { rijen: prijsregelRijen } = parseContractPrijsregels(ruwePrijsregelRijen);
+    const resolutie = bepaalToekomstigeKortingswijzigingenPerContract(prijsregelRijen, bedrijfsnr, bronPeildatum);
+    prijsregelPerContract = resolutie.perContract;
+    prijsregelIssues = resolutie.issues;
+  }
+
+  const contracten = contractenVanAdministratie.map((c) => naarBgContractFeiten(c, rentrollPerContract.get(c.contract) ?? [], prijsregelPerContract.get(c.contract) ?? []));
 
   return {
     bronBeschikbaar: true,
@@ -130,5 +154,6 @@ export function leesBgContractFeitenVoorAdministratie(root: string, administrati
     contracten,
     contractenIssues: contractenIssues.map((i) => ({ ernst: i.ernst, bericht: i.bericht })),
     rentrollIssues: rentrollIssues.map((i) => ({ ernst: i.ernst, bericht: i.bericht })),
+    prijsregelIssues,
   };
 }
