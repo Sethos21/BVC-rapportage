@@ -291,6 +291,18 @@ describe("Begrotingsworkflow via echte HTTP-routes (Tranche 11) — acceptatiecr
       const hoofdscherm = await fetch(`${baseUrl}/begroting/${ADMINISTRATIE_ID}/${id}?laatstAfgeslotenBoekperiode=06`);
       const html = await hoofdscherm.text();
       expect(html).toContain("Vastgesteld");
+      // UX-assemblagedelta (docs/begroting/ux/): hoofdscherm gebruikt de vastgestelde werkomgeving-shell
+      // (zijbalk + status-pill), niet de kale paginaShell.
+      expect(html).toContain('class="sidebar"');
+      expect(html).toContain('class="pill vastgesteld"');
+
+      // UX_13 Terugkijken: de controleren/vaststellen-pagina toont bij VASTGESTELD een leesbare
+      // bevestigingsbanner in plaats van het vaststel-formulier.
+      const controleVastgesteld = await fetch(`${baseUrl}/begroting/${ADMINISTRATIE_ID}/${id}/controle?laatstAfgeslotenBoekperiode=06`);
+      expect(controleVastgesteld.status).toBe(200);
+      const controleHtml = await controleVastgesteld.text();
+      expect(controleHtml).toContain("Begroting vastgesteld");
+      expect(controleHtml).not.toContain('name="bevestigd"');
 
       const schrijfPoging = await fetch(`${baseUrl}/begroting/${ADMINISTRATIE_ID}/${id}/module/rente-leningen?laatstAfgeslotenBoekperiode=06`, {
         method: "POST",
@@ -394,6 +406,9 @@ describe("Huur/Beheer via echte HTTP-routes met een echte Contracten/RentRoll-fi
       const html1 = await hoofdscherm1.text();
       expect(html1).toContain("Huuropbrengst belast");
       expect(html1).toContain("€ 120.000,00");
+      // UX-assemblagedelta: CONCEPT toont de werkomgeving-shell met de "Concept"-pill.
+      expect(html1).toContain('class="sidebar"');
+      expect(html1).toContain('class="pill concept"');
 
       // Huur-detailpagina toont het contract.
       const huurUrl = hoofdschermUrl.replace(/\?.*/, "") + "/module/huur?laatstAfgeslotenBoekperiode=06";

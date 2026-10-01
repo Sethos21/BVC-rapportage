@@ -13,44 +13,121 @@ import { BOEKPERIODES } from "./serveUi.js";
  * lokale, JS-vrije server-shell niet biedt) — het volgt wel de VASTGESTELDE structuur en
  * volgorde uit `09_Begrotingsmodule_UX_Vastgesteld.md` §3/§10: tabelgerichte vergelijkende
  * P&L, progressive disclosure (detail pas na doorklikken), onbekend/leeg/bewust-€0 blijven
- * zichtbaar onderscheiden, gebruikerstaal in plaats van technische statuscodes. Zie het
- * acceptatierapport voor de expliciete, bewuste visuele-getrouwheidsbeperkingen.
+ * zichtbaar onderscheiden, gebruikerstaal in plaats van technische statuscodes.
+ *
+ * UX-ASSEMBLAGEDELTA (post-Tranche-13, `docs/begroting/ux/`): de vastgestelde visuele taal
+ * (kleuren, typografie, kaarten, tabelopmaak, zijbalknavigatie, volledige-breedte desktop-
+ * layout) uit `09_Begrotingsmodule_UX_Vastgesteld.md`/`UX_Ontwerpen/`/`prototype/` is nu
+ * toegepast op DEZE BESTAANDE, server-gerenderde architectuur — géén overstap naar een
+ * client-side SPA (dat zou een nieuw architectuurbesluit zijn, buiten scope). Interacties die
+ * in het prototype inline-in-de-tabel-rij plaatsvinden (bv. een module direct uitklappen in de
+ * vergelijkende P&L) blijven daarom een eigen paginanavigatie — dezelfde bestaande routes,
+ * dezelfde velden/formuliernamen, uitsluitend opnieuw gestyled binnen hetzelfde visuele systeem
+ * (zijbalk + topbar + kaarten), zodat de hoofd-/detailnavigatie wél duidelijk is. Geen enkele
+ * waarde, berekening of route is hierbij gewijzigd.
  */
 
 const BASIS_CSS = `
-  :root{ --ink:#1c2521; --muted:#626b64; --green:#21594a; --red:#bf4a30; --amber:#8a6100; --paper:#f6f4ee; --line:#e6e4dc; }
-  body{font-family:system-ui,'IBM Plex Sans',sans-serif;color:var(--ink);background:var(--paper);margin:0;padding:0}
-  .wrap{max-width:980px;margin:40px auto;padding:0 24px}
+  :root{
+    --ink:#10233f; --muted:#5c6c82; --line:#dde3e9; --paper:#f5f7f9;
+    --green:#0b6a58; --green-dark:#073f36; --green-soft:#eaf4f1;
+    --amber:#9a6a0b; --amber-soft:#fff3d9;
+    --red:#a14c36; --red-soft:#fbeae6;
+    --radius:8px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:"Segoe UI",Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,sans-serif;color:var(--ink);background:var(--paper);-webkit-font-smoothing:antialiased}
+  button,input,select,textarea{font:inherit}
+  button{cursor:pointer}
+
+  /* eenvoudige pagina's zonder open begrotingsversie (keuzescherm, foutpagina): gecentreerd, geen zijbalk */
+  .wrap{max-width:760px;margin:48px auto;padding:0 24px}
   .wrap-smal{max-width:560px;margin:60px auto;padding:0 24px}
-  .eyebrow{font-size:12px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted)}
-  h1{font-size:24px;margin:6px 0 4px}
-  h2{font-size:16px;margin:28px 0 10px}
-  .sub{color:var(--muted);font-size:13px;margin-bottom:20px}
-  .card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:24px;margin-bottom:20px}
-  label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:14px 0 6px}
+
+  /* werkomgeving (hoofdscherm, detailschermen, controleren): zijbalk + vrijwel volledige desktopbreedte */
+  .app-shell{min-height:100vh;display:flex}
+  .sidebar{width:230px;flex:0 0 230px;background:linear-gradient(180deg,#073f36 0%,#0b4a3d 55%,#073a33 100%);color:#fff;display:flex;flex-direction:column;position:sticky;top:0;align-self:flex-start;height:100vh}
+  .brand{padding:22px 22px 18px;border-bottom:1px solid rgba(255,255,255,.14)}
+  .brand-title{font-size:14.5px;font-weight:700;letter-spacing:-.1px;line-height:1.3}
+  .brand-sub{font-size:11px;opacity:.75;margin-top:4px}
+  .nav{padding:14px 10px;display:grid;gap:3px}
+  .nav a{display:block;padding:10px 14px;border-radius:6px;color:rgba(255,255,255,.88);text-decoration:none;font-size:13.5px}
+  .nav a:hover{background:rgba(255,255,255,.09)}
+  .nav a.actief{background:rgba(255,255,255,.15);color:#fff;font-weight:650}
+  .nav-terug{margin-top:auto;padding:14px 10px;border-top:1px solid rgba(255,255,255,.14)}
+  .nav-terug a{display:block;padding:10px 14px;border-radius:6px;color:rgba(255,255,255,.72);text-decoration:none;font-size:12.5px}
+  .nav-terug a:hover{background:rgba(255,255,255,.09);color:#fff}
+
+  .workspace{flex:1;min-width:0;display:flex;flex-direction:column}
+  .topbar{min-height:54px;background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center;padding:0 30px}
+  .topbar-context{font-size:13px;color:var(--muted)}
+  .topbar-context strong{color:var(--ink)}
+
+  .main{flex:1;padding:28px 34px 72px}
+
+  .eyebrow{font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:650}
+  .title-row{display:flex;align-items:center;gap:13px;margin:6px 0 6px;flex-wrap:wrap}
+  h1{font-size:24px;margin:0;letter-spacing:-.3px;line-height:1.3}
+  h2{font-size:15px;margin:26px 0 10px;color:var(--ink)}
+  .sub{color:var(--muted);font-size:13.5px;margin:0 0 20px;line-height:1.5}
+
+  .pill{display:inline-flex;align-items:center;padding:4px 13px;border-radius:999px;font-size:12px;font-weight:650;white-space:nowrap}
+  .pill.concept{background:var(--amber-soft);color:var(--amber)}
+  .pill.vastgesteld{background:var(--green-soft);color:var(--green-dark)}
+
+  .card{background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:22px 24px;margin-bottom:22px;box-shadow:0 1px 2px rgba(16,35,63,.03)}
+
+  label{display:block;font-size:12px;font-weight:650;color:var(--muted);margin:14px 0 6px}
   label:first-of-type{margin-top:0}
-  select,input,textarea{width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--line);border-radius:6px;font-size:14px;font-family:inherit}
-  button{margin-top:20px;padding:9px 16px;border:none;border-radius:6px;background:var(--green);color:#fff;font-size:13.5px;font-weight:600;cursor:pointer}
+  select,input,textarea{width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid var(--line);border-radius:6px;font-size:13.5px;color:var(--ink);background:#fff;transition:border-color .12s,box-shadow .12s}
+  select:focus,input:focus,textarea:focus{outline:0;border-color:var(--green);box-shadow:0 0 0 3px rgba(11,106,88,.12)}
+  input[type=checkbox]{width:auto}
+
+  button[type=submit]{margin-top:20px;padding:10px 18px;border:none;border-radius:7px;background:var(--green);color:#fff;font-size:13.5px;font-weight:650}
+  button[type=submit]:hover{background:var(--green-dark)}
   button.secundair{background:#fff;color:var(--ink);border:1px solid var(--line)}
-  button:hover{opacity:0.92}
-  .fouten{background:#fdecea;border:1px solid #f3c6bf;border-radius:8px;padding:12px 16px;margin-bottom:20px;color:var(--red)}
-  .fouten ul{margin:4px 0 0;padding-left:18px}
+  button.secundair:hover{background:#f3f5f6}
+
+  .fouten{background:var(--red-soft);border:1px solid #e3c3b9;border-radius:var(--radius);padding:13px 16px;margin-bottom:20px;color:#7d3a28;font-size:13.5px}
+  .fouten ul{margin:6px 0 0;padding-left:18px}
+
   table{width:100%;border-collapse:collapse;font-size:13px}
-  th{text-align:right;font-size:11px;text-transform:uppercase;letter-spacing:0.04em;color:var(--muted);padding:6px 8px;border-bottom:1px solid var(--line)}
+  th{text-align:right;font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);font-weight:650;padding:10px 12px;border-bottom:1px solid var(--line);background:#fafbfc}
   th:first-child,td:first-child{text-align:left}
-  td{padding:7px 8px;border-bottom:1px solid #f0efe9;text-align:right;font-variant-numeric:tabular-nums}
-  tr.groep td{background:#fbfaf6;font-weight:600;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:0.04em}
-  tr.subtotaal td{font-weight:700;border-top:1px solid var(--line)}
-  .onbekend{color:var(--amber)}
-  .naam{font-weight:600}
-  .naam-sub{display:block;font-size:11px;color:var(--muted);font-weight:400}
-  .bewerk{font-size:11px;color:var(--green);text-decoration:none}
-  .banner{background:#eef5f1;border:1px solid #cfe3d8;border-radius:8px;padding:12px 16px;margin-bottom:20px;font-size:13px}
-  .banner.vastgesteld{background:#f3efe4;border-color:#e2d8bd}
-  .terug{display:inline-block;margin-top:16px;color:var(--green);text-decoration:none;font-size:13.5px}
+  td{padding:10px 12px;border-bottom:1px solid #eef1f3;text-align:right;font-variant-numeric:tabular-nums;vertical-align:middle}
+  tbody tr:hover td{background:#fbfcfc}
+  tr.groep td{background:#f4f6f7;font-weight:650;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--line)}
+  tr.subtotaal td{font-weight:700;border-top:2px solid var(--line);border-bottom:2px solid var(--line)}
+
+  .onbekend{color:var(--amber);font-weight:600}
+  .naam{font-weight:650;display:block}
+  .naam-sub{display:block;font-size:11px;color:var(--muted);font-weight:400;margin-top:2px}
+  .bewerk{display:inline-block;font-size:11.5px;color:var(--green);text-decoration:none;font-weight:650;margin-right:8px}
+  .bewerk:hover{text-decoration:underline}
+
+  .banner{background:var(--green-soft);border:1px solid #cfe3d8;border-radius:var(--radius);padding:13px 16px;margin-bottom:20px;font-size:13.5px;color:#163f37}
+  .banner a{color:var(--green-dark);font-weight:650}
+  .banner.vastgesteld{background:#f3f0e4;border-color:#e2d8bd;color:#5a4f2e}
+
+  .terug{display:inline-block;margin-top:4px;color:var(--muted);text-decoration:none;font-size:13px}
+  .terug:hover{color:var(--ink)}
+
   .lijst{list-style:none;padding:0;margin:0}
-  .lijst li{padding:8px 0;border-bottom:1px solid var(--line);font-size:13.5px;display:flex;justify-content:space-between}
-  .lijst a{color:var(--green);text-decoration:none;font-weight:600}
+  .lijst li{padding:10px 0;border-bottom:1px solid var(--line);font-size:13.5px;display:flex;justify-content:space-between;align-items:center}
+  .lijst a{color:var(--green);text-decoration:none;font-weight:650}
+
+  .controle-grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(280px,1fr);gap:22px;align-items:start}
+  .metrics-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:22px}
+  .metric{background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px}
+  .metric span{display:block;color:var(--muted);font-size:11.5px}
+  .metric strong{display:block;margin-top:6px;font-size:18px;color:var(--ink);font-variant-numeric:tabular-nums}
+
+  @media (max-width:980px){
+    .app-shell{flex-direction:column}
+    .sidebar{position:relative;width:100%;height:auto;top:0}
+    .main{padding:20px 18px 60px}
+    .controle-grid{grid-template-columns:1fr}
+  }
 `;
 
 function paginaShell(titel: string, bodyHtml: string, breed = true): string {
@@ -67,6 +144,68 @@ ${bodyHtml}
 </div>
 </body>
 </html>`;
+}
+
+/**
+ * De werkomgeving-app-shell (zijbalk + topbar) voor elk scherm binnen een geopende
+ * begrotingsversie (hoofdscherm, detail-/invoerschermen, controleren/vaststellen) — realiseert
+ * de vastgestelde "duidelijke hoofd- en detailnavigatie" (UX_01/UX_11/UX_13) zonder client-side
+ * routing: `navHtml` zijn gewone `<a>`-links naar bestaande routes.
+ */
+function appShell(o: { titel: string; navHtml: string; topbarContext: string; bodyHtml: string }): string {
+  return `<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8" />
+<title>${escapeHtml(o.titel)}</title>
+<style>${BASIS_CSS}</style>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-title">BVC Vastgoed Consultants</div>
+      <div class="brand-sub">Exploitatiebegroting</div>
+    </div>
+    <nav class="nav">${o.navHtml}</nav>
+  </aside>
+  <div class="workspace">
+    <div class="topbar"><div class="topbar-context">${o.topbarContext}</div></div>
+    <div class="main">${o.bodyHtml}</div>
+  </div>
+</div>
+</body>
+</html>`;
+}
+
+interface WerkomgevingContext {
+  administratieId: string;
+  weergavenaam: string;
+  versie: Begrotingsversie;
+  laatstAfgeslotenBoekperiode: string;
+  actief: "hoofdscherm" | "controle";
+}
+
+function statusPill(status: Begrotingsversie["status"]): string {
+  return status === "VASTGESTELD" ? `<span class="pill vastgesteld">Vastgesteld</span>` : `<span class="pill concept">Concept</span>`;
+}
+
+function werkomgevingHoofdschermUrl(ctx: WerkomgevingContext): string {
+  return `/begroting/${encodeURIComponent(ctx.administratieId)}/${encodeURIComponent(ctx.versie.id)}?laatstAfgeslotenBoekperiode=${encodeURIComponent(ctx.laatstAfgeslotenBoekperiode)}`;
+}
+
+function werkomgevingControleUrl(ctx: WerkomgevingContext): string {
+  return `/begroting/${encodeURIComponent(ctx.administratieId)}/${encodeURIComponent(ctx.versie.id)}/controle?laatstAfgeslotenBoekperiode=${encodeURIComponent(ctx.laatstAfgeslotenBoekperiode)}`;
+}
+
+/** Zijbalk met de twee echte bestemmingen binnen een open begrotingsversie — hoofdscherm en controleren/vaststellen gebruiken deze, met actieve-staat-markering. */
+function werkomgevingShell(ctx: WerkomgevingContext, titel: string, bodyHtml: string): string {
+  const navHtml = [
+    `<a href="${escapeHtml(werkomgevingHoofdschermUrl(ctx))}" class="${ctx.actief === "hoofdscherm" ? "actief" : ""}">Vergelijkende P&amp;L</a>`,
+    `<a href="${escapeHtml(werkomgevingControleUrl(ctx))}" class="${ctx.actief === "controle" ? "actief" : ""}">Controleren &amp; vaststellen</a>`,
+  ].join("");
+  const topbarContext = `<strong>${escapeHtml(ctx.weergavenaam)}</strong> — Begroting ${ctx.versie.begrotingsjaar}`;
+  return appShell({ titel, navHtml, topbarContext, bodyHtml });
 }
 
 function fmtBedrag(d: Decimal): string {
@@ -279,13 +418,13 @@ export function renderBegrotingHoofdscherm(o: HoofdschermOpties): string {
   const statusBanner =
     o.versie.status === "VASTGESTELD"
       ? `<div class="banner vastgesteld"><strong>Vastgesteld</strong> op ${o.versie.vastgesteldAt ? o.versie.vastgesteldAt.toLocaleDateString("nl-NL") : "-"} — deze begroting is alleen-lezen (Terugkijken).</div>`
-      : `<div class="banner">Concept — werk verder in de vergelijkende P&L hieronder. <a href="/begroting/${encodeURIComponent(o.administratieId)}/${encodeURIComponent(o.versie.id)}/controle?laatstAfgeslotenBoekperiode=${encodeURIComponent(o.laatstAfgeslotenBoekperiode)}">Naar controleren en vaststellen →</a></div>`;
+      : `<div class="banner">Werk de onderdelen hieronder bij, en ga daarna naar <a href="${escapeHtml(werkomgevingControleUrl({ administratieId: o.administratieId, weergavenaam: o.weergavenaam, versie: o.versie, laatstAfgeslotenBoekperiode: o.laatstAfgeslotenBoekperiode, actief: "hoofdscherm" }))}">controleren en vaststellen →</a></div>`;
 
   const meldingHtml = o.melding !== undefined ? `<div class="banner">${escapeHtml(o.melding)}</div>` : "";
 
   const body = `
-    <div class="eyebrow">${escapeHtml(o.weergavenaam)} — Begroting ${o.versie.begrotingsjaar}</div>
-    <h1>Vergelijkende exploitatiebegroting</h1>
+    <div class="eyebrow">Begroting ${o.versie.begrotingsjaar}</div>
+    <div class="title-row"><h1>Vergelijkende exploitatiebegroting</h1>${statusPill(o.versie.status)}</div>
     <div class="sub">Werkelijk/Estimated: ${o.versie.begrotingsjaar - 1} t/m periode ${escapeHtml(o.laatstAfgeslotenBoekperiode)}. Bron: productieboekingen + de bestaande, bewezen GL/OGB-bronmapping — geen testdata.</div>
     ${meldingHtml}
     ${statusBanner}
@@ -299,17 +438,34 @@ export function renderBegrotingHoofdscherm(o: HoofdschermOpties): string {
         </tbody>
       </table>
     </div>
-    <a class="terug" href="/begroting">← Terug naar begrotingskeuze</a>`;
-  return paginaShell(`Begroting ${o.versie.begrotingsjaar} — ${o.weergavenaam}`, body);
+    <a class="terug" href="/begroting?administratieId=${encodeURIComponent(o.administratieId)}">← Terug naar begrotingskeuze</a>`;
+  return werkomgevingShell(
+    { administratieId: o.administratieId, weergavenaam: o.weergavenaam, versie: o.versie, laatstAfgeslotenBoekperiode: o.laatstAfgeslotenBoekperiode, actief: "hoofdscherm" },
+    `Begroting ${o.versie.begrotingsjaar} — ${o.weergavenaam}`,
+    body,
+  );
 }
 
 export function renderControlePagina(o: { administratieId: string; weergavenaam: string; versie: Begrotingsversie; laatstAfgeslotenBoekperiode: string; vergelijking: PnLVergelijking | null; vaststelFout?: string }): string {
+  const ctx: WerkomgevingContext = { administratieId: o.administratieId, weergavenaam: o.weergavenaam, versie: o.versie, laatstAfgeslotenBoekperiode: o.laatstAfgeslotenBoekperiode, actief: "controle" };
   const rij = (naam: string, v: PnLVergelijking["ebitda"]) =>
     `<tr><td>${escapeHtml(naam)}</td><td>${fmtBedrag(v.basis)}</td><td>${fmtBedrag(v.vergelijk)}</td><td>${fmtBedrag(v.afwijking)}</td><td>${v.volledigheid.status === "VOLLEDIG" ? "Volledig" : "Onvolledig"}</td></tr>`;
+
+  const metricsHtml =
+    o.vergelijking === null
+      ? ""
+      : `<div class="metrics-row">
+      <div class="metric"><span>Jouw begroting ${o.versie.begrotingsjaar} — EBITDA</span><strong>${fmtBedrag(o.vergelijking.ebitda.vergelijk)}</strong></div>
+      <div class="metric"><span>Estimated ${o.versie.begrotingsjaar - 1} — EBITDA</span><strong>${fmtBedrag(o.vergelijking.ebitda.basis)}</strong></div>
+      <div class="metric"><span>Verschil t.o.v. Estimated</span><strong>${fmtBedrag(o.vergelijking.ebitda.afwijking)}</strong></div>
+      <div class="metric"><span>Volledigheid</span><strong>${o.vergelijking.ebitda.volledigheid.status === "VOLLEDIG" ? "Volledig" : "Onvolledig"}</strong></div>
+    </div>`;
+
   const vergelijkingHtml =
     o.vergelijking === null
       ? `<div class="card"><div class="sub">Er bestaat nog geen vastgestelde begroting voor ${o.versie.begrotingsjaar - 1} — Estimated (en daarmee deze vergelijking) is nog niet beschikbaar. Dit blokkeert het opstellen van Jouw begroting niet.</div></div>`
       : `<div class="card">
+      <h2 style="margin-top:0">Begrotingsonderdelen</h2>
       <table>
         <thead><tr><th>Post</th><th>Estimated ${o.versie.begrotingsjaar - 1}</th><th>Jouw begroting ${o.versie.begrotingsjaar}</th><th>Verschil</th><th>Volledigheid</th></tr></thead>
         <tbody>
@@ -322,22 +478,36 @@ export function renderControlePagina(o: { administratieId: string; weergavenaam:
         </tbody>
       </table>
     </div>`;
+
+  const eindcontroleHtml =
+    o.versie.status === "VASTGESTELD"
+      ? `<div class="card">
+        <h2 style="margin-top:0">Vastgesteld</h2>
+        <div class="banner vastgesteld"><strong>Begroting vastgesteld</strong>${o.versie.vastgesteldAt ? ` op ${o.versie.vastgesteldAt.toLocaleDateString("nl-NL")}` : ""} — alleen-lezen (Terugkijken).</div>
+      </div>`
+      : `<div class="card">
+        <h2 style="margin-top:0">Eindcontrole</h2>
+        <div class="sub">Wat nog nodig is voor vaststelling.</div>
+        ${o.vaststelFout !== undefined ? `<div class="fouten"><strong>Vaststellen kan nog niet:</strong> ${escapeHtml(o.vaststelFout)}</div>` : ""}
+        <form method="POST" action="/begroting/${encodeURIComponent(o.administratieId)}/${encodeURIComponent(o.versie.id)}/vaststellen">
+          <label><input type="checkbox" name="bevestigd" value="1" style="width:auto;display:inline-block;margin-right:8px" required />Ik bevestig dat ik deze begroting voor ${o.versie.begrotingsjaar} definitief wil vaststellen. Na vaststellen is de begroting alleen-lezen.</label>
+          <label for="toelichting">Toelichting bij vaststelling (optioneel)</label>
+          <textarea name="toelichting" id="toelichting" rows="3" placeholder="Bijvoorbeeld: akkoord na bespreking met eigenaar"></textarea>
+          <button type="submit">Begroting vaststellen</button>
+        </form>
+      </div>`;
+
   const body = `
-    <div class="eyebrow">${escapeHtml(o.weergavenaam)} — Begroting ${o.versie.begrotingsjaar}</div>
-    <h1>Controleren en vaststellen</h1>
-    <div class="sub">Vergelijking van Jouw begroting ${o.versie.begrotingsjaar} met Estimated ${o.versie.begrotingsjaar - 1}.</div>
-    ${o.vaststelFout !== undefined ? `<div class="fouten"><strong>Vaststellen kan nog niet:</strong> ${escapeHtml(o.vaststelFout)}</div>` : ""}
-    ${vergelijkingHtml}
-    <div class="card">
-      <form method="POST" action="/begroting/${encodeURIComponent(o.administratieId)}/${encodeURIComponent(o.versie.id)}/vaststellen">
-        <label><input type="checkbox" name="bevestigd" value="1" style="width:auto;display:inline-block;margin-right:8px" required />Ik bevestig dat ik deze begroting voor ${o.versie.begrotingsjaar} definitief wil vaststellen. Na vaststellen is de begroting alleen-lezen.</label>
-        <label for="toelichting">Toelichting (optioneel)</label>
-        <textarea name="toelichting" id="toelichting" rows="3"></textarea>
-        <button type="submit">Definitief vaststellen</button>
-      </form>
+    <div class="eyebrow">Begroting ${o.versie.begrotingsjaar}</div>
+    <div class="title-row"><h1>Controle begroting ${o.versie.begrotingsjaar} — ${escapeHtml(o.weergavenaam)}</h1>${statusPill(o.versie.status)}</div>
+    <div class="sub">${o.versie.status === "VASTGESTELD" ? "Definitieve begroting — controleer de totalen en de onderbouwing." : "Controleer de totalen en afwijkingen voordat je de begroting vaststelt."}</div>
+    ${metricsHtml}
+    <div class="controle-grid">
+      <div>${vergelijkingHtml}</div>
+      <div>${eindcontroleHtml}</div>
     </div>
-    <a class="terug" href="/begroting/${encodeURIComponent(o.administratieId)}/${encodeURIComponent(o.versie.id)}?laatstAfgeslotenBoekperiode=${encodeURIComponent(o.laatstAfgeslotenBoekperiode)}">← Terug naar de vergelijkende P&L</a>`;
-  return paginaShell(`Controleren — Begroting ${o.versie.begrotingsjaar}`, body);
+    <a class="terug" href="${escapeHtml(werkomgevingHoofdschermUrl(ctx))}">← Terug naar de vergelijkende P&L</a>`;
+  return werkomgevingShell(ctx, `Controleren — Begroting ${o.versie.begrotingsjaar}`, body);
 }
 
 export function renderFoutPagina(titel: string, bericht: string, terugUrl = "/begroting"): string {
@@ -366,12 +536,13 @@ function moduleFormShell(o: { titel: string; terugUrl: string; fouten?: readonly
   const inhoud = o.alleenLezen ? `<fieldset disabled style="border:none;padding:0;margin:0">${o.inhoud}</fieldset>` : o.inhoud;
   const body = `
     <div class="eyebrow">${o.alleenLezen ? "Begrotingsonderdeel — alleen-lezen" : "Begrotingsonderdeel aanpassen"}</div>
-    <h1>${escapeHtml(o.titel)}</h1>
+    <div class="title-row"><h1>${escapeHtml(o.titel)}</h1>${o.alleenLezen ? `<span class="pill vastgesteld">Vastgesteld</span>` : `<span class="pill concept">Concept</span>`}</div>
     ${alleenLezenBanner}
     ${foutenHtml}
     <div class="card">${inhoud}</div>
     <a class="terug" href="${escapeHtml(o.terugUrl)}">← Terug naar de vergelijkende P&L</a>`;
-  return paginaShell(o.titel, body, false);
+  const navHtml = `<a href="${escapeHtml(o.terugUrl)}" class="actief">← Vergelijkende P&amp;L</a>`;
+  return appShell({ titel: o.titel, navHtml, topbarContext: escapeHtml(o.titel), bodyHtml: body });
 }
 
 const geldWaarde = (d: Decimal | null): string => (d === null ? "" : d.toString());
