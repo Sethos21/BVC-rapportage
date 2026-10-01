@@ -214,7 +214,7 @@ describe("Begrotingsworkflow via echte HTTP-routes (Tranche 11) — acceptatiecr
     const versie = maakBegrotingsversie(db, { originType: "NIEUW", bedrijfsnr: BEDRIJFSNR, begrotingsjaar: 2027, bronPeildatum: new Date() });
     const id = versie.id;
     schrijfModule1Snapshot(db, id, []);
-    schrijfModule1Aannames(db, id, { begrotingsjaar: 2027, indexatiePercentage: new Decimal(3) });
+    schrijfModule1Aannames(db, id, { begrotingsjaar: 2027, indexatiePercentage: new Decimal(3) }, "06");
     schrijfModule3Invoer(db, id, { wijze: "NIEUWE_VERGOEDING", bedrag: new Decimal(500), eenheid: "MAAND", ingangsdatum: null });
     schrijfGeplandOnderhoudActiviteiten(db, id, [
       {
@@ -509,6 +509,143 @@ describe("Huur/Beheer via echte HTTP-routes met een echte Contracten/RentRoll-fi
 
       const html = await (await fetch(baseUrl + hoofdschermUrl)).text();
       expect(html).toContain("Geen Contracten");
+    });
+  });
+});
+
+/**
+ * Product-readiness fix (migratie 42) — bewijst dat de laatst afgesloten boekperiode nu persistent
+ * bij de begrotingsversie wordt vastgelegd (`begroting_aannames`), nooit meer een hardcoded "12" of
+ * een stilzwijgende afleiding, en dat een opgeslagen periode nooit door een afwijkende queryparameter
+ * wordt overschreven.
+ */
+describe("laatstAfgeslotenBoekperiode persistent per begrotingsversie (product-readiness fix, migratie 42)", () => {
+  it("1. een nieuwe begroting met periode 06 slaat die direct persistent op, en 'Openen' (zonder queryparameter) toont daarna de echte begroting", async () => {
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "boekingen.xlsx"), []);
+
+    await metServer(async (baseUrl) => {
+      const nieuw = await fetch(`${baseUrl}/begroting/nieuw`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ administratieId: ADMINISTRATIE_ID, begrotingsjaar: "2026", laatstAfgeslotenBoekperiode: "06", indexatiePercentage: "0" }).toString(),
+        redirect: "manual",
+      });
+      const hoofdschermUrl = nieuw.headers.get("location")!;
+      const versieId = hoofdschermUrl.split("/")[3]!.split("?")[0]!;
+
+      // Exact de "Openen"-link uit het keuzescherm: GEEN queryparameter.
+      const openen = await fetch(`${baseUrl}/begroting/${ADMINISTRATIE_ID}/${versieId}`);
+      expect(openen.status).toBe(200);
+      const html = await openen.text();
+      expect(html).toContain("Vergelijkende exploitatiebegroting");
+      expect(html).toContain("t/m periode 06");
+      expect(html).not.toContain("Kies de laatst afgesloten boekperiode");
+
+      const { openOrCreateDatabase: openDb, leesLaatstAfgeslotenBoekperiode } = await import("@bvc/begroting-data");
+      const { begrotingsversiesDatabasePad: dbPad } = await import("./paths.js");
+      const db = openDb(dbPad(root, ADMINISTRATIE_ID));
+      expect(leesLaatstAfgeslotenBoekperiode(db, versieId)).toBe("06");
+      db.close();
+    });
+  });
+
+  it("2. opnieuw openen (nieuwe, onafhankelijke requests — 'nieuwe sessie') blijft exact dezelfde periode tonen", async () => {
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "boekingen.xlsx"), []);
+
+    await metServer(async (baseUrl) => {
+      const nieuw = await fetch(`${baseUrl}/begroting/nieuw`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ administratieId: ADMINISTRATIE_ID, begrotingsjaar: "2026", laatstAfgeslotenBoekperiode: "06", indexatiePercentage: "0" }).toString(),
+        redirect: "manual",
+      });
+      const versieId = nieuw.headers.get("location")!.split("/")[3]!.split("?")[0]!;
+
+      for (let poging = 0; poging < 3; poging++) {
+        const html = await (await fetch(`${baseUrl}/begroting/${ADMINISTRATIE_ID}/${versieId}`)).text();
+        expect(html).toContain("t/m periode 06");
+      }
+    });
+  });
+
+  it("3. een bestaande (legacy) versie zonder opgeslagen periode toont nooit stilzwijgend een default — de gebruiker moet expliciet kiezen, en die keuze wordt daarna persistent", async () => {
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "boekingen.xlsx"), []);
+    const { maakBegrotingsversie, schrijfModule1Snapshot, schrijfModule1Aannames, leesLaatstAfgeslotenBoekperiode, openOrCreateDatabase: openDb } = await import("@bvc/begroting-data");
+    const { begrotingsversiesDatabasePad: dbPad } = await import("./paths.js");
+
+    const db = openDb(dbPad(root, ADMINISTRATIE_ID));
+    const versie = maakBegrotingsversie(db, { originType: "NIEUW", bedrijfsnr: BEDRIJFSNR, begrotingsjaar: 2026, bronPeildatum: new Date() });
+    schrijfModule1Snapshot(db, versie.id, []);
+    // Bewust GEEN 4e argument — exact de situatie van vóór migratie 42 (en van c8d5a538 vóór de handmatige correctie).
+    schrijfModule1Aannames(db, versie.id, { begrotingsjaar: 2026, indexatiePercentage: new Decimal(3) });
+    db.close();
+
+    await metServer(async (baseUrl) => {
+      // GET zonder queryparameter: geen default, geen afleiding -- expliciete-keuze-scherm.
+      const zonderQuery = await fetch(`${baseUrl}/begroting/${ADMINISTRATIE_ID}/${versie.id}`);
+      expect(zonderQuery.status).toBe(200);
+      const htmlZonder = await zonderQuery.text();
+      expect(htmlZonder).toContain("Kies de laatst afgesloten boekperiode");
+      expect(htmlZonder).not.toContain("Vergelijkende exploitatiebegroting");
+
+      // GET MET een queryparameter wordt ook niet stilzwijgend geaccepteerd zolang er niets is opgeslagen --
+      // nog steeds het keuzescherm, geen vlucht via de URL.
+      const metQuery = await fetch(`${baseUrl}/begroting/${ADMINISTRATIE_ID}/${versie.id}?laatstAfgeslotenBoekperiode=12`);
+      expect(await metQuery.text()).toContain("Kies de laatst afgesloten boekperiode");
+
+      // Expliciete keuze indienen.
+      const keuze = await fetch(`${baseUrl}/begroting/${ADMINISTRATIE_ID}/${versie.id}/boekperiode`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ laatstAfgeslotenBoekperiode: "09" }).toString(),
+        redirect: "manual",
+      });
+      expect(keuze.status).toBe(302);
+
+      const dbNa = openDb(dbPad(root, ADMINISTRATIE_ID));
+      expect(leesLaatstAfgeslotenBoekperiode(dbNa, versie.id)).toBe("09");
+      dbNa.close();
+
+      // Vanaf nu toont "Openen" zonder queryparameter de echte begroting met de zojuist gekozen periode.
+      const htmlNa = await (await fetch(`${baseUrl}/begroting/${ADMINISTRATIE_ID}/${versie.id}`)).text();
+      expect(htmlNa).toContain("t/m periode 09");
+    });
+  });
+
+  it("4. een afwijkende/gemanipuleerde queryparameter kan een al opgeslagen periode nooit stilzwijgend overschrijven", async () => {
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "boekingen.xlsx"), []);
+
+    await metServer(async (baseUrl) => {
+      const nieuw = await fetch(`${baseUrl}/begroting/nieuw`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ administratieId: ADMINISTRATIE_ID, begrotingsjaar: "2026", laatstAfgeslotenBoekperiode: "06", indexatiePercentage: "0" }).toString(),
+        redirect: "manual",
+      });
+      const versieId = nieuw.headers.get("location")!.split("/")[3]!.split("?")[0]!;
+
+      const html = await (await fetch(`${baseUrl}/begroting/${ADMINISTRATIE_ID}/${versieId}?laatstAfgeslotenBoekperiode=12`)).text();
+      expect(html).toContain("t/m periode 06"); // de opgeslagen waarde wint, de query-12 wordt genegeerd
+      expect(html).not.toContain("t/m periode 12");
+    });
+  });
+
+  it("5. bestaande financiële rekenuitkomsten blijven ongewijzigd door deze fix (geen Huur/Beheer-wijziging)", async () => {
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "contracten_huidig.xlsx"), [contractRij()]);
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "rentroll.xlsx"), [rentrollRij()]);
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "boekingen.xlsx"), []);
+
+    await metServer(async (baseUrl) => {
+      const nieuw = await fetch(`${baseUrl}/begroting/nieuw`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ administratieId: ADMINISTRATIE_ID, begrotingsjaar: "2028", laatstAfgeslotenBoekperiode: "06", indexatiePercentage: "0" }).toString(),
+        redirect: "manual",
+      });
+      const hoofdschermUrl = nieuw.headers.get("location")!;
+      const html = await (await fetch(baseUrl + hoofdschermUrl)).text();
+      expect(html).toContain("Huuropbrengst belast");
+      expect(html).toContain("€ 120.000,00"); // zelfde contract-afgeleide bruto huur als vóór deze fix
     });
   });
 });

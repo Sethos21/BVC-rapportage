@@ -363,6 +363,35 @@ export function renderBegrotingKeuzeScherm(administraties: readonly Administrati
   return paginaShell("BVC Rapportage — Begroting", body);
 }
 
+/**
+ * Product-readiness fix (migratie 42): getoond wanneer een begrotingsversie nog geen opgeslagen
+ * laatst-afgesloten-boekperiode heeft (legacy-versie van vóór deze fix). Verzint nooit een periode
+ * — de gebruiker kiest hem hier expliciet, eenmalig, waarna hij persistent bij de versie wordt
+ * vastgelegd (zie `POST .../boekperiode` in `begrotingRoutes.ts`).
+ */
+export function renderKiesBoekperiodeScherm(o: { administratieId: string; weergavenaam: string; versie: Begrotingsversie; fouten?: readonly string[] }): string {
+  const periodeOpties = BOEKPERIODES.map((p) => `<option value="${p.waarde}">${escapeHtml(p.label)}</option>`).join("");
+  const foutenHtml =
+    o.fouten && o.fouten.length > 0 ? `<div class="fouten"><strong>Controleer de invoer:</strong><ul>${o.fouten.map((f) => `<li>${escapeHtml(f)}</li>`).join("")}</ul></div>` : "";
+  const body = `
+    <div class="eyebrow">${escapeHtml(o.weergavenaam)} — Begroting ${o.versie.begrotingsjaar}</div>
+    <h1>Kies de laatst afgesloten boekperiode</h1>
+    <div class="sub">Voor deze bestaande begrotingsversie is nog geen laatst afgesloten boekperiode vastgelegd (nodig om Werkelijk/Estimated te tonen). Kies hem eenmalig — de keuze wordt daarna bij deze versie bewaard en hoeft niet opnieuw gekozen te worden.</div>
+    ${foutenHtml}
+    <div class="card">
+      <form method="POST" action="/begroting/${encodeURIComponent(o.administratieId)}/${encodeURIComponent(o.versie.id)}/boekperiode">
+        <label for="laatstAfgeslotenBoekperiode">Laatst afgesloten boekperiode</label>
+        <select name="laatstAfgeslotenBoekperiode" id="laatstAfgeslotenBoekperiode" required>
+          <option value="" disabled selected>Kies een periode…</option>
+          ${periodeOpties}
+        </select>
+        <button type="submit">Opslaan en openen</button>
+      </form>
+    </div>
+    <a class="terug" href="/begroting?administratieId=${encodeURIComponent(o.administratieId)}">← Terug naar begrotingskeuze</a>`;
+  return paginaShell(`Boekperiode kiezen — Begroting ${o.versie.begrotingsjaar}`, body);
+}
+
 export interface HoofdschermOpties {
   administratieId: string;
   weergavenaam: string;

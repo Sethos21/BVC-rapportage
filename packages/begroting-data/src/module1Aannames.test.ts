@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { berekenBegroteHuuropbrengsten, type BgHuurAannames } from "@bvc/reporting";
 import { maakBegrotingsversie, markeerVastgesteld, verwijderConceptVersie, type NieuweBegrotingsversieInput } from "./begrotingsversies.js";
 import { openOrCreateDatabase } from "./database.js";
-import { leesModule1Aannames, schrijfModule1Aannames } from "./module1Aannames.js";
+import { leesLaatstAfgeslotenBoekperiode, leesModule1Aannames, schrijfModule1Aannames } from "./module1Aannames.js";
 import { leesModule1Snapshot, schrijfModule1Snapshot } from "./module1Snapshot.js";
 
 let dir: string;
@@ -140,6 +140,52 @@ describe("schrijfModule1Aannames / leesModule1Aannames", () => {
     verwijderConceptVersie(db, versie.id);
 
     expect(db.prepare(`SELECT 1 FROM begroting_aannames WHERE begroting_versie_id = ?`).get(versie.id)).toBeUndefined();
+  });
+
+  it("34. laatstAfgeslotenBoekperiode: geen opgeslagen waarde zonder expliciete keuze (geen default, geen afleiding) — product-readiness fix migratie 42", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    schrijfModule1Aannames(db, versie.id, { begrotingsjaar: 2027, indexatiePercentage: new Decimal(3) });
+
+    expect(leesLaatstAfgeslotenBoekperiode(db, versie.id)).toBeNull();
+  });
+
+  it("35. laatstAfgeslotenBoekperiode: expliciet meegegeven bij aanmaak wordt exact teruggelezen", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    schrijfModule1Aannames(db, versie.id, { begrotingsjaar: 2027, indexatiePercentage: new Decimal(3) }, "06");
+
+    expect(leesLaatstAfgeslotenBoekperiode(db, versie.id)).toBe("06");
+    // indexatiePercentage blijft intact, laatstAfgeslotenBoekperiode zit bewust buiten BgHuurAannames.
+    expect(leesModule1Aannames(db, versie.id)).toEqual({ begrotingsjaar: 2027, indexatiePercentage: new Decimal(3) });
+  });
+
+  it("36. laatstAfgeslotenBoekperiode: een latere schrijfActie die het argument weglaat, wist een al opgeslagen periode NIET (COALESCE-upsert)", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    schrijfModule1Aannames(db, versie.id, { begrotingsjaar: 2027, indexatiePercentage: new Decimal(3) }, "06");
+
+    // Een latere, bestaande oproep (bv. alleen het indexatiepercentage bijwerken) geeft het argument niet mee.
+    schrijfModule1Aannames(db, versie.id, { begrotingsjaar: 2027, indexatiePercentage: new Decimal(4.5) });
+
+    expect(leesLaatstAfgeslotenBoekperiode(db, versie.id)).toBe("06");
+    expect(leesModule1Aannames(db, versie.id)!.indexatiePercentage.toString()).toBe("4.5");
+  });
+
+  it("37. laatstAfgeslotenBoekperiode: een expliciet nieuwe waarde overschrijft de vorige", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    schrijfModule1Aannames(db, versie.id, { begrotingsjaar: 2027, indexatiePercentage: new Decimal(3) }, "06");
+    schrijfModule1Aannames(db, versie.id, { begrotingsjaar: 2027, indexatiePercentage: new Decimal(3) }, "09");
+
+    expect(leesLaatstAfgeslotenBoekperiode(db, versie.id)).toBe("09");
+  });
+
+  it("38. laatstAfgeslotenBoekperiode: een ongeldige periode (buiten '01'..'12', verkeerde lengte) wordt door de database-CHECK geweigerd", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    expect(() => schrijfModule1Aannames(db, versie.id, { begrotingsjaar: 2027, indexatiePercentage: new Decimal(3) }, "13")).toThrow(/CHECK constraint failed/);
+    expect(() => schrijfModule1Aannames(db, versie.id, { begrotingsjaar: 2027, indexatiePercentage: new Decimal(3) }, "6")).toThrow(/CHECK constraint failed/);
+  });
+
+  it("39. leesLaatstAfgeslotenBoekperiode geeft null voor een versie zonder aannamesrij", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    expect(leesLaatstAfgeslotenBoekperiode(db, versie.id)).toBeNull();
   });
 
   it("33. gelezen aannames werken rechtstreeks als invoer van de échte berekenBegroteHuuropbrengsten, samen met een geldige snapshot", () => {

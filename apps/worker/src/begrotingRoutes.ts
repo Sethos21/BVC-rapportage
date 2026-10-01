@@ -14,6 +14,7 @@ import {
   leesGeplandOnderhoudBeoordeeld,
   leesLeegstandCategorieState,
   leesLeegstandRegels,
+  leesLaatstAfgeslotenBoekperiode,
   leesModule1Aannames,
   leesModule1Overrides,
   leesModule1Snapshot,
@@ -99,6 +100,7 @@ import {
   renderGemeentelijkeLastenForm,
   renderGeplandOnderhoudForm,
   renderHuurDetail,
+  renderKiesBoekperiodeScherm,
   renderLeegstandForm,
   renderManagementForm,
   renderRenteForm,
@@ -189,9 +191,16 @@ function open(root: string, administratieId: string, versieId: string): Geopend 
   return { root, administratieId, weergavenaam: config.weergavenaam, bedrijfsnr: config.bedrijfsnr, db, versie };
 }
 
-function laatstAfgeslotenBoekperiodeUitQuery(url: URL): string | null {
-  const waarde = url.searchParams.get("laatstAfgeslotenBoekperiode") ?? "";
-  return GELDIGE_PERIODES.has(waarde) ? waarde : null;
+/**
+ * Product-readiness fix (migratie 42): de autoritatieve laatst-afgesloten-boekperiode van een
+ * REEDS GEOPENDE begrotingsversie — altijd de opgeslagen waarde (`begroting_aannames`), nooit een
+ * eventueel aanwezige queryparameter. Die mag daarom nooit stilzwijgend een afwijkende opgeslagen
+ * waarde introduceren: zodra er iets is opgeslagen, wint dat altijd. `null` = nog niets opgeslagen
+ * (legacy-versie van vóór deze fix) — de aanroeper laat de gebruiker dan expliciet kiezen via
+ * `renderKiesBoekperiodeScherm`/`POST .../boekperiode`, verzint zelf niets.
+ */
+function opgeslagenBoekperiode(g: Geopend): string | null {
+  return leesLaatstAfgeslotenBoekperiode(g.db, g.versie.id);
 }
 
 function hoofdschermUrl(administratieId: string, versieId: string, laatstAfgeslotenBoekperiode: string, melding?: string): string {
@@ -287,7 +296,10 @@ export async function handleBegrotingRequest(root: string, req: IncomingMessage,
       // snapshot bij het starten"), niet ververst zodra de bron later wijzigt (OB-017).
       const contractenResultaat = leesBgContractFeitenVoorAdministratie(root, administratieId, config.bedrijfsnr, versie.bronPeildatum);
       schrijfModule1Snapshot(db, versie.id, contractenResultaat.contracten);
-      schrijfModule1Aannames(db, versie.id, { begrotingsjaar, indexatiePercentage: indexatiePercentage! });
+      // Product-readiness fix (migratie 42): de gekozen laatst afgesloten boekperiode is hierboven al
+      // gevalideerd (GELDIGE_PERIODES) en wordt nu direct persistent vastgelegd bij deze versie — de
+      // URL/querystring is daarna niet langer de enige bron van waarheid (zie opgeslagenBoekperiode()).
+      schrijfModule1Aannames(db, versie.id, { begrotingsjaar, indexatiePercentage: indexatiePercentage! }, laatstAfgeslotenBoekperiode);
       const melding = contractenResultaat.bronBeschikbaar
         ? `Contractbasis geladen: ${contractenResultaat.contracten.length} contract(en) uit Contracten/RentRoll (${contractenResultaat.aantalContractenNaFilter} van ${contractenResultaat.aantalRuweContractenRegels} contractregels na administratiefilter).`
         : "Geen Contracten- en/of RentRoll-bronbestand gevonden voor deze administratie — Huur/Beheer starten leeg (onbekend), niet als bevestigde €0.";
@@ -309,14 +321,61 @@ export async function handleBegrotingRequest(root: string, req: IncomingMessage,
       stuurHtml(res, 404, renderFoutPagina("Niet gevonden", "Deze begrotingsversie of administratie bestaat niet."));
       return true;
     }
-    const laatstAfgeslotenBoekperiode = laatstAfgeslotenBoekperiodeUitQuery(url);
+    const laatstAfgeslotenBoekperiode = opgeslagenBoekperiode(g);
     if (laatstAfgeslotenBoekperiode === null) {
+      // Product-readiness fix (migratie 42): geen opgeslagen periode voor deze versie (legacy, van
+      // vóór deze fix) — nooit verzinnen/afleiden, de gebruiker kiest hem hier expliciet eenmalig.
+      stuurHtml(res, 200, renderKiesBoekperiodeScherm({ administratieId, weergavenaam: g.weergavenaam, versie: g.versie }));
       g.db.close();
-      stuurRedirect(res, `/begroting?administratieId=${encodeURIComponent(administratieId)}`);
       return true;
     }
     const melding = url.searchParams.get("melding");
     await toonHoofdscherm(res, g, laatstAfgeslotenBoekperiode, melding ?? undefined);
+    return true;
+  }
+
+  // POST /begroting/{administratieId}/{versieId}/boekperiode — legacy-versie zonder opgeslagen
+  // periode: expliciete, eenmalige keuze die daarna persistent bij de versie wordt vastgelegd.
+  if (req.method === "POST" && segmenten.length === 4 && segmenten[3] === "boekperiode") {
+    const g = open(root, administratieId, versieId);
+    if (g === null) {
+      stuurHtml(res, 404, renderFoutPagina("Niet gevonden", "Deze begrotingsversie of administratie bestaat niet."));
+      return true;
+    }
+    if (g.versie.status !== "CONCEPT") {
+      g.db.close();
+      stuurHtml(
+        res,
+        400,
+        renderFoutPagina(
+          "Boekperiode kan niet worden vastgelegd",
+          "Deze begrotingsversie is al vastgesteld (immutable) en heeft geen opgeslagen laatst afgesloten boekperiode. Dit is een bekend, nog niet opgelost architectuurpunt voor vastgestelde legacy-versies zonder deze waarde.",
+          "/begroting",
+        ),
+      );
+      return true;
+    }
+    const body = await leesBody(req);
+    const velden = Object.fromEntries(new URLSearchParams(body));
+    const gekozenPeriode = tekst(velden["laatstAfgeslotenBoekperiode"]);
+    if (!GELDIGE_PERIODES.has(gekozenPeriode)) {
+      stuurHtml(
+        res,
+        400,
+        renderKiesBoekperiodeScherm({ administratieId, weergavenaam: g.weergavenaam, versie: g.versie, fouten: ["Kies een geldige laatst afgesloten boekperiode."] }),
+      );
+      g.db.close();
+      return true;
+    }
+    const bestaandeAannames = leesModule1Aannames(g.db, g.versie.id);
+    if (bestaandeAannames === null) {
+      g.db.close();
+      stuurHtml(res, 500, renderFoutPagina("Boekperiode kan niet worden vastgelegd", `Begrotingsversie ${versieId} heeft nog geen Module-1-aannames.`, "/begroting"));
+      return true;
+    }
+    schrijfModule1Aannames(g.db, g.versie.id, bestaandeAannames, gekozenPeriode);
+    g.db.close();
+    stuurRedirect(res, hoofdschermUrl(administratieId, versieId, gekozenPeriode));
     return true;
   }
 
@@ -327,7 +386,12 @@ export async function handleBegrotingRequest(root: string, req: IncomingMessage,
       stuurHtml(res, 404, renderFoutPagina("Niet gevonden", "Deze begrotingsversie of administratie bestaat niet."));
       return true;
     }
-    const laatstAfgeslotenBoekperiode = laatstAfgeslotenBoekperiodeUitQuery(url) ?? "12";
+    const laatstAfgeslotenBoekperiode = opgeslagenBoekperiode(g);
+    if (laatstAfgeslotenBoekperiode === null) {
+      g.db.close();
+      stuurRedirect(res, `/begroting/${encodeURIComponent(administratieId)}/${encodeURIComponent(versieId)}`);
+      return true;
+    }
     try {
       const vergelijkend = leesBegrotingsWerkomgeving(g.root, g.administratieId, g.bedrijfsnr, g.db, g.versie, laatstAfgeslotenBoekperiode);
       const vergelijking = vergelijkend.estimated !== null ? vergelijkPnLResultaten(vergelijkend.estimated, vergelijkend.jouwBegroting) : null;
@@ -348,7 +412,12 @@ export async function handleBegrotingRequest(root: string, req: IncomingMessage,
       return true;
     }
     await leesBody(req); // bevestigingsveld wordt niet inhoudelijk gebruikt — de checkbox dwingt de bevestigingsklik af (UX_12)
-    const laatstAfgeslotenBoekperiode = laatstAfgeslotenBoekperiodeUitQuery(url) ?? "12";
+    const laatstAfgeslotenBoekperiode = opgeslagenBoekperiode(g);
+    if (laatstAfgeslotenBoekperiode === null) {
+      g.db.close();
+      stuurRedirect(res, `/begroting/${encodeURIComponent(administratieId)}/${encodeURIComponent(versieId)}`);
+      return true;
+    }
     try {
       stelBegrotingVast(g.db, g.versie.id, new Date());
       g.db.close();
@@ -391,7 +460,12 @@ async function handleModuleRoute(root: string, req: IncomingMessage, res: Server
     stuurHtml(res, 404, renderFoutPagina("Niet gevonden", "Deze begrotingsversie of administratie bestaat niet."));
     return true;
   }
-  const laatstAfgeslotenBoekperiode = laatstAfgeslotenBoekperiodeUitQuery(url) ?? "12";
+  const laatstAfgeslotenBoekperiode = opgeslagenBoekperiode(g);
+  if (laatstAfgeslotenBoekperiode === null) {
+    g.db.close();
+    stuurRedirect(res, `/begroting/${encodeURIComponent(administratieId)}/${encodeURIComponent(versieId)}`);
+    return true;
+  }
   const terugUrl = hoofdschermUrl(administratieId, versieId, laatstAfgeslotenBoekperiode);
   const actieUrl = `${url.pathname}?laatstAfgeslotenBoekperiode=${encodeURIComponent(laatstAfgeslotenBoekperiode)}`;
 

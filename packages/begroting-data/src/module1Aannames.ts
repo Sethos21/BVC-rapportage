@@ -14,6 +14,7 @@ import { leesBegrotingsversie } from "./begrotingsversies.js";
 
 interface AannamesRow {
   indexatie_percentage: string;
+  laatst_afgesloten_boekperiode: string | null;
 }
 
 /**
@@ -25,8 +26,17 @@ interface AannamesRow {
  * Eén enkele `INSERT … ON CONFLICT … DO UPDATE`-statement — voor een
  * 1-op-1-record is dat al atomair, geen aparte DELETE+INSERT/transactie
  * nodig.
+ *
+ * `laatstAfgeslotenBoekperiode` (migratie 42, product-readiness fix): het
+ * tweede vooraf vastgestelde uitgangspunt van een begrotingsversie, bewust
+ * BUITEN `BgHuurAannames` gehouden (dat blijft een pure `@bvc/reporting`-
+ * rekentype, geen UI-/periodecontext). `undefined` (het argument weglaten)
+ * laat een al opgeslagen waarde ongemoeid — alleen een expliciet meegegeven
+ * geldige periode overschrijft hem. Zo kan deze functie voor de bestaande
+ * oproepen (uitsluitend `indexatiePercentage` bijwerken) ongewijzigd blijven
+ * werken zonder een eerder opgeslagen periode per ongeluk te wissen.
  */
-export function schrijfModule1Aannames(db: DatabaseSync, versieId: string, aannames: BgHuurAannames): void {
+export function schrijfModule1Aannames(db: DatabaseSync, versieId: string, aannames: BgHuurAannames, laatstAfgeslotenBoekperiode?: string | null): void {
   const versie = leesBegrotingsversie(db, versieId);
   if (versie === null) {
     throw new Error(`Begrotingsversie ${versieId} bestaat niet.`);
@@ -43,10 +53,12 @@ export function schrijfModule1Aannames(db: DatabaseSync, versieId: string, aanna
   }
 
   db.prepare(
-    `INSERT INTO begroting_aannames (begroting_versie_id, indexatie_percentage)
-     VALUES (?, ?)
-     ON CONFLICT (begroting_versie_id) DO UPDATE SET indexatie_percentage = excluded.indexatie_percentage`,
-  ).run(versieId, aannames.indexatiePercentage.toString());
+    `INSERT INTO begroting_aannames (begroting_versie_id, indexatie_percentage, laatst_afgesloten_boekperiode)
+     VALUES (?, ?, ?)
+     ON CONFLICT (begroting_versie_id) DO UPDATE SET
+       indexatie_percentage = excluded.indexatie_percentage,
+       laatst_afgesloten_boekperiode = COALESCE(excluded.laatst_afgesloten_boekperiode, begroting_aannames.laatst_afgesloten_boekperiode)`,
+  ).run(versieId, aannames.indexatiePercentage.toString(), laatstAfgeslotenBoekperiode ?? null);
 }
 
 /** Leest de Module-1-aannames voor een begrotingsversie. `null` als de versie niet bestaat óf nog geen aannames heeft (beide legitiem tijdens CONCEPT). */
@@ -55,7 +67,7 @@ export function leesModule1Aannames(db: DatabaseSync, versieId: string): BgHuurA
   if (versie === null) {
     return null;
   }
-  const row = db.prepare(`SELECT indexatie_percentage FROM begroting_aannames WHERE begroting_versie_id = ?`).get(versieId) as unknown as
+  const row = db.prepare(`SELECT indexatie_percentage, laatst_afgesloten_boekperiode FROM begroting_aannames WHERE begroting_versie_id = ?`).get(versieId) as unknown as
     | AannamesRow
     | undefined;
   if (row === undefined) {
@@ -65,4 +77,17 @@ export function leesModule1Aannames(db: DatabaseSync, versieId: string): BgHuurA
     begrotingsjaar: versie.begrotingsjaar,
     indexatiePercentage: new Decimal(row.indexatie_percentage),
   };
+}
+
+/**
+ * Leest uitsluitend de opgeslagen laatst-afgesloten-boekperiode van een begrotingsversie
+ * (migratie 42). `null` = nog geen keuze opgeslagen voor deze versie (legacy-versie van vóór deze
+ * fix, of nog geen aannames) — de aanroeper moet dan de gebruiker expliciet laten kiezen, nooit
+ * een periode verzinnen of uit de huidige datum/`bron_peildatum` afleiden.
+ */
+export function leesLaatstAfgeslotenBoekperiode(db: DatabaseSync, versieId: string): string | null {
+  const row = db.prepare(`SELECT laatst_afgesloten_boekperiode FROM begroting_aannames WHERE begroting_versie_id = ?`).get(versieId) as unknown as
+    | { laatst_afgesloten_boekperiode: string | null }
+    | undefined;
+  return row?.laatst_afgesloten_boekperiode ?? null;
 }

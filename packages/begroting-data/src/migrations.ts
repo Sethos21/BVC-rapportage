@@ -4436,6 +4436,28 @@ export const MIGRATIONS: readonly Migration[] = [
        END`,
     ],
   },
+  /**
+   * Migratie 42 — product-readiness fix: de laatst afgesloten boekperiode waarmee een
+   * begrotingsversie is aangemaakt (UX §2/§4 — hetzelfde soort "vooraf vastgesteld uitgangspunt"
+   * als `indexatie_percentage`) wordt nergens persistent bewaard; alleen de URL-querystring droeg
+   * hem rond. Elke keer dat een versie zonder die exacte parameter werd geopend (bookmark,
+   * "Openen"-link, nieuwe sessie), viel de code terug op ofwel een redirect naar het keuzescherm,
+   * ofwel een hardcoded `"12"` — beide in strijd met CLAUDE.md §6 ("periodekeuze is altijd
+   * expliciet, nooit een stilzwijgende aanname").
+   *
+   * Additieve kolom op `begroting_aannames` (bestaat al 1-op-1 per begrotingsversie, bevat al het
+   * andere vooraf vastgestelde uitgangspunt) — zelfde validatiepatroon als elders in dit schema
+   * (`length(x) = 2 AND x BETWEEN '01' AND '12'`, zie migratie 25). Puur additief: bestaande rijen
+   * krijgen `NULL` (onbekend), nooit een verzonnen default, nooit afgeleid uit de huidige datum of
+   * uit `bron_peildatum`. Geen financiële logica gewijzigd.
+   */
+  {
+    version: 42,
+    description: "begroting_aannames: laatst_afgesloten_boekperiode persistent per begrotingsversie (geen default)",
+    ddl: [
+      `ALTER TABLE begroting_aannames ADD COLUMN laatst_afgesloten_boekperiode TEXT NULL CHECK (laatst_afgesloten_boekperiode IS NULL OR (length(laatst_afgesloten_boekperiode) = 2 AND laatst_afgesloten_boekperiode BETWEEN '01' AND '12'))`,
+    ],
+  },
 ];
 
 function schemaMetaTableExists(db: DatabaseSync): boolean {
