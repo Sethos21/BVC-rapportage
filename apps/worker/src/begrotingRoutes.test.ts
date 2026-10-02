@@ -356,7 +356,7 @@ describe("Begrotingsworkflow via echte HTTP-routes (Tranche 11) — acceptatiecr
  */
 describe("Onderhoud totaal zichtbaar op Gepland- en Correctief-detailscherm (UX-uitrol, Sectie 3)", () => {
   it("alleen Gepland ingevuld: Correctief toont €0, totaal = Gepland, Werkelijk en Estimated zichtbaar", async () => {
-    schrijfXlsxFixture(join(bronGedeeldDir(root), "boekingen.xlsx"), [boekingRij("4300", 300), boekingRij("4330", 150), boekingRij("4340", 75)]);
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "boekingen.xlsx"), [boekingRij("4300", 300, null, null), boekingRij("4330", 150, null, null), boekingRij("4340", 75, null, null)]);
     const mappingDb = openOrCreateDatabase(pnlBronmappingDatabasePad(root, ADMINISTRATIE_ID));
     voegPnLBronmappingMutatieToe(mappingDb, pnlMapping("4300", "ONDERHOUD_GEBOUWEN"));
     voegPnLBronmappingMutatieToe(mappingDb, pnlMapping("4330", "ONDERHOUD_TERREIN"));
@@ -413,7 +413,7 @@ describe("Onderhoud totaal zichtbaar op Gepland- en Correctief-detailscherm (UX-
   });
 
   it("alleen Correctief ingevuld: Gepland toont €0, totaal = Correctief, zichtbaar op beide schermen", async () => {
-    schrijfXlsxFixture(join(bronGedeeldDir(root), "boekingen.xlsx"), [boekingRij("4300", 300), boekingRij("4330", 150), boekingRij("4340", 75)]);
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "boekingen.xlsx"), [boekingRij("4300", 300, null, null), boekingRij("4330", 150, null, null), boekingRij("4340", 75, null, null)]);
     const mappingDb = openOrCreateDatabase(pnlBronmappingDatabasePad(root, ADMINISTRATIE_ID));
     voegPnLBronmappingMutatieToe(mappingDb, pnlMapping("4300", "ONDERHOUD_GEBOUWEN"));
     voegPnLBronmappingMutatieToe(mappingDb, pnlMapping("4330", "ONDERHOUD_TERREIN"));
@@ -448,7 +448,7 @@ describe("Onderhoud totaal zichtbaar op Gepland- en Correctief-detailscherm (UX-
   });
 
   it("beide (Gepland + Correctief) ingevuld: Onderhoud totaal = som, Werkelijk blijft exact hetzelfde getal op beide schermen", async () => {
-    schrijfXlsxFixture(join(bronGedeeldDir(root), "boekingen.xlsx"), [boekingRij("4300", 300), boekingRij("4330", 150), boekingRij("4340", 75)]);
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "boekingen.xlsx"), [boekingRij("4300", 300, null, null), boekingRij("4330", 150, null, null), boekingRij("4340", 75, null, null)]);
     const mappingDb = openOrCreateDatabase(pnlBronmappingDatabasePad(root, ADMINISTRATIE_ID));
     voegPnLBronmappingMutatieToe(mappingDb, pnlMapping("4300", "ONDERHOUD_GEBOUWEN"));
     voegPnLBronmappingMutatieToe(mappingDb, pnlMapping("4330", "ONDERHOUD_TERREIN"));
