@@ -113,6 +113,7 @@ import {
   type GeplandOnderhoudRegelVeld,
   type HuurDetailRegel,
   type LeegstandCategorieOpties,
+  moduleWerkomgevingPnLHtml,
   type OnderhoudTotaalSamenvattingVeld,
   type VerzekeringRegelVeld,
   type WozObjectVeld,
@@ -167,6 +168,9 @@ function tekstOfNull(v: string | undefined): string | null {
 }
 
 const GELDIGE_PERIODES = new Set(BOEKPERIODES.map((p) => p.waarde));
+
+/** UX-UITROL (2026-10-02): `null` wanneer de vergelijkende P&L (nog) niet kon worden berekend — het detailscherm werkt dan door zonder P&L-samenvattingspaneel. */
+type Vergelijkend = ReturnType<typeof leesBegrotingsWerkomgeving> | null;
 
 interface Geopend {
   root: string;
@@ -557,19 +561,32 @@ async function handleModuleRoute(root: string, req: IncomingMessage, res: Server
     return true;
   }
 
+  // UX-UITROL (2026-10-02, generieke regel): elk detailscherm toont dezelfde vergelijkende-P&L-
+  // rij(en) die ook op het hoofdscherm staan (09_Begrotingsmodule_UX_Vastgesteld §3/§10) — hier
+  // ÉÉN KEER berekend (zelfde bestaande keten als `toonHoofdscherm`) en als kant-en-klaar
+  // `VergelijkendeBegrotingsPnLResultaat` doorgegeven, zodat geen enkele handler dit zelf opnieuw
+  // hoeft te berekenen. Faalt deze ophaal (bv. nog geen boekingen.xlsx), dan blijft het detailscherm
+  // zelf gewoon werken — de samenvatting wordt dan stil weggelaten (`vergelijkend = null`).
+  let vergelijkend: ReturnType<typeof leesBegrotingsWerkomgeving> | null = null;
   try {
-    if (moduleKey === "huur") return await handleHuur(req, res, g, actieUrl, terugUrl);
-    if (moduleKey === "beheer") return await handleBeheer(req, res, g, actieUrl, terugUrl);
-    if (moduleKey === "management") return await handleManagement(req, res, g, actieUrl, terugUrl);
+    vergelijkend = leesBegrotingsWerkomgeving(g.root, g.administratieId, g.bedrijfsnr, g.db, g.versie, laatstAfgeslotenBoekperiode);
+  } catch {
+    vergelijkend = null;
+  }
+
+  try {
+    if (moduleKey === "huur") return await handleHuur(req, res, g, actieUrl, terugUrl, vergelijkend);
+    if (moduleKey === "beheer") return await handleBeheer(req, res, g, actieUrl, terugUrl, vergelijkend);
+    if (moduleKey === "management") return await handleManagement(req, res, g, actieUrl, terugUrl, vergelijkend);
     if (moduleKey === "correctief") return await handleCorrectief(req, res, g, actieUrl, terugUrl, laatstAfgeslotenBoekperiode);
-    if (moduleKey === "btw") return await handleBtw(req, res, g, actieUrl, terugUrl);
-    if (moduleKey === "rente-leningen") return await handleRente(req, res, g, actieUrl, terugUrl, "RENTEKOSTEN");
-    if (moduleKey === "rente-opbrengst") return await handleRente(req, res, g, actieUrl, terugUrl, "RENTE_OPBRENGSTEN");
-    if (moduleKey === "leegstand") return await handleLeegstand(req, res, g, actieUrl, terugUrl);
-    if (moduleKey === "algemene-kosten") return await handleAlgemeneKosten(req, res, g, actieUrl, terugUrl);
-    if (moduleKey === "verzekeringen") return await handleVerzekeringen(req, res, g, actieUrl, terugUrl);
+    if (moduleKey === "btw") return await handleBtw(req, res, g, actieUrl, terugUrl, vergelijkend);
+    if (moduleKey === "rente-leningen") return await handleRente(req, res, g, actieUrl, terugUrl, "RENTEKOSTEN", vergelijkend);
+    if (moduleKey === "rente-opbrengst") return await handleRente(req, res, g, actieUrl, terugUrl, "RENTE_OPBRENGSTEN", vergelijkend);
+    if (moduleKey === "leegstand") return await handleLeegstand(req, res, g, actieUrl, terugUrl, vergelijkend);
+    if (moduleKey === "algemene-kosten") return await handleAlgemeneKosten(req, res, g, actieUrl, terugUrl, vergelijkend);
+    if (moduleKey === "verzekeringen") return await handleVerzekeringen(req, res, g, actieUrl, terugUrl, vergelijkend);
     if (moduleKey === "gepland-onderhoud") return await handleGeplandOnderhoud(req, res, g, actieUrl, terugUrl, laatstAfgeslotenBoekperiode);
-    if (moduleKey === "gemeentelijke-lasten") return await handleGemeentelijkeLasten(req, res, g, root, actieUrl, terugUrl);
+    if (moduleKey === "gemeentelijke-lasten") return await handleGemeentelijkeLasten(req, res, g, root, actieUrl, terugUrl, vergelijkend);
     stuurHtml(res, 404, renderFoutPagina("Onbekend onderdeel", `Onbekend begrotingsonderdeel "${moduleKey}".`, terugUrl));
     return true;
   } finally {
@@ -612,7 +629,7 @@ function fmtDatumVeld(d: Date): string {
  * Blijft leesbaar (GET) na vaststellen; schrijven (POST) is uitsluitend op CONCEPT mogelijk (zie
  * `handleModuleRoute`'s guard).
  */
-async function handleHuur(req: IncomingMessage, res: ServerResponse, g: Geopend, actieUrl: string, terugUrl: string): Promise<boolean> {
+async function handleHuur(req: IncomingMessage, res: ServerResponse, g: Geopend, actieUrl: string, terugUrl: string, vergelijkend: Vergelijkend): Promise<boolean> {
   const alleenLezen = g.versie.status !== "CONCEPT";
   const contracten = leesModule1Snapshot(g.db, g.versie.id);
   const aannames = leesModule1Aannames(g.db, g.versie.id);
@@ -680,6 +697,7 @@ async function handleHuur(req: IncomingMessage, res: ServerResponse, g: Geopend,
       regels,
       controleVereist: module1.controleVereist.map((c) => `${c.contractnummer ?? "Algemeen"}: ${c.bericht}`),
       portefeuilleNetto: fmtBedragKort(portefeuilleNetto),
+      pnlHtml: vergelijkend !== null ? moduleWerkomgevingPnLHtml(vergelijkend, ["HUUROPBRENGST_BELAST", "HUUROPBRENGST_ONBELAST", "VERLEENDE_HUURKORTING"]) : "",
     }),
   );
   return true;
@@ -691,7 +709,7 @@ async function handleHuur(req: IncomingMessage, res: ServerResponse, g: Geopend,
  * gevoed vanuit de echte contractbasis. Complexen komen uit de Module-1-contracten (elk complex
  * dat in de contractbasis voorkomt), niet uit een los complexenregister.
  */
-async function handleBeheer(req: IncomingMessage, res: ServerResponse, g: Geopend, actieUrl: string, terugUrl: string): Promise<boolean> {
+async function handleBeheer(req: IncomingMessage, res: ServerResponse, g: Geopend, actieUrl: string, terugUrl: string, vergelijkend: Vergelijkend): Promise<boolean> {
   const alleenLezen = g.versie.status !== "CONCEPT";
   const contracten = leesModule1Snapshot(g.db, g.versie.id);
   const aannames = leesModule1Aannames(g.db, g.versie.id);
@@ -776,12 +794,13 @@ async function handleBeheer(req: IncomingMessage, res: ServerResponse, g: Geopen
       regels,
       controleVereist: module2.controleVereist.map((c) => `${c.complexnummer ?? "Algemeen"}: ${c.bericht}`),
       portefeuilleTotaal: fmtBedragKort(module2.portefeuilleTotalen.totaleVergoeding),
+      pnlHtml: vergelijkend !== null ? moduleWerkomgevingPnLHtml(vergelijkend, ["BEHEERKOSTEN"]) : "",
     }),
   );
   return true;
 }
 
-async function handleManagement(req: IncomingMessage, res: ServerResponse, g: Geopend, actieUrl: string, terugUrl: string): Promise<boolean> {
+async function handleManagement(req: IncomingMessage, res: ServerResponse, g: Geopend, actieUrl: string, terugUrl: string, vergelijkend: Vergelijkend): Promise<boolean> {
   if (req.method === "GET") {
     const huidig = leesModule3Invoer(g.db, g.versie.id);
     const leeg = { wijze: "NIEUWE_VERGOEDING", bedrag: "", eenheid: "MAAND", ingangsdatum: "", bestaandBedrag: "", bestaandEenheid: "MAAND", indexatiePercentage: "", indexatiedatum: "", nieuwBedrag: "", nieuweEenheid: "MAAND" };
@@ -793,7 +812,8 @@ async function handleManagement(req: IncomingMessage, res: ServerResponse, g: Ge
           : huidig.wijze === "INDEXEER_BESTAAND"
             ? { ...leeg, wijze: huidig.wijze, bestaandBedrag: huidig.bestaandBedrag.toString(), bestaandEenheid: huidig.eenheid, indexatiePercentage: huidig.indexatiePercentage.toString(), indexatiedatum: huidig.indexatiedatum.toISOString().slice(0, 10) }
             : { ...leeg, wijze: huidig.wijze, nieuwBedrag: huidig.nieuwBedrag.toString(), nieuweEenheid: huidig.nieuweEenheid };
-    stuurHtml(res, 200, renderManagementForm({ actieUrl, terugUrl, huidig: form, alleenLezen: g.versie.status !== "CONCEPT" }));
+    const pnlHtml = vergelijkend !== null ? moduleWerkomgevingPnLHtml(vergelijkend, ["MANAGEMENTVERGOEDING"]) : "";
+    stuurHtml(res, 200, renderManagementForm({ actieUrl, terugUrl, huidig: form, alleenLezen: g.versie.status !== "CONCEPT", pnlHtml }));
     return true;
   }
 
@@ -921,7 +941,7 @@ async function handleCorrectief(req: IncomingMessage, res: ServerResponse, g: Ge
   return true;
 }
 
-async function handleBtw(req: IncomingMessage, res: ServerResponse, g: Geopend, actieUrl: string, terugUrl: string): Promise<boolean> {
+async function handleBtw(req: IncomingMessage, res: ServerResponse, g: Geopend, actieUrl: string, terugUrl: string, vergelijkend: Vergelijkend): Promise<boolean> {
   if (req.method === "GET") {
     const regels = leesNietVerrekenbareBtwRegels(g.db, g.versie.id);
     const state = leesNietVerrekenbareBtwState(g.db, g.versie.id);
@@ -936,6 +956,7 @@ async function handleBtw(req: IncomingMessage, res: ServerResponse, g: Geopend, 
         resterendeVerwachting: resterendeVerwachting?.toString() ?? "",
         regels: regels.map((r) => ({ id: r.id, omschrijving: r.omschrijving, complexnummer: r.complexnummer ?? "", jaarbedrag: r.jaarbedrag?.toString() ?? "" })),
         alleenLezen: g.versie.status !== "CONCEPT",
+        pnlHtml: vergelijkend !== null ? moduleWerkomgevingPnLHtml(vergelijkend, ["NIET_VERREKENBARE_BTW"]) : "",
       }),
     );
     return true;
@@ -970,7 +991,7 @@ async function handleBtw(req: IncomingMessage, res: ServerResponse, g: Geopend, 
   return true;
 }
 
-async function handleRente(req: IncomingMessage, res: ServerResponse, g: Geopend, actieUrl: string, terugUrl: string, categorie: BgRenteCategorie): Promise<boolean> {
+async function handleRente(req: IncomingMessage, res: ServerResponse, g: Geopend, actieUrl: string, terugUrl: string, categorie: BgRenteCategorie, vergelijkend: Vergelijkend): Promise<boolean> {
   const isOpbrengst = categorie === "RENTE_OPBRENGSTEN";
 
   if (req.method === "GET") {
@@ -981,7 +1002,8 @@ async function handleRente(req: IncomingMessage, res: ServerResponse, g: Geopend
     // Ruwe conventie: Rente opbrengsten wordt intern negatief bewaard; de gebruiker ziet en voert altijd een positief bedrag in (Tranche 11 §11).
     const begrotingsbedrag = bestaandeRegel?.begrotingsbedrag !== null && bestaandeRegel?.begrotingsbedrag !== undefined ? (isOpbrengst ? bestaandeRegel.begrotingsbedrag.negated() : bestaandeRegel.begrotingsbedrag).toString() : "";
     const verwachtingWeergave = resterendeVerwachting !== null ? (isOpbrengst ? resterendeVerwachting.negated() : resterendeVerwachting).toString() : "";
-    stuurHtml(res, 200, renderRenteForm({ categorie, actieUrl, terugUrl, begrotingsbedrag, beoordeeld: categorieState[categorie].beoordeeld, resterendeVerwachting: verwachtingWeergave, alleenLezen: g.versie.status !== "CONCEPT" }));
+    const pnlHtml = vergelijkend !== null ? moduleWerkomgevingPnLHtml(vergelijkend, [categorie]) : "";
+    stuurHtml(res, 200, renderRenteForm({ categorie, actieUrl, terugUrl, begrotingsbedrag, beoordeeld: categorieState[categorie].beoordeeld, resterendeVerwachting: verwachtingWeergave, alleenLezen: g.versie.status !== "CONCEPT", pnlHtml }));
     return true;
   }
 
@@ -1045,7 +1067,7 @@ const LEEGSTAND_TITELS: Record<BgLeegstandCategorie, string> = { NUTS_LEEGSTAND:
 const MAX_REGELS_LEEGSTAND = 6;
 
 /** Leegstandskosten (OB-031, Tranche 13): drie categorieën, elk het bestaande complete-list-save-patroon. */
-async function handleLeegstand(req: IncomingMessage, res: ServerResponse, g: Geopend, actieUrl: string, terugUrl: string): Promise<boolean> {
+async function handleLeegstand(req: IncomingMessage, res: ServerResponse, g: Geopend, actieUrl: string, terugUrl: string, vergelijkend: Vergelijkend): Promise<boolean> {
   if (req.method === "GET") {
     const state = leesLeegstandCategorieState(g.db, g.versie.id);
     const regels = leesLeegstandRegels(g.db, g.versie.id);
@@ -1056,7 +1078,8 @@ async function handleLeegstand(req: IncomingMessage, res: ServerResponse, g: Geo
       regels: regels.filter((r) => r.categorie === categorie).map((r) => ({ id: r.id, complexnummer: r.complexnummer ?? "", omschrijving: r.omschrijving, q1: r.q1?.toString() ?? "", q2: r.q2?.toString() ?? "", q3: r.q3?.toString() ?? "", q4: r.q4?.toString() ?? "" })),
     }));
     const totaal = som(regels.flatMap((r) => [r.q1, r.q2, r.q3, r.q4]));
-    stuurHtml(res, 200, renderLeegstandForm({ actieUrl, terugUrl, categorieen, portefeuilleTotaal: fmtBedragKort(totaal), alleenLezen: g.versie.status !== "CONCEPT" }));
+    const pnlHtml = vergelijkend !== null ? moduleWerkomgevingPnLHtml(vergelijkend, ["LEEGSTANDSKOSTEN"]) : "";
+    stuurHtml(res, 200, renderLeegstandForm({ actieUrl, terugUrl, categorieen, portefeuilleTotaal: fmtBedragKort(totaal), alleenLezen: g.versie.status !== "CONCEPT", pnlHtml }));
     return true;
   }
 
@@ -1100,7 +1123,7 @@ const ALGEMENE_KOSTEN_TITELS: Record<BgAlgemeneKostenCategorie, string> = { ACCO
 const MAX_REGELS_AK = 5;
 
 /** Algemene kosten (OB-035/036, Tranche 13): vijf categorieën met hetzelfde regelmodel; Accountant/Bank tonen het bestaande informatieve vorig-jaar-voorstel. */
-async function handleAlgemeneKosten(req: IncomingMessage, res: ServerResponse, g: Geopend, actieUrl: string, terugUrl: string): Promise<boolean> {
+async function handleAlgemeneKosten(req: IncomingMessage, res: ServerResponse, g: Geopend, actieUrl: string, terugUrl: string, vergelijkend: Vergelijkend): Promise<boolean> {
   if (req.method === "GET") {
     const state = leesAlgemeneKostenCategorieState(g.db, g.versie.id);
     const regels = leesAlgemeneKostenRegels(g.db, g.versie.id);
@@ -1114,7 +1137,8 @@ async function handleAlgemeneKosten(req: IncomingMessage, res: ServerResponse, g
       regels: regels.filter((r) => r.categorie === categorie).map((r) => ({ id: r.id, omschrijving: r.omschrijving, complexnummer: r.complexnummer ?? "", ogbKostensoortCode: r.ogbKostensoortCode ?? "", jaarbedrag: r.jaarbedrag?.toString() ?? "" })),
     }));
     const totaal = som(regels.map((r) => r.jaarbedrag));
-    stuurHtml(res, 200, renderAlgemeneKostenForm({ actieUrl, terugUrl, categorieen, portefeuilleTotaal: fmtBedragKort(totaal), alleenLezen: g.versie.status !== "CONCEPT" }));
+    const pnlHtml = vergelijkend !== null ? moduleWerkomgevingPnLHtml(vergelijkend, ["ACCOUNTANT", "JURIDISCHE_KOSTEN", "MAKELAARSKOSTEN", "ALGEMENE_KOSTEN", "BANKKOSTEN"]) : "";
+    stuurHtml(res, 200, renderAlgemeneKostenForm({ actieUrl, terugUrl, categorieen, portefeuilleTotaal: fmtBedragKort(totaal), alleenLezen: g.versie.status !== "CONCEPT", pnlHtml }));
     return true;
   }
 
@@ -1152,7 +1176,7 @@ async function handleAlgemeneKosten(req: IncomingMessage, res: ServerResponse, g
 const MAX_REGELS_VERZEKERING = 8;
 
 /** Verzekeringen (UX_06, OB-032, Tranche 13): bestaand polisregelmodel, module-brede beoordeeld-vlag. Actual per polis blijft BRONGAT — niet gemaskeerd. */
-async function handleVerzekeringen(req: IncomingMessage, res: ServerResponse, g: Geopend, actieUrl: string, terugUrl: string): Promise<boolean> {
+async function handleVerzekeringen(req: IncomingMessage, res: ServerResponse, g: Geopend, actieUrl: string, terugUrl: string, vergelijkend: Vergelijkend): Promise<boolean> {
   if (req.method === "GET") {
     const regels = leesVerzekeringRegels(g.db, g.versie.id);
     const beoordeeld = leesVerzekeringBeoordeeld(g.db, g.versie.id);
@@ -1169,7 +1193,8 @@ async function handleVerzekeringen(req: IncomingMessage, res: ServerResponse, g:
       handmatigBegrootOverride: r.handmatigBegrootOverride?.toString() ?? "",
     }));
     const totaal = som(regels.map((r) => r.handmatigBegrootOverride ?? r.bedrag));
-    stuurHtml(res, 200, renderVerzekeringenForm({ actieUrl, terugUrl, regels: veldRegels, beoordeeld, portefeuilleTotaal: fmtBedragKort(totaal), alleenLezen: g.versie.status !== "CONCEPT" }));
+    const pnlHtml = vergelijkend !== null ? moduleWerkomgevingPnLHtml(vergelijkend, ["VERZEKERINGEN"]) : "";
+    stuurHtml(res, 200, renderVerzekeringenForm({ actieUrl, terugUrl, regels: veldRegels, beoordeeld, portefeuilleTotaal: fmtBedragKort(totaal), alleenLezen: g.versie.status !== "CONCEPT", pnlHtml }));
     return true;
   }
 
@@ -1283,7 +1308,7 @@ const MAX_REGELS_GL = 3;
 const MAX_REGELS_WOZ = 4;
 
 /** Gemeentelijke lasten / WOZ (UX_08, OB-033, Tranche 13): GL-regels + WOZ-historie + aannames + "Voorstel overnemen" — allemaal bestaande, ongewijzigde functionaliteit. */
-async function handleGemeentelijkeLasten(req: IncomingMessage, res: ServerResponse, g: Geopend, root: string, actieUrl: string, terugUrl: string): Promise<boolean> {
+async function handleGemeentelijkeLasten(req: IncomingMessage, res: ServerResponse, g: Geopend, root: string, actieUrl: string, terugUrl: string, vergelijkend: Vergelijkend): Promise<boolean> {
   const mappingDb = openOrCreateDatabase(pnlBronmappingDatabasePad(root, g.administratieId));
   let relevanteGrootboeken: string[];
   try {
@@ -1388,6 +1413,7 @@ async function handleGemeentelijkeLasten(req: IncomingMessage, res: ServerRespon
       voorstelReden: voorstelStatus.reden,
       portefeuilleTotaal: fmtBedragKort(totaal),
       alleenLezen: g.versie.status !== "CONCEPT",
+      pnlHtml: vergelijkend !== null ? moduleWerkomgevingPnLHtml(vergelijkend, ["GEMEENTELIJKE_LASTEN"]) : "",
     }),
   );
   return true;

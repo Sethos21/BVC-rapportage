@@ -508,6 +508,47 @@ describe("Onderhoud totaal zichtbaar op Gepland- en Correctief-detailscherm (UX-
   });
 });
 
+/**
+ * UX-UITROL (2026-10-02, generieke regel) — bewijst dat de nieuwe, gedeelde
+ * `moduleWerkomgevingPnLHtml` daadwerkelijk is aangesloten op een moduledetailscherm (hier
+ * Managementvergoeding, het eenvoudigste geval): dezelfde vergelijkende-P&L-rij als op het
+ * hoofdscherm is nu ook zichtbaar op het detailscherm zelf. De onderliggende berekening
+ * (`leesVergelijkendeBegrotingsPnL`) is al uitgebreid getest elders — dit bewijst uitsluitend de
+ * UI-bedrading (handler -> render), niet de financiële uitkomst zelf.
+ */
+describe("Vergelijkende P&L zichtbaar op overige moduledetailschermen (UX-uitrol, generieke regel)", () => {
+  it("Managementvergoeding-detailscherm toont de Vergelijkende-P&L-samenvatting met dezelfde regel als het hoofdscherm", async () => {
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "boekingen.xlsx"), []);
+
+    await metServer(async (baseUrl) => {
+      const nieuw = await fetch(`${baseUrl}/begroting/nieuw`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ administratieId: ADMINISTRATIE_ID, begrotingsjaar: "2027", laatstAfgeslotenBoekperiode: "06", indexatiePercentage: "3" }).toString(),
+        redirect: "manual",
+      });
+      const hoofdschermUrl = nieuw.headers.get("location")!;
+      const versieId = hoofdschermUrl.split("/")[3]!.split("?")[0]!;
+
+      await fetch(`${baseUrl}/begroting/${ADMINISTRATIE_ID}/${versieId}/module/management?laatstAfgeslotenBoekperiode=06`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ wijze: "NIEUWE_VERGOEDING", bedrag: "500", eenheid: "MAAND", ingangsdatum: "", beoordeeld: "1" }).toString(),
+      });
+
+      const managementHtml = await (await fetch(`${baseUrl}/begroting/${ADMINISTRATIE_ID}/${versieId}/module/management?laatstAfgeslotenBoekperiode=06`)).text();
+      expect(managementHtml).toContain("Vergelijkende P&amp;L");
+      expect(managementHtml).toContain("Managementvergoeding");
+      // Geen vorigjaarversie/Werkelijk-bron aanwezig in deze fixture: blijft zichtbaar "onbekend", nooit stilzwijgend €0.
+      expect(managementHtml).toContain("onbekend");
+
+      const hoofdschermHtml = await (await fetch(baseUrl + hoofdschermUrl)).text();
+      // Zelfde rij, zelfde label, al aanwezig op het hoofdscherm — geen tweede, afwijkende berekening op het detailscherm.
+      expect(hoofdschermHtml).toContain("Managementvergoeding");
+    });
+  });
+});
+
 function pnlMapping(grootboekrekening: string, economischeCategorie: string): Parameters<typeof voegPnLBronmappingMutatieToe>[1] {
   return {
     bedrijfsnr: BEDRIJFSNR,

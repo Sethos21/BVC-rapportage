@@ -266,6 +266,36 @@ function label(regelSleutel: string): string {
   return LABELS[regelSleutel] ?? regelSleutel.charAt(0) + regelSleutel.slice(1).toLowerCase().replace(/_/g, " ");
 }
 
+/**
+ * UX-UITROL (2026-10-02) — gedeeld bouwblok voor ELK moduledetailscherm: toont dezelfde rij(en)
+ * uit de al-bestaande vergelijkende P&L (`VergelijkendeBegrotingsPnLResultaat`, hergebruikt van
+ * `leesBegrotingsWerkomgeving`) die op het hoofdscherm ook al zichtbaar zijn — Begroting vorig
+ * jaar / Werkelijk / Estimated / Voorstel / Jouw begroting (09_Begrotingsmodule_UX_Vastgesteld §3).
+ * Puur presentatie/lookup op `regelSleutel`: geen nieuwe berekening, geen tweede databron. `null`/
+ * lege lijst (regelSleutel niet gevonden) geeft bewust niets terug — geen placeholder-rij.
+ */
+export function moduleWerkomgevingPnLHtml(vergelijkend: VergelijkendeBegrotingsPnLResultaat, regelSleutels: readonly string[]): string {
+  const regels = regelSleutels.map((sleutel) => vergelijkend.regels.find((r) => r.regelSleutel === sleutel)).filter((r): r is VergelijkendeBegrotingsPnLRegel => r !== undefined);
+  if (regels.length === 0) return "";
+  const rijHtml = (r: VergelijkendeBegrotingsPnLRegel) => `
+    <tr>
+      <td>${escapeHtml(label(r.regelSleutel))}</td>
+      <td style="text-align:right">${fmtWaarde(r.begrotingVorigJaar)}</td>
+      <td style="text-align:right">${fmtWaarde(r.werkelijk)}</td>
+      <td style="text-align:right">${fmtWaarde(r.estimated)}</td>
+      <td style="text-align:right">${fmtVoorstel(r.voorstel)}</td>
+      <td style="text-align:right"><strong>${fmtWaarde(r.jouwBegroting)}</strong></td>
+    </tr>`;
+  return `
+    <div class="card" style="margin-bottom:16px">
+      <div class="eyebrow">Vergelijkende P&amp;L</div>
+      <table style="margin:0">
+        <thead><tr><th style="text-align:left">Onderdeel</th><th style="text-align:right">Begroting vorig jaar</th><th style="text-align:right">Werkelijk</th><th style="text-align:right">Estimated</th><th style="text-align:right">Voorstel</th><th style="text-align:right">Jouw begroting</th></tr></thead>
+        <tbody>${regels.map(rijHtml).join("")}</tbody>
+      </table>
+    </div>`;
+}
+
 const GROEP_LABELS: Record<PnLGroepBovenEbitda, string> = {
   OPBRENGSTEN: "Opbrengsten",
   MANAGEMENT_EN_BEHEER: "Management en beheer",
@@ -664,11 +694,13 @@ export interface ManagementFormOpties {
   fouten?: readonly string[];
   alleenLezen?: boolean;
   huidig: { wijze: string; bedrag: string; eenheid: string; ingangsdatum: string; bestaandBedrag: string; bestaandEenheid: string; indexatiePercentage: string; indexatiedatum: string; nieuwBedrag: string; nieuweEenheid: string };
+  pnlHtml?: string;
 }
 
 export function renderManagementForm(o: ManagementFormOpties): string {
   const eenheidOpties = (naam: string, huidig: string) => `<select name="${naam}"><option value="MAAND"${huidig === "MAAND" ? " selected" : ""}>per maand</option><option value="JAAR"${huidig === "JAAR" ? " selected" : ""}>per jaar</option></select>`;
   const inhoud = `
+    ${o.pnlHtml ?? ""}
     <p class="sub">Kies precies één van de drie situaties (UX_03) en vul uitsluitend de bijbehorende velden in.</p>
     <form method="POST" action="${escapeHtml(o.actieUrl)}">
       <label><input type="radio" name="wijze" value="NIEUWE_VERGOEDING" style="width:auto;display:inline-block;margin-right:8px"${o.huidig.wijze === "NIEUWE_VERGOEDING" ? " checked" : ""} />1. Nieuwe vergoeding (vóór ingangsdatum werkelijk €0)</label>
@@ -741,6 +773,7 @@ export function renderBtwForm(o: {
   beoordeeld: boolean;
   resterendeVerwachting: string;
   alleenLezen?: boolean;
+  pnlHtml?: string;
 }): string {
   const rijen = [...o.regels, ...Array.from({ length: Math.max(0, 4 - o.regels.length) }, () => ({ id: null as number | null, omschrijving: "", complexnummer: "", jaarbedrag: "" }))];
   const rijHtml = (r: (typeof rijen)[number], i: number) => `
@@ -750,6 +783,7 @@ export function renderBtwForm(o: {
       <td><input type="text" name="jaarbedrag_${i}" value="${escapeHtml(r.jaarbedrag)}" placeholder="0,00" /></td>
     </tr>`;
   const inhoud = `
+    ${o.pnlHtml ?? ""}
     <form method="POST" action="${escapeHtml(o.actieUrl)}">
       <table style="margin-bottom:16px">
         <thead><tr><th style="text-align:left">Omschrijving</th><th style="text-align:left">Complex</th><th style="text-align:left">Jaarbedrag</th></tr></thead>
@@ -763,12 +797,23 @@ export function renderBtwForm(o: {
   return moduleFormShell({ titel: "Niet verrekenbare btw", terugUrl: o.terugUrl, ...(o.fouten !== undefined ? { fouten: o.fouten } : {}), inhoud, alleenLezen: o.alleenLezen === true });
 }
 
-export function renderRenteForm(o: { categorie: "RENTEKOSTEN" | "RENTE_OPBRENGSTEN"; actieUrl: string; terugUrl: string; fouten?: readonly string[]; begrotingsbedrag: string; beoordeeld: boolean; resterendeVerwachting: string; alleenLezen?: boolean }): string {
+export function renderRenteForm(o: {
+  categorie: "RENTEKOSTEN" | "RENTE_OPBRENGSTEN";
+  actieUrl: string;
+  terugUrl: string;
+  fouten?: readonly string[];
+  begrotingsbedrag: string;
+  beoordeeld: boolean;
+  resterendeVerwachting: string;
+  alleenLezen?: boolean;
+  pnlHtml?: string;
+}): string {
   const isOpbrengst = o.categorie === "RENTE_OPBRENGSTEN";
   const toelichting = isOpbrengst
     ? `<p class="sub">Voer het verwachte bedrag als POSITIEF bedrag in — de vertaling naar de interne boekhoudconventie gebeurt automatisch.</p>`
     : `<p class="sub">Eén jaarbedrag op moduleniveau — geen leningadministratie of automatische renteberekening (Tranche 10).</p>`;
   const inhoud = `
+    ${o.pnlHtml ?? ""}
     ${toelichting}
     <form method="POST" action="${escapeHtml(o.actieUrl)}">
       <label for="begrotingsbedrag">Begroting — jaarbedrag${isOpbrengst ? " (positief)" : ""}</label>
@@ -812,6 +857,7 @@ export function renderHuurDetail(o: {
   regels: readonly HuurDetailRegel[];
   controleVereist: readonly string[];
   portefeuilleNetto: string;
+  pnlHtml?: string;
 }): string {
   const waarschuwingenHtml = o.controleVereist.length > 0 ? `<div class="banner">${o.controleVereist.map(escapeHtml).join("<br/>")}</div>` : "";
   const rijenHtml = o.regels
@@ -829,6 +875,7 @@ export function renderHuurDetail(o: {
     )
     .join("");
   const inhoud = `
+    ${o.pnlHtml ?? ""}
     ${waarschuwingenHtml}
     <div class="sub">Algemeen indexatiepercentage voor ${o.begrotingsjaar}: ${escapeHtml(o.algemeenIndexatiePercentage)}%. Een contractoverride vervangt uitsluitend het toegepaste percentage voor dat contract — de bronfeiten blijven ongewijzigd.</div>
     <form method="POST" action="${escapeHtml(o.actieUrl)}">
@@ -865,6 +912,7 @@ export function renderBeheerDetail(o: {
   regels: readonly BeheerDetailRegel[];
   controleVereist: readonly string[];
   portefeuilleTotaal: string;
+  pnlHtml?: string;
 }): string {
   const waarschuwingenHtml = o.controleVereist.length > 0 ? `<div class="banner">${o.controleVereist.map(escapeHtml).join("<br/>")}</div>` : "";
   const rijenHtml = o.regels
@@ -887,6 +935,7 @@ export function renderBeheerDetail(o: {
     )
     .join("");
   const inhoud = `
+    ${o.pnlHtml ?? ""}
     ${waarschuwingenHtml}
     <form method="POST" action="${escapeHtml(o.actieUrl)}">
       <table style="margin-bottom:16px">
@@ -911,7 +960,7 @@ export interface LeegstandCategorieOpties {
 }
 
 /** Leegstandskosten (UX/OB-031, Tranche 13): drie categorieën, elk dezelfde compacte structuur Complex|Omschrijving|Q1-Q4. */
-export function renderLeegstandForm(o: { actieUrl: string; terugUrl: string; fouten?: readonly string[]; categorieen: readonly LeegstandCategorieOpties[]; portefeuilleTotaal: string; alleenLezen?: boolean }): string {
+export function renderLeegstandForm(o: { actieUrl: string; terugUrl: string; fouten?: readonly string[]; categorieen: readonly LeegstandCategorieOpties[]; portefeuilleTotaal: string; alleenLezen?: boolean; pnlHtml?: string }): string {
   const sectie = (c: LeegstandCategorieOpties, prefix: string) => {
     const rijen = [...c.regels, ...Array.from({ length: Math.max(0, 4 - c.regels.length) }, () => ({ id: null, complexnummer: "", omschrijving: "", q1: "", q2: "", q3: "", q4: "" }))];
     return `<h2>${escapeHtml(c.titel)}</h2>
@@ -933,6 +982,7 @@ export function renderLeegstandForm(o: { actieUrl: string; terugUrl: string; fou
       ${beoordeeldCheckbox(`${prefix}_beoordeeld`, c.beoordeeld)}`;
   };
   const inhoud = `
+    ${o.pnlHtml ?? ""}
     <form method="POST" action="${escapeHtml(o.actieUrl)}">
       ${sectie(o.categorieen[0]!, "nuts")}
       ${sectie(o.categorieen[1]!, "service")}
@@ -954,7 +1004,7 @@ export interface AlgemeneKostenCategorieOpties {
 }
 
 /** Algemene kosten (OB-035/036, Tranche 13): vijf categorieën, elk dezelfde regelvorm (Omschrijving|Complex|OGB|Jaarbedrag); Accountant/Bank tonen aanvullend het informatieve vorig-jaar/verwachte-verhoging-voorstel. */
-export function renderAlgemeneKostenForm(o: { actieUrl: string; terugUrl: string; fouten?: readonly string[]; categorieen: readonly AlgemeneKostenCategorieOpties[]; portefeuilleTotaal: string; alleenLezen?: boolean }): string {
+export function renderAlgemeneKostenForm(o: { actieUrl: string; terugUrl: string; fouten?: readonly string[]; categorieen: readonly AlgemeneKostenCategorieOpties[]; portefeuilleTotaal: string; alleenLezen?: boolean; pnlHtml?: string }): string {
   const sectie = (c: AlgemeneKostenCategorieOpties, prefix: string) => {
     const rijen = [...c.regels, ...Array.from({ length: Math.max(0, 3 - c.regels.length) }, () => ({ id: null, omschrijving: "", complexnummer: "", ogbKostensoortCode: "", jaarbedrag: "" }))];
     const voorstelHtml = c.toonVoorstelVelden
@@ -979,6 +1029,7 @@ export function renderAlgemeneKostenForm(o: { actieUrl: string; terugUrl: string
   };
   const prefixen = ["accountant", "juridisch", "makelaar", "algemeen", "bank"];
   const inhoud = `
+    ${o.pnlHtml ?? ""}
     <form method="POST" action="${escapeHtml(o.actieUrl)}">
       ${o.categorieen.map((c, i) => sectie(c, prefixen[i]!)).join("<hr style=\"border:none;border-top:1px solid var(--line);margin:20px 0\" />")}
       <p class="sub">Totaal Algemene kosten (Jouw begroting): <strong>${escapeHtml(o.portefeuilleTotaal)}</strong></p>
@@ -1001,7 +1052,7 @@ export interface VerzekeringRegelVeld {
 }
 
 /** Verzekeringen (UX_06, Tranche 13): compacte polisregels Complex|Verzekeraar|Ingangsdatum|Looptijd|Bedrag|Index%|GL|OGB|Override. */
-export function renderVerzekeringenForm(o: { actieUrl: string; terugUrl: string; fouten?: readonly string[]; regels: readonly VerzekeringRegelVeld[]; beoordeeld: boolean; portefeuilleTotaal: string; alleenLezen?: boolean }): string {
+export function renderVerzekeringenForm(o: { actieUrl: string; terugUrl: string; fouten?: readonly string[]; regels: readonly VerzekeringRegelVeld[]; beoordeeld: boolean; portefeuilleTotaal: string; alleenLezen?: boolean; pnlHtml?: string }): string {
   const rijen = [...o.regels, ...Array.from({ length: Math.max(0, 6 - o.regels.length) }, (): VerzekeringRegelVeld => ({ id: null, complexnummer: "", verzekeraar: "", grootboekrekening: "", ogbKostensoort: "", ingangsdatum: "", looptijdMaanden: "", bedrag: "", indexPercentage: "", handmatigBegrootOverride: "" }))];
   const rijHtml = (r: VerzekeringRegelVeld, i: number) => `
     <tr>
@@ -1016,6 +1067,7 @@ export function renderVerzekeringenForm(o: { actieUrl: string; terugUrl: string;
       <td><input type="text" name="override_${i}" value="${escapeHtml(r.handmatigBegrootOverride)}" placeholder="berekend" style="width:80px" /></td>
     </tr>`;
   const inhoud = `
+    ${o.pnlHtml ?? ""}
     <p class="sub">Override laat het berekende voorstel (huidige premie × indexatie) staan tenzij ingevuld.</p>
     <form method="POST" action="${escapeHtml(o.actieUrl)}">
       <table style="margin-bottom:16px">
@@ -1133,6 +1185,7 @@ export function renderGemeentelijkeLastenForm(o: {
   voorstelReden: string | null;
   portefeuilleTotaal: string;
   alleenLezen?: boolean;
+  pnlHtml?: string;
 }): string {
   const glRijen = [...o.glRegels, ...Array.from({ length: Math.max(0, 3 - o.glRegels.length) }, (): GemeentelijkeLastenRegelVeld => ({ id: null, grootboekrekening: "", ogbKostensoort: "", jaarbedrag: "" }))];
   const glRijHtml = (r: GemeentelijkeLastenRegelVeld, i: number) => `
@@ -1158,6 +1211,7 @@ export function renderGemeentelijkeLastenForm(o: {
       ? `<p class="sub">Voorstel overnemen niet mogelijk: ${escapeHtml(o.voorstelReden)}</p>`
       : "";
   const inhoud = `
+    ${o.pnlHtml ?? ""}
     <datalist id="relevanteGrootboeken">${o.relevanteGrootboeken.map((gl) => `<option value="${escapeHtml(gl)}">`).join("")}</datalist>
     <form method="POST" action="${escapeHtml(o.actieUrl)}">
       <h2>Begroting per grootboekrekening</h2>
