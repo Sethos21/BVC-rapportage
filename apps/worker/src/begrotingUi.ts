@@ -623,6 +623,41 @@ function moduleFormShell(o: { titel: string; terugUrl: string; fouten?: readonly
 
 const geldWaarde = (d: Decimal | null): string => (d === null ? "" : d.toString());
 
+/**
+ * UX-UITROL (2026-10-02, Sectie 3) — samengestelde Onderhoud-totaalsamenvatting, gedeeld door
+ * Gepland- en Correctief/Dagelijks-detailscherm (`renderGeplandOnderhoudForm`/`renderCorrectiefForm`).
+ * Puur presentatie: alle bedragen komen al geformatteerd binnen (`@bvc/worker`'s `fmtBedragKort`
+ * op het bestaande `OnderhoudTotaalResultaat` van `leesOnderhoudTotaalVoorWerkomgeving`) — hier
+ * wordt niets opnieuw berekend of gemapt.
+ */
+export interface OnderhoudTotaalSamenvattingVeld {
+  begrotingGepland: string;
+  begrotingCorrectief: string;
+  begrotingTotaal: string;
+  werkelijkTotaal: string;
+  resterendeVerwachtingTotaal: string;
+  estimatedTotaal: string;
+  verschilEstimatedVsBegroting: string;
+}
+
+function onderhoudTotaalSamenvattingHtml(s: OnderhoudTotaalSamenvattingVeld): string {
+  return `
+    <div class="card" style="margin-bottom:16px">
+      <div class="eyebrow">Onderhoud totaal — Gepland + Correctief/dagelijks</div>
+      <table style="margin:0">
+        <tbody>
+          <tr><td>Begroting Gepland onderhoud</td><td style="text-align:right">${escapeHtml(s.begrotingGepland)}</td></tr>
+          <tr><td>Begroting Correctief/dagelijks onderhoud</td><td style="text-align:right">${escapeHtml(s.begrotingCorrectief)}</td></tr>
+          <tr><td><strong>Begroting Onderhoud totaal</strong></td><td style="text-align:right"><strong>${escapeHtml(s.begrotingTotaal)}</strong></td></tr>
+          <tr><td>Werkelijk Onderhoud totaal (tot afgesloten boekperiode, niet uitgesplitst per Gepland/Correctief)</td><td style="text-align:right">${escapeHtml(s.werkelijkTotaal)}</td></tr>
+          <tr><td>Resterende verwachting (Gepland + Correctief/dagelijks samen)</td><td style="text-align:right">${escapeHtml(s.resterendeVerwachtingTotaal)}</td></tr>
+          <tr><td><strong>Estimated Onderhoud totaal</strong></td><td style="text-align:right"><strong>${escapeHtml(s.estimatedTotaal)}</strong></td></tr>
+          <tr><td>Verschil Estimated t.o.v. Begroting</td><td style="text-align:right">${escapeHtml(s.verschilEstimatedVsBegroting)}</td></tr>
+        </tbody>
+      </table>
+    </div>`;
+}
+
 export interface ManagementFormOpties {
   actieUrl: string;
   terugUrl: string;
@@ -665,7 +700,15 @@ export interface CorrectiefRegelRow {
   jaarbedrag: string;
 }
 
-export function renderCorrectiefForm(o: { actieUrl: string; terugUrl: string; fouten?: readonly string[]; regels: readonly CorrectiefRegelRow[]; beoordeeld: boolean; alleenLezen?: boolean }): string {
+export function renderCorrectiefForm(o: {
+  actieUrl: string;
+  terugUrl: string;
+  fouten?: readonly string[];
+  regels: readonly CorrectiefRegelRow[];
+  beoordeeld: boolean;
+  alleenLezen?: boolean;
+  onderhoudTotaal?: OnderhoudTotaalSamenvattingVeld;
+}): string {
   const rijen = [...o.regels, ...Array.from({ length: Math.max(0, 6 - o.regels.length) }, (): CorrectiefRegelRow => ({ id: null, omschrijving: "", complexnummer: "", grootboekrekening: "", ogbKostensoort: "", jaarbedrag: "" }))];
   const rijHtml = (r: CorrectiefRegelRow, i: number) => `
     <tr>
@@ -675,7 +718,9 @@ export function renderCorrectiefForm(o: { actieUrl: string; terugUrl: string; fo
       <td><input type="text" name="ogbKostensoort_${i}" value="${escapeHtml(r.ogbKostensoort)}" placeholder="optioneel" /></td>
       <td><input type="text" name="jaarbedrag_${i}" value="${escapeHtml(r.jaarbedrag)}" placeholder="0,00" /></td>
     </tr>`;
+  const samenvattingHtml = o.onderhoudTotaal !== undefined ? onderhoudTotaalSamenvattingHtml(o.onderhoudTotaal) : "";
   const inhoud = `
+    ${samenvattingHtml}
     <p class="sub">Een lege regel (geen omschrijving én geen bedrag) wordt genegeerd. Bewust nul regels + beoordeeld = een bewuste €0-begroting.</p>
     <form method="POST" action="${escapeHtml(o.actieUrl)}">
       <table style="margin-bottom:16px">
@@ -1014,6 +1059,7 @@ export function renderGeplandOnderhoudForm(o: {
   beoordeeld: boolean;
   jaartotaal: string;
   alleenLezen?: boolean;
+  onderhoudTotaal?: OnderhoudTotaalSamenvattingVeld;
 }): string {
   const leeg = (): GeplandOnderhoudRegelVeld => ({ id: null, complexnummer: "", omschrijving: "", grootboekrekening: "", ogbKostensoort: "", aanleidingType: "", aanleidingToelichting: "", q1: "", q2: "", q3: "", q4: "", status: "GEPLAND", leverancier: "", offertebedrag: "", notitie: "" });
   const rijen = [...o.regels, ...Array.from({ length: Math.max(0, 5 - o.regels.length) }, leeg)];
@@ -1035,7 +1081,9 @@ export function renderGeplandOnderhoudForm(o: {
       <td><input type="text" name="offertebedrag_${i}" value="${escapeHtml(r.offertebedrag)}" placeholder="optioneel" style="width:70px" /></td>
       <td><input type="text" name="notitie_${i}" value="${escapeHtml(r.notitie)}" placeholder="optioneel" style="width:90px" /></td>
     </tr>`;
+  const samenvattingHtml = o.onderhoudTotaal !== undefined ? onderhoudTotaalSamenvattingHtml(o.onderhoudTotaal) : "";
   const inhoud = `
+    ${samenvattingHtml}
     <p class="sub">Werkelijk is alleen beschikbaar voor Onderhoud totaal (Gepland + Correctief/dagelijks samen) — er is bewust geen Werkelijk per activiteit.</p>
     <form method="POST" action="${escapeHtml(o.actieUrl)}">
       <table style="margin-bottom:16px">

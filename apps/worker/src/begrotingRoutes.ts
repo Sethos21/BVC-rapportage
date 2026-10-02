@@ -86,7 +86,7 @@ import {
 } from "@bvc/reporting";
 import { lijstAdministraties, leesAdministratieConfig } from "./administratie.js";
 import { begrotingsversiesDatabasePad, pnlBronmappingDatabasePad } from "./paths.js";
-import { leesBegrotingsWerkomgeving } from "./begrotingWerkelijk.js";
+import { leesBegrotingsWerkomgeving, leesOnderhoudTotaalVoorWerkomgeving } from "./begrotingWerkelijk.js";
 import { leesBgContractFeitenVoorAdministratie } from "./contractenRentrollAdapter.js";
 import { BOEKPERIODES } from "./serveUi.js";
 import {
@@ -113,6 +113,7 @@ import {
   type GeplandOnderhoudRegelVeld,
   type HuurDetailRegel,
   type LeegstandCategorieOpties,
+  type OnderhoudTotaalSamenvattingVeld,
   type VerzekeringRegelVeld,
   type WozObjectVeld,
 } from "./begrotingUi.js";
@@ -560,14 +561,14 @@ async function handleModuleRoute(root: string, req: IncomingMessage, res: Server
     if (moduleKey === "huur") return await handleHuur(req, res, g, actieUrl, terugUrl);
     if (moduleKey === "beheer") return await handleBeheer(req, res, g, actieUrl, terugUrl);
     if (moduleKey === "management") return await handleManagement(req, res, g, actieUrl, terugUrl);
-    if (moduleKey === "correctief") return await handleCorrectief(req, res, g, actieUrl, terugUrl);
+    if (moduleKey === "correctief") return await handleCorrectief(req, res, g, actieUrl, terugUrl, laatstAfgeslotenBoekperiode);
     if (moduleKey === "btw") return await handleBtw(req, res, g, actieUrl, terugUrl);
     if (moduleKey === "rente-leningen") return await handleRente(req, res, g, actieUrl, terugUrl, "RENTEKOSTEN");
     if (moduleKey === "rente-opbrengst") return await handleRente(req, res, g, actieUrl, terugUrl, "RENTE_OPBRENGSTEN");
     if (moduleKey === "leegstand") return await handleLeegstand(req, res, g, actieUrl, terugUrl);
     if (moduleKey === "algemene-kosten") return await handleAlgemeneKosten(req, res, g, actieUrl, terugUrl);
     if (moduleKey === "verzekeringen") return await handleVerzekeringen(req, res, g, actieUrl, terugUrl);
-    if (moduleKey === "gepland-onderhoud") return await handleGeplandOnderhoud(req, res, g, actieUrl, terugUrl);
+    if (moduleKey === "gepland-onderhoud") return await handleGeplandOnderhoud(req, res, g, actieUrl, terugUrl, laatstAfgeslotenBoekperiode);
     if (moduleKey === "gemeentelijke-lasten") return await handleGemeentelijkeLasten(req, res, g, root, actieUrl, terugUrl);
     stuurHtml(res, 404, renderFoutPagina("Onbekend onderdeel", `Onbekend begrotingsonderdeel "${moduleKey}".`, terugUrl));
     return true;
@@ -581,6 +582,19 @@ function fmtBedragKort(d: Decimal): string {
   const [geheel, decimalen] = d.abs().toFixed(2).split(".");
   const geheelMetPunten = geheel!.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
   return (negatief ? "-€ " : "€ ") + geheelMetPunten + "," + decimalen;
+}
+
+/** UX-UITROL (2026-10-02, Sectie 3) — formatteert het bestaande `OnderhoudTotaalResultaat` (geen herberekening) voor de gedeelde samenvatting op de Gepland-/Correctief-detailschermen. */
+function bouwOnderhoudTotaalSamenvatting(resultaat: ReturnType<typeof leesOnderhoudTotaalVoorWerkomgeving>): OnderhoudTotaalSamenvattingVeld {
+  return {
+    begrotingGepland: fmtBedragKort(resultaat.gepland.begrotingTotaal),
+    begrotingCorrectief: fmtBedragKort(resultaat.correctiefDagelijks.begrotingTotaal),
+    begrotingTotaal: fmtBedragKort(resultaat.begrotingOnderhoudTotaal),
+    werkelijkTotaal: fmtBedragKort(resultaat.werkelijk.totaalTotAfgeslotenPeriode),
+    resterendeVerwachtingTotaal: fmtBedragKort(resultaat.resterendeVerwachtingOnderhoudTotaal),
+    estimatedTotaal: fmtBedragKort(resultaat.estimatedOnderhoudTotaal),
+    verschilEstimatedVsBegroting: fmtBedragKort(resultaat.verschilEstimatedVsBegrotingBedrag),
+  };
 }
 
 function fmtPercentageVeld(d: Decimal): string {
@@ -844,10 +858,11 @@ async function handleManagement(req: IncomingMessage, res: ServerResponse, g: Ge
 
 const MAX_REGELS = 8;
 
-async function handleCorrectief(req: IncomingMessage, res: ServerResponse, g: Geopend, actieUrl: string, terugUrl: string): Promise<boolean> {
+async function handleCorrectief(req: IncomingMessage, res: ServerResponse, g: Geopend, actieUrl: string, terugUrl: string, laatstAfgeslotenBoekperiode: string): Promise<boolean> {
   if (req.method === "GET") {
     const regels = leesCorrectiefDagelijksOnderhoudRegels(g.db, g.versie.id);
     const beoordeeld = leesCorrectiefDagelijksOnderhoudBeoordeeld(g.db, g.versie.id);
+    const onderhoudTotaal = bouwOnderhoudTotaalSamenvatting(leesOnderhoudTotaalVoorWerkomgeving(g.root, g.administratieId, g.db, g.versie, laatstAfgeslotenBoekperiode));
     stuurHtml(
       res,
       200,
@@ -857,6 +872,7 @@ async function handleCorrectief(req: IncomingMessage, res: ServerResponse, g: Ge
         beoordeeld,
         regels: regels.map((r) => ({ id: r.id, omschrijving: r.omschrijving, complexnummer: r.complexnummer ?? "", grootboekrekening: r.grootboekrekening, ogbKostensoort: r.ogbKostensoort ?? "", jaarbedrag: r.jaarbedrag?.toString() ?? "" })),
         alleenLezen: g.versie.status !== "CONCEPT",
+        onderhoudTotaal,
       }),
     );
     return true;
@@ -1192,10 +1208,11 @@ async function handleVerzekeringen(req: IncomingMessage, res: ServerResponse, g:
 const MAX_REGELS_GEPLAND = 6;
 
 /** Gepland onderhoud (UX_04, OB-027, Tranche 13): handmatige activiteiten. Werkelijk/Estimated blijven op Onderhoud-totaalniveau (§16/§17) — bewust geen fictieve waarde per activiteit. */
-async function handleGeplandOnderhoud(req: IncomingMessage, res: ServerResponse, g: Geopend, actieUrl: string, terugUrl: string): Promise<boolean> {
+async function handleGeplandOnderhoud(req: IncomingMessage, res: ServerResponse, g: Geopend, actieUrl: string, terugUrl: string, laatstAfgeslotenBoekperiode: string): Promise<boolean> {
   if (req.method === "GET") {
     const activiteiten = leesGeplandOnderhoudActiviteiten(g.db, g.versie.id);
     const beoordeeld = leesGeplandOnderhoudBeoordeeld(g.db, g.versie.id);
+    const onderhoudTotaal = bouwOnderhoudTotaalSamenvatting(leesOnderhoudTotaalVoorWerkomgeving(g.root, g.administratieId, g.db, g.versie, laatstAfgeslotenBoekperiode));
     const regels: GeplandOnderhoudRegelVeld[] = activiteiten.map((a) => ({
       id: a.id,
       complexnummer: a.complexnummer,
@@ -1214,7 +1231,7 @@ async function handleGeplandOnderhoud(req: IncomingMessage, res: ServerResponse,
       notitie: a.notitie ?? "",
     }));
     const jaartotaal = activiteiten.reduce((t, a) => t.plus(a.q1).plus(a.q2).plus(a.q3).plus(a.q4), new Decimal(0));
-    stuurHtml(res, 200, renderGeplandOnderhoudForm({ actieUrl, terugUrl, regels, beoordeeld, jaartotaal: fmtBedragKort(jaartotaal), alleenLezen: g.versie.status !== "CONCEPT" }));
+    stuurHtml(res, 200, renderGeplandOnderhoudForm({ actieUrl, terugUrl, regels, beoordeeld, jaartotaal: fmtBedragKort(jaartotaal), alleenLezen: g.versie.status !== "CONCEPT", onderhoudTotaal }));
     return true;
   }
 

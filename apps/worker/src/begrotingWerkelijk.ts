@@ -3,9 +3,11 @@ import {
   bepaalResterendeKwartalen,
   bepaalResterendeMaanden,
   bouwEstimatedPnLInvoer,
+  leesOnderhoudTotaalResultaat,
   leesVastgesteldeBegrotingsversieVoorJaar,
   leesVergelijkendeBegrotingsPnL,
   type Begrotingsversie,
+  type OnderhoudTotaalResultaat,
   type VergelijkendeBegrotingsPnLResultaat,
 } from "@bvc/begroting-data";
 import { haalPnLPeriodeResultaatOp } from "./genereerPnLPeriode.js";
@@ -32,4 +34,26 @@ export function leesBegrotingsWerkomgeving(
   const estimatedInvoer = bouwEstimatedPnLInvoer(periode.moduleWerkelijk, bepaalResterendeMaanden(laatstAfgeslotenBoekperiode), bepaalResterendeKwartalen(laatstAfgeslotenBoekperiode));
   const vorigJaarVersie = leesVastgesteldeBegrotingsversieVoorJaar(db, bedrijfsnr, huidigJaar);
   return leesVergelijkendeBegrotingsPnL(db, { nieuweVersieId: nieuweVersie.id, vorigJaarVersieId: vorigJaarVersie?.id ?? null }, periode.resultaat, estimatedInvoer);
+}
+
+/**
+ * UX-UITROL (2026-10-02, Sectie 3) — productieprobleem: de Gepland- en Correctief/Dagelijks-
+ * detailschermen toonden alleen hun eigen moduletotaal, nooit het samengestelde Onderhoud-totaal
+ * (Begroting/Werkelijk/Estimated) dat al correct wordt berekend door `leesOnderhoudTotaalResultaat`
+ * (gebruikt in de hoofdscherm-P&L via `leesBegrotingsWerkomgeving`). Deze functie hergebruikt
+ * dezelfde bestaande, bewezen keten (Werkelijk-ophaal + resterende kwartalen + orchestratie) —
+ * rekent zelf niets nieuws uit — zodat beide detailschermen hetzelfde, al bestaande totaal kunnen
+ * tonen. Geen tweede calculator, geen tweede Werkelijk-bepaling.
+ */
+export function leesOnderhoudTotaalVoorWerkomgeving(
+  root: string,
+  administratieId: string,
+  db: DatabaseSync,
+  versie: Begrotingsversie,
+  laatstAfgeslotenBoekperiode: string,
+): OnderhoudTotaalResultaat {
+  const huidigJaar = versie.begrotingsjaar - 1;
+  const periode = haalPnLPeriodeResultaatOp(root, administratieId, { boekjaar: huidigJaar, boekperiodeTotEnMet: laatstAfgeslotenBoekperiode });
+  const resterendeKwartalen = bepaalResterendeKwartalen(laatstAfgeslotenBoekperiode);
+  return leesOnderhoudTotaalResultaat(db, versie.id, periode.moduleWerkelijk.onderhoud.werkelijk, resterendeKwartalen);
 }

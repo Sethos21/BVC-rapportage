@@ -348,6 +348,187 @@ describe("Begrotingsworkflow via echte HTTP-routes (Tranche 11) — acceptatiecr
   });
 });
 
+/**
+ * UX-UITROL (2026-10-02, Sectie 3) — bewijst de "BELANGRIJK ACCEPTATIEPUNT"-scenario's: de
+ * Gepland- en Correctief/Dagelijks-detailschermen tonen nu het bestaande, al-bewezen
+ * `leesOnderhoudTotaalResultaat`-totaal (Begroting/Werkelijk/Estimated), i.p.v. alleen hun eigen
+ * geïsoleerde moduletotaal. Reusing: geen nieuwe berekening, alleen UI-orchestratie.
+ */
+describe("Onderhoud totaal zichtbaar op Gepland- en Correctief-detailscherm (UX-uitrol, Sectie 3)", () => {
+  it("alleen Gepland ingevuld: Correctief toont €0, totaal = Gepland, Werkelijk en Estimated zichtbaar", async () => {
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "boekingen.xlsx"), [boekingRij("4300", 300), boekingRij("4330", 150), boekingRij("4340", 75)]);
+    const mappingDb = openOrCreateDatabase(pnlBronmappingDatabasePad(root, ADMINISTRATIE_ID));
+    voegPnLBronmappingMutatieToe(mappingDb, pnlMapping("4300", "ONDERHOUD_GEBOUWEN"));
+    voegPnLBronmappingMutatieToe(mappingDb, pnlMapping("4330", "ONDERHOUD_TERREIN"));
+    voegPnLBronmappingMutatieToe(mappingDb, pnlMapping("4340", "ONDERHOUD_INSTALLATIES"));
+    mappingDb.close();
+
+    const { schrijfGeplandOnderhoudActiviteiten, schrijfGeplandOnderhoudBeoordeeld } = await import("@bvc/begroting-data");
+
+    await metServer(async (baseUrl) => {
+      const nieuw = await fetch(`${baseUrl}/begroting/nieuw`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ administratieId: ADMINISTRATIE_ID, begrotingsjaar: "2027", laatstAfgeslotenBoekperiode: "06", indexatiePercentage: "3" }).toString(),
+        redirect: "manual",
+      });
+      const hoofdschermUrl = nieuw.headers.get("location")!;
+      const versieId = hoofdschermUrl.split("/")[3]!.split("?")[0]!;
+
+      const db = openOrCreateDatabase(begrotingsversiesDatabasePad(root, ADMINISTRATIE_ID));
+      schrijfGeplandOnderhoudActiviteiten(db, versieId, [
+        {
+          id: null,
+          complexnummer: "001",
+          omschrijving: "Dakrenovatie",
+          grootboekrekening: "4300",
+          ogbKostensoort: null,
+          aanleidingType: "MJOP",
+          aanleidingToelichting: "MJOP 2027",
+          q1: new Decimal(1000),
+          q2: new Decimal(1000),
+          q3: new Decimal(1000),
+          q4: new Decimal(1000),
+          status: "GEPLAND",
+          leverancier: null,
+          offertebedrag: null,
+          notitie: null,
+        },
+      ]);
+      schrijfGeplandOnderhoudBeoordeeld(db, versieId, true);
+      db.close();
+
+      const geplandHtml = await (await fetch(`${baseUrl}/begroting/${ADMINISTRATIE_ID}/${versieId}/module/gepland-onderhoud?laatstAfgeslotenBoekperiode=06`)).text();
+      expect(geplandHtml).toContain("Onderhoud totaal");
+      expect(geplandHtml).toContain("€ 4.000,00"); // Begroting Gepland + Begroting Onderhoud totaal (Correctief nog leeg)
+      expect(geplandHtml).toContain("€ 0,00"); // Begroting Correctief/dagelijks (nog niets ingevuld)
+      expect(geplandHtml).toContain("€ 525,00"); // Werkelijk Onderhoud totaal (300+150+75), exact één keer bepaald
+      expect(geplandHtml).toContain("Estimated Onderhoud totaal");
+
+      const correctiefHtml = await (await fetch(`${baseUrl}/begroting/${ADMINISTRATIE_ID}/${versieId}/module/correctief?laatstAfgeslotenBoekperiode=06`)).text();
+      // Zelfde samengestelde totaal zichtbaar op de Correctief-pagina — geen tweede, afwijkende berekening.
+      expect(correctiefHtml).toContain("€ 4.000,00");
+      expect(correctiefHtml).toContain("€ 525,00");
+    });
+  });
+
+  it("alleen Correctief ingevuld: Gepland toont €0, totaal = Correctief, zichtbaar op beide schermen", async () => {
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "boekingen.xlsx"), [boekingRij("4300", 300), boekingRij("4330", 150), boekingRij("4340", 75)]);
+    const mappingDb = openOrCreateDatabase(pnlBronmappingDatabasePad(root, ADMINISTRATIE_ID));
+    voegPnLBronmappingMutatieToe(mappingDb, pnlMapping("4300", "ONDERHOUD_GEBOUWEN"));
+    voegPnLBronmappingMutatieToe(mappingDb, pnlMapping("4330", "ONDERHOUD_TERREIN"));
+    voegPnLBronmappingMutatieToe(mappingDb, pnlMapping("4340", "ONDERHOUD_INSTALLATIES"));
+    mappingDb.close();
+
+    const { schrijfCorrectiefDagelijksOnderhoudRegels, schrijfCorrectiefDagelijksOnderhoudBeoordeeld } = await import("@bvc/begroting-data");
+
+    await metServer(async (baseUrl) => {
+      const nieuw = await fetch(`${baseUrl}/begroting/nieuw`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ administratieId: ADMINISTRATIE_ID, begrotingsjaar: "2027", laatstAfgeslotenBoekperiode: "06", indexatiePercentage: "3" }).toString(),
+        redirect: "manual",
+      });
+      const hoofdschermUrl = nieuw.headers.get("location")!;
+      const versieId = hoofdschermUrl.split("/")[3]!.split("?")[0]!;
+
+      const db = openOrCreateDatabase(begrotingsversiesDatabasePad(root, ADMINISTRATIE_ID));
+      schrijfCorrectiefDagelijksOnderhoudRegels(db, versieId, [{ id: null, omschrijving: "Dagelijks onderhoud", complexnummer: "001", grootboekrekening: "4330", ogbKostensoort: null, jaarbedrag: new Decimal(1200) }]);
+      schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versieId, true);
+      db.close();
+
+      const geplandHtml = await (await fetch(`${baseUrl}/begroting/${ADMINISTRATIE_ID}/${versieId}/module/gepland-onderhoud?laatstAfgeslotenBoekperiode=06`)).text();
+      const correctiefHtml = await (await fetch(`${baseUrl}/begroting/${ADMINISTRATIE_ID}/${versieId}/module/correctief?laatstAfgeslotenBoekperiode=06`)).text();
+      // Begroting Onderhoud totaal = 0 (Gepland) + 1200 (Correctief) = 1200, identiek op beide schermen.
+      expect(geplandHtml).toContain("€ 1.200,00");
+      expect(correctiefHtml).toContain("€ 1.200,00");
+      expect(geplandHtml).toContain("€ 525,00");
+      expect(correctiefHtml).toContain("€ 525,00");
+    });
+  });
+
+  it("beide (Gepland + Correctief) ingevuld: Onderhoud totaal = som, Werkelijk blijft exact hetzelfde getal op beide schermen", async () => {
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "boekingen.xlsx"), [boekingRij("4300", 300), boekingRij("4330", 150), boekingRij("4340", 75)]);
+    const mappingDb = openOrCreateDatabase(pnlBronmappingDatabasePad(root, ADMINISTRATIE_ID));
+    voegPnLBronmappingMutatieToe(mappingDb, pnlMapping("4300", "ONDERHOUD_GEBOUWEN"));
+    voegPnLBronmappingMutatieToe(mappingDb, pnlMapping("4330", "ONDERHOUD_TERREIN"));
+    voegPnLBronmappingMutatieToe(mappingDb, pnlMapping("4340", "ONDERHOUD_INSTALLATIES"));
+    mappingDb.close();
+
+    const { schrijfGeplandOnderhoudActiviteiten, schrijfGeplandOnderhoudBeoordeeld, schrijfCorrectiefDagelijksOnderhoudRegels, schrijfCorrectiefDagelijksOnderhoudBeoordeeld } = await import("@bvc/begroting-data");
+
+    await metServer(async (baseUrl) => {
+      const nieuw = await fetch(`${baseUrl}/begroting/nieuw`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ administratieId: ADMINISTRATIE_ID, begrotingsjaar: "2027", laatstAfgeslotenBoekperiode: "06", indexatiePercentage: "3" }).toString(),
+        redirect: "manual",
+      });
+      const hoofdschermUrl = nieuw.headers.get("location")!;
+      const versieId = hoofdschermUrl.split("/")[3]!.split("?")[0]!;
+
+      const db = openOrCreateDatabase(begrotingsversiesDatabasePad(root, ADMINISTRATIE_ID));
+      schrijfGeplandOnderhoudActiviteiten(db, versieId, [
+        {
+          id: null,
+          complexnummer: "001",
+          omschrijving: "Dakrenovatie",
+          grootboekrekening: "4300",
+          ogbKostensoort: null,
+          aanleidingType: "MJOP",
+          aanleidingToelichting: "MJOP 2027",
+          q1: new Decimal(1000),
+          q2: new Decimal(1000),
+          q3: new Decimal(1000),
+          q4: new Decimal(1000),
+          status: "GEPLAND",
+          leverancier: null,
+          offertebedrag: null,
+          notitie: null,
+        },
+      ]);
+      schrijfGeplandOnderhoudBeoordeeld(db, versieId, true);
+      schrijfCorrectiefDagelijksOnderhoudRegels(db, versieId, [{ id: null, omschrijving: "Dagelijks onderhoud", complexnummer: "001", grootboekrekening: "4330", ogbKostensoort: null, jaarbedrag: new Decimal(1200) }]);
+      schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versieId, true);
+      db.close();
+
+      const geplandHtml = await (await fetch(`${baseUrl}/begroting/${ADMINISTRATIE_ID}/${versieId}/module/gepland-onderhoud?laatstAfgeslotenBoekperiode=06`)).text();
+      const correctiefHtml = await (await fetch(`${baseUrl}/begroting/${ADMINISTRATIE_ID}/${versieId}/module/correctief?laatstAfgeslotenBoekperiode=06`)).text();
+
+      // Begroting Onderhoud totaal = 4000 (Gepland) + 1200 (Correctief) = 5200, identiek op beide schermen.
+      expect(geplandHtml).toContain("€ 5.200,00");
+      expect(correctiefHtml).toContain("€ 5.200,00");
+      // Werkelijk Onderhoud totaal (525) komt exact één keer voor — geen optelling per module, hetzelfde getal op beide schermen.
+      expect(geplandHtml).toContain("€ 525,00");
+      expect(correctiefHtml).toContain("€ 525,00");
+      // Estimated Onderhoud totaal = Werkelijk (525) + resterende verwachting (0, geen Estimated-verwachtingen ingevuld).
+      expect(geplandHtml).toContain("Estimated Onderhoud totaal");
+      expect(correctiefHtml).toContain("Estimated Onderhoud totaal");
+    });
+  });
+});
+
+function pnlMapping(grootboekrekening: string, economischeCategorie: string): Parameters<typeof voegPnLBronmappingMutatieToe>[1] {
+  return {
+    bedrijfsnr: BEDRIJFSNR,
+    grootboekrekening,
+    grootboekOmschrijving: null,
+    ogbKostensoort: null,
+    ogbKostensoortOmschrijving: null,
+    economischeModule: "ONDERHOUD",
+    economischeCategorie,
+    geldigVanafBoekjaar: 2020,
+    geldigVanafPeriode: "01",
+    geldigTotBoekjaar: null,
+    geldigTotPeriode: null,
+    type: "NIEUWE_MAPPING_VANAF_PERIODE",
+    vorigeMappingId: null,
+    gewijzigdOp: new Date("2026-01-01T00:00:00.000Z"),
+    gebruiker: "test",
+    wijzigingsreden: "testfixture",
+  };
+}
+
 function contractRij(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     Bedrijfsnr: BEDRIJFSNR,
