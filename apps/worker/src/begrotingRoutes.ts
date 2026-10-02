@@ -60,6 +60,7 @@ import {
   schrijfWozObjecten,
   schrijfWozSetBevestigd,
   stelBegrotingVast,
+  verwijderConceptVersie,
   VoorstelOvernameGeweigerdError,
   type AlgemeneKostenRegelInvoer,
   type Begrotingsversie,
@@ -104,6 +105,7 @@ import {
   renderLeegstandForm,
   renderManagementForm,
   renderRenteForm,
+  renderVerwijderBevestigingScherm,
   renderVerzekeringenForm,
   type AlgemeneKostenCategorieOpties,
   type BeheerDetailRegel,
@@ -253,7 +255,12 @@ export async function handleBegrotingRequest(root: string, req: IncomingMessage,
     const db = openOrCreateDatabase(begrotingsversiesDatabasePad(root, administratieId));
     try {
       const versies = leesBegrotingsversiesVoorAdministratie(db, config.bedrijfsnr);
-      stuurHtml(res, 200, renderBegrotingKeuzeScherm(administraties, { ingevoerd: { administratieId }, bestaandeVersies: versies }));
+      const melding = url.searchParams.get("melding");
+      stuurHtml(
+        res,
+        200,
+        renderBegrotingKeuzeScherm(administraties, { ingevoerd: { administratieId }, bestaandeVersies: versies, ...(melding !== null ? { melding } : {}) }),
+      );
     } finally {
       db.close();
     }
@@ -376,6 +383,66 @@ export async function handleBegrotingRequest(root: string, req: IncomingMessage,
     schrijfModule1Aannames(g.db, g.versie.id, bestaandeAannames, gekozenPeriode);
     g.db.close();
     stuurRedirect(res, hoofdschermUrl(administratieId, versieId, gekozenPeriode));
+    return true;
+  }
+
+  // GET /begroting/{administratieId}/{versieId}/verwijderen — toont het bevestigingsscherm.
+  // Uitsluitend voor CONCEPT; voor VASTGESTELD wordt het scherm nooit getoond, ook niet via een
+  // directe URL (een actieve verwijdermogelijkheid mag voor VASTGESTELD nooit zichtbaar worden).
+  if (req.method === "GET" && segmenten.length === 4 && segmenten[3] === "verwijderen") {
+    const g = open(root, administratieId, versieId);
+    if (g === null) {
+      stuurHtml(res, 404, renderFoutPagina("Niet gevonden", "Deze begrotingsversie of administratie bestaat niet."));
+      return true;
+    }
+    if (g.versie.status !== "CONCEPT") {
+      g.db.close();
+      stuurHtml(res, 400, renderFoutPagina("Kan niet worden verwijderd", "Een vastgestelde begrotingsversie is immutable en kan nooit worden verwijderd.", `/begroting?administratieId=${encodeURIComponent(administratieId)}`));
+      return true;
+    }
+    stuurHtml(res, 200, renderVerwijderBevestigingScherm({ administratieId, weergavenaam: g.weergavenaam, versie: g.versie }));
+    g.db.close();
+    return true;
+  }
+
+  // POST /begroting/{administratieId}/{versieId}/verwijderen — definitieve verwijdering, uitsluitend
+  // na exacte bevestiging ("VERWIJDEREN", server-side gevalideerd). Status wordt hier opnieuw, vers
+  // gecontroleerd (niet vertrouwd op wat het bevestigingsscherm ooit toonde) — geen directe route mag
+  // een VASTGESTELDE versie alsnog verwijderen. De daadwerkelijke verwijdering loopt via de bestaande,
+  // al geteste `verwijderConceptVersie` (cascade via bestaande foreign keys, geen losse SQL hier).
+  if (req.method === "POST" && segmenten.length === 4 && segmenten[3] === "verwijderen") {
+    const g = open(root, administratieId, versieId);
+    if (g === null) {
+      stuurHtml(res, 404, renderFoutPagina("Niet gevonden", "Deze begrotingsversie of administratie bestaat niet."));
+      return true;
+    }
+    if (g.versie.status !== "CONCEPT") {
+      g.db.close();
+      stuurHtml(res, 400, renderFoutPagina("Kan niet worden verwijderd", "Een vastgestelde begrotingsversie is immutable en kan nooit worden verwijderd.", `/begroting?administratieId=${encodeURIComponent(administratieId)}`));
+      return true;
+    }
+    const body = await leesBody(req);
+    const velden = Object.fromEntries(new URLSearchParams(body));
+    // Bewust GEEN `tekst()` (die trimt) — "exact VERWIJDEREN" betekent ook geen toegestane
+    // voorloop-/naloopspaties; een onbekend formulierveld levert een lege string op, nooit een match.
+    const bevestiging = velden["bevestiging"] ?? "";
+    if (bevestiging !== "VERWIJDEREN") {
+      stuurHtml(
+        res,
+        400,
+        renderVerwijderBevestigingScherm({ administratieId, weergavenaam: g.weergavenaam, versie: g.versie, fouten: ['Typ exact "VERWIJDEREN" (hoofdletters, geen spaties ervoor/erna) om te bevestigen.'] }),
+      );
+      g.db.close();
+      return true;
+    }
+    try {
+      verwijderConceptVersie(g.db, g.versie.id);
+      g.db.close();
+      stuurRedirect(res, `/begroting?administratieId=${encodeURIComponent(administratieId)}&melding=${encodeURIComponent(`Conceptbegroting ${g.versie.begrotingsjaar} is verwijderd.`)}`);
+    } catch (error) {
+      g.db.close();
+      stuurHtml(res, 400, renderFoutPagina("Verwijderen is mislukt", error instanceof Error ? error.message : String(error), `/begroting?administratieId=${encodeURIComponent(administratieId)}`));
+    }
     return true;
   }
 

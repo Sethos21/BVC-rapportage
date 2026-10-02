@@ -649,3 +649,218 @@ describe("laatstAfgeslotenBoekperiode persistent per begrotingsversie (product-r
     });
   });
 });
+
+/**
+ * Veilig verwijderen conceptbegroting (productieacceptatie-delta, vervangt de eerdere opdracht).
+ * Uitsluitend testdata (tijdelijke tmp-root/-database) — raakt nooit de echte 070/2026-versies.
+ */
+describe("Veilig verwijderen conceptbegroting", () => {
+  /** Volledig vaststelbare fixture — exact hetzelfde bewezen patroon als de Tranche-14-test hierboven, hier uitsluitend hergebruikt om één échte VASTGESTELDE testversie te krijgen (de publieke ingang is en blijft `stelBegrotingVast`, nooit het interne `markeerVastgesteld`). */
+  async function maakVastgesteldeTestversie(db: ReturnType<typeof openOrCreateDatabase>, begrotingsjaar: number): Promise<string> {
+    const {
+      maakBegrotingsversie,
+      schrijfModule1Snapshot,
+      schrijfModule1Aannames,
+      schrijfModule3Invoer,
+      schrijfGeplandOnderhoudBeoordeeld,
+      schrijfCorrectiefDagelijksOnderhoudBeoordeeld,
+      schrijfVerzekeringBeoordeeld,
+      schrijfGemeentelijkeLastenModule,
+      schrijfAlgemeneKostenCategorieState,
+      schrijfLeegstandCategorieState,
+      schrijfRenteCategorieState,
+      schrijfNietVerrekenbareBtwState,
+      stelBegrotingVast,
+    } = await import("@bvc/begroting-data");
+    const { ALGEMENE_KOSTEN_CATEGORIEEN, LEEGSTAND_CATEGORIEEN, RENTE_CATEGORIEEN } = await import("@bvc/reporting");
+
+    const versie = maakBegrotingsversie(db, { originType: "NIEUW", bedrijfsnr: BEDRIJFSNR, begrotingsjaar, bronPeildatum: new Date() });
+    const id = versie.id;
+    schrijfModule1Snapshot(db, id, []);
+    schrijfModule1Aannames(db, id, { begrotingsjaar, indexatiePercentage: new Decimal(3) }, "06");
+    schrijfModule3Invoer(db, id, { wijze: "NIEUWE_VERGOEDING", bedrag: new Decimal(500), eenheid: "MAAND", ingangsdatum: null });
+    schrijfGeplandOnderhoudBeoordeeld(db, id, true);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, id, true);
+    schrijfVerzekeringBeoordeeld(db, id, true);
+    schrijfGemeentelijkeLastenModule(db, id, { werkelijkeGemeentelijkeLasten: null, wozStijgingPercentage: null, lastenPercentageStijging: null, begrotingsPercentageOverride: null, beoordeeld: true });
+    schrijfAlgemeneKostenCategorieState(db, id, Object.fromEntries(ALGEMENE_KOSTEN_CATEGORIEEN.map((c: string) => [c, { beoordeeld: true, vorigJaarBedrag: null, verwachteVerhogingPercentage: null }])) as never);
+    schrijfLeegstandCategorieState(
+      db,
+      id,
+      Object.fromEntries(LEEGSTAND_CATEGORIEEN.map((c: string) => [c, { beoordeeld: true, laatstBekendServicekostenvoorschotJaar: null, laatstBekendServicekostenvoorschotJaarHerkomst: null, verwachteLeegstandsperiodeMaanden: null }])) as never,
+    );
+    schrijfRenteCategorieState(db, id, Object.fromEntries(RENTE_CATEGORIEEN.map((c: string) => [c, { beoordeeld: true }])) as never);
+    schrijfNietVerrekenbareBtwState(db, id, { beoordeeld: true, vorigJaarWerkelijk: null });
+    stelBegrotingVast(db, id, new Date());
+    return id;
+  }
+
+  async function zetTweeVersiesNeer(): Promise<{
+    conceptA: string;
+    conceptB: string;
+    vastgesteld: string;
+    db: ReturnType<typeof openOrCreateDatabase>;
+  }> {
+    const { maakBegrotingsversie, schrijfModule1Snapshot, schrijfModule1Aannames } = await import("@bvc/begroting-data");
+    const db = openOrCreateDatabase(begrotingsversiesDatabasePad(root, ADMINISTRATIE_ID));
+    const a = maakBegrotingsversie(db, { originType: "NIEUW", bedrijfsnr: BEDRIJFSNR, begrotingsjaar: 2026, bronPeildatum: new Date() });
+    schrijfModule1Snapshot(db, a.id, []);
+    schrijfModule1Aannames(db, a.id, { begrotingsjaar: 2026, indexatiePercentage: new Decimal(3) }, "06");
+
+    const b = maakBegrotingsversie(db, { originType: "NIEUW", bedrijfsnr: BEDRIJFSNR, begrotingsjaar: 2027, bronPeildatum: new Date() });
+    schrijfModule1Snapshot(db, b.id, []);
+    schrijfModule1Aannames(db, b.id, { begrotingsjaar: 2027, indexatiePercentage: new Decimal(3) }, "06");
+
+    const vastgesteld = await maakVastgesteldeTestversie(db, 2025);
+
+    return { conceptA: a.id, conceptB: b.id, vastgesteld, db };
+  }
+
+  it("1. keuzescherm toont 'Verwijderen' bij CONCEPT, niet bij VASTGESTELD", async () => {
+    const { conceptA, vastgesteld, db } = await zetTweeVersiesNeer();
+    db.close();
+
+    await metServer(async (baseUrl) => {
+      const html = await (await fetch(`${baseUrl}/begroting?administratieId=${ADMINISTRATIE_ID}`)).text();
+      expect(html).toContain(`/begroting/${ADMINISTRATIE_ID}/${conceptA}/verwijderen`);
+      expect(html).not.toContain(`/begroting/${ADMINISTRATIE_ID}/${vastgesteld}/verwijderen`);
+    });
+  });
+
+  it("2. directe GET op het verwijderscherm voor een VASTGESTELDE versie toont nooit het bevestigingsformulier", async () => {
+    const { vastgesteld, db } = await zetTweeVersiesNeer();
+    db.close();
+
+    await metServer(async (baseUrl) => {
+      const resp = await fetch(`${baseUrl}/begroting/${ADMINISTRATIE_ID}/${vastgesteld}/verwijderen`);
+      expect(resp.status).toBe(400);
+      const html = await resp.text();
+      expect(html).not.toContain("Typ exact");
+      expect(html).toContain("immutable");
+    });
+  });
+
+  it("3. lege bevestiging verwijdert niets", async () => {
+    const { conceptA, db } = await zetTweeVersiesNeer();
+    db.close();
+
+    await metServer(async (baseUrl) => {
+      const resp = await fetch(`${baseUrl}/begroting/${ADMINISTRATIE_ID}/${conceptA}/verwijderen`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ bevestiging: "" }).toString(),
+      });
+      expect(resp.status).toBe(400);
+
+      const dbNa = openOrCreateDatabase(begrotingsversiesDatabasePad(root, ADMINISTRATIE_ID));
+      const { leesBegrotingsversie } = await import("@bvc/begroting-data");
+      expect(leesBegrotingsversie(dbNa, conceptA)).not.toBeNull();
+      dbNa.close();
+    });
+  });
+
+  it("4. verkeerde bevestiging (andere schrijfwijze) verwijdert niets", async () => {
+    const { conceptA, db } = await zetTweeVersiesNeer();
+    db.close();
+
+    await metServer(async (baseUrl) => {
+      for (const foutieveTekst of ["verwijderen", "VERWIJDER", "Verwijderen", " VERWIJDEREN", "VERWIJDEREN "]) {
+        const resp = await fetch(`${baseUrl}/begroting/${ADMINISTRATIE_ID}/${conceptA}/verwijderen`, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ bevestiging: foutieveTekst }).toString(),
+        });
+        expect.soft(resp.status, `bevestiging="${foutieveTekst}"`).toBe(400);
+      }
+
+      const dbNa = openOrCreateDatabase(begrotingsversiesDatabasePad(root, ADMINISTRATIE_ID));
+      const { leesBegrotingsversie } = await import("@bvc/begroting-data");
+      expect(leesBegrotingsversie(dbNa, conceptA)).not.toBeNull();
+      dbNa.close();
+    });
+  });
+
+  it("5. exacte bevestiging 'VERWIJDEREN' verwijdert de CONCEPT-versie en uitsluitend haar eigen versiegebonden data — versie B en de VASTGESTELDE versie blijven volledig intact (geen orphan records)", async () => {
+    const { conceptA, conceptB, vastgesteld, db } = await zetTweeVersiesNeer();
+    db.close();
+
+    await metServer(async (baseUrl) => {
+      const resp = await fetch(`${baseUrl}/begroting/${ADMINISTRATIE_ID}/${conceptA}/verwijderen`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ bevestiging: "VERWIJDEREN" }).toString(),
+        redirect: "manual",
+      });
+      expect(resp.status).toBe(302);
+      expect(resp.headers.get("location")).toContain(`/begroting?administratieId=${ADMINISTRATIE_ID}`);
+      expect(resp.headers.get("location")).toContain("melding=");
+
+      const dbNa = openOrCreateDatabase(begrotingsversiesDatabasePad(root, ADMINISTRATIE_ID));
+      const { leesBegrotingsversie } = await import("@bvc/begroting-data");
+      // Versie A: volledig weg, inclusief haar eigen versiegebonden data (cascade, geen orphans).
+      expect(leesBegrotingsversie(dbNa, conceptA)).toBeNull();
+      expect(dbNa.prepare(`SELECT 1 FROM begroting_aannames WHERE begroting_versie_id = ?`).get(conceptA)).toBeUndefined();
+      // Versie B en de vastgestelde versie: volledig ongemoeid (aannames blijven bestaan, nog steeds precies 1 rij elk).
+      expect(leesBegrotingsversie(dbNa, conceptB)).not.toBeNull();
+      expect(dbNa.prepare(`SELECT 1 FROM begroting_aannames WHERE begroting_versie_id = ?`).get(conceptB)).toBeDefined();
+      expect(leesBegrotingsversie(dbNa, vastgesteld)).not.toBeNull();
+      expect(dbNa.prepare(`SELECT 1 FROM begroting_aannames WHERE begroting_versie_id = ?`).get(vastgesteld)).toBeDefined();
+      dbNa.close();
+    });
+  });
+
+  it("6. een directe server-side POST-poging om een VASTGESTELDE versie te verwijderen wordt geweigerd, ook met de exacte bevestigingstekst", async () => {
+    const { vastgesteld, db } = await zetTweeVersiesNeer();
+    db.close();
+
+    await metServer(async (baseUrl) => {
+      const resp = await fetch(`${baseUrl}/begroting/${ADMINISTRATIE_ID}/${vastgesteld}/verwijderen`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ bevestiging: "VERWIJDEREN" }).toString(),
+        redirect: "manual",
+      });
+      expect(resp.status).toBe(400);
+      expect(await resp.text()).toContain("immutable");
+
+      const dbNa = openOrCreateDatabase(begrotingsversiesDatabasePad(root, ADMINISTRATIE_ID));
+      const { leesBegrotingsversie } = await import("@bvc/begroting-data");
+      expect(leesBegrotingsversie(dbNa, vastgesteld)).not.toBeNull();
+      dbNa.close();
+    });
+  });
+
+  it("7. verwijderen is administratie- en versiegebonden: een niet-bestaande combinatie faalt veilig (404), raakt niets", async () => {
+    const { conceptA, db } = await zetTweeVersiesNeer();
+    db.close();
+
+    await metServer(async (baseUrl) => {
+      const resp = await fetch(`${baseUrl}/begroting/onbekende_administratie/${conceptA}/verwijderen`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ bevestiging: "VERWIJDEREN" }).toString(),
+      });
+      expect(resp.status).toBe(404);
+
+      const dbNa = openOrCreateDatabase(begrotingsversiesDatabasePad(root, ADMINISTRATIE_ID));
+      const { leesBegrotingsversie } = await import("@bvc/begroting-data");
+      expect(leesBegrotingsversie(dbNa, conceptA)).not.toBeNull(); // niet geraakt
+      dbNa.close();
+    });
+  });
+
+  it("8. bestaande Openen-flow en opgeslagen periodecontext blijven werken voor een niet-verwijderde versie", async () => {
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "boekingen.xlsx"), []);
+    const { conceptB, db } = await zetTweeVersiesNeer();
+    db.close();
+
+    await metServer(async (baseUrl) => {
+      const resp = await fetch(`${baseUrl}/begroting/${ADMINISTRATIE_ID}/${conceptB}`); // "Openen"-link: geen queryparameter
+      expect(resp.status).toBe(200);
+      const html = await resp.text();
+      expect(html).toContain("Vergelijkende exploitatiebegroting");
+      expect(html).toContain("t/m periode 06");
+      expect(html).not.toContain("Kies de laatst afgesloten boekperiode");
+    });
+  });
+});

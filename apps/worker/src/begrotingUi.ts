@@ -115,6 +115,11 @@ const BASIS_CSS = `
   .lijst{list-style:none;padding:0;margin:0}
   .lijst li{padding:10px 0;border-bottom:1px solid var(--line);font-size:13.5px;display:flex;justify-content:space-between;align-items:center}
   .lijst a{color:var(--green);text-decoration:none;font-weight:650}
+  .lijst-acties{display:flex;align-items:center;gap:16px}
+  .verwijder-link{color:var(--muted)!important;font-weight:500!important;font-size:12px}
+  .verwijder-link:hover{color:var(--red)!important;text-decoration:underline}
+  button.danger{background:var(--red)}
+  button.danger:hover{background:#7d3a28}
 
   .controle-grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(280px,1fr);gap:22px;align-items:start}
   .metrics-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:22px}
@@ -294,6 +299,7 @@ const BEWERKBARE_MODULES: Record<string, readonly { key: string; label: string }
 
 export interface AdministratieKeuzeSchermOpties {
   fouten?: readonly string[];
+  melding?: string;
   ingevoerd?: { administratieId?: string; begrotingsjaar?: string; laatstAfgeslotenBoekperiode?: string; indexatiePercentage?: string };
   bestaandeVersies?: readonly Begrotingsversie[];
 }
@@ -309,6 +315,7 @@ export function renderBegrotingKeuzeScherm(administraties: readonly Administrati
     opties.fouten && opties.fouten.length > 0
       ? `<div class="fouten"><strong>Controleer de invoer:</strong><ul>${opties.fouten.map((f) => `<li>${escapeHtml(f)}</li>`).join("")}</ul></div>`
       : "";
+  const meldingHtml = opties.melding !== undefined ? `<div class="banner">${escapeHtml(opties.melding)}</div>` : "";
 
   const bestaandeVersiesHtml =
     opties.bestaandeVersies !== undefined
@@ -316,10 +323,13 @@ export function renderBegrotingKeuzeScherm(administraties: readonly Administrati
           opties.bestaandeVersies.length === 0
             ? `<div class="sub">Nog geen begrotingsversie voor deze administratie.</div>`
             : `<ul class="lijst">${opties.bestaandeVersies
-                .map(
-                  (v) =>
-                    `<li><span>${v.begrotingsjaar} — ${v.status === "VASTGESTELD" ? "Vastgesteld" : "Concept"}${v.naam ? ` — ${escapeHtml(v.naam)}` : ""}</span><a href="/begroting/${encodeURIComponent(geselecteerd)}/${encodeURIComponent(v.id)}">Openen →</a></li>`,
-                )
+                .map((v) => {
+                  const basis = `/begroting/${encodeURIComponent(geselecteerd)}/${encodeURIComponent(v.id)}`;
+                  // Verwijderen is een destructieve secundaire actie — uitsluitend zichtbaar voor CONCEPT, en
+                  // visueel bewust klein/gedempt zodat hij niet concurreert met de primaire "Openen"-actie.
+                  const verwijderLink = v.status === "CONCEPT" ? `<a class="verwijder-link" href="${basis}/verwijderen">Verwijderen</a>` : "";
+                  return `<li><span>${v.begrotingsjaar} — ${v.status === "VASTGESTELD" ? "Vastgesteld" : "Concept"}${v.naam ? ` — ${escapeHtml(v.naam)}` : ""}</span><span class="lijst-acties"><a href="${basis}">Openen →</a>${verwijderLink}</span></li>`;
+                })
                 .join("")}</ul>`
         }</div>`
       : "";
@@ -328,6 +338,7 @@ export function renderBegrotingKeuzeScherm(administraties: readonly Administrati
     <div class="eyebrow">BVC Vastgoed Consultants — Exploitatiebegroting</div>
     <h1>Begroting kiezen of starten</h1>
     <div class="sub">Het exacte startscherm is nog niet als afzonderlijk UX-ontwerp vastgesteld (zie hoofdstuk 12 van de UX-vastgesteld-set) — dit is een minimale, functionele selectie op basis van de al bestaande administratieselectie.</div>
+    ${meldingHtml}
     <div class="card">
       ${foutenHtml}
       <form method="GET" action="/begroting">
@@ -390,6 +401,42 @@ export function renderKiesBoekperiodeScherm(o: { administratieId: string; weerga
     </div>
     <a class="terug" href="/begroting?administratieId=${encodeURIComponent(o.administratieId)}">← Terug naar begrotingskeuze</a>`;
   return paginaShell(`Boekperiode kiezen — Begroting ${o.versie.begrotingsjaar}`, body);
+}
+
+/**
+ * Veilig verwijderen conceptbegroting — uitsluitend bereikbaar/bedoeld voor een CONCEPT-versie
+ * (de aanroeper in `begrotingRoutes.ts` weigert dit scherm server-side voor VASTGESTELD, en
+ * `verwijderConceptVersie` weigert de daadwerkelijke verwijdering sowieso nogmaals). Eén klik is
+ * bewust nooit genoeg: de gebruiker moet exact "VERWIJDEREN" typen, server-side gevalideerd —
+ * geen browser-`confirm()`, een eigen pagina binnen dezelfde visuele taal als de rest van de
+ * begrotingsmodule.
+ */
+export function renderVerwijderBevestigingScherm(o: { administratieId: string; weergavenaam: string; versie: Begrotingsversie; fouten?: readonly string[] }): string {
+  const foutenHtml =
+    o.fouten && o.fouten.length > 0 ? `<div class="fouten"><strong>Controleer de invoer:</strong><ul>${o.fouten.map((f) => `<li>${escapeHtml(f)}</li>`).join("")}</ul></div>` : "";
+  const naamRegel = o.versie.naam ? `<li><span>Naam</span><strong>${escapeHtml(o.versie.naam)}</strong></li>` : "";
+  const body = `
+    <div class="eyebrow">${escapeHtml(o.weergavenaam)} — Begroting ${o.versie.begrotingsjaar}</div>
+    <h1>Conceptbegroting verwijderen</h1>
+    <div class="fouten"><strong>Dit kan niet ongedaan worden gemaakt.</strong> Deze conceptbegroting en alle daarbij opgeslagen invoer (alle modules, overrides, beoordelingen) worden definitief verwijderd. Andere begrotingsversies van deze of een andere administratie, bronbestanden, algemene administratiegegevens en gedeelde mappings blijven onaangeroerd.</div>
+    <div class="card">
+      <ul class="lijst">
+        <li><span>Administratie</span><strong>${escapeHtml(o.weergavenaam)}</strong></li>
+        <li><span>Begrotingsjaar</span><strong>${o.versie.begrotingsjaar}</strong></li>
+        ${naamRegel}
+        <li><span>Status</span><strong>Concept</strong></li>
+      </ul>
+    </div>
+    ${foutenHtml}
+    <div class="card">
+      <form method="POST" action="/begroting/${encodeURIComponent(o.administratieId)}/${encodeURIComponent(o.versie.id)}/verwijderen">
+        <label for="bevestiging">Typ exact <strong>VERWIJDEREN</strong> om te bevestigen</label>
+        <input type="text" name="bevestiging" id="bevestiging" autocomplete="off" required />
+        <button type="submit" class="danger">Definitief verwijderen</button>
+      </form>
+    </div>
+    <a class="terug" href="/begroting?administratieId=${encodeURIComponent(o.administratieId)}">← Terug naar begrotingskeuze (zonder te verwijderen)</a>`;
+  return paginaShell(`Verwijderen — Begroting ${o.versie.begrotingsjaar}`, body);
 }
 
 export interface HoofdschermOpties {
