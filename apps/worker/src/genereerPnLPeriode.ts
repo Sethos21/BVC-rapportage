@@ -4,7 +4,7 @@ import Decimal from "decimal.js";
 import { openOrCreateDatabase, leesPnLBronmappingRegels } from "@bvc/begroting-data";
 import { berekenPnLPeriode, renderPnLPeriodeHtml, type PnLPeriodeOrchestratieResultaat, type PnLRuweBoekingRegel } from "@bvc/reporting";
 import { resolveBron } from "./sourceResolver.js";
-import { ExcelBronAdapter } from "./bronAdapter.js";
+import { leesRuweRijenMetCache } from "./boekingenParseCache.js";
 import { leesAdministratieConfig } from "./administratie.js";
 import { administratieRapportenDir, pnlBronmappingDatabasePad } from "./paths.js";
 import { PNL_PRESENTATIEMAPPINGEN } from "./pnlPresentatiemappingen.js";
@@ -17,14 +17,19 @@ import { PNL_PRESENTATIEMAPPINGEN } from "./pnlPresentatiemappingen.js";
  * bestaande brontypen die de orchestratielaag nodig heeft en geeft ze
  * ongewijzigd door.
  *
- * WAAROM DE RUWE BOEKINGENBRON RECHTSTREEKS (NIET DE CACHE): de acht
+ * WAAROM DE RUWE BOEKINGENBRON RECHTSTREEKS (NIET DE `@bvc/cache`-SQLITE-CACHE): de acht
  * bestaande productieketens vereisen `ogbKostensoort` per boeking — de
  * `boekingen`-cachetabel (`@bvc/cache`'s schema.ts) modelleert dat veld
  * (nog) niet (`grootboek_a`/`grootboek_b` zijn iets anders). Dit is GEEN
  * nieuw parallel data-importpad: `genereerOnderhoudBoekingenDiagnose.ts`
  * gebruikt exact hetzelfde bestaande mechanisme (`resolveBron` +
  * `ExcelBronAdapter().leesRuweRijen`) om precies dezelfde reden — hier
- * uitsluitend hergebruikt, niet opnieuw ontworpen.
+ * uitsluitend hergebruikt, niet opnieuw ontworpen. Performance-delta
+ * (2026-10-02): `leesRuweRijenMetCache` (`boekingenParseCache.ts`) wikkelt
+ * dezelfde `ExcelBronAdapter`-aanroep in een in-memory, mtime-gevalideerde
+ * cache — puur een performance-maatregel tegen het keer-op-keer opnieuw
+ * parsen van hetzelfde bestand, geen nieuw brontype en geen wijziging van
+ * wélke rijen worden gelezen.
  *
  * WAAROM DE PNL-BRONMAPPING-DATABASE (NIEUW PRODUCTIEPAD): vóór deze
  * Delta Build riep `apps/worker` `@bvc/begroting-data`'s
@@ -100,7 +105,10 @@ export function haalPnLPeriodeResultaatOp(root: string, administratieId: string,
   if (!bron.bestaat) {
     throw new Error(`Boekingen-bronbestand niet gevonden op "${bron.pad}" — draai eerst rebuild-cache of controleer bronlocaties.json.`);
   }
-  const ruweRijen = new ExcelBronAdapter().leesRuweRijen(bron);
+  // Performance-delta: `leesRuweRijenMetCache` hergebruikt een eerder geparst resultaat zolang
+  // bestandspad+mtime ongewijzigd zijn (zie `boekingenParseCache.ts`) — zelfde brongegevens als
+  // vóór deze delta, uitsluitend minder vaak opnieuw geparsed.
+  const ruweRijen = leesRuweRijenMetCache(administratieId, bron);
 
   const boekingen: PnLRuweBoekingRegel[] = ruweRijen
     .filter((row) => tekst(row["Bedrijfsnr"]) === config.bedrijfsnr)

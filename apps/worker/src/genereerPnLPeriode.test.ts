@@ -1,10 +1,11 @@
-import { mkdirSync, readFileSync, rmSync, mkdtempSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, mkdtempSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openOrCreateDatabase, voegPnLBronmappingMutatieToe, type PnLBronmappingMutatieInvoer } from "@bvc/begroting-data";
 import type { PnLEconomischeModule } from "@bvc/reporting";
-import { genereerPnLPeriode } from "./genereerPnLPeriode.js";
+import { genereerPnLPeriode, haalPnLPeriodeResultaatOp } from "./genereerPnLPeriode.js";
+import { ExcelBronAdapter } from "./bronAdapter.js";
 import { nieuweAdministratieConfig, schrijfAdministratieConfig } from "./administratie.js";
 import { administratieDir, bronGedeeldDir, pnlBronmappingDatabasePad } from "./paths.js";
 import { schrijfXlsxFixture } from "./test/fixtures.js";
@@ -222,5 +223,47 @@ describe("genereerPnLPeriode — productie-integratie (echte xlsx-bron + echte P
 
   it("faalt hard met een duidelijke fout wanneer het boekingen-bronbestand ontbreekt (geen stilzwijgende lege P&L)", () => {
     expect(() => genereerPnLPeriode(root, ADMINISTRATIE_ID, { boekjaar: 2026, boekperiodeTotEnMet: "06" })).toThrow(/Boekingen-bronbestand niet gevonden/);
+  });
+
+  describe("performance-delta: boekingen.xlsx-parsecache (boekingenParseCache.ts)", () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it("twee identieke aanroepen (zelfde bestand/mtime) parsen het bronbestand maar één keer en geven exact dezelfde financiële uitkomst", () => {
+      schrijfXlsxFixture(join(bronGedeeldDir(root), "boekingen.xlsx"), [boekingRij("8800", -1000)]);
+      const mappingDb = openOrCreateDatabase(pnlBronmappingDatabasePad(root, ADMINISTRATIE_ID));
+      voegMapping(mappingDb, { grootboekrekening: "8800", economischeModule: "HUUR", economischeCategorie: "HUUROPBRENGST_BELAST" });
+      mappingDb.close();
+
+      const spy = vi.spyOn(ExcelBronAdapter.prototype, "leesRuweRijen");
+      const eerste = haalPnLPeriodeResultaatOp(root, ADMINISTRATIE_ID, { boekjaar: 2026, boekperiodeTotEnMet: "06" });
+      const tweede = haalPnLPeriodeResultaatOp(root, ADMINISTRATIE_ID, { boekjaar: 2026, boekperiodeTotEnMet: "06" });
+
+      expect(spy).toHaveBeenCalledTimes(1); // tweede aanroep hergebruikt de cache, geen nieuwe parse
+      expect(eerste.resultaat.totaalOpbrengsten.besteWetenSom.toString()).toBe("1000");
+      expect(tweede.resultaat.totaalOpbrengsten.besteWetenSom.toString()).toBe(eerste.resultaat.totaalOpbrengsten.besteWetenSom.toString());
+    });
+
+    it("een gewijzigde mtime van boekingen.xlsx laat de eerstvolgende aanroep daadwerkelijk opnieuw parsen, met de nieuwe inhoud", () => {
+      const pad = join(bronGedeeldDir(root), "boekingen.xlsx");
+      schrijfXlsxFixture(pad, [boekingRij("8800", -1000)]);
+      const mappingDb = openOrCreateDatabase(pnlBronmappingDatabasePad(root, ADMINISTRATIE_ID));
+      voegMapping(mappingDb, { grootboekrekening: "8800", economischeModule: "HUUR", economischeCategorie: "HUUROPBRENGST_BELAST" });
+      mappingDb.close();
+
+      const spy = vi.spyOn(ExcelBronAdapter.prototype, "leesRuweRijen");
+      const eerste = haalPnLPeriodeResultaatOp(root, ADMINISTRATIE_ID, { boekjaar: 2026, boekperiodeTotEnMet: "06" });
+      expect(eerste.resultaat.totaalOpbrengsten.besteWetenSom.toString()).toBe("1000");
+
+      // Bron wijzigen + mtime expliciet vooruitzetten (voorkomt flakiness door OS-mtime-afrondingsresolutie).
+      schrijfXlsxFixture(pad, [boekingRij("8800", -2500)]);
+      const toekomst = new Date(Date.now() + 5000);
+      utimesSync(pad, toekomst, toekomst);
+
+      const tweede = haalPnLPeriodeResultaatOp(root, ADMINISTRATIE_ID, { boekjaar: 2026, boekperiodeTotEnMet: "06" });
+      expect(spy).toHaveBeenCalledTimes(2); // mtime gewijzigd -> de oude cache-entry wordt genegeerd
+      expect(tweede.resultaat.totaalOpbrengsten.besteWetenSom.toString()).toBe("2500");
+    });
   });
 });
