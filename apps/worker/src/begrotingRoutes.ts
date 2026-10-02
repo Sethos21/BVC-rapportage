@@ -435,13 +435,23 @@ export async function handleBegrotingRequest(root: string, req: IncomingMessage,
       g.db.close();
       return true;
     }
+    // `g.db.close()` loopt bewust via `finally` en exact één keer, losgekoppeld van welk antwoord
+    // wordt verstuurd: de vorige vorm sloot de database zowel in het succes- als in het catch-pad
+    // apart, dus een close()-fout ná een geslaagde verwijdering kon de redirect naar het
+    // versieoverzicht laten mislukken — de browser bleef dan op de POST-URL (.../verwijderen)
+    // staan met een generieke foutpagina i.p.v. de bedoelde navigatie terug (zie oplevering).
+    let foutmelding: string | null = null;
     try {
       verwijderConceptVersie(g.db, g.versie.id);
-      g.db.close();
-      stuurRedirect(res, `/begroting?administratieId=${encodeURIComponent(administratieId)}&melding=${encodeURIComponent(`Conceptbegroting ${g.versie.begrotingsjaar} is verwijderd.`)}`);
     } catch (error) {
+      foutmelding = error instanceof Error ? error.message : String(error);
+    } finally {
       g.db.close();
-      stuurHtml(res, 400, renderFoutPagina("Verwijderen is mislukt", error instanceof Error ? error.message : String(error), `/begroting?administratieId=${encodeURIComponent(administratieId)}`));
+    }
+    if (foutmelding === null) {
+      stuurRedirect(res, `/begroting?administratieId=${encodeURIComponent(administratieId)}&melding=${encodeURIComponent(`Conceptbegroting ${g.versie.begrotingsjaar} is verwijderd.`)}`);
+    } else {
+      stuurHtml(res, 400, renderFoutPagina("Verwijderen is mislukt", foutmelding, `/begroting?administratieId=${encodeURIComponent(administratieId)}`));
     }
     return true;
   }
