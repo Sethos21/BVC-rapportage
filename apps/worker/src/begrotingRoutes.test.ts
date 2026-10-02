@@ -670,6 +670,47 @@ describe("Huur/Beheer via echte HTTP-routes met een echte Contracten/RentRoll-fi
     });
   });
 
+  it("UX-UITROL §4: Huur-detailscherm toont een complex/contract-weergavewissel en markeert een in het begrotingsjaar aflopend contract", async () => {
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "contracten_huidig.xlsx"), [
+      contractRij({ Contract: "0000000043", Complexnummer: "001", Expiratie_Expiratiedatum: "31-12-2030" }),
+      contractRij({ Contract: "0000000099", Complexnummer: "002", Huurdernummer: "00000099", Huurder_Naam_1: "Aflopende Huurder BV", Expiratie_Expiratiedatum: "30-06-2028" }),
+    ]);
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "rentroll.xlsx"), [
+      rentrollRij({ Contractnummer: "0000000043", Complexnummer: "001", Prolongatie_bedrag_jaar: 120000 }),
+      rentrollRij({ Contractnummer: "0000000099", Complexnummer: "002", Unitnummer: "0002", Prolongatie_bedrag_jaar: 60000 }),
+    ]);
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "boekingen.xlsx"), []);
+
+    await metServer(async (baseUrl) => {
+      const nieuw = await fetch(`${baseUrl}/begroting/nieuw`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ administratieId: ADMINISTRATIE_ID, begrotingsjaar: "2028", laatstAfgeslotenBoekperiode: "06", indexatiePercentage: "0" }).toString(),
+        redirect: "manual",
+      });
+      const hoofdschermUrl = nieuw.headers.get("location")!;
+      const huurUrl = hoofdschermUrl.replace(/\?.*/, "") + "/module/huur?laatstAfgeslotenBoekperiode=06";
+
+      // Standaard (contractweergave): het in 2028 aflopende contract 0000000099 is herkenbaar gemarkeerd; het doorlopende contract niet.
+      const contractHtml = await (await fetch(baseUrl + huurUrl)).text();
+      expect(contractHtml).toContain("0000000099");
+      expect(contractHtml).toContain("loopt af in 2028");
+      const regelAflopend = contractHtml.slice(contractHtml.indexOf("0000000099"), contractHtml.indexOf("0000000099") + 300);
+      expect(regelAflopend).toContain("loopt af in 2028");
+      const regelDoorlopend = contractHtml.slice(contractHtml.indexOf("0000000043"), contractHtml.indexOf("0000000043") + 300);
+      expect(regelDoorlopend).not.toContain("loopt af");
+
+      // Complexweergave: twee complexen, geaggregeerd (netto 120.000 + 60.000), geen per-contract-overrideveld.
+      const complexHtml = await (await fetch(`${baseUrl + huurUrl}&weergave=complex`)).text();
+      expect(complexHtml).toContain("Per complex");
+      expect(complexHtml).toContain("001");
+      expect(complexHtml).toContain("002");
+      expect(complexHtml).toContain("€ 120.000,00");
+      expect(complexHtml).toContain("€ 30.000,00");
+      expect(complexHtml).not.toContain("Overrides opslaan");
+    });
+  });
+
   it("TRANCHE 14: een toekomstige contract_prijsregels-kortingswijziging werkt door in de netto begrote huur vanaf de juiste maand, en dus automatisch in de variabele Beheersvergoeding (dezelfde Module-1-grondslag)", async () => {
     schrijfXlsxFixture(join(bronGedeeldDir(root), "contracten_huidig.xlsx"), [contractRij()]);
     schrijfXlsxFixture(join(bronGedeeldDir(root), "rentroll.xlsx"), [

@@ -111,6 +111,7 @@ import {
   type BeheerDetailRegel,
   type GemeentelijkeLastenRegelVeld,
   type GeplandOnderhoudRegelVeld,
+  type ComplexHuurRegel,
   type HuurDetailRegel,
   type LeegstandCategorieOpties,
   moduleWerkomgevingPnLHtml,
@@ -667,21 +668,45 @@ async function handleHuur(req: IncomingMessage, res: ServerResponse, g: Geopend,
     return true;
   }
 
-  const regels: HuurDetailRegel[] = module1.contracten.map((c) => ({
-    contractnummer: c.contractnummer,
-    huurderNaam: c.huurderNaam,
-    complexnummer: c.complexnummer,
-    belastOnbelast: c.belastOnbelast === "BELAST" ? "Belast" : c.belastOnbelast === "ONBELAST" ? "Onbelast" : "Onbekend",
-    indexatiePercentageGebruikt: fmtPercentageVeld(c.indexatiePercentageGebruikt),
-    indexatiePercentageBron: c.indexatiePercentageBron,
-    effectieveIndexatiedatum: c.effectieveIndexatiedatum ? fmtDatumVeld(c.effectieveIndexatiedatum) : null,
-    bruto: fmtBedragKort(c.jaartotaal.brutoHuurMetIndexatie),
-    korting: fmtBedragKort(c.jaartotaal.huurkorting),
-    netto: fmtBedragKort(c.jaartotaal.nettoHuur),
-    overrideWaarde: overrides.find((o) => o.contractnummer === c.contractnummer)?.indexatiePercentage.toString() ?? "",
-  }));
+  const einddatumPerContract = new Map(contracten.map((c) => [c.contractnummer, c.einddatum]));
+  const regels: HuurDetailRegel[] = module1.contracten.map((c) => {
+    const einddatum = einddatumPerContract.get(c.contractnummer) ?? null;
+    return {
+      contractnummer: c.contractnummer,
+      huurderNaam: c.huurderNaam,
+      complexnummer: c.complexnummer,
+      belastOnbelast: c.belastOnbelast === "BELAST" ? "Belast" : c.belastOnbelast === "ONBELAST" ? "Onbelast" : "Onbekend",
+      indexatiePercentageGebruikt: fmtPercentageVeld(c.indexatiePercentageGebruikt),
+      indexatiePercentageBron: c.indexatiePercentageBron,
+      effectieveIndexatiedatum: c.effectieveIndexatiedatum ? fmtDatumVeld(c.effectieveIndexatiedatum) : null,
+      bruto: fmtBedragKort(c.jaartotaal.brutoHuurMetIndexatie),
+      korting: fmtBedragKort(c.jaartotaal.huurkorting),
+      netto: fmtBedragKort(c.jaartotaal.nettoHuur),
+      overrideWaarde: overrides.find((o) => o.contractnummer === c.contractnummer)?.indexatiePercentage.toString() ?? "",
+      // UX §4: "de contractweergave toont herkenbaar welke contracten in het begrotingsjaar aflopen" — puur presentatie-join op de al-bestaande snapshotdatum, geen nieuwe business­regel.
+      looptAfDitJaar: einddatum !== null && einddatum.getUTCFullYear() === g.versie.begrotingsjaar,
+      einddatum: einddatum ? fmtDatumVeld(einddatum) : null,
+    };
+  });
 
   const portefeuilleNetto = module1.portefeuilleTotalen.nettoHuurBelast.plus(module1.portefeuilleTotalen.nettoHuurOnbelast).plus(module1.portefeuilleTotalen.nettoHuurOnbekendeBtw);
+
+  // UX §4: "de gebruiker kan wisselen tussen een complexweergave en een contractweergave" — server-rendered toggle via query param, geen client-side state nodig. Zuivere aggregatie van de al-berekende Decimal-jaartotalen per complex — geen nieuwe berekening.
+  const weergave = new URL(req.url ?? "", "http://localhost").searchParams.get("weergave") === "complex" ? "complex" : "contract";
+  const complexGroepen = new Map<string, { bruto: Decimal; korting: Decimal; netto: Decimal; aantal: number }>();
+  for (const c of module1.contracten) {
+    const key = c.complexnummer ?? "Onbekend";
+    const bestaand = complexGroepen.get(key) ?? { bruto: new Decimal(0), korting: new Decimal(0), netto: new Decimal(0), aantal: 0 };
+    complexGroepen.set(key, {
+      bruto: bestaand.bruto.plus(c.jaartotaal.brutoHuurMetIndexatie),
+      korting: bestaand.korting.plus(c.jaartotaal.huurkorting),
+      netto: bestaand.netto.plus(c.jaartotaal.nettoHuur),
+      aantal: bestaand.aantal + 1,
+    });
+  }
+  const complexRegels: ComplexHuurRegel[] = [...complexGroepen.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([complexnummer, t]) => ({ complexnummer, aantalContracten: t.aantal, bruto: fmtBedragKort(t.bruto), korting: fmtBedragKort(t.korting), netto: fmtBedragKort(t.netto) }));
 
   stuurHtml(
     res,
@@ -691,10 +716,14 @@ async function handleHuur(req: IncomingMessage, res: ServerResponse, g: Geopend,
       versieId: g.versie.id,
       terugUrl,
       actieUrl,
+      weergave,
+      contractWeergaveUrl: `${actieUrl}&weergave=contract`,
+      complexWeergaveUrl: `${actieUrl}&weergave=complex`,
       begrotingsjaar: g.versie.begrotingsjaar,
       alleenLezen,
       algemeenIndexatiePercentage: fmtPercentageVeld(aannames.indexatiePercentage),
       regels,
+      complexRegels,
       controleVereist: module1.controleVereist.map((c) => `${c.contractnummer ?? "Algemeen"}: ${c.bericht}`),
       portefeuilleNetto: fmtBedragKort(portefeuilleNetto),
       pnlHtml: vergelijkend !== null ? moduleWerkomgevingPnLHtml(vergelijkend, ["HUUROPBRENGST_BELAST", "HUUROPBRENGST_ONBELAST", "VERLEENDE_HUURKORTING"]) : "",

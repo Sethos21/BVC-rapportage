@@ -838,32 +838,58 @@ export interface HuurDetailRegel {
   korting: string;
   netto: string;
   overrideWaarde: string;
+  /** UX §4: contract loopt in het begrotingsjaar zelf af — een zichtbaar aandachtspunt in de contractweergave, geen blokkade. */
+  looptAfDitJaar: boolean;
+  einddatum: string | null;
+}
+
+export interface ComplexHuurRegel {
+  complexnummer: string;
+  aantalContracten: number;
+  bruto: string;
+  korting: string;
+  netto: string;
 }
 
 /**
- * Huur-detailweergave (UX_01, Tranche 12): toont de bewezen contractbasis per contract —
+ * Huur-detailweergave (UX_01, Tranche 12; complex/contract-toggle + aflopende-contracten-
+ * aandachtspunt: UX-uitrol 2026-10-02 §4): toont de bewezen contractbasis per contract —
  * bronhuur/indexatie/override/resulterende huur/korting blijven zichtbaar onderscheiden zodat
  * later herleidbaar blijft hoe het bedrag is ontstaan (§10). Rekent zelf niets — alle bedragen
- * komen kant-en-klaar van de aanroeper (de bestaande, ongewijzigde pure Huur-motor).
+ * komen kant-en-klaar van de aanroeper (de bestaande, ongewijzigde pure Huur-motor); de
+ * complexweergave is een zuivere optelling van de al-berekende contractregels.
  */
 export function renderHuurDetail(o: {
   administratieId: string;
   versieId: string;
   terugUrl: string;
   actieUrl: string;
+  weergave: "contract" | "complex";
+  contractWeergaveUrl: string;
+  complexWeergaveUrl: string;
   begrotingsjaar: number;
   alleenLezen: boolean;
   algemeenIndexatiePercentage: string;
   regels: readonly HuurDetailRegel[];
+  complexRegels: readonly ComplexHuurRegel[];
   controleVereist: readonly string[];
   portefeuilleNetto: string;
   pnlHtml?: string;
 }): string {
   const waarschuwingenHtml = o.controleVereist.length > 0 ? `<div class="banner">${o.controleVereist.map(escapeHtml).join("<br/>")}</div>` : "";
-  const rijenHtml = o.regels
+  const weergaveToggleHtml = `
+    <div class="sub" style="margin-bottom:12px">
+      Weergave:
+      <a href="${escapeHtml(o.contractWeergaveUrl)}"${o.weergave === "contract" ? ' style="font-weight:600"' : ""}>Per contract</a>
+      ·
+      <a href="${escapeHtml(o.complexWeergaveUrl)}"${o.weergave === "complex" ? ' style="font-weight:600"' : ""}>Per complex</a>
+    </div>`;
+  const contractRijenHtml = o.regels
     .map(
       (r) => `<tr>
-      <td><span class="naam">${escapeHtml(r.contractnummer)}</span><span class="naam-sub">${escapeHtml(r.huurderNaam ?? "onbekende huurder")} · complex ${escapeHtml(r.complexnummer ?? "-")}</span></td>
+      <td><span class="naam">${escapeHtml(r.contractnummer)}</span><span class="naam-sub">${escapeHtml(r.huurderNaam ?? "onbekende huurder")} · complex ${escapeHtml(r.complexnummer ?? "-")}</span>${
+        r.looptAfDitJaar ? `<span class="naam-sub" style="color:#b45309">⚠ loopt af in ${o.begrotingsjaar}${r.einddatum ? ` (${escapeHtml(r.einddatum)})` : ""}</span>` : ""
+      }</td>
       <td>${escapeHtml(r.belastOnbelast)}</td>
       <td>${escapeHtml(r.indexatiePercentageGebruikt)}% (${r.indexatiePercentageBron === "OVERRIDE" ? "override" : "algemeen"})</td>
       <td>${r.effectieveIndexatiedatum ? escapeHtml(r.effectieveIndexatiedatum) : "-"}</td>
@@ -874,17 +900,36 @@ export function renderHuurDetail(o: {
     </tr>`,
     )
     .join("");
+  const complexRijenHtml = o.complexRegels
+    .map(
+      (r) => `<tr>
+      <td class="naam">${escapeHtml(r.complexnummer)}</td>
+      <td>${r.aantalContracten}</td>
+      <td>${escapeHtml(r.bruto)}</td>
+      <td>${escapeHtml(r.korting)}</td>
+      <td>${escapeHtml(r.netto)}</td>
+    </tr>`,
+    )
+    .join("");
+  const tabelHtml =
+    o.weergave === "complex"
+      ? `<table style="margin-bottom:16px">
+        <thead><tr><th style="text-align:left">Complex</th><th>Aantal contracten</th><th>Bruto</th><th>Korting</th><th>Netto</th></tr></thead>
+        <tbody>${complexRijenHtml}</tbody>
+      </table>`
+      : `<table style="margin-bottom:16px">
+        <thead><tr><th style="text-align:left">Contract</th><th>Belast/onbelast</th><th>Indexatie</th><th>Ingangsdatum indexatie</th><th>Bruto</th><th>Korting</th><th>Netto</th><th>Override %</th></tr></thead>
+        <tbody>${contractRijenHtml}</tbody>
+      </table>`;
   const inhoud = `
     ${o.pnlHtml ?? ""}
     ${waarschuwingenHtml}
     <div class="sub">Algemeen indexatiepercentage voor ${o.begrotingsjaar}: ${escapeHtml(o.algemeenIndexatiePercentage)}%. Een contractoverride vervangt uitsluitend het toegepaste percentage voor dat contract — de bronfeiten blijven ongewijzigd.</div>
+    ${weergaveToggleHtml}
     <form method="POST" action="${escapeHtml(o.actieUrl)}">
-      <table style="margin-bottom:16px">
-        <thead><tr><th style="text-align:left">Contract</th><th>Belast/onbelast</th><th>Indexatie</th><th>Ingangsdatum indexatie</th><th>Bruto</th><th>Korting</th><th>Netto</th><th>Override %</th></tr></thead>
-        <tbody>${rijenHtml}</tbody>
-      </table>
+      ${tabelHtml}
       <p class="sub">Netto huur portefeuille (Jouw begroting): <strong>${escapeHtml(o.portefeuilleNetto)}</strong></p>
-      ${o.alleenLezen ? "" : `<button type="submit">Overrides opslaan</button>`}
+      ${o.alleenLezen || o.weergave === "complex" ? "" : `<button type="submit">Overrides opslaan</button>`}
     </form>`;
   return moduleFormShell({ titel: `Huur — contractbasis ${o.begrotingsjaar}`, terugUrl: o.terugUrl, inhoud, alleenLezen: o.alleenLezen });
 }
