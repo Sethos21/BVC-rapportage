@@ -601,6 +601,56 @@ describe("WOZ-historie CSV-export (UX-uitrol §9.2)", () => {
   });
 });
 
+/**
+ * UX-UITROL (2026-10-02, §9.1) — "Maandverloop" (`berekenVerzekeringMaandverloop`, al volledig
+ * gebouwd en getest in `@bvc/reporting`) was niet aangesloten op een route. Bewijst de nieuwe
+ * link + sub-pagina, inclusief het expliciete "onbekend" (nooit een stille €0-reeks) voor een
+ * polis zonder rekenkritische velden.
+ */
+describe("Verzekeringen — Maandverloop (UX-uitrol §9.1)", () => {
+  it("Maandverloop-link opent de maand-/kwartaalverdeling voor een complete polis, en toont onbekend voor een onvolledige polis", async () => {
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "boekingen.xlsx"), []);
+    const { schrijfVerzekeringRegels } = await import("@bvc/begroting-data");
+
+    await metServer(async (baseUrl) => {
+      const nieuw = await fetch(`${baseUrl}/begroting/nieuw`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ administratieId: ADMINISTRATIE_ID, begrotingsjaar: "2027", laatstAfgeslotenBoekperiode: "06", indexatiePercentage: "3" }).toString(),
+        redirect: "manual",
+      });
+      const hoofdschermUrl = nieuw.headers.get("location")!;
+      const versieId = hoofdschermUrl.split("/")[3]!.split("?")[0]!;
+
+      const db = openOrCreateDatabase(begrotingsversiesDatabasePad(root, ADMINISTRATIE_ID));
+      schrijfVerzekeringRegels(db, versieId, [
+        { id: null, complexnummer: "001", verzekeraar: "Interpolis", grootboekrekening: "4130", ogbKostensoort: null, ingangsdatum: new Date("2024-01-01T00:00:00.000Z"), looptijdMaanden: 12, bedrag: new Decimal(1200), indexPercentage: new Decimal(0), handmatigBegrootOverride: null },
+        { id: null, complexnummer: "002", verzekeraar: "Onvolledige polis", grootboekrekening: "4130", ogbKostensoort: null, ingangsdatum: null, looptijdMaanden: null, bedrag: null, indexPercentage: null, handmatigBegrootOverride: null },
+      ]);
+      db.close();
+
+      const verzekeringenUrl = `${baseUrl}/begroting/${ADMINISTRATIE_ID}/${versieId}/module/verzekeringen?laatstAfgeslotenBoekperiode=06`;
+      const verzekeringenHtml = await (await fetch(verzekeringenUrl)).text();
+      expect(verzekeringenHtml).toContain("Maandverloop");
+      const maandverloopMatch = verzekeringenHtml.match(/module\/verzekeringen\/maandverloop\?polisId=(\d+)/g);
+      expect(maandverloopMatch).not.toBeNull();
+      expect(maandverloopMatch!.length).toBe(2); // beide polissen hebben een id en dus een link, ongeacht volledigheid
+
+      const [compleetUrl, onvolledigUrl] = maandverloopMatch!.map((m) => `${baseUrl}/begroting/${ADMINISTRATIE_ID}/${versieId}/${m}`);
+
+      const compleetHtml = await (await fetch(compleetUrl!)).text();
+      expect(compleetHtml).toContain("januari");
+      expect(compleetHtml).toContain("december");
+      expect(compleetHtml).toContain("€ 100,00"); // 1200/12, geen indexatie
+      expect(compleetHtml).toContain("Q1");
+
+      const onvolledigHtml = await (await fetch(onvolledigUrl!)).text();
+      expect(onvolledigHtml).toContain("onbekend");
+      expect(onvolledigHtml).not.toContain("€ 0,00"); // nooit een stille €0-reeks
+    });
+  });
+});
+
 function pnlMapping(grootboekrekening: string, economischeCategorie: string): Parameters<typeof voegPnLBronmappingMutatieToe>[1] {
   return {
     bedrijfsnr: BEDRIJFSNR,

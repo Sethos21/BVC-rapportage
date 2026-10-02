@@ -76,6 +76,7 @@ import {
   berekenBegroteBeheersvergoeding,
   berekenBegroteHuuropbrengsten,
   berekenPnLBoom,
+  berekenVerzekeringMaandverloop,
   LEEGSTAND_CATEGORIEEN,
   vergelijkPnLResultaten,
   type BgAlgemeneKostenCategorie,
@@ -108,6 +109,7 @@ import {
   renderRenteForm,
   renderVerwijderBevestigingScherm,
   renderVerzekeringenForm,
+  renderVerzekeringMaandverloop,
   type AlgemeneKostenCategorieOpties,
   type BeheerDetailRegel,
   type GemeentelijkeLastenRegelVeld,
@@ -558,6 +560,45 @@ export async function handleBegrotingRequest(root: string, req: IncomingMessage,
     }
   }
 
+  // GET /begroting/{administratieId}/{versieId}/module/verzekeringen/maandverloop?polisId=<id> (UX §9.1: Maandverloop, controle-informatie)
+  if (req.method === "GET" && segmenten.length === 6 && segmenten[3] === "module" && segmenten[4] === "verzekeringen" && segmenten[5] === "maandverloop") {
+    const g = open(root, administratieId, versieId);
+    if (g === null) {
+      stuurHtml(res, 404, renderFoutPagina("Niet gevonden", "Deze begrotingsversie of administratie bestaat niet."));
+      return true;
+    }
+    try {
+      const laatstAfgeslotenBoekperiode = opgeslagenBoekperiode(g);
+      const terugUrl = `/begroting/${encodeURIComponent(administratieId)}/${encodeURIComponent(versieId)}/module/verzekeringen${laatstAfgeslotenBoekperiode !== null ? `?laatstAfgeslotenBoekperiode=${encodeURIComponent(laatstAfgeslotenBoekperiode)}` : ""}`;
+      const polisIdStr = url.searchParams.get("polisId");
+      const regel = polisIdStr !== null ? leesVerzekeringRegels(g.db, g.versie.id).find((r) => r.id === Number(polisIdStr)) : undefined;
+      if (regel === undefined) {
+        stuurHtml(res, 404, renderFoutPagina("Polis niet gevonden", "Deze polis bestaat niet (meer) in deze begrotingsversie.", terugUrl));
+        return true;
+      }
+      const verloop = berekenVerzekeringMaandverloop(
+        { complexnummer: regel.complexnummer, verzekeraar: regel.verzekeraar, grootboekrekening: regel.grootboekrekening, ogbKostensoort: regel.ogbKostensoort, ingangsdatum: regel.ingangsdatum, looptijdMaanden: regel.looptijdMaanden, bedrag: regel.bedrag, indexPercentage: regel.indexPercentage, handmatigBegrootOverride: regel.handmatigBegrootOverride },
+        g.versie.begrotingsjaar,
+      );
+      stuurHtml(
+        res,
+        200,
+        renderVerzekeringMaandverloop({
+          terugUrl,
+          verzekeraar: regel.verzekeraar,
+          complexnummer: regel.complexnummer,
+          maanden: verloop ? verloop.maanden.map((m) => ({ maand: m.maand, maandNaam: MAAND_NAMEN[m.maand - 1]!, bedrag: fmtBedragKort(m.bedrag), status: m.status, isEersteIndexatiemaand: m.isEersteIndexatiemaand })) : null,
+          kwartalen: verloop ? [fmtBedragKort(verloop.kwartalen[0]), fmtBedragKort(verloop.kwartalen[1]), fmtBedragKort(verloop.kwartalen[2]), fmtBedragKort(verloop.kwartalen[3])] : null,
+          effectiefJaarbedrag: verloop ? fmtBedragKort(verloop.effectiefJaarbedrag) : null,
+          bron: verloop?.bron ?? null,
+        }),
+      );
+      return true;
+    } finally {
+      g.db.close();
+    }
+  }
+
   // GET/POST /begroting/{administratieId}/{versieId}/module/{moduleKey}
   if (segmenten.length === 5 && segmenten[3] === "module") {
     const moduleKey = segmenten[4]!;
@@ -644,6 +685,8 @@ function bouwOnderhoudTotaalSamenvatting(resultaat: ReturnType<typeof leesOnderh
     verschilEstimatedVsBegroting: fmtBedragKort(resultaat.verschilEstimatedVsBegrotingBedrag),
   };
 }
+
+const MAAND_NAMEN = ["januari", "februari", "maart", "april", "mei", "juni", "juli", "augustus", "september", "oktober", "november", "december"];
 
 function fmtPercentageVeld(d: Decimal): string {
   return d.toString();
@@ -1253,7 +1296,8 @@ async function handleVerzekeringen(req: IncomingMessage, res: ServerResponse, g:
     }));
     const totaal = som(regels.map((r) => r.handmatigBegrootOverride ?? r.bedrag));
     const pnlHtml = vergelijkend !== null ? moduleWerkomgevingPnLHtml(vergelijkend, ["VERZEKERINGEN"]) : "";
-    stuurHtml(res, 200, renderVerzekeringenForm({ actieUrl, terugUrl, regels: veldRegels, beoordeeld, portefeuilleTotaal: fmtBedragKort(totaal), alleenLezen: g.versie.status !== "CONCEPT", pnlHtml }));
+    const maandverloopUrl = (polisId: number) => `/begroting/${encodeURIComponent(g.administratieId)}/${encodeURIComponent(g.versie.id)}/module/verzekeringen/maandverloop?polisId=${polisId}`;
+    stuurHtml(res, 200, renderVerzekeringenForm({ actieUrl, terugUrl, regels: veldRegels, beoordeeld, portefeuilleTotaal: fmtBedragKort(totaal), alleenLezen: g.versie.status !== "CONCEPT", pnlHtml, maandverloopUrl }));
     return true;
   }
 

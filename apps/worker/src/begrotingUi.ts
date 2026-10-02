@@ -1097,7 +1097,17 @@ export interface VerzekeringRegelVeld {
 }
 
 /** Verzekeringen (UX_06, Tranche 13): compacte polisregels Complex|Verzekeraar|Ingangsdatum|Looptijd|Bedrag|Index%|GL|OGB|Override. */
-export function renderVerzekeringenForm(o: { actieUrl: string; terugUrl: string; fouten?: readonly string[]; regels: readonly VerzekeringRegelVeld[]; beoordeeld: boolean; portefeuilleTotaal: string; alleenLezen?: boolean; pnlHtml?: string }): string {
+export function renderVerzekeringenForm(o: {
+  actieUrl: string;
+  terugUrl: string;
+  fouten?: readonly string[];
+  regels: readonly VerzekeringRegelVeld[];
+  beoordeeld: boolean;
+  portefeuilleTotaal: string;
+  alleenLezen?: boolean;
+  pnlHtml?: string;
+  maandverloopUrl?: (polisId: number) => string;
+}): string {
   const rijen = [...o.regels, ...Array.from({ length: Math.max(0, 6 - o.regels.length) }, (): VerzekeringRegelVeld => ({ id: null, complexnummer: "", verzekeraar: "", grootboekrekening: "", ogbKostensoort: "", ingangsdatum: "", looptijdMaanden: "", bedrag: "", indexPercentage: "", handmatigBegrootOverride: "" }))];
   const rijHtml = (r: VerzekeringRegelVeld, i: number) => `
     <tr>
@@ -1110,13 +1120,14 @@ export function renderVerzekeringenForm(o: { actieUrl: string; terugUrl: string;
       <td><input type="text" name="bedrag_${i}" value="${escapeHtml(r.bedrag)}" style="width:80px" /></td>
       <td><input type="text" name="index_${i}" value="${escapeHtml(r.indexPercentage)}" style="width:50px" /></td>
       <td><input type="text" name="override_${i}" value="${escapeHtml(r.handmatigBegrootOverride)}" placeholder="berekend" style="width:80px" /></td>
+      <td>${r.id !== null && o.maandverloopUrl ? `<a href="${escapeHtml(o.maandverloopUrl(r.id))}">Maandverloop</a>` : "-"}</td>
     </tr>`;
   const inhoud = `
     ${o.pnlHtml ?? ""}
-    <p class="sub">Override laat het berekende voorstel (huidige premie × indexatie) staan tenzij ingevuld.</p>
+    <p class="sub">Override laat het berekende voorstel (huidige premie × indexatie) staan tenzij ingevuld. Maandverloop toont de afgeleide maand-/kwartaalverdeling — controle-informatie, geen extra invoer.</p>
     <form method="POST" action="${escapeHtml(o.actieUrl)}">
       <table style="margin-bottom:16px">
-        <thead><tr><th style="text-align:left">Complex</th><th style="text-align:left">Verzekeraar</th><th style="text-align:left">GL</th><th style="text-align:left">OGB</th><th>Ingangsdatum</th><th>Looptijd (mnd)</th><th>Jaarpremie</th><th>Index %</th><th>Override</th></tr></thead>
+        <thead><tr><th style="text-align:left">Complex</th><th style="text-align:left">Verzekeraar</th><th style="text-align:left">GL</th><th style="text-align:left">OGB</th><th>Ingangsdatum</th><th>Looptijd (mnd)</th><th>Jaarpremie</th><th>Index %</th><th>Override</th><th></th></tr></thead>
         <tbody>${rijen.map(rijHtml).join("")}</tbody>
       </table>
       ${beoordeeldCheckbox("beoordeeld", o.beoordeeld)}
@@ -1124,6 +1135,47 @@ export function renderVerzekeringenForm(o: { actieUrl: string; terugUrl: string;
       <button type="submit">Opslaan</button>
     </form>`;
   return moduleFormShell({ titel: "Verzekeringen", terugUrl: o.terugUrl, ...(o.fouten !== undefined ? { fouten: o.fouten } : {}), inhoud, alleenLezen: o.alleenLezen === true });
+}
+
+export interface VerzekeringMaandverloopVeld {
+  maand: number;
+  maandNaam: string;
+  bedrag: string;
+  status: "NIET_BESTAAND" | "BASIS" | "GEINDEXEERD";
+  isEersteIndexatiemaand: boolean;
+}
+
+/** Maandverloop per polis (UX §9.1): afgeleide maand-/kwartaalverdeling, controle-informatie — geen invoer. */
+export function renderVerzekeringMaandverloop(o: {
+  terugUrl: string;
+  verzekeraar: string | null;
+  complexnummer: string | null;
+  maanden: readonly VerzekeringMaandverloopVeld[] | null;
+  kwartalen: readonly [string, string, string, string] | null;
+  effectiefJaarbedrag: string | null;
+  bron: "BEREKEND" | "OVERRIDE" | null;
+}): string {
+  const STATUS_LABEL: Record<VerzekeringMaandverloopVeld["status"], string> = { NIET_BESTAAND: "polis nog niet actief", BASIS: "basis", GEINDEXEERD: "geïndexeerd" };
+  const inhoud =
+    o.maanden === null
+      ? `<p class="sub"><span class="onbekend">onbekend</span> — niet alle rekenkritische velden (ingangsdatum, looptijd, bedrag, index) zijn ingevuld, of de override kan niet over maanden worden verdeeld.</p>`
+      : `
+    <p class="sub">${o.verzekeraar ? escapeHtml(o.verzekeraar) : "onbekende verzekeraar"} · complex ${escapeHtml(o.complexnummer ?? "-")} · bron: ${o.bron === "OVERRIDE" ? "handmatige jaaroverride, tijdsevenredig verdeeld" : "berekend voorstel"}</p>
+    <table style="margin-bottom:16px">
+      <thead><tr><th style="text-align:left">Maand</th><th>Bedrag</th><th style="text-align:left">Status</th></tr></thead>
+      <tbody>${o.maanden
+        .map(
+          (m) => `<tr>
+        <td class="naam">${escapeHtml(m.maandNaam)}${m.isEersteIndexatiemaand ? ' <span class="naam-sub" style="display:inline">(eerste indexatiemaand)</span>' : ""}</td>
+        <td>${escapeHtml(m.bedrag)}</td>
+        <td>${escapeHtml(STATUS_LABEL[m.status])}</td>
+      </tr>`,
+        )
+        .join("")}</tbody>
+    </table>
+    <p class="sub">Q1 ${escapeHtml(o.kwartalen![0])} · Q2 ${escapeHtml(o.kwartalen![1])} · Q3 ${escapeHtml(o.kwartalen![2])} · Q4 ${escapeHtml(o.kwartalen![3])}</p>
+    <p class="sub">Effectief jaarbedrag: <strong>${escapeHtml(o.effectiefJaarbedrag!)}</strong></p>`;
+  return moduleFormShell({ titel: "Verzekeringen — maandverloop", terugUrl: o.terugUrl, inhoud });
 }
 
 export interface GeplandOnderhoudRegelVeld {
