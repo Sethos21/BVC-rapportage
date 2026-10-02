@@ -549,6 +549,58 @@ describe("Vergelijkende P&L zichtbaar op overige moduledetailschermen (UX-uitrol
   });
 });
 
+/**
+ * UX-UITROL (2026-10-02, §9.2) — de WOZ-historie-CSV-export (`leesWozHistorieCsv`, al volledig
+ * gebouwd en getest in `@bvc/begroting-data`/`@bvc/reporting`) was niet aangesloten op een route.
+ * Bewijst de nieuwe GET-route + de "zichtbaar maar uitgeschakeld zonder bevestigde set"-regel.
+ */
+describe("WOZ-historie CSV-export (UX-uitrol §9.2)", () => {
+  it("export is uitgeschakeld zonder bevestigde WOZ-set, en beschikbaar met correcte CSV na bevestiging", async () => {
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "boekingen.xlsx"), []);
+    const { schrijfWozObjecten, schrijfWozSetBevestigd } = await import("@bvc/begroting-data");
+
+    await metServer(async (baseUrl) => {
+      const nieuw = await fetch(`${baseUrl}/begroting/nieuw`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ administratieId: ADMINISTRATIE_ID, begrotingsjaar: "2027", laatstAfgeslotenBoekperiode: "06", indexatiePercentage: "3" }).toString(),
+        redirect: "manual",
+      });
+      const hoofdschermUrl = nieuw.headers.get("location")!;
+      const versieId = hoofdschermUrl.split("/")[3]!.split("?")[0]!;
+      const csvUrl = `${baseUrl}/begroting/${ADMINISTRATIE_ID}/${versieId}/module/gemeentelijke-lasten/woz-historie.csv`;
+      const glUrl = `${baseUrl}/begroting/${ADMINISTRATIE_ID}/${versieId}/module/gemeentelijke-lasten?laatstAfgeslotenBoekperiode=06`;
+
+      const db = openOrCreateDatabase(begrotingsversiesDatabasePad(root, ADMINISTRATIE_ID));
+      schrijfWozObjecten(db, versieId, [
+        { id: null, complexnummer: "001", objectType: "GEHEEL_COMPLEX", unitnummer: null, aanslagjaar: 2026, waardepeildatum: new Date("2025-01-01T00:00:00.000Z"), werkelijkeWoz: new Decimal(500000), verwachteWozOverride: null },
+      ]);
+      db.close();
+
+      // Vóór bevestiging: het GL-scherm toont de export-link als uitgeschakeld, en de route zelf weigert.
+      const glHtmlVoor = await (await fetch(glUrl)).text();
+      expect(glHtmlVoor).toContain("pas beschikbaar na bevestiging");
+      const csvVoor = await fetch(csvUrl);
+      expect(csvVoor.status).toBe(400);
+      expect(await csvVoor.text()).toContain("nog niet bevestigd");
+
+      const db2 = openOrCreateDatabase(begrotingsversiesDatabasePad(root, ADMINISTRATIE_ID));
+      schrijfWozSetBevestigd(db2, versieId, true);
+      db2.close();
+
+      // Na bevestiging: het GL-scherm toont een echte link, en de route levert een correcte CSV.
+      const glHtmlNa = await (await fetch(glUrl)).text();
+      expect(glHtmlNa).toContain(`href="${csvUrl.slice(baseUrl.length)}"`);
+      const csvNa = await fetch(csvUrl);
+      expect(csvNa.status).toBe(200);
+      expect(csvNa.headers.get("content-type")).toContain("text/csv");
+      const csvTekst = await csvNa.text();
+      expect(csvTekst.split("\r\n")[0]).toBe("Administratie;Complex;Unit/Geheel complex;Aanslagjaar;Waardepeildatum;Werkelijke WOZ;Verschil € vorig jaar;Verschil % vorig jaar");
+      expect(csvTekst).toContain("001;Geheel complex;2026;2025-01-01;500000");
+    });
+  });
+});
+
 function pnlMapping(grootboekrekening: string, economischeCategorie: string): Parameters<typeof voegPnLBronmappingMutatieToe>[1] {
   return {
     bedrijfsnr: BEDRIJFSNR,

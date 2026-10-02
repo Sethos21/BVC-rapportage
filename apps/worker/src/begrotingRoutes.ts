@@ -30,6 +30,7 @@ import {
   leesRenteRegels,
   leesVerzekeringBeoordeeld,
   leesVerzekeringRegels,
+  leesWozHistorieCsv,
   leesWozObjecten,
   maakBegrotingsversie,
   neemWozVoorstelOver,
@@ -526,6 +527,35 @@ export async function handleBegrotingRequest(root: string, req: IncomingMessage,
       }
     }
     return true;
+  }
+
+  // GET /begroting/{administratieId}/{versieId}/module/gemeentelijke-lasten/woz-historie.csv (UX §9.2: WOZ-historie-export)
+  if (req.method === "GET" && segmenten.length === 6 && segmenten[3] === "module" && segmenten[4] === "gemeentelijke-lasten" && segmenten[5] === "woz-historie.csv") {
+    const g = open(root, administratieId, versieId);
+    if (g === null) {
+      stuurHtml(res, 404, renderFoutPagina("Niet gevonden", "Deze begrotingsversie of administratie bestaat niet."));
+      return true;
+    }
+    try {
+      const complexnummer = url.searchParams.get("complex");
+      const aanslagjaarVanStr = url.searchParams.get("aanslagjaarVan");
+      const aanslagjaarTotStr = url.searchParams.get("aanslagjaarTot");
+      const resultaat = leesWozHistorieCsv(g.db, g.versie.id, {
+        ...(complexnummer !== null && complexnummer.length > 0 ? { complexnummer } : {}),
+        ...(aanslagjaarVanStr !== null && aanslagjaarVanStr.length > 0 ? { aanslagjaarVan: Number(aanslagjaarVanStr) } : {}),
+        ...(aanslagjaarTotStr !== null && aanslagjaarTotStr.length > 0 ? { aanslagjaarTot: Number(aanslagjaarTotStr) } : {}),
+      });
+      if (!resultaat.beschikbaar) {
+        const terugUrl = hoofdschermUrl(administratieId, versieId, opgeslagenBoekperiode(g) ?? "");
+        stuurHtml(res, 400, renderFoutPagina("Export nog niet beschikbaar", "De WOZ-set is nog niet bevestigd als compleet — bevestig eerst de set op het Gemeentelijke-lasten-scherm.", terugUrl));
+        return true;
+      }
+      res.writeHead(200, { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="woz-historie-${encodeURIComponent(g.versie.bedrijfsnr)}-${encodeURIComponent(g.versie.begrotingsjaar)}.csv"` });
+      res.end(resultaat.csv);
+      return true;
+    } finally {
+      g.db.close();
+    }
   }
 
   // GET/POST /begroting/{administratieId}/{versieId}/module/{moduleKey}
@@ -1443,6 +1473,7 @@ async function handleGemeentelijkeLasten(req: IncomingMessage, res: ServerRespon
       portefeuilleTotaal: fmtBedragKort(totaal),
       alleenLezen: g.versie.status !== "CONCEPT",
       pnlHtml: vergelijkend !== null ? moduleWerkomgevingPnLHtml(vergelijkend, ["GEMEENTELIJKE_LASTEN"]) : "",
+      wozHistorieCsvUrl: `/begroting/${encodeURIComponent(g.administratieId)}/${encodeURIComponent(g.versie.id)}/module/gemeentelijke-lasten/woz-historie.csv`,
     }),
   );
   return true;

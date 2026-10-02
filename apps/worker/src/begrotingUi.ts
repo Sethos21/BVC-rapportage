@@ -1231,6 +1231,7 @@ export function renderGemeentelijkeLastenForm(o: {
   portefeuilleTotaal: string;
   alleenLezen?: boolean;
   pnlHtml?: string;
+  wozHistorieCsvUrl: string;
 }): string {
   const glRijen = [...o.glRegels, ...Array.from({ length: Math.max(0, 3 - o.glRegels.length) }, (): GemeentelijkeLastenRegelVeld => ({ id: null, grootboekrekening: "", ogbKostensoort: "", jaarbedrag: "" }))];
   const glRijHtml = (r: GemeentelijkeLastenRegelVeld, i: number) => `
@@ -1273,6 +1274,11 @@ export function renderGemeentelijkeLastenForm(o: {
         <tbody>${wozRijen.map(wozRijHtml).join("")}</tbody>
       </table>
       <label><input type="checkbox" name="wozSetBevestigd" value="1" style="width:auto;display:inline-block;margin-right:8px"${o.wozSetBevestigd ? " checked" : ""} />De WOZ-set is compleet (verplicht om vast te kunnen stellen)</label>
+      <p class="sub">${
+        o.wozSetBevestigd
+          ? `<a href="${escapeHtml(o.wozHistorieCsvUrl)}">WOZ-historie exporteren (CSV)</a>`
+          : `<span class="onbekend" title="Bevestig eerst dat de WOZ-set compleet is">WOZ-historie exporteren (CSV) — pas beschikbaar na bevestiging van de set</span>`
+      }</p>
 
       <h2>Aannames</h2>
       <label for="wozStijging">Verwachte WOZ-stijging %</label><input type="text" name="wozStijging" id="wozStijging" value="${escapeHtml(o.wozStijgingPercentage)}" />
