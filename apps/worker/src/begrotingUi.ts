@@ -140,6 +140,13 @@ const BASIS_CSS = `
   .metric span{display:block;color:var(--muted);font-size:11.5px}
   .metric strong{display:block;margin-top:6px;font-size:18px;color:var(--ink);font-variant-numeric:tabular-nums}
 
+  /* UX-uitrol (mockup-actueel): "X van Y onderdelen beoordeeld" voortgangsindicator op hoofdscherm en controlepagina */
+  .progress-card{background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:14px 18px;margin-bottom:20px}
+  .progress-copy{display:flex;justify-content:space-between;align-items:baseline;font-size:13px;color:var(--muted);margin-bottom:8px}
+  .progress-copy strong{color:var(--ink);font-size:15px}
+  .progress-track{height:6px;border-radius:999px;background:var(--paper)}
+  .progress-bar{height:100%;border-radius:999px;background:var(--green)}
+
   @media (max-width:980px){
     .app-shell{flex-direction:column}
     .sidebar{position:relative;width:100%;height:auto;top:0}
@@ -491,12 +498,18 @@ export interface HoofdschermOpties {
   melding?: string;
   /** UX_10 "Verborgen onderdelen" (CONTRACTCONFLICT-besluit 2026-10-06) — module-sleutels ("MANAGEMENT") die voor deze administratie als niet van toepassing zijn gemarkeerd. */
   verborgenModules?: readonly string[];
+  /** UX_3 punt 7 "Beoordeling in gewone gebruikerstaal" — regelSleutel -> label, zie `leesBeoordelingPerRegel` in begrotingRoutes.ts. */
+  beoordelingPerRegel?: Record<string, string>;
 }
 
 /** Koppelt een verbergbare module-sleutel aan de bijbehorende P&L-regelSleutel(s) en weergavenaam — uitsluitend Managementvergoeding. */
 const VERBORGEN_MODULE_INFO: Record<string, { label: string; regelSleutels: readonly string[] }> = {
   MANAGEMENT: { label: "Managementvergoeding", regelSleutels: ["MANAGEMENTVERGOEDING"] },
 };
+
+/** Moeten exact overeenkomen met `BEOORDELING_BEOORDEELD`/`BEOORDELING_AUTOMATISCH` in begrotingRoutes.ts — uitsluitend gebruikt om de voortgangsteller te bepalen, nooit om een label zelf te verzinnen. */
+const BEOORDELING_LABEL_BEOORDEELD = "Beoordeeld";
+const BEOORDELING_LABEL_AUTOMATISCH = "Automatisch bijgewerkt";
 
 const GROEP_VOLGORDE: readonly PnLGroepBovenEbitda[] = ["OPBRENGSTEN", "MANAGEMENT_EN_BEHEER", "EXPLOITATIE_LASTEN", "ALGEMENE_KOSTEN"];
 
@@ -527,8 +540,9 @@ function regelRij(o: HoofdschermOpties, r: VergelijkendeBegrotingsPnLRegel): str
     .map((d) => `<a class="bewerk" data-expand="${escapeHtml(d.detailId)}" data-url="${escapeHtml(d.url)}" href="${escapeHtml(d.url)}" aria-expanded="false" aria-controls="detail-row-${escapeHtml(d.detailId)}">${escapeHtml(d.label)}</a>`)
     .join(" · ");
   const detailRijenHtml = detailLinksHtml
-    .map((d) => `<tr class="detail-row" id="detail-row-${escapeHtml(d.detailId)}" style="display:none"><td colspan="6"><div class="detail-body" data-detail-body></div></td></tr>`)
+    .map((d) => `<tr class="detail-row" id="detail-row-${escapeHtml(d.detailId)}" style="display:none"><td colspan="7"><div class="detail-body" data-detail-body></div></td></tr>`)
     .join("");
+  const beoordeling = o.beoordelingPerRegel?.[r.regelSleutel];
   return `<tr>
     <td><span class="naam">${escapeHtml(label(r.regelSleutel))}</span>${bewerkLinksHtml ? `<span class="naam-sub">${bewerkLinksHtml}</span>` : ""}</td>
     <td>${fmtWaarde(r.begrotingVorigJaar)}</td>
@@ -536,6 +550,7 @@ function regelRij(o: HoofdschermOpties, r: VergelijkendeBegrotingsPnLRegel): str
     <td>${fmtWaarde(r.estimated)}</td>
     <td>${fmtVoorstel(r.voorstel)}</td>
     <td>${fmtWaarde(r.jouwBegroting)}</td>
+    <td>${beoordeling !== undefined ? escapeHtml(beoordeling) : ""}</td>
   </tr>${detailRijenHtml}`;
 }
 
@@ -598,10 +613,26 @@ export function renderBegrotingHoofdscherm(o: HoofdschermOpties): string {
   const groepenHtml = GROEP_VOLGORDE.map((groep) => {
     const regels = bovenRegels.filter((r) => r.groep === groep);
     if (regels.length === 0) return "";
-    return `<tr class="groep"><td colspan="6">${escapeHtml(GROEP_LABELS[groep])}</td></tr>${regels.map((r) => regelRij(o, r)).join("")}`;
+    return `<tr class="groep"><td colspan="7">${escapeHtml(GROEP_LABELS[groep])}</td></tr>${regels.map((r) => regelRij(o, r)).join("")}`;
   }).join("");
 
-  const onderHtml = onderRegels.length > 0 ? `<tr class="groep"><td colspan="6">Onder EBITDA</td></tr>${onderRegels.map((r) => regelRij(o, r)).join("")}` : "";
+  const onderHtml = onderRegels.length > 0 ? `<tr class="groep"><td colspan="7">Onder EBITDA</td></tr>${onderRegels.map((r) => regelRij(o, r)).join("")}` : "";
+
+  // UX_3 "voortgang": X van Y onderdelen beoordeeld, excl. verborgen onderdelen — reusing dezelfde labels als de Beoordeling-kolom, geen nieuwe berekening.
+  // Uitsluitend regels met een gedefinieerd Beoordeling-label tellen mee — interne "niet geclassificeerd"-canonrijen
+  // (technische bronmapping-restpost, geen eigen begrotingsonderdeel) blijven zo buiten de teller, net als op de controlepagina.
+  const beoordeelbareRegels = [...bovenRegels, ...onderRegels].filter((r) => o.beoordelingPerRegel?.[r.regelSleutel] !== undefined);
+  const beoordeeldeRegels = beoordeelbareRegels.filter((r) => {
+    const label = o.beoordelingPerRegel?.[r.regelSleutel];
+    return label === BEOORDELING_LABEL_BEOORDEELD || label === BEOORDELING_LABEL_AUTOMATISCH;
+  });
+  const voortgangHtml =
+    o.beoordelingPerRegel === undefined || beoordeelbareRegels.length === 0
+      ? ""
+      : `<div class="progress-card">
+      <div class="progress-copy"><span>${beoordeeldeRegels.length} van ${beoordeelbareRegels.length} onderdelen beoordeeld</span><strong>${Math.round((beoordeeldeRegels.length / beoordeelbareRegels.length) * 100)}%</strong></div>
+      <div class="progress-track"><div class="progress-bar" style="width:${Math.round((beoordeeldeRegels.length / beoordeelbareRegels.length) * 100)}%"></div></div>
+    </div>`;
 
   const verborgenOnderdelenHtml =
     verborgenModules.length === 0
@@ -641,12 +672,13 @@ export function renderBegrotingHoofdscherm(o: HoofdschermOpties): string {
     <div class="sub">Werkelijk/Estimated: ${o.versie.begrotingsjaar - 1} t/m periode ${escapeHtml(o.laatstAfgeslotenBoekperiode)}. Bron: productieboekingen + de bestaande, bewezen GL/OGB-bronmapping — geen testdata.</div>
     ${meldingHtml}
     ${statusBanner}
+    ${voortgangHtml}
     <div class="card">
       <table>
-        <thead><tr><th>Onderdeel</th><th>Begroting ${o.versie.begrotingsjaar - 1}</th><th>Werkelijk ${o.versie.begrotingsjaar - 1}</th><th>Estimated ${o.versie.begrotingsjaar - 1}</th><th>Voorstel ${o.versie.begrotingsjaar}</th><th>Jouw begroting ${o.versie.begrotingsjaar}</th></tr></thead>
+        <thead><tr><th>Onderdeel</th><th>Begroting ${o.versie.begrotingsjaar - 1}</th><th>Werkelijk ${o.versie.begrotingsjaar - 1}</th><th>Estimated ${o.versie.begrotingsjaar - 1}</th><th>Voorstel ${o.versie.begrotingsjaar}</th><th>Jouw begroting ${o.versie.begrotingsjaar}</th><th>Beoordeling</th></tr></thead>
         <tbody>
           ${groepenHtml}
-          <tr class="subtotaal"><td>EBITDA (bedrijfsresultaat)</td><td>${ebitdaRij("vorig", vergelijkend.begrotingVorigJaar)}</td><td>${ebitdaRij("werkelijk", vergelijkend.werkelijk)}</td><td>${ebitdaRij("estimated", vergelijkend.estimated)}</td><td>—</td><td>${ebitdaRij("nieuw", vergelijkend.jouwBegroting)}</td></tr>
+          <tr class="subtotaal"><td>EBITDA (bedrijfsresultaat)</td><td>${ebitdaRij("vorig", vergelijkend.begrotingVorigJaar)}</td><td>${ebitdaRij("werkelijk", vergelijkend.werkelijk)}</td><td>${ebitdaRij("estimated", vergelijkend.estimated)}</td><td>—</td><td>${ebitdaRij("nieuw", vergelijkend.jouwBegroting)}</td><td></td></tr>
           ${onderHtml}
         </tbody>
       </table>
@@ -661,10 +693,38 @@ export function renderBegrotingHoofdscherm(o: HoofdschermOpties): string {
   );
 }
 
-export function renderControlePagina(o: { administratieId: string; weergavenaam: string; versie: Begrotingsversie; laatstAfgeslotenBoekperiode: string; vergelijking: PnLVergelijking | null; vaststelFout?: string }): string {
+export function renderControlePagina(o: {
+  administratieId: string;
+  weergavenaam: string;
+  versie: Begrotingsversie;
+  laatstAfgeslotenBoekperiode: string;
+  vergelijking: PnLVergelijking | null;
+  vaststelFout?: string;
+  verborgenModules?: readonly string[];
+  beoordelingPerRegel?: Record<string, string>;
+}): string {
   const ctx: WerkomgevingContext = { administratieId: o.administratieId, weergavenaam: o.weergavenaam, versie: o.versie, laatstAfgeslotenBoekperiode: o.laatstAfgeslotenBoekperiode, actief: "controle" };
   const rij = (naam: string, v: PnLVergelijking["ebitda"]) =>
     `<tr><td>${escapeHtml(naam)}</td><td>${fmtBedrag(v.basis)}</td><td>${fmtBedrag(v.vergelijk)}</td><td>${fmtBedrag(v.afwijking)}</td><td>${v.volledigheid.status === "VOLLEDIG" ? "Volledig" : "Onvolledig"}</td></tr>`;
+
+  const verborgenModules = o.verborgenModules ?? [];
+  const verborgenNoteHtml =
+    verborgenModules.length === 0
+      ? ""
+      : `<div class="banner">${verborgenModules.length} ${verborgenModules.length === 1 ? "onderdeel is" : "onderdelen zijn"} verborgen (${verborgenModules.map((m) => escapeHtml(VERBORGEN_MODULE_INFO[m]?.label ?? m)).join(", ")}) — niet van toepassing voor deze administratie en daarom uitgesloten van controle en totalen.</div>`;
+
+  const beoordelingWaarden = o.beoordelingPerRegel !== undefined ? Object.values(o.beoordelingPerRegel) : [];
+  const voortgangHtml =
+    beoordelingWaarden.length === 0
+      ? ""
+      : (() => {
+          const beoordeeld = beoordelingWaarden.filter((v) => v === BEOORDELING_LABEL_BEOORDEELD || v === BEOORDELING_LABEL_AUTOMATISCH).length;
+          const percentage = Math.round((beoordeeld / beoordelingWaarden.length) * 100);
+          return `<div class="progress-card">
+      <div class="progress-copy"><span>${beoordeeld} van ${beoordelingWaarden.length} onderdelen beoordeeld</span><strong>${percentage}%</strong></div>
+      <div class="progress-track"><div class="progress-bar" style="width:${percentage}%"></div></div>
+    </div>`;
+        })();
 
   const metricsHtml =
     o.vergelijking === null
@@ -716,6 +776,8 @@ export function renderControlePagina(o: { administratieId: string; weergavenaam:
     <div class="eyebrow">Begroting ${o.versie.begrotingsjaar}</div>
     <div class="title-row"><h1>Controle begroting ${o.versie.begrotingsjaar} — ${escapeHtml(o.weergavenaam)}</h1>${statusPill(o.versie.status)}</div>
     <div class="sub">${o.versie.status === "VASTGESTELD" ? "Definitieve begroting — controleer de totalen en de onderbouwing." : "Controleer de totalen en afwijkingen voordat je de begroting vaststelt."}</div>
+    ${voortgangHtml}
+    ${verborgenNoteHtml}
     ${metricsHtml}
     <div class="controle-grid">
       <div>${vergelijkingHtml}</div>

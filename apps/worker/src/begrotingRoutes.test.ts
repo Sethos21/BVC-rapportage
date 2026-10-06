@@ -932,6 +932,87 @@ describe("Verborgen onderdelen — Managementvergoeding (UX_10, CONTRACTCONFLICT
   });
 });
 
+/**
+ * UX-UITROL (2026-10-06, mockup-actueel-aansluiting) — "Beoordeling in gewone gebruikerstaal"
+ * (09_Begrotingsmodule_UX_Vastgesteld §3 punt 7) en de bijbehorende voortgangsindicator
+ * ("X van Y onderdelen beoordeeld"), zoals getoond in `mockup-actueel/`. Bewijst dat beide
+ * uitsluitend de bestaande, al-geteste beoordeeld-vlaggen hergebruiken (geen nieuwe berekening).
+ */
+describe("Beoordeling-kolom en voortgangsindicator (UX-uitrol, mockup-actueel-aansluiting)", () => {
+  it("hoofdscherm toont per regel een Beoordeling-label en een kloppende voortgangsteller die meebeweegt met echte beoordeeld-vlaggen", async () => {
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "boekingen.xlsx"), []);
+    const { schrijfCorrectiefDagelijksOnderhoudBeoordeeld, schrijfGeplandOnderhoudBeoordeeld } = await import("@bvc/begroting-data");
+
+    await metServer(async (baseUrl) => {
+      const nieuw = await fetch(`${baseUrl}/begroting/nieuw`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ administratieId: ADMINISTRATIE_ID, begrotingsjaar: "2027", laatstAfgeslotenBoekperiode: "06", indexatiePercentage: "3" }).toString(),
+        redirect: "manual",
+      });
+      const hoofdschermUrl = nieuw.headers.get("location")!;
+      const versieId = hoofdschermUrl.split("/")[3]!.split("?")[0]!;
+
+      // Nog niets beoordeeld: Huur toont "Automatisch bijgewerkt" (geen beoordeeld-concept), Management "Nog beoordelen".
+      const htmlVoor = await (await fetch(baseUrl + hoofdschermUrl)).text();
+      expect(htmlVoor).toContain("<th>Beoordeling</th>");
+      expect(htmlVoor).toContain("Automatisch bijgewerkt");
+      expect(htmlVoor).toContain("Nog beoordelen");
+      const voortgangMatchVoor = htmlVoor.match(/(\d+) van (\d+) onderdelen beoordeeld/);
+      expect(voortgangMatchVoor).not.toBeNull();
+      const [, beoordeeldVoor, totaalVoor] = voortgangMatchVoor!;
+
+      // Management invullen + Onderhoud (gepland+correctief) beoordelen -> voortgangsteller stijgt.
+      await fetch(`${baseUrl}/begroting/${ADMINISTRATIE_ID}/${versieId}/module/management?laatstAfgeslotenBoekperiode=06`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ wijze: "NIEUWE_VERGOEDING", bedrag: "500", eenheid: "MAAND", ingangsdatum: "" }).toString(),
+      });
+      const db = openOrCreateDatabase(begrotingsversiesDatabasePad(root, ADMINISTRATIE_ID));
+      schrijfGeplandOnderhoudBeoordeeld(db, versieId, true);
+      schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versieId, true);
+      db.close();
+
+      const htmlNa = await (await fetch(baseUrl + hoofdschermUrl)).text();
+      const voortgangMatchNa = htmlNa.match(/(\d+) van (\d+) onderdelen beoordeeld/);
+      expect(voortgangMatchNa).not.toBeNull();
+      const [, beoordeeldNa, totaalNa] = voortgangMatchNa!;
+      expect(totaalNa).toBe(totaalVoor); // totaal aantal regels verandert niet
+      expect(Number(beoordeeldNa)).toBeGreaterThan(Number(beoordeeldVoor)); // Management + Onderhoud tellen nu mee
+
+      // Controlepagina toont dezelfde voortgang.
+      const controleHtml = await (await fetch(`${baseUrl}/begroting/${ADMINISTRATIE_ID}/${versieId}/controle?laatstAfgeslotenBoekperiode=06`)).text();
+      expect(controleHtml).toContain(`${beoordeeldNa} van ${totaalNa} onderdelen beoordeeld`);
+    });
+  });
+
+  it("verborgen Managementvergoeding: hoofdscherm toont 'Niet van toepassing' en telt mee als beoordeeld; controlepagina benoemt het apart", async () => {
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "boekingen.xlsx"), []);
+
+    await metServer(async (baseUrl) => {
+      const nieuw = await fetch(`${baseUrl}/begroting/nieuw`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ administratieId: ADMINISTRATIE_ID, begrotingsjaar: "2027", laatstAfgeslotenBoekperiode: "06", indexatiePercentage: "3" }).toString(),
+        redirect: "manual",
+      });
+      const hoofdschermUrl = nieuw.headers.get("location")!;
+      const versieId = hoofdschermUrl.split("/")[3]!.split("?")[0]!;
+
+      await fetch(`${baseUrl}/begroting/${ADMINISTRATIE_ID}/${versieId}/module/management/verbergen`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ bevestiging: "1" }).toString(),
+      });
+
+      const controleHtml = await (await fetch(`${baseUrl}/begroting/${ADMINISTRATIE_ID}/${versieId}/controle?laatstAfgeslotenBoekperiode=06`)).text();
+      expect(controleHtml).toContain("onderdeel is verborgen");
+      expect(controleHtml).toContain("Managementvergoeding");
+      expect(controleHtml).toContain("uitgesloten van controle en totalen");
+    });
+  });
+});
+
 function pnlMapping(grootboekrekening: string, economischeCategorie: string): Parameters<typeof voegPnLBronmappingMutatieToe>[1] {
   return {
     bedrijfsnr: BEDRIJFSNR,

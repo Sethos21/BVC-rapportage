@@ -224,10 +224,64 @@ function hoofdschermUrl(administratieId: string, versieId: string, laatstAfgeslo
   return melding !== undefined ? `${basis}&melding=${encodeURIComponent(melding)}` : basis;
 }
 
+const BEOORDELING_BEOORDEELD = "Beoordeeld";
+const BEOORDELING_NOG_BEOORDELEN = "Nog beoordelen";
+const BEOORDELING_NIET_VAN_TOEPASSING = "Niet van toepassing";
+const BEOORDELING_AUTOMATISCH = "Automatisch bijgewerkt";
+
+/**
+ * UX-UITROL (2026-10-06, mockup-actueel-aansluiting) — "Beoordeling in gewone gebruikerstaal"
+ * (09_Begrotingsmodule_UX_Vastgesteld §3, punt 7): hergebruikt UITSLUITEND de bestaande, per-module
+ * beoordeeld-vlaggen die `stelBegrotingVast`'s vaststel-gate ook al leest — geen nieuwe berekening,
+ * geen tweede validatie, geen KRITIEK-herevaluatie (die blijft uitsluitend zichtbaar op de
+ * detailschermen zelf). Huur/Beheer hebben in het bestaande contract geen beoordeeld-concept (geen
+ * gate-check) en krijgen daarom het neutrale, eerlijke label "Automatisch bijgewerkt" — nooit een
+ * verzonnen beoordeeld/nog-te-beoordelen-status voor een module die het contract niet kent.
+ */
+function leesBeoordelingPerRegel(g: Geopend): Record<string, string> {
+  const labels: Record<string, string> = {
+    HUUROPBRENGST_BELAST: BEOORDELING_AUTOMATISCH,
+    HUUROPBRENGST_ONBELAST: BEOORDELING_AUTOMATISCH,
+    VERLEENDE_HUURKORTING: BEOORDELING_AUTOMATISCH,
+    BEHEERKOSTEN: BEOORDELING_AUTOMATISCH,
+  };
+
+  labels["MANAGEMENTVERGOEDING"] = isModuleVerborgen(g.db, g.bedrijfsnr, "MANAGEMENT")
+    ? BEOORDELING_NIET_VAN_TOEPASSING
+    : leesModule3Invoer(g.db, g.versie.id) !== null
+      ? BEOORDELING_BEOORDEELD
+      : BEOORDELING_NOG_BEOORDELEN;
+
+  const geplandBeoordeeld = leesGeplandOnderhoudBeoordeeld(g.db, g.versie.id);
+  const correctiefBeoordeeld = leesCorrectiefDagelijksOnderhoudBeoordeeld(g.db, g.versie.id);
+  labels["ONDERHOUD"] = geplandBeoordeeld && correctiefBeoordeeld ? BEOORDELING_BEOORDEELD : BEOORDELING_NOG_BEOORDELEN;
+
+  labels["VERZEKERINGEN"] = leesVerzekeringBeoordeeld(g.db, g.versie.id) ? BEOORDELING_BEOORDEELD : BEOORDELING_NOG_BEOORDELEN;
+
+  labels["GEMEENTELIJKE_LASTEN"] = leesGemeentelijkeLastenModule(g.db, g.versie.id).beoordeeld ? BEOORDELING_BEOORDEELD : BEOORDELING_NOG_BEOORDELEN;
+
+  const akState = leesAlgemeneKostenCategorieState(g.db, g.versie.id);
+  for (const categorie of ALGEMENE_KOSTEN_CATEGORIEEN) {
+    labels[categorie] = akState[categorie].beoordeeld ? BEOORDELING_BEOORDEELD : BEOORDELING_NOG_BEOORDELEN;
+  }
+
+  const leegstandState = leesLeegstandCategorieState(g.db, g.versie.id);
+  labels["LEEGSTANDSKOSTEN"] = LEEGSTAND_CATEGORIEEN.every((categorie) => leegstandState[categorie].beoordeeld) ? BEOORDELING_BEOORDEELD : BEOORDELING_NOG_BEOORDELEN;
+
+  labels["NIET_VERREKENBARE_BTW"] = leesNietVerrekenbareBtwState(g.db, g.versie.id).beoordeeld ? BEOORDELING_BEOORDEELD : BEOORDELING_NOG_BEOORDELEN;
+
+  const renteState = leesRenteCategorieState(g.db, g.versie.id);
+  labels["RENTEKOSTEN"] = renteState.RENTEKOSTEN.beoordeeld ? BEOORDELING_BEOORDEELD : BEOORDELING_NOG_BEOORDELEN;
+  labels["RENTE_OPBRENGSTEN"] = renteState.RENTE_OPBRENGSTEN.beoordeeld ? BEOORDELING_BEOORDEELD : BEOORDELING_NOG_BEOORDELEN;
+
+  return labels;
+}
+
 async function toonHoofdscherm(res: ServerResponse, g: Geopend, laatstAfgeslotenBoekperiode: string, melding?: string): Promise<void> {
   try {
     const vergelijkend = leesBegrotingsWerkomgeving(g.root, g.administratieId, g.bedrijfsnr, g.db, g.versie, laatstAfgeslotenBoekperiode);
     const verborgenModules = leesVerborgenModules(g.db, g.bedrijfsnr);
+    const beoordelingPerRegel = leesBeoordelingPerRegel(g);
     stuurHtml(
       res,
       200,
@@ -238,6 +292,7 @@ async function toonHoofdscherm(res: ServerResponse, g: Geopend, laatstAfgesloten
         vergelijkend,
         laatstAfgeslotenBoekperiode,
         verborgenModules,
+        beoordelingPerRegel,
         ...(melding !== undefined ? { melding } : {}),
       }),
     );
@@ -488,7 +543,9 @@ export async function handleBegrotingRequest(root: string, req: IncomingMessage,
     try {
       const vergelijkend = leesBegrotingsWerkomgeving(g.root, g.administratieId, g.bedrijfsnr, g.db, g.versie, laatstAfgeslotenBoekperiode);
       const vergelijking = vergelijkend.estimated !== null ? vergelijkPnLResultaten(vergelijkend.estimated, vergelijkend.jouwBegroting) : null;
-      stuurHtml(res, 200, renderControlePagina({ administratieId, weergavenaam: g.weergavenaam, versie: g.versie, laatstAfgeslotenBoekperiode, vergelijking }));
+      const verborgenModules = leesVerborgenModules(g.db, g.bedrijfsnr);
+      const beoordelingPerRegel = leesBeoordelingPerRegel(g);
+      stuurHtml(res, 200, renderControlePagina({ administratieId, weergavenaam: g.weergavenaam, versie: g.versie, laatstAfgeslotenBoekperiode, vergelijking, verborgenModules, beoordelingPerRegel }));
     } catch (error) {
       stuurHtml(res, 500, renderFoutPagina("Controlepagina kon niet worden geladen", error instanceof Error ? error.message : String(error)));
     } finally {
