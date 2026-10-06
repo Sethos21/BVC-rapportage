@@ -49,6 +49,8 @@ Onder EBITDA: Rente leningen; Opbrengst rente; Verkoopresultaat; Zonnestroom waa
 
 Canon/Erfpacht is expliciet HOLD/uit scope.
 
+De verhouding tussen functionele begrotingsmodules en deze P&L-canon is vastgelegd in §18.
+
 ## 5. Geaccepteerde implementatiestand
 
 Geaccepteerde tranche-HEADs:
@@ -219,3 +221,41 @@ Na herstel van de Geplande-verkoop-gate volgt eerst een echte single-user BVC-be
 Commit `9a3381b9731f754f26e0413d33a120a5ee5204b0` is na review geaccepteerd. `stelBegrotingVast` vereist geen beoordeling/KRITIEK-vrije status meer voor Geplande Verkoop zolang deze module HOLD is. Het frozen Geplande-Verkoop-resultaat blijft wel worden geschreven. Migratie 41 staat daarom in uitsluitend deze frozen-resultaattabel `beoordeeld=0` en `review_status='NOT_REVIEWED'` toe; overige geldigheidschecks en immutability van VASTGESTELD blijven intact. Geen Geplande-verkoop-UI is toegevoegd en geen andere financiële modulelogica is gewijzigd.
 
 Hiermee is de structurele blokkade uit de product-readiness audit gesloten. De volgende fase is geen nieuwe bouwtranche maar de eerste echte single-user BVC-productieacceptatie van de volledige begrotingsflow.
+
+## 18. Architectuurprincipe — specificatie-, classificatie- en presentatielaag (vastgesteld 06-10-2026)
+
+Dit formaliseert een architectuur die grotendeels al impliciet aanwezig is in bestaande calculators, financiële adapters en de P&L-canon (§4). Het is geen nieuwe architectuur en geen opdracht tot herbouw.
+
+### 18.1 Vier verantwoordelijkheden
+
+**A. Bron-/Actuallaag.** Bronfeiten: boekingen, contracten, units, complexen, polissen, WOZ en overige bewezen brondata. Wordt niet door UX- of begrotingspresentatie gemuteerd.
+
+**B. Functionele begrotings-/specificatielaag.** De gebruiker stelt de begroting samen op het natuurlijke niveau van het domein (Huur: contract/complex; Gepland onderhoud: activiteit/complex/kwartaal; Correctief onderhoud: begrotingsregel; Verzekeringen: polis; Gemeentelijke lasten/WOZ: object/aanslag; overige modules conform hun bestaande modulecontract). Bevat invoer en onderbouwing. De functionele specificatiestructuur is niet hetzelfde als de financiële P&L-structuur.
+
+**C. Berekening en financiële classificatie.** Bestaande pure calculators berekenen de financiële resultaten van de functionele modules; bestaande financiële adapters vertalen deze resultaten naar de P&L-canon (§4). Eén functionele module mag meerdere P&L-posten voeden (Huur → Huuropbrengst belast + onbelast). Meerdere functionele modules mogen gezamenlijk één P&L-post voeden (Gepland onderhoud + Correctief/dagelijks onderhoud → Onderhoud).
+
+**D. Output/presentatie.** De vergelijkende Begrotings-P&L (Begroting vorig jaar, Werkelijk, Estimated, Voorstel, Jouw begroting — §11) blijft het centrale financiële overzicht- en controle-/navigatiescherm van de begrotingsmodule en verdwijnt niet. Een individuele P&L-regel is echter niet automatisch een zelfstandig invoerformulier: de functionele module is de invoer-/specificatielaag die één of meer P&L-posten voedt. Een functionele module mag vanuit de vergelijkende P&L inline of via detailinteractie worden geopend conform de vastgestelde UX, zonder dat de module daarmee gelijk wordt gesteld aan één individuele P&L-regel.
+
+### 18.2 Dimensies niet vermengen
+
+Per-contract/per-complex (functionele specificatie-/weergavedimensie) en belast/onbelast (financiële classificatiedimensie) bestaan naast elkaar en vervangen elkaar niet. Hetzelfde geldt waar relevant voor andere modules: functioneel detailniveau en financiële classificatie zijn afzonderlijke verantwoordelijkheden.
+
+### 18.3 Financiële canon en detailclassificatie
+
+Wanneer Begroting, Werkelijk en Estimated in de vergelijkende P&L naast elkaar als dezelfde financiële post worden gepresenteerd, moeten de getoonde waarden semantisch en financieel vergelijkbaar zijn en aansluiten op dezelfde canonieke financiële betekenis (dezelfde P&L-post uit §4).
+
+Dit dwingt niet af dat Begroting, Werkelijk en Estimated op ieder intern detailniveau exact dezelfde technische sleutel-set of detaillering moeten hebben. Onderliggende financiële/detailclassificaties mogen behouden blijven voor berekening, specificatie, drill-down, analyse en administratie-afhankelijke verbijzondering — bijvoorbeeld de bestaande, reeds geaccepteerde boekhouddimensies Gebouwen/Terrein/Installaties binnen Werkelijk Onderhoud (§5, Onderhoud). Deze detailclassificaties mogen echter niet als onverklaarde of ongegroepeerde weesregels buiten de gekozen P&L-presentatiestructuur verschijnen: canonieke financiële classificatie en zichtbare aggregatiegraad zijn niet noodzakelijk hetzelfde, maar iedere presentatie moet uiteindelijk op de canonieke P&L-post aansluiten.
+
+Grootboek blijft leidend voor de financiële P&L-classificatie waar het bestaande contract dit bepaalt (§6). OGB blijft optioneel en bepaalt nooit zelfstandig de P&L-post.
+
+### 18.4 Huurkorting
+
+Geen nieuwe businessbeslissing. De bestaande regel blijft onverkort gelden: verleende huurkorting blijft zichtbaar in de netto-huuropbouw (§4; FO-addendum §A.1/OB-008) en wordt niet als losse uitgaande P&L-regel gedupliceerd. Architectonisch betekent dit: korting blijft zichtbaar in de functionele Huurspecificatie/netto-huuropbouw; korting mag financieel niet nogmaals als zelfstandige uitgaande begrotingspost worden afgetrokken wanneer deze al in de netto begrote huur is verwerkt; de behandeling van Werkelijk/Estimated-detailinformatie over huurkorting mag niet tot dubbeltelling leiden. Exacte aanvullende UX-presentatie hiervan wordt hiermee niet opnieuw ontworpen.
+
+### 18.5 Rapportage
+
+Vastgestelde begrotingsuitkomsten zijn via de financiële classificatie (laag C) beschikbaar voor de financiële rapportagelaag. De rapportagelaag introduceert geen tweede of afwijkende begrotingsberekening. Begroting, Werkelijk en Estimated behouden hun eigen bron-/berekenlogica en worden via de financiële classificatie vergelijkbaar gemaakt voor rapportage.
+
+### 18.6 Bescherming bestaande architectuur
+
+Dit architectuurbesluit is op zichzelf geen opdracht tot wijziging van bestaande bewezen calculators, persistence, lifecycle, bronlogica, Actual-logica, Estimated-logica, bestaande detailclassificaties of database/schema. Technische wijzigingen zijn alleen toegestaan wanneer later afzonderlijk wordt aangetoond dat een bestaande implementatie deze architectuurregels schendt; dat volgt een eigen, apart geaccordeerd traject en wordt niet door dit besluit zelf opgedragen.
