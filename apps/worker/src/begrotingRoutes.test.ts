@@ -153,7 +153,8 @@ describe("Begrotingsworkflow via echte HTTP-routes (Tranche 11) — acceptatiecr
       const html = await (await fetch(baseUrl + hoofdschermUrl)).text();
       expect(html).toContain("Opbrengst rente");
       // De Werkelijk-cel voor Opbrengst rente moet "onbekend" zijn — nooit "€ 0,00".
-      const opbrengstRegel = html.slice(html.indexOf("Opbrengst rente"), html.indexOf("Opbrengst rente") + 400);
+      // (UX-uitrol: de rij bevat nu ook een inline-uitklap-link met data-attributen, vandaar het ruimere venster.)
+      const opbrengstRegel = html.slice(html.indexOf("Opbrengst rente"), html.indexOf("Opbrengst rente") + 700);
       expect(opbrengstRegel).toContain("onbekend");
     });
   });
@@ -647,6 +648,113 @@ describe("Verzekeringen — Maandverloop (UX-uitrol §9.1)", () => {
       const onvolledigHtml = await (await fetch(onvolledigUrl!)).text();
       expect(onvolledigHtml).toContain("onbekend");
       expect(onvolledigHtml).not.toContain("€ 0,00"); // nooit een stille €0-reeks
+    });
+  });
+});
+
+/**
+ * UX-UITROL (2026-10-06, ARCHITECTUURPUNT-besluit) — bewijst de inline-uitklapbare detailweergave
+ * (UX_01/prototype): het hoofdscherm bevat per bewerkbare regel een `[data-expand]`-link met een
+ * `?fragment=1`-URL naar DEZELFDE bestaande route; die route levert dan uitsluitend de
+ * formulierinhoud (geen zijbalk/`<html>`-skelet), en een normale (niet-fragment) aanroep van
+ * exact dezelfde URL blijft de volledige pagina — bewijst dat er geen tweede render-pad is.
+ */
+describe("Inline-uitklapbare detailweergave op het hoofdscherm (UX-uitrol, ARCHITECTUURPUNT-besluit)", () => {
+  it("hoofdscherm bevat data-expand-links met fragment-URL's; de route levert fragment vs. volledige pagina op basis van ?fragment=1", async () => {
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "boekingen.xlsx"), []);
+
+    await metServer(async (baseUrl) => {
+      const nieuw = await fetch(`${baseUrl}/begroting/nieuw`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ administratieId: ADMINISTRATIE_ID, begrotingsjaar: "2027", laatstAfgeslotenBoekperiode: "06", indexatiePercentage: "3" }).toString(),
+        redirect: "manual",
+      });
+      const hoofdschermUrl = nieuw.headers.get("location")!;
+
+      const hoofdschermHtml = await (await fetch(baseUrl + hoofdschermUrl)).text();
+      expect(hoofdschermHtml).toContain("data-expand=");
+      expect(hoofdschermHtml).toContain('class="detail-row"');
+      expect(hoofdschermHtml).toContain("<script>"); // de enige client-side JS in de module, uitsluitend op het hoofdscherm
+
+      const managementUrlMatch = hoofdschermHtml.match(/data-url="([^"]*\/module\/management\?[^"]*)"/);
+      expect(managementUrlMatch).not.toBeNull();
+      const managementUrl = managementUrlMatch![1]!.replace(/&amp;/g, "&");
+
+      // Volledige pagina (geen ?fragment=1): bevat het paginaskelet.
+      const volledigeHtml = await (await fetch(baseUrl + managementUrl)).text();
+      expect(volledigeHtml).toContain('class="sidebar"');
+      expect(volledigeHtml.toLowerCase()).toContain("<!doctype html>");
+      expect(volledigeHtml).toContain("Managementvergoeding");
+
+      // Fragment (?fragment=1): dezelfde inhoud, zonder paginaskelet — klaar om inline te plaatsen.
+      const fragmentHtml = await (await fetch(`${baseUrl}${managementUrl}&fragment=1`)).text();
+      expect(fragmentHtml).not.toContain('class="sidebar"');
+      expect(fragmentHtml.toLowerCase()).not.toContain("<!doctype html>");
+      expect(fragmentHtml).toContain('class="inline-detail"');
+      expect(fragmentHtml).toContain("Managementvergoeding");
+      expect(fragmentHtml).toContain("<form"); // het echte, bestaande formulier — geen tweede invoerpad
+
+      // Een formulier binnen het fragment post naar dezelfde bestaande route (geen fragment-param nodig voor opslaan).
+      const actionMatch = fragmentHtml.match(/<form method="POST" action="([^"]*)"/);
+      expect(actionMatch).not.toBeNull();
+      expect(actionMatch![1]).toBe(managementUrl.replace(/&amp;/g, "&"));
+    });
+  });
+
+  it("VASTGESTELD: dezelfde inline-uitklaplink blijft werken, gelabeld als Bekijken, en toont de alleen-lezen onderbouwing", async () => {
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "boekingen.xlsx"), []);
+    const {
+      maakBegrotingsversie,
+      schrijfModule1Snapshot,
+      schrijfModule1Aannames,
+      schrijfModule3Invoer,
+      schrijfGeplandOnderhoudBeoordeeld,
+      schrijfCorrectiefDagelijksOnderhoudRegels,
+      schrijfCorrectiefDagelijksOnderhoudBeoordeeld,
+      schrijfVerzekeringBeoordeeld,
+      schrijfGemeentelijkeLastenModule,
+      schrijfAlgemeneKostenCategorieState,
+      schrijfLeegstandCategorieState,
+      schrijfRenteCategorieState,
+      schrijfNietVerrekenbareBtwState,
+      stelBegrotingVast,
+    } = await import("@bvc/begroting-data");
+    const { ALGEMENE_KOSTEN_CATEGORIEEN, LEEGSTAND_CATEGORIEEN, RENTE_CATEGORIEEN } = await import("@bvc/reporting");
+
+    const db = openOrCreateDatabase(begrotingsversiesDatabasePad(root, ADMINISTRATIE_ID));
+    const versie = maakBegrotingsversie(db, { originType: "NIEUW", bedrijfsnr: BEDRIJFSNR, begrotingsjaar: 2027, bronPeildatum: new Date() });
+    const id = versie.id;
+    schrijfModule1Snapshot(db, id, []);
+    schrijfModule1Aannames(db, id, { begrotingsjaar: 2027, indexatiePercentage: new Decimal(3) }, "06");
+    schrijfModule3Invoer(db, id, { wijze: "NIEUWE_VERGOEDING", bedrag: new Decimal(500), eenheid: "MAAND", ingangsdatum: null });
+    schrijfGeplandOnderhoudBeoordeeld(db, id, true);
+    schrijfCorrectiefDagelijksOnderhoudRegels(db, id, []);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, id, true);
+    schrijfVerzekeringBeoordeeld(db, id, true);
+    schrijfGemeentelijkeLastenModule(db, id, { werkelijkeGemeentelijkeLasten: null, wozStijgingPercentage: null, lastenPercentageStijging: null, begrotingsPercentageOverride: null, beoordeeld: true });
+    schrijfAlgemeneKostenCategorieState(db, id, Object.fromEntries(ALGEMENE_KOSTEN_CATEGORIEEN.map((c: string) => [c, { beoordeeld: true, vorigJaarBedrag: null, verwachteVerhogingPercentage: null }])) as never);
+    schrijfLeegstandCategorieState(
+      db,
+      id,
+      Object.fromEntries(LEEGSTAND_CATEGORIEEN.map((c: string) => [c, { beoordeeld: true, laatstBekendServicekostenvoorschotJaar: null, laatstBekendServicekostenvoorschotJaarHerkomst: null, verwachteLeegstandsperiodeMaanden: null }])) as never,
+    );
+    schrijfRenteCategorieState(db, id, Object.fromEntries(RENTE_CATEGORIEEN.map((c: string) => [c, { beoordeeld: true }])) as never);
+    schrijfNietVerrekenbareBtwState(db, id, { beoordeeld: true, vorigJaarWerkelijk: null });
+    stelBegrotingVast(db, id, new Date());
+    db.close();
+
+    await metServer(async (baseUrl) => {
+      const hoofdschermHtml = await (await fetch(`${baseUrl}/begroting/${ADMINISTRATIE_ID}/${id}?laatstAfgeslotenBoekperiode=06`)).text();
+      expect(hoofdschermHtml).toContain("Bekijken");
+      const managementUrlMatch = hoofdschermHtml.match(/data-url="([^"]*\/module\/management\?[^"]*)"/);
+      expect(managementUrlMatch).not.toBeNull();
+      const managementUrl = managementUrlMatch![1]!.replace(/&amp;/g, "&");
+
+      const fragmentHtml = await (await fetch(`${baseUrl}${managementUrl}&fragment=1`)).text();
+      expect(fragmentHtml).toContain("alleen-lezen");
+      expect(fragmentHtml).toContain("<fieldset disabled");
+      expect(fragmentHtml).toContain("500"); // de vastgestelde onderbouwing blijft zichtbaar
     });
   });
 });

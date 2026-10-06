@@ -5,26 +5,30 @@ import type { AdministratieListItem } from "./administratie.js";
 import { BOEKPERIODES } from "./serveUi.js";
 
 /**
- * TRANCHE 11 — server-rendered HTML voor de begrotingsworkflow (`/begroting/...`), zelfde
- * bewuste stijl als `serveUi.ts`: geen client-side JavaScript, rekent en classificeert NIETS —
- * presenteert uitsluitend wat de aanroeper (`begrotingRoutes.ts`) al heeft opgehaald/berekend
- * via de bestaande rekenlaag. Dit is BEWUST GEEN 1-op-1 visuele implementatie van de
- * UX_01…UX_13-ontwerpen (die vereisen client-side interactie/JS-componenten die deze
- * lokale, JS-vrije server-shell niet biedt) — het volgt wel de VASTGESTELDE structuur en
- * volgorde uit `09_Begrotingsmodule_UX_Vastgesteld.md` §3/§10: tabelgerichte vergelijkende
- * P&L, progressive disclosure (detail pas na doorklikken), onbekend/leeg/bewust-€0 blijven
- * zichtbaar onderscheiden, gebruikerstaal in plaats van technische statuscodes.
+ * TRANCHE 11 — server-rendered HTML voor de begrotingsworkflow (`/begroting/...`): rekent en
+ * classificeert NIETS — presenteert uitsluitend wat de aanroeper (`begrotingRoutes.ts`) al heeft
+ * opgehaald/berekend via de bestaande rekenlaag. Volgt de VASTGESTELDE structuur en volgorde uit
+ * `09_Begrotingsmodule_UX_Vastgesteld.md` §3/§10: tabelgerichte vergelijkende P&L, progressive
+ * disclosure, onbekend/leeg/bewust-€0 blijven zichtbaar onderscheiden, gebruikerstaal i.p.v.
+ * technische statuscodes.
  *
  * UX-ASSEMBLAGEDELTA (post-Tranche-13, `docs/begroting/ux/`): de vastgestelde visuele taal
- * (kleuren, typografie, kaarten, tabelopmaak, zijbalknavigatie, volledige-breedte desktop-
- * layout) uit `09_Begrotingsmodule_UX_Vastgesteld.md`/`UX_Ontwerpen/`/`prototype/` is nu
- * toegepast op DEZE BESTAANDE, server-gerenderde architectuur — géén overstap naar een
- * client-side SPA (dat zou een nieuw architectuurbesluit zijn, buiten scope). Interacties die
- * in het prototype inline-in-de-tabel-rij plaatsvinden (bv. een module direct uitklappen in de
- * vergelijkende P&L) blijven daarom een eigen paginanavigatie — dezelfde bestaande routes,
- * dezelfde velden/formuliernamen, uitsluitend opnieuw gestyled binnen hetzelfde visuele systeem
- * (zijbalk + topbar + kaarten), zodat de hoofd-/detailnavigatie wél duidelijk is. Geen enkele
- * waarde, berekening of route is hierbij gewijzigd.
+ * (kleuren, typografie, kaarten, tabelopmaak, zijbalknavigatie, volledige-breedte desktop-layout)
+ * is toegepast op deze server-gerenderde architectuur.
+ *
+ * UX-UITROL (2026-10-06, expliciet ARCHITECTUURPUNT-besluit): het hoofdscherm klapt een module nu
+ * INLINE uit in de tabelrij — zoals UX_01 en `docs/begroting/ux/prototype/` — in plaats van een
+ * eigen paginanavigatie. Dit is BEWUST GEEN overstap naar een client-side SPA en GEEN tweede
+ * domeinmodel: iedere detailpagina/route/calculator/POST-handler blijft ONGEWIJZIGD. De enige
+ * toevoeging is minimale, puur presentationele client-side JavaScript (`HOOFDSCHERM_SCRIPT`,
+ * alleen in `renderBegrotingHoofdscherm`) die bij een klik op een "Aanpassen"/"Bekijken"-link
+ * `event.preventDefault()` doet en in plaats daarvan de BESTAANDE route ophaalt met `?fragment=1`
+ * (zie `moduleFormShell`'s `fragment`-optie) en de respons in een verborgen rij eronder plaatst.
+ * Zonder JavaScript, of bij een gedeelde/directe link, werkt dezelfde `<a href>` gewoon als volledige
+ * paginanavigatie — geen tweede render-pad, uitsluitend een andere wikkel om dezelfde `inhoud`. Een
+ * formulier binnen een uitgeklapte rij is een gewoon HTML-`<form>`: opslaan is een normale POST naar
+ * de bestaande route, die (zoals altijd) terugstuurt naar het hoofdscherm. Financiële logica blijft
+ * volledig server-side; er is geen nieuwe berekening, validatie of opslag voor deze delta.
  */
 
 const BASIS_CSS = `
@@ -104,6 +108,15 @@ const BASIS_CSS = `
   .naam-sub{display:block;font-size:11px;color:var(--muted);font-weight:400;margin-top:2px}
   .bewerk{display:inline-block;font-size:11.5px;color:var(--green);text-decoration:none;font-weight:650;margin-right:8px}
   .bewerk:hover{text-decoration:underline}
+  .bewerk[data-expand]::before{content:"▸";display:inline-block;margin-right:3px;font-size:10px;transition:transform .12s}
+  .bewerk[data-expand][aria-expanded="true"]::before{transform:rotate(90deg)}
+
+  /* UX-uitrol (2026-10-06): inline-uitklapbare detailrij op het hoofdscherm (UX_01/prototype) */
+  tr.detail-row>td{background:#fafbfc;padding:0;border-bottom:2px solid var(--line)}
+  .detail-body{padding:18px 22px}
+  .inline-detail{max-width:860px}
+  .inline-detail-head{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+  .inline-detail-head h3{margin:0;font-size:15px}
 
   .banner{background:var(--green-soft);border:1px solid #cfe3d8;border-radius:var(--radius);padding:13px 16px;margin-bottom:20px;font-size:13.5px;color:#163f37}
   .banner a{color:var(--green-dark);font-weight:650}
@@ -480,26 +493,92 @@ export interface HoofdschermOpties {
 
 const GROEP_VOLGORDE: readonly PnLGroepBovenEbitda[] = ["OPBRENGSTEN", "MANAGEMENT_EN_BEHEER", "EXPLOITATIE_LASTEN", "ALGEMENE_KOSTEN"];
 
+/**
+ * UX-UITROL (2026-10-06, ARCHITECTUURPUNT-besluit) — realiseert UX_01/het prototype's inline-
+ * uitklapbare detailweergave: dezelfde "Aanpassen"-links van vóór dit besluit, nu als
+ * uitklaptoggle i.p.v. paginanavigatie. Elke link blijft een `<a href>` naar de volledige,
+ * bestaande detailpagina (werkt zonder JavaScript/bij een gedeelde link); `data-expand` laat het
+ * hoofdscherm-script (zie `renderBegrotingHoofdscherm`) 'm onderscheppen en de inhoud via
+ * `?fragment=1` van DEZELFDE route in een rij eronder laden — geen tweede databron, geen nieuwe
+ * backend-aanroep. Na vaststellen blijft de onderbouwing bereikbaar (UX_13 "Terugkijken"), nu ook
+ * vanaf het hoofdscherm, met het label "Bekijken" i.p.v. "Aanpassen".
+ */
 function regelRij(o: HoofdschermOpties, r: VergelijkendeBegrotingsPnLRegel): string {
   const moduleLinks = BEWERKBARE_MODULES[r.regelSleutel];
-  const bewerkLinks =
-    o.versie.status === "CONCEPT" && moduleLinks !== undefined
+  const isConcept = o.versie.status === "CONCEPT";
+  const detailLinksHtml =
+    moduleLinks !== undefined
       ? moduleLinks
-          .map(
-            (m) =>
-              `<a class="bewerk" href="/begroting/${encodeURIComponent(o.administratieId)}/${encodeURIComponent(o.versie.id)}/module/${m.key}?laatstAfgeslotenBoekperiode=${encodeURIComponent(o.laatstAfgeslotenBoekperiode)}">${escapeHtml(m.label)}</a>`,
-          )
-          .join(" · ")
-      : "";
+          .map((m) => {
+            const detailId = `${r.regelSleutel}--${m.key}`;
+            const url = `/begroting/${encodeURIComponent(o.administratieId)}/${encodeURIComponent(o.versie.id)}/module/${m.key}?laatstAfgeslotenBoekperiode=${encodeURIComponent(o.laatstAfgeslotenBoekperiode)}`;
+            const label = isConcept ? m.label : "Bekijken";
+            return { detailId, url, label };
+          })
+      : [];
+  const bewerkLinksHtml = detailLinksHtml
+    .map((d) => `<a class="bewerk" data-expand="${escapeHtml(d.detailId)}" data-url="${escapeHtml(d.url)}" href="${escapeHtml(d.url)}" aria-expanded="false" aria-controls="detail-row-${escapeHtml(d.detailId)}">${escapeHtml(d.label)}</a>`)
+    .join(" · ");
+  const detailRijenHtml = detailLinksHtml
+    .map((d) => `<tr class="detail-row" id="detail-row-${escapeHtml(d.detailId)}" style="display:none"><td colspan="6"><div class="detail-body" data-detail-body></div></td></tr>`)
+    .join("");
   return `<tr>
-    <td><span class="naam">${escapeHtml(label(r.regelSleutel))}</span>${bewerkLinks ? `<span class="naam-sub">${bewerkLinks}</span>` : ""}</td>
+    <td><span class="naam">${escapeHtml(label(r.regelSleutel))}</span>${bewerkLinksHtml ? `<span class="naam-sub">${bewerkLinksHtml}</span>` : ""}</td>
     <td>${fmtWaarde(r.begrotingVorigJaar)}</td>
     <td>${fmtWaarde(r.werkelijk)}</td>
     <td>${fmtWaarde(r.estimated)}</td>
     <td>${fmtVoorstel(r.voorstel)}</td>
     <td>${fmtWaarde(r.jouwBegroting)}</td>
-  </tr>`;
+  </tr>${detailRijenHtml}`;
 }
+
+/**
+ * UX-UITROL (2026-10-06) — de enige client-side JavaScript in de begrotingsmodule: onderschept een
+ * klik op `[data-expand]`, laadt de BESTAANDE route via `?fragment=1` (`moduleFormShell`'s
+ * `fragment`-optie) en zet de respons in de bijbehorende `detail-row-<id>`. Geen financiële logica,
+ * geen eigen state buiten "welke rij staat open"/"is deze al geladen" — puur UI-weergave. Zonder
+ * JavaScript blijft `[data-expand]`'s `href` een gewone link naar de volledige detailpagina.
+ */
+const HOOFDSCHERM_SCRIPT = `
+<script>
+(function () {
+  function toonFout(body, url) {
+    body.innerHTML = '<div class="fouten">Kon de details niet laden. <a href="' + url + '">Open in een aparte pagina</a>.</div>';
+  }
+  document.querySelectorAll('[data-expand]').forEach(function (link) {
+    link.addEventListener('click', function (event) {
+      event.preventDefault();
+      var id = link.getAttribute('data-expand');
+      var row = document.getElementById('detail-row-' + id);
+      if (!row) return;
+      var expanded = link.getAttribute('aria-expanded') === 'true';
+      if (expanded) {
+        row.style.display = 'none';
+        link.setAttribute('aria-expanded', 'false');
+        return;
+      }
+      row.style.display = '';
+      link.setAttribute('aria-expanded', 'true');
+      var body = row.querySelector('[data-detail-body]');
+      if (body.getAttribute('data-loaded') === '1') return;
+      var url = link.getAttribute('data-url');
+      body.innerHTML = '<div class="sub">Laden…</div>';
+      fetch(url + (url.indexOf('?') === -1 ? '?' : '&') + 'fragment=1')
+        .then(function (resp) {
+          if (!resp.ok) throw new Error('status ' + resp.status);
+          return resp.text();
+        })
+        .then(function (html) {
+          body.innerHTML = html;
+          body.setAttribute('data-loaded', '1');
+        })
+        .catch(function () {
+          toonFout(body, url);
+        });
+    });
+  });
+})();
+</script>`;
 
 export function renderBegrotingHoofdscherm(o: HoofdschermOpties): string {
   const { vergelijkend } = o;
@@ -544,7 +623,8 @@ export function renderBegrotingHoofdscherm(o: HoofdschermOpties): string {
         </tbody>
       </table>
     </div>
-    <a class="terug" href="/begroting?administratieId=${encodeURIComponent(o.administratieId)}">← Terug naar begrotingskeuze</a>`;
+    <a class="terug" href="/begroting?administratieId=${encodeURIComponent(o.administratieId)}">← Terug naar begrotingskeuze</a>
+    ${HOOFDSCHERM_SCRIPT}`;
   return werkomgevingShell(
     { administratieId: o.administratieId, weergavenaam: o.weergavenaam, versie: o.versie, laatstAfgeslotenBoekperiode: o.laatstAfgeslotenBoekperiode, actief: "hoofdscherm" },
     `Begroting ${o.versie.begrotingsjaar} — ${o.weergavenaam}`,
@@ -635,11 +715,33 @@ export function renderFoutPagina(titel: string, bericht: string, terugUrl = "/be
  * veld hoeft te markeren. De route-laag blokkeert schrijfacties (POST) hoe dan ook al op
  * niet-CONCEPT (`handleModuleRoute`) — dit is uitsluitend de zichtbare, niet-bewerkbare weergave.
  */
-function moduleFormShell(o: { titel: string; terugUrl: string; fouten?: readonly string[]; inhoud: string; alleenLezen?: boolean }): string {
+/**
+ * UX-UITROL (2026-10-06) — `fragment: true` levert UITSLUITEND de formulierinhoud (fouten +
+ * alleen-lezen-banner + inhoud), zonder het volledige paginaskelet (zijbalk/topbar/"Terug"-link).
+ * Dit is de server-kant van de inline-uitklapbare detailweergave op het hoofdscherm (UX_01 en het
+ * prototype, `docs/begroting/ux/prototype/`): hetzelfde formulier, dezelfde route, dezelfde
+ * backend — uitsluitend minder omringende HTML, zodat de hoofdschermscript het rechtstreeks in een
+ * uitgeklapte rij kan plaatsen. Een directe paginanavigatie (zonder `?fragment=1`, bv. bij
+ * uitgeschakelde JavaScript of een gedeelde link) krijgt gewoon de volledige pagina — geen tweede
+ * render-pad, uitsluitend een andere wikkel om dezelfde `inhoud`.
+ */
+function moduleFormShell(o: { titel: string; terugUrl: string; fouten?: readonly string[]; inhoud: string; alleenLezen?: boolean; fragment?: boolean }): string {
   const foutenHtml =
     o.fouten && o.fouten.length > 0 ? `<div class="fouten"><strong>Controleer de invoer:</strong><ul>${o.fouten.map((f) => `<li>${escapeHtml(f)}</li>`).join("")}</ul></div>` : "";
   const alleenLezenBanner = o.alleenLezen ? `<div class="banner vastgesteld">Vastgesteld — deze onderbouwing is alleen-lezen.</div>` : "";
   const inhoud = o.alleenLezen ? `<fieldset disabled style="border:none;padding:0;margin:0">${o.inhoud}</fieldset>` : o.inhoud;
+
+  if (o.fragment === true) {
+    return `
+      <div class="inline-detail">
+        <div class="inline-detail-head"><h3>${escapeHtml(o.titel)}</h3>${o.alleenLezen ? `<span class="pill vastgesteld">Vastgesteld</span>` : `<span class="pill concept">Concept</span>`}</div>
+        ${alleenLezenBanner}
+        ${foutenHtml}
+        ${inhoud}
+        <a class="terug" href="${escapeHtml(o.terugUrl)}">Volledige pagina openen →</a>
+      </div>`;
+  }
+
   const body = `
     <div class="eyebrow">${o.alleenLezen ? "Begrotingsonderdeel — alleen-lezen" : "Begrotingsonderdeel aanpassen"}</div>
     <div class="title-row"><h1>${escapeHtml(o.titel)}</h1>${o.alleenLezen ? `<span class="pill vastgesteld">Vastgesteld</span>` : `<span class="pill concept">Concept</span>`}</div>
@@ -693,6 +795,7 @@ export interface ManagementFormOpties {
   terugUrl: string;
   fouten?: readonly string[];
   alleenLezen?: boolean;
+  fragment?: boolean;
   huidig: { wijze: string; bedrag: string; eenheid: string; ingangsdatum: string; bestaandBedrag: string; bestaandEenheid: string; indexatiePercentage: string; indexatiedatum: string; nieuwBedrag: string; nieuweEenheid: string };
   pnlHtml?: string;
 }
@@ -720,7 +823,7 @@ export function renderManagementForm(o: ManagementFormOpties): string {
 
       <button type="submit">Opslaan</button>
     </form>`;
-  return moduleFormShell({ titel: "Managementvergoeding", terugUrl: o.terugUrl, ...(o.fouten !== undefined ? { fouten: o.fouten } : {}), inhoud, alleenLezen: o.alleenLezen === true });
+  return moduleFormShell({ titel: "Managementvergoeding", terugUrl: o.terugUrl, ...(o.fouten !== undefined ? { fouten: o.fouten } : {}), inhoud, alleenLezen: o.alleenLezen === true, fragment: o.fragment === true });
 }
 
 export interface CorrectiefRegelRow {
@@ -739,6 +842,7 @@ export function renderCorrectiefForm(o: {
   regels: readonly CorrectiefRegelRow[];
   beoordeeld: boolean;
   alleenLezen?: boolean;
+  fragment?: boolean;
   onderhoudTotaal?: OnderhoudTotaalSamenvattingVeld;
 }): string {
   const rijen = [...o.regels, ...Array.from({ length: Math.max(0, 6 - o.regels.length) }, (): CorrectiefRegelRow => ({ id: null, omschrijving: "", complexnummer: "", grootboekrekening: "", ogbKostensoort: "", jaarbedrag: "" }))];
@@ -762,7 +866,7 @@ export function renderCorrectiefForm(o: {
       <label><input type="checkbox" name="beoordeeld" value="1" style="width:auto;display:inline-block;margin-right:8px"${o.beoordeeld ? " checked" : ""} />Ik heb dit onderdeel beoordeeld</label>
       <button type="submit">Opslaan</button>
     </form>`;
-  return moduleFormShell({ titel: "Correctief / dagelijks onderhoud", terugUrl: o.terugUrl, ...(o.fouten !== undefined ? { fouten: o.fouten } : {}), inhoud, alleenLezen: o.alleenLezen === true });
+  return moduleFormShell({ titel: "Correctief / dagelijks onderhoud", terugUrl: o.terugUrl, ...(o.fouten !== undefined ? { fouten: o.fouten } : {}), inhoud, alleenLezen: o.alleenLezen === true, fragment: o.fragment === true });
 }
 
 export function renderBtwForm(o: {
@@ -773,6 +877,7 @@ export function renderBtwForm(o: {
   beoordeeld: boolean;
   resterendeVerwachting: string;
   alleenLezen?: boolean;
+  fragment?: boolean;
   pnlHtml?: string;
 }): string {
   const rijen = [...o.regels, ...Array.from({ length: Math.max(0, 4 - o.regels.length) }, () => ({ id: null as number | null, omschrijving: "", complexnummer: "", jaarbedrag: "" }))];
@@ -794,7 +899,7 @@ export function renderBtwForm(o: {
       <input type="text" name="resterendeVerwachting" id="resterendeVerwachting" value="${escapeHtml(o.resterendeVerwachting)}" />
       <button type="submit">Opslaan</button>
     </form>`;
-  return moduleFormShell({ titel: "Niet verrekenbare btw", terugUrl: o.terugUrl, ...(o.fouten !== undefined ? { fouten: o.fouten } : {}), inhoud, alleenLezen: o.alleenLezen === true });
+  return moduleFormShell({ titel: "Niet verrekenbare btw", terugUrl: o.terugUrl, ...(o.fouten !== undefined ? { fouten: o.fouten } : {}), inhoud, alleenLezen: o.alleenLezen === true, fragment: o.fragment === true });
 }
 
 export function renderRenteForm(o: {
@@ -806,6 +911,7 @@ export function renderRenteForm(o: {
   beoordeeld: boolean;
   resterendeVerwachting: string;
   alleenLezen?: boolean;
+  fragment?: boolean;
   pnlHtml?: string;
 }): string {
   const isOpbrengst = o.categorie === "RENTE_OPBRENGSTEN";
@@ -823,7 +929,7 @@ export function renderRenteForm(o: {
       <input type="text" name="resterendeVerwachting" id="resterendeVerwachting" value="${escapeHtml(o.resterendeVerwachting)}" />
       <button type="submit">Opslaan</button>
     </form>`;
-  return moduleFormShell({ titel: isOpbrengst ? "Opbrengst rente" : "Rente leningen", terugUrl: o.terugUrl, ...(o.fouten !== undefined ? { fouten: o.fouten } : {}), inhoud, alleenLezen: o.alleenLezen === true });
+  return moduleFormShell({ titel: isOpbrengst ? "Opbrengst rente" : "Rente leningen", terugUrl: o.terugUrl, ...(o.fouten !== undefined ? { fouten: o.fouten } : {}), inhoud, alleenLezen: o.alleenLezen === true, fragment: o.fragment === true });
 }
 
 export interface HuurDetailRegel {
@@ -869,6 +975,7 @@ export function renderHuurDetail(o: {
   complexWeergaveUrl: string;
   begrotingsjaar: number;
   alleenLezen: boolean;
+  fragment?: boolean;
   algemeenIndexatiePercentage: string;
   regels: readonly HuurDetailRegel[];
   complexRegels: readonly ComplexHuurRegel[];
@@ -931,7 +1038,7 @@ export function renderHuurDetail(o: {
       <p class="sub">Netto huur portefeuille (Jouw begroting): <strong>${escapeHtml(o.portefeuilleNetto)}</strong></p>
       ${o.alleenLezen || o.weergave === "complex" ? "" : `<button type="submit">Overrides opslaan</button>`}
     </form>`;
-  return moduleFormShell({ titel: `Huur — contractbasis ${o.begrotingsjaar}`, terugUrl: o.terugUrl, inhoud, alleenLezen: o.alleenLezen });
+  return moduleFormShell({ titel: `Huur — contractbasis ${o.begrotingsjaar}`, terugUrl: o.terugUrl, inhoud, alleenLezen: o.alleenLezen, fragment: o.fragment === true });
 }
 
 export interface BeheerDetailRegel {
@@ -954,6 +1061,7 @@ export function renderBeheerDetail(o: {
   terugUrl: string;
   actieUrl: string;
   alleenLezen: boolean;
+  fragment?: boolean;
   regels: readonly BeheerDetailRegel[];
   controleVereist: readonly string[];
   portefeuilleTotaal: string;
@@ -990,7 +1098,7 @@ export function renderBeheerDetail(o: {
       <p class="sub">Totale beheersvergoeding portefeuille: <strong>${escapeHtml(o.portefeuilleTotaal)}</strong></p>
       ${o.alleenLezen ? "" : `<button type="submit">Configuratie opslaan</button>`}
     </form>`;
-  return moduleFormShell({ titel: "Beheersvergoeding", terugUrl: o.terugUrl, inhoud, alleenLezen: o.alleenLezen });
+  return moduleFormShell({ titel: "Beheersvergoeding", terugUrl: o.terugUrl, inhoud, alleenLezen: o.alleenLezen, fragment: o.fragment === true });
 }
 
 function beoordeeldCheckbox(naam: string, aangevinkt: boolean): string {
@@ -1005,7 +1113,7 @@ export interface LeegstandCategorieOpties {
 }
 
 /** Leegstandskosten (UX/OB-031, Tranche 13): drie categorieën, elk dezelfde compacte structuur Complex|Omschrijving|Q1-Q4. */
-export function renderLeegstandForm(o: { actieUrl: string; terugUrl: string; fouten?: readonly string[]; categorieen: readonly LeegstandCategorieOpties[]; portefeuilleTotaal: string; alleenLezen?: boolean; pnlHtml?: string }): string {
+export function renderLeegstandForm(o: { actieUrl: string; terugUrl: string; fouten?: readonly string[]; categorieen: readonly LeegstandCategorieOpties[]; portefeuilleTotaal: string; alleenLezen?: boolean; pnlHtml?: string; fragment?: boolean }): string {
   const sectie = (c: LeegstandCategorieOpties, prefix: string) => {
     const rijen = [...c.regels, ...Array.from({ length: Math.max(0, 4 - c.regels.length) }, () => ({ id: null, complexnummer: "", omschrijving: "", q1: "", q2: "", q3: "", q4: "" }))];
     return `<h2>${escapeHtml(c.titel)}</h2>
@@ -1035,7 +1143,7 @@ export function renderLeegstandForm(o: { actieUrl: string; terugUrl: string; fou
       <p class="sub">Totaal Leegstandskosten (Jouw begroting): <strong>${escapeHtml(o.portefeuilleTotaal)}</strong></p>
       <button type="submit">Opslaan</button>
     </form>`;
-  return moduleFormShell({ titel: "Leegstandskosten", terugUrl: o.terugUrl, ...(o.fouten !== undefined ? { fouten: o.fouten } : {}), inhoud, alleenLezen: o.alleenLezen === true });
+  return moduleFormShell({ titel: "Leegstandskosten", terugUrl: o.terugUrl, ...(o.fouten !== undefined ? { fouten: o.fouten } : {}), inhoud, alleenLezen: o.alleenLezen === true, fragment: o.fragment === true });
 }
 
 export interface AlgemeneKostenCategorieOpties {
@@ -1049,7 +1157,7 @@ export interface AlgemeneKostenCategorieOpties {
 }
 
 /** Algemene kosten (OB-035/036, Tranche 13): vijf categorieën, elk dezelfde regelvorm (Omschrijving|Complex|OGB|Jaarbedrag); Accountant/Bank tonen aanvullend het informatieve vorig-jaar/verwachte-verhoging-voorstel. */
-export function renderAlgemeneKostenForm(o: { actieUrl: string; terugUrl: string; fouten?: readonly string[]; categorieen: readonly AlgemeneKostenCategorieOpties[]; portefeuilleTotaal: string; alleenLezen?: boolean; pnlHtml?: string }): string {
+export function renderAlgemeneKostenForm(o: { actieUrl: string; terugUrl: string; fouten?: readonly string[]; categorieen: readonly AlgemeneKostenCategorieOpties[]; portefeuilleTotaal: string; alleenLezen?: boolean; pnlHtml?: string; fragment?: boolean }): string {
   const sectie = (c: AlgemeneKostenCategorieOpties, prefix: string) => {
     const rijen = [...c.regels, ...Array.from({ length: Math.max(0, 3 - c.regels.length) }, () => ({ id: null, omschrijving: "", complexnummer: "", ogbKostensoortCode: "", jaarbedrag: "" }))];
     const voorstelHtml = c.toonVoorstelVelden
@@ -1080,7 +1188,7 @@ export function renderAlgemeneKostenForm(o: { actieUrl: string; terugUrl: string
       <p class="sub">Totaal Algemene kosten (Jouw begroting): <strong>${escapeHtml(o.portefeuilleTotaal)}</strong></p>
       <button type="submit">Opslaan</button>
     </form>`;
-  return moduleFormShell({ titel: "Algemene kosten", terugUrl: o.terugUrl, ...(o.fouten !== undefined ? { fouten: o.fouten } : {}), inhoud, alleenLezen: o.alleenLezen === true });
+  return moduleFormShell({ titel: "Algemene kosten", terugUrl: o.terugUrl, ...(o.fouten !== undefined ? { fouten: o.fouten } : {}), inhoud, alleenLezen: o.alleenLezen === true, fragment: o.fragment === true });
 }
 
 export interface VerzekeringRegelVeld {
@@ -1105,6 +1213,7 @@ export function renderVerzekeringenForm(o: {
   beoordeeld: boolean;
   portefeuilleTotaal: string;
   alleenLezen?: boolean;
+  fragment?: boolean;
   pnlHtml?: string;
   maandverloopUrl?: (polisId: number) => string;
 }): string {
@@ -1134,7 +1243,7 @@ export function renderVerzekeringenForm(o: {
       <p class="sub">Totaal Verzekeringen (Jouw begroting): <strong>${escapeHtml(o.portefeuilleTotaal)}</strong></p>
       <button type="submit">Opslaan</button>
     </form>`;
-  return moduleFormShell({ titel: "Verzekeringen", terugUrl: o.terugUrl, ...(o.fouten !== undefined ? { fouten: o.fouten } : {}), inhoud, alleenLezen: o.alleenLezen === true });
+  return moduleFormShell({ titel: "Verzekeringen", terugUrl: o.terugUrl, ...(o.fouten !== undefined ? { fouten: o.fouten } : {}), inhoud, alleenLezen: o.alleenLezen === true, fragment: o.fragment === true });
 }
 
 export interface VerzekeringMaandverloopVeld {
@@ -1208,6 +1317,7 @@ export function renderGeplandOnderhoudForm(o: {
   beoordeeld: boolean;
   jaartotaal: string;
   alleenLezen?: boolean;
+  fragment?: boolean;
   onderhoudTotaal?: OnderhoudTotaalSamenvattingVeld;
 }): string {
   const leeg = (): GeplandOnderhoudRegelVeld => ({ id: null, complexnummer: "", omschrijving: "", grootboekrekening: "", ogbKostensoort: "", aanleidingType: "", aanleidingToelichting: "", q1: "", q2: "", q3: "", q4: "", status: "GEPLAND", leverancier: "", offertebedrag: "", notitie: "" });
@@ -1243,7 +1353,7 @@ export function renderGeplandOnderhoudForm(o: {
       <p class="sub">Jaartotaal Gepland onderhoud: <strong>${escapeHtml(o.jaartotaal)}</strong> (telt samen met Correctief/dagelijks op tot de P&L-post Onderhoud)</p>
       <button type="submit">Opslaan</button>
     </form>`;
-  return moduleFormShell({ titel: "Gepland onderhoud", terugUrl: o.terugUrl, ...(o.fouten !== undefined ? { fouten: o.fouten } : {}), inhoud, alleenLezen: o.alleenLezen === true });
+  return moduleFormShell({ titel: "Gepland onderhoud", terugUrl: o.terugUrl, ...(o.fouten !== undefined ? { fouten: o.fouten } : {}), inhoud, alleenLezen: o.alleenLezen === true, fragment: o.fragment === true });
 }
 
 export interface WozObjectVeld {
@@ -1282,6 +1392,7 @@ export function renderGemeentelijkeLastenForm(o: {
   voorstelReden: string | null;
   portefeuilleTotaal: string;
   alleenLezen?: boolean;
+  fragment?: boolean;
   pnlHtml?: string;
   wozHistorieCsvUrl: string;
 }): string {
@@ -1342,7 +1453,7 @@ export function renderGemeentelijkeLastenForm(o: {
       <p class="sub">Totaal Gemeentelijke lasten pand (Jouw begroting): <strong>${escapeHtml(o.portefeuilleTotaal)}</strong></p>
       <button type="submit" name="actie" value="opslaan">Opslaan</button>
     </form>`;
-  return moduleFormShell({ titel: "Gemeentelijke lasten / WOZ", terugUrl: o.terugUrl, ...(o.fouten !== undefined ? { fouten: o.fouten } : {}), inhoud, alleenLezen: o.alleenLezen === true });
+  return moduleFormShell({ titel: "Gemeentelijke lasten / WOZ", terugUrl: o.terugUrl, ...(o.fouten !== undefined ? { fouten: o.fouten } : {}), inhoud, alleenLezen: o.alleenLezen === true, fragment: o.fragment === true });
 }
 
 export { geldWaarde };

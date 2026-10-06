@@ -688,6 +688,16 @@ function bouwOnderhoudTotaalSamenvatting(resultaat: ReturnType<typeof leesOnderh
 
 const MAAND_NAMEN = ["januari", "februari", "maart", "april", "mei", "juni", "juli", "augustus", "september", "oktober", "november", "december"];
 
+/**
+ * UX-UITROL (2026-10-06, ARCHITECTUURPUNT-besluit) — `?fragment=1` vraagt om uitsluitend de
+ * formulierinhoud (zie `moduleFormShell`'s `fragment`-optie), zonder het paginaskelet. Dit is de
+ * server-kant van het hoofdscherm se inline-uitklapbare detailweergave (UX_01/prototype): dezelfde
+ * route, dezelfde handler, dezelfde data — uitsluitend minder omringende HTML in de respons.
+ */
+function isFragmentVerzoek(req: IncomingMessage): boolean {
+  return new URL(req.url ?? "", "http://localhost").searchParams.get("fragment") === "1";
+}
+
 function fmtPercentageVeld(d: Decimal): string {
   return d.toString();
 }
@@ -781,6 +791,8 @@ async function handleHuur(req: IncomingMessage, res: ServerResponse, g: Geopend,
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([complexnummer, t]) => ({ complexnummer, aantalContracten: t.aantal, bruto: fmtBedragKort(t.bruto), korting: fmtBedragKort(t.korting), netto: fmtBedragKort(t.netto) }));
 
+  const fragment = isFragmentVerzoek(req);
+  const weergaveSuffix = fragment ? "&fragment=1" : "";
   stuurHtml(
     res,
     200,
@@ -790,8 +802,8 @@ async function handleHuur(req: IncomingMessage, res: ServerResponse, g: Geopend,
       terugUrl,
       actieUrl,
       weergave,
-      contractWeergaveUrl: `${actieUrl}&weergave=contract`,
-      complexWeergaveUrl: `${actieUrl}&weergave=complex`,
+      contractWeergaveUrl: `${actieUrl}&weergave=contract${weergaveSuffix}`,
+      complexWeergaveUrl: `${actieUrl}&weergave=complex${weergaveSuffix}`,
       begrotingsjaar: g.versie.begrotingsjaar,
       alleenLezen,
       algemeenIndexatiePercentage: fmtPercentageVeld(aannames.indexatiePercentage),
@@ -800,6 +812,7 @@ async function handleHuur(req: IncomingMessage, res: ServerResponse, g: Geopend,
       controleVereist: module1.controleVereist.map((c) => `${c.contractnummer ?? "Algemeen"}: ${c.bericht}`),
       portefeuilleNetto: fmtBedragKort(portefeuilleNetto),
       pnlHtml: vergelijkend !== null ? moduleWerkomgevingPnLHtml(vergelijkend, ["HUUROPBRENGST_BELAST", "HUUROPBRENGST_ONBELAST", "VERLEENDE_HUURKORTING"]) : "",
+      fragment,
     }),
   );
   return true;
@@ -897,6 +910,7 @@ async function handleBeheer(req: IncomingMessage, res: ServerResponse, g: Geopen
       controleVereist: module2.controleVereist.map((c) => `${c.complexnummer ?? "Algemeen"}: ${c.bericht}`),
       portefeuilleTotaal: fmtBedragKort(module2.portefeuilleTotalen.totaleVergoeding),
       pnlHtml: vergelijkend !== null ? moduleWerkomgevingPnLHtml(vergelijkend, ["BEHEERKOSTEN"]) : "",
+      fragment: isFragmentVerzoek(req),
     }),
   );
   return true;
@@ -915,7 +929,7 @@ async function handleManagement(req: IncomingMessage, res: ServerResponse, g: Ge
             ? { ...leeg, wijze: huidig.wijze, bestaandBedrag: huidig.bestaandBedrag.toString(), bestaandEenheid: huidig.eenheid, indexatiePercentage: huidig.indexatiePercentage.toString(), indexatiedatum: huidig.indexatiedatum.toISOString().slice(0, 10) }
             : { ...leeg, wijze: huidig.wijze, nieuwBedrag: huidig.nieuwBedrag.toString(), nieuweEenheid: huidig.nieuweEenheid };
     const pnlHtml = vergelijkend !== null ? moduleWerkomgevingPnLHtml(vergelijkend, ["MANAGEMENTVERGOEDING"]) : "";
-    stuurHtml(res, 200, renderManagementForm({ actieUrl, terugUrl, huidig: form, alleenLezen: g.versie.status !== "CONCEPT", pnlHtml }));
+    stuurHtml(res, 200, renderManagementForm({ actieUrl, terugUrl, huidig: form, alleenLezen: g.versie.status !== "CONCEPT", pnlHtml, fragment: isFragmentVerzoek(req) }));
     return true;
   }
 
@@ -995,6 +1009,7 @@ async function handleCorrectief(req: IncomingMessage, res: ServerResponse, g: Ge
         regels: regels.map((r) => ({ id: r.id, omschrijving: r.omschrijving, complexnummer: r.complexnummer ?? "", grootboekrekening: r.grootboekrekening, ogbKostensoort: r.ogbKostensoort ?? "", jaarbedrag: r.jaarbedrag?.toString() ?? "" })),
         alleenLezen: g.versie.status !== "CONCEPT",
         onderhoudTotaal,
+        fragment: isFragmentVerzoek(req),
       }),
     );
     return true;
@@ -1059,6 +1074,7 @@ async function handleBtw(req: IncomingMessage, res: ServerResponse, g: Geopend, 
         regels: regels.map((r) => ({ id: r.id, omschrijving: r.omschrijving, complexnummer: r.complexnummer ?? "", jaarbedrag: r.jaarbedrag?.toString() ?? "" })),
         alleenLezen: g.versie.status !== "CONCEPT",
         pnlHtml: vergelijkend !== null ? moduleWerkomgevingPnLHtml(vergelijkend, ["NIET_VERREKENBARE_BTW"]) : "",
+        fragment: isFragmentVerzoek(req),
       }),
     );
     return true;
@@ -1105,7 +1121,7 @@ async function handleRente(req: IncomingMessage, res: ServerResponse, g: Geopend
     const begrotingsbedrag = bestaandeRegel?.begrotingsbedrag !== null && bestaandeRegel?.begrotingsbedrag !== undefined ? (isOpbrengst ? bestaandeRegel.begrotingsbedrag.negated() : bestaandeRegel.begrotingsbedrag).toString() : "";
     const verwachtingWeergave = resterendeVerwachting !== null ? (isOpbrengst ? resterendeVerwachting.negated() : resterendeVerwachting).toString() : "";
     const pnlHtml = vergelijkend !== null ? moduleWerkomgevingPnLHtml(vergelijkend, [categorie]) : "";
-    stuurHtml(res, 200, renderRenteForm({ categorie, actieUrl, terugUrl, begrotingsbedrag, beoordeeld: categorieState[categorie].beoordeeld, resterendeVerwachting: verwachtingWeergave, alleenLezen: g.versie.status !== "CONCEPT", pnlHtml }));
+    stuurHtml(res, 200, renderRenteForm({ categorie, actieUrl, terugUrl, begrotingsbedrag, beoordeeld: categorieState[categorie].beoordeeld, resterendeVerwachting: verwachtingWeergave, alleenLezen: g.versie.status !== "CONCEPT", pnlHtml, fragment: isFragmentVerzoek(req) }));
     return true;
   }
 
@@ -1181,7 +1197,7 @@ async function handleLeegstand(req: IncomingMessage, res: ServerResponse, g: Geo
     }));
     const totaal = som(regels.flatMap((r) => [r.q1, r.q2, r.q3, r.q4]));
     const pnlHtml = vergelijkend !== null ? moduleWerkomgevingPnLHtml(vergelijkend, ["LEEGSTANDSKOSTEN"]) : "";
-    stuurHtml(res, 200, renderLeegstandForm({ actieUrl, terugUrl, categorieen, portefeuilleTotaal: fmtBedragKort(totaal), alleenLezen: g.versie.status !== "CONCEPT", pnlHtml }));
+    stuurHtml(res, 200, renderLeegstandForm({ actieUrl, terugUrl, categorieen, portefeuilleTotaal: fmtBedragKort(totaal), alleenLezen: g.versie.status !== "CONCEPT", pnlHtml, fragment: isFragmentVerzoek(req) }));
     return true;
   }
 
@@ -1240,7 +1256,7 @@ async function handleAlgemeneKosten(req: IncomingMessage, res: ServerResponse, g
     }));
     const totaal = som(regels.map((r) => r.jaarbedrag));
     const pnlHtml = vergelijkend !== null ? moduleWerkomgevingPnLHtml(vergelijkend, ["ACCOUNTANT", "JURIDISCHE_KOSTEN", "MAKELAARSKOSTEN", "ALGEMENE_KOSTEN", "BANKKOSTEN"]) : "";
-    stuurHtml(res, 200, renderAlgemeneKostenForm({ actieUrl, terugUrl, categorieen, portefeuilleTotaal: fmtBedragKort(totaal), alleenLezen: g.versie.status !== "CONCEPT", pnlHtml }));
+    stuurHtml(res, 200, renderAlgemeneKostenForm({ actieUrl, terugUrl, categorieen, portefeuilleTotaal: fmtBedragKort(totaal), alleenLezen: g.versie.status !== "CONCEPT", pnlHtml, fragment: isFragmentVerzoek(req) }));
     return true;
   }
 
@@ -1297,7 +1313,7 @@ async function handleVerzekeringen(req: IncomingMessage, res: ServerResponse, g:
     const totaal = som(regels.map((r) => r.handmatigBegrootOverride ?? r.bedrag));
     const pnlHtml = vergelijkend !== null ? moduleWerkomgevingPnLHtml(vergelijkend, ["VERZEKERINGEN"]) : "";
     const maandverloopUrl = (polisId: number) => `/begroting/${encodeURIComponent(g.administratieId)}/${encodeURIComponent(g.versie.id)}/module/verzekeringen/maandverloop?polisId=${polisId}`;
-    stuurHtml(res, 200, renderVerzekeringenForm({ actieUrl, terugUrl, regels: veldRegels, beoordeeld, portefeuilleTotaal: fmtBedragKort(totaal), alleenLezen: g.versie.status !== "CONCEPT", pnlHtml, maandverloopUrl }));
+    stuurHtml(res, 200, renderVerzekeringenForm({ actieUrl, terugUrl, regels: veldRegels, beoordeeld, portefeuilleTotaal: fmtBedragKort(totaal), alleenLezen: g.versie.status !== "CONCEPT", pnlHtml, maandverloopUrl, fragment: isFragmentVerzoek(req) }));
     return true;
   }
 
@@ -1359,7 +1375,7 @@ async function handleGeplandOnderhoud(req: IncomingMessage, res: ServerResponse,
       notitie: a.notitie ?? "",
     }));
     const jaartotaal = activiteiten.reduce((t, a) => t.plus(a.q1).plus(a.q2).plus(a.q3).plus(a.q4), new Decimal(0));
-    stuurHtml(res, 200, renderGeplandOnderhoudForm({ actieUrl, terugUrl, regels, beoordeeld, jaartotaal: fmtBedragKort(jaartotaal), alleenLezen: g.versie.status !== "CONCEPT", onderhoudTotaal }));
+    stuurHtml(res, 200, renderGeplandOnderhoudForm({ actieUrl, terugUrl, regels, beoordeeld, jaartotaal: fmtBedragKort(jaartotaal), alleenLezen: g.versie.status !== "CONCEPT", onderhoudTotaal, fragment: isFragmentVerzoek(req) }));
     return true;
   }
 
@@ -1518,6 +1534,7 @@ async function handleGemeentelijkeLasten(req: IncomingMessage, res: ServerRespon
       alleenLezen: g.versie.status !== "CONCEPT",
       pnlHtml: vergelijkend !== null ? moduleWerkomgevingPnLHtml(vergelijkend, ["GEMEENTELIJKE_LASTEN"]) : "",
       wozHistorieCsvUrl: `/begroting/${encodeURIComponent(g.administratieId)}/${encodeURIComponent(g.versie.id)}/module/gemeentelijke-lasten/woz-historie.csv`,
+      fragment: isFragmentVerzoek(req),
     }),
   );
   return true;
