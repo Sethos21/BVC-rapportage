@@ -85,6 +85,7 @@ import { schrijfGeplandOnderhoudBeoordeeld } from "./geplandOnderhoudBeoordeeld.
 import { schrijfVerzekeringBeoordeeld } from "./verzekeringBeoordeeld.js";
 import { schrijfVerzekeringRegels, type VerzekeringRegelInvoer } from "./verzekeringRegels.js";
 import { stelBegrotingVast } from "./vaststellen.js";
+import { isModuleVerborgen, toonModule, verbergModule } from "./verborgenOnderdelen.js";
 import { schrijfWozObjecten, type WozObjectInvoer } from "./wozObjecten.js";
 
 let dir: string;
@@ -698,6 +699,75 @@ describe("stelBegrotingVast — Fase 2C.5: Module 3 verplicht bij vaststellen", 
     expect(leesFrozenBegrotingsresultaat(db, versie.id)).toBeNull(); // geen frozen Module 1/2
     expect(leesFrozenModule3Resultaat(db, versie.id)).toBeNull(); // geen frozen Module 3
     expect(leesModule3Invoer(db, versie.id)).toBeNull(); // nog steeds geen invoer — niets stilzwijgend aangemaakt
+  });
+
+  it("A2 (UX_10, CONTRACTCONFLICT-besluit 2026-10-06): Managementvergoeding verborgen + geen invoer -> vaststellen slaagt met een geldig, controlevrij €0-resultaat; de echte module3Invoer-tabel blijft leeg", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    zet070InputNeer(versie.id); // geldige Module-1/2-input, BEWUST geen schrijfModule3Invoer
+    schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
+    schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
+    schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
+    schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
+
+    verbergModule(db, "070", "MANAGEMENT");
+
+    const resultaat = stelBegrotingVast(db, versie.id);
+    expect(resultaat.module3.jaartotaal.bedrag.toString()).toBe("0");
+    expect(resultaat.module3.controleVereist).toEqual([]);
+    expect(leesBegrotingsversie(db, versie.id)!.status).toBe("VASTGESTELD");
+
+    // De substitutie bestaat uitsluitend in-memory voor deze berekening — nooit in de echte tabel geschreven.
+    expect(leesModule3Invoer(db, versie.id)).toBeNull();
+  });
+
+  it("A3 (UX_10): Managementvergoeding verborgen MAAR met bestaande invoer -> die bestaande invoer blijft leidend, verbergen verandert het resultaat niet", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    zet070InputNeer(versie.id);
+    schrijfModule3Invoer(db, versie.id, MODULE3_STANDAARD); // bestaande, echte invoer (bedrag 500)
+    schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
+    schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
+    schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
+    schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
+
+    verbergModule(db, "070", "MANAGEMENT");
+
+    const resultaat = stelBegrotingVast(db, versie.id);
+    // Punt 5/7: verbergen mag een bestaand bedrag nooit stilzwijgend op €0 zetten — de echte invoer (500/mnd) blijft leidend.
+    expect(resultaat.module3.jaartotaal.bedrag.toString()).toBe("6000");
+  });
+
+  it("A4 (UX_10): weergeven (toonModule) na verbergen herstelt de bestaande blokkade — invoer en beoordeling blijven ongewijzigd, nergens stilzwijgend hersteld/verzonnen", () => {
+    const versie = maakBegrotingsversie(db, NIEUWE_VERSIE_INPUT);
+    zet070InputNeer(versie.id);
+    schrijfGeplandOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versie.id, true);
+    schrijfVerzekeringBeoordeeld(db, versie.id, true);
+    schrijfGemeentelijkeLastenModule(db, versie.id, GEMEENTELIJKE_LASTEN_ZERO_OBJECTS);
+    schrijfAlgemeneKostenCategorieState(db, versie.id, ALGEMENE_KOSTEN_ZERO_REGELS);
+    schrijfLeegstandCategorieState(db, versie.id, LEEGSTAND_ZERO_REGELS);
+    schrijfRenteCategorieState(db, versie.id, RENTE_ZERO_REGELS);
+    schrijfGeplandeVerkoopBeoordeeld(db, versie.id, true);
+    schrijfNietVerrekenbareBtwState(db, versie.id, { beoordeeld: true, vorigJaarWerkelijk: null });
+
+    verbergModule(db, "070", "MANAGEMENT");
+    expect(isModuleVerborgen(db, "070", "MANAGEMENT")).toBe(true);
+    toonModule(db, "070", "MANAGEMENT");
+    expect(isModuleVerborgen(db, "070", "MANAGEMENT")).toBe(false);
+
+    // Terug naar de oorspronkelijke, ongewijzigde blokkade — exact dezelfde foutmelding als test A.
+    expect(() => stelBegrotingVast(db, versie.id)).toThrow(/Module-3-invoer/);
+    expect(leesModule3Invoer(db, versie.id)).toBeNull();
+    expect(leesBegrotingsversie(db, versie.id)!.status).toBe("CONCEPT");
   });
 
   it("B. INDEXEER_BESTAAND: volledige keten persistente input → vaststellen → frozen Module 3 → read-back exact", () => {

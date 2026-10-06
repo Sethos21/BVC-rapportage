@@ -759,6 +759,179 @@ describe("Inline-uitklapbare detailweergave op het hoofdscherm (UX-uitrol, ARCHI
   });
 });
 
+/**
+ * UX_10 "Verborgen onderdelen" (CONTRACTCONFLICT-besluit 2026-10-06) — end-to-end via echte
+ * HTTP-routes: verbergen/weergeven, persistentie, hoofdscherm-weergave, en het effect op
+ * vaststellen (geen Module-3-invoer meer vereist zodra verborgen). Uitsluitend Managementvergoeding.
+ */
+describe("Verborgen onderdelen — Managementvergoeding (UX_10, CONTRACTCONFLICT-besluit)", () => {
+  async function nieuweVersie(baseUrl: string): Promise<string> {
+    const nieuw = await fetch(`${baseUrl}/begroting/nieuw`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ administratieId: ADMINISTRATIE_ID, begrotingsjaar: "2027", laatstAfgeslotenBoekperiode: "06", indexatiePercentage: "3" }).toString(),
+      redirect: "manual",
+    });
+    const hoofdschermUrl = nieuw.headers.get("location")!;
+    return hoofdschermUrl.split("/")[3]!.split("?")[0]!;
+  }
+
+  it("verbergen zonder bestaande invoer: bevestigingsscherm -> hoofdscherm toont 'Verborgen onderdelen' i.p.v. de Management-rij -> weergeven herstelt de rij", async () => {
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "boekingen.xlsx"), []);
+
+    await metServer(async (baseUrl) => {
+      const versieId = await nieuweVersie(baseUrl);
+      const managementUrl = `${baseUrl}/begroting/${ADMINISTRATIE_ID}/${versieId}/module/management`;
+      const verbergenUrl = `${managementUrl}/verbergen`;
+
+      // Vóór verbergen: Management staat gewoon op het hoofdscherm, verbergen-link zichtbaar op het Management-scherm.
+      const managementHtmlVoor = await (await fetch(`${managementUrl}?laatstAfgeslotenBoekperiode=06`)).text();
+      expect(managementHtmlVoor).toContain("Niet van toepassing — dit onderdeel verbergen");
+
+      const hoofdschermVoor = await (await fetch(`${baseUrl}/begroting/${ADMINISTRATIE_ID}/${versieId}?laatstAfgeslotenBoekperiode=06`)).text();
+      expect(hoofdschermVoor).toContain("Managementvergoeding");
+      expect(hoofdschermVoor).not.toContain("Verborgen onderdelen");
+
+      // Bevestigingsscherm.
+      const bevestigScherm = await (await fetch(verbergenUrl)).text();
+      expect(bevestigScherm).toContain("niet van toepassing");
+      expect(bevestigScherm).toContain('name="bevestiging"');
+
+      // Zonder de checkbox: geweigerd, geen wijziging.
+      const zonderBevestiging = await fetch(verbergenUrl, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({}).toString() });
+      expect(zonderBevestiging.status).toBe(400);
+
+      // Met expliciete bevestiging: verbergen slaagt.
+      const metBevestiging = await fetch(verbergenUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ bevestiging: "1" }).toString(),
+        redirect: "manual",
+      });
+      expect(metBevestiging.status).toBe(302);
+
+      // Na verbergen: hoofdscherm toont GEEN Managementvergoeding-rij meer, wel het "Verborgen onderdelen"-paneel met Weergeven.
+      const hoofdschermNa = await (await fetch(`${baseUrl}/begroting/${ADMINISTRATIE_ID}/${versieId}?laatstAfgeslotenBoekperiode=06`)).text();
+      expect(hoofdschermNa).toContain("Verborgen onderdelen");
+      expect(hoofdschermNa).toContain("Weergeven");
+      expect(hoofdschermNa).not.toContain('data-expand="MANAGEMENTVERGOEDING--management"');
+
+      // Management-scherm zelf toont nu de "niet van toepassing"-banner i.p.v. het formulier.
+      const managementHtmlNa = await (await fetch(`${managementUrl}?laatstAfgeslotenBoekperiode=06`)).text();
+      expect(managementHtmlNa).toContain("Niet van toepassing.");
+      expect(managementHtmlNa).not.toContain('name="wijze"');
+
+      // Weergeven herstelt de rij.
+      const weergevenResp = await fetch(`${managementUrl}/weergeven`, { method: "POST", redirect: "manual" });
+      expect(weergevenResp.status).toBe(302);
+      const hoofdschermNaWeergeven = await (await fetch(`${baseUrl}/begroting/${ADMINISTRATIE_ID}/${versieId}?laatstAfgeslotenBoekperiode=06`)).text();
+      expect(hoofdschermNaWeergeven).toContain("Managementvergoeding");
+      expect(hoofdschermNaWeergeven).not.toContain("Verborgen onderdelen");
+    });
+  });
+
+  it("verbergen is geblokkeerd zodra er al Module-3-invoer bestaat — geen enkel bestaand bedrag verdwijnt onzichtbaar uit de P&L", async () => {
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "boekingen.xlsx"), []);
+
+    await metServer(async (baseUrl) => {
+      const versieId = await nieuweVersie(baseUrl);
+      const managementUrl = `${baseUrl}/begroting/${ADMINISTRATIE_ID}/${versieId}/module/management`;
+
+      await fetch(`${managementUrl}?laatstAfgeslotenBoekperiode=06`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ wijze: "NIEUWE_VERGOEDING", bedrag: "500", eenheid: "MAAND", ingangsdatum: "" }).toString(),
+      });
+
+      const bevestigScherm = await fetch(`${managementUrl}/verbergen`);
+      expect(bevestigScherm.status).toBe(200);
+      expect(await bevestigScherm.text()).toContain("Er is al invoer vastgelegd");
+
+      const poging = await fetch(`${managementUrl}/verbergen`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ bevestiging: "1" }).toString(),
+      });
+      expect(poging.status).toBe(400);
+      expect(await poging.text()).toContain("Er is al invoer vastgelegd");
+
+      // Hoofdscherm toont Management nog gewoon — niets is verdwenen.
+      const hoofdscherm = await (await fetch(`${baseUrl}/begroting/${ADMINISTRATIE_ID}/${versieId}?laatstAfgeslotenBoekperiode=06`)).text();
+      expect(hoofdscherm).toContain("Managementvergoeding");
+      expect(hoofdscherm).not.toContain("Verborgen onderdelen");
+    });
+  });
+
+  it("verborgen + geen invoer: vaststellen slaagt (geen Module-3-invoer meer vereist); niet-verborgen blokkeert nog steeds zoals voorheen", async () => {
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "boekingen.xlsx"), []);
+    const {
+      schrijfGeplandOnderhoudBeoordeeld,
+      schrijfCorrectiefDagelijksOnderhoudRegels,
+      schrijfCorrectiefDagelijksOnderhoudBeoordeeld,
+      schrijfVerzekeringBeoordeeld,
+      schrijfGemeentelijkeLastenModule,
+      schrijfAlgemeneKostenCategorieState,
+      schrijfLeegstandCategorieState,
+      schrijfRenteCategorieState,
+      schrijfNietVerrekenbareBtwState,
+    } = await import("@bvc/begroting-data");
+    const { ALGEMENE_KOSTEN_CATEGORIEEN, LEEGSTAND_CATEGORIEEN, RENTE_CATEGORIEEN } = await import("@bvc/reporting");
+
+    function vulRestVanDeKetenIn(versieId: string): void {
+      const db = openOrCreateDatabase(begrotingsversiesDatabasePad(root, ADMINISTRATIE_ID));
+      schrijfGeplandOnderhoudBeoordeeld(db, versieId, true);
+      schrijfCorrectiefDagelijksOnderhoudRegels(db, versieId, []);
+      schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versieId, true);
+      schrijfVerzekeringBeoordeeld(db, versieId, true);
+      schrijfGemeentelijkeLastenModule(db, versieId, { werkelijkeGemeentelijkeLasten: null, wozStijgingPercentage: null, lastenPercentageStijging: null, begrotingsPercentageOverride: null, beoordeeld: true });
+      schrijfAlgemeneKostenCategorieState(db, versieId, Object.fromEntries(ALGEMENE_KOSTEN_CATEGORIEEN.map((c: string) => [c, { beoordeeld: true, vorigJaarBedrag: null, verwachteVerhogingPercentage: null }])) as never);
+      schrijfLeegstandCategorieState(
+        db,
+        versieId,
+        Object.fromEntries(LEEGSTAND_CATEGORIEEN.map((c: string) => [c, { beoordeeld: true, laatstBekendServicekostenvoorschotJaar: null, laatstBekendServicekostenvoorschotJaarHerkomst: null, verwachteLeegstandsperiodeMaanden: null }])) as never,
+      );
+      schrijfRenteCategorieState(db, versieId, Object.fromEntries(RENTE_CATEGORIEEN.map((c: string) => [c, { beoordeeld: true }])) as never);
+      schrijfNietVerrekenbareBtwState(db, versieId, { beoordeeld: true, vorigJaarWerkelijk: null });
+      db.close();
+    }
+
+    await metServer(async (baseUrl) => {
+      // Scenario 1: NIET verborgen, geen invoer -> blokkeert (ongewijzigd bestaand gedrag).
+      const versieId1 = await nieuweVersie(baseUrl);
+      vulRestVanDeKetenIn(versieId1);
+      const vaststelPoging1 = await fetch(`${baseUrl}/begroting/${ADMINISTRATIE_ID}/${versieId1}/vaststellen?laatstAfgeslotenBoekperiode=06`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ bevestigd: "1" }).toString(),
+      });
+      expect(vaststelPoging1.status).toBe(400);
+      expect(await vaststelPoging1.text()).toContain("Vaststellen kan nog niet");
+
+      // Scenario 2: WEL verborgen, geen invoer -> vaststellen slaagt.
+      const versieId2 = await nieuweVersie(baseUrl);
+      vulRestVanDeKetenIn(versieId2);
+      await fetch(`${baseUrl}/begroting/${ADMINISTRATIE_ID}/${versieId2}/module/management/verbergen`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ bevestiging: "1" }).toString(),
+      });
+      const vaststelPoging2 = await fetch(`${baseUrl}/begroting/${ADMINISTRATIE_ID}/${versieId2}/vaststellen?laatstAfgeslotenBoekperiode=06`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ bevestigd: "1" }).toString(),
+        redirect: "manual",
+      });
+      expect(vaststelPoging2.status).toBe(302);
+
+      // VASTGESTELD: verbergen/weergeven-routes weigeren nu (alleen-lezen).
+      const verbergenNaVaststellen = await fetch(`${baseUrl}/begroting/${ADMINISTRATIE_ID}/${versieId2}/module/management/verbergen`);
+      expect(verbergenNaVaststellen.status).toBe(400);
+      const weergevenNaVaststellen = await fetch(`${baseUrl}/begroting/${ADMINISTRATIE_ID}/${versieId2}/module/management/weergeven`, { method: "POST" });
+      expect(weergevenNaVaststellen.status).toBe(400);
+    });
+  });
+});
+
 function pnlMapping(grootboekrekening: string, economischeCategorie: string): Parameters<typeof voegPnLBronmappingMutatieToe>[1] {
   return {
     bedrijfsnr: BEDRIJFSNR,

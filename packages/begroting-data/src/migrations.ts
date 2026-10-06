@@ -4458,6 +4458,30 @@ export const MIGRATIONS: readonly Migration[] = [
       `ALTER TABLE begroting_aannames ADD COLUMN laatst_afgesloten_boekperiode TEXT NULL CHECK (laatst_afgesloten_boekperiode IS NULL OR (length(laatst_afgesloten_boekperiode) = 2 AND laatst_afgesloten_boekperiode BETWEEN '01' AND '12'))`,
     ],
   },
+
+  /**
+   * Migratie 43 — UX_10 "Verborgen onderdelen" (CONTRACTCONFLICT-besluit 2026-10-06), uitsluitend
+   * Managementvergoeding (zie `verborgenOnderdelen.ts`'s moduledoc): een per-ADMINISTRATIE
+   * (`bedrijfsnr`, niet per begrotingsversie — vandaar geen FK naar `begrotingsversies`), expliciet
+   * en herstelbaar "niet van toepassing"-vlag. AANWEZIGHEID van een rij = verborgen; verwijderen
+   * (`DELETE`) = weer tonen — geen apart boolean-veld nodig. `module_key` is bewust CHECK-beperkt
+   * tot uitsluitend `'MANAGEMENT'`: dit is GEEN generiek verbergmechanisme voor alle modules
+   * (expliciet buiten scope per besluit — Canon/Erfpacht en Geplande verkoop blijven HOLD, andere
+   * modules worden niet generiek verbergbaar zonder afzonderlijk vastgesteld besluit). Schrijft/
+   * wijzigt GEEN bestaande financiële tabel — puur additief, eigen tabel.
+   */
+  {
+    version: 43,
+    description: "begroting_verborgen_onderdelen: UX_10 'niet van toepassing', uitsluitend Managementvergoeding",
+    ddl: [
+      `CREATE TABLE begroting_verborgen_onderdelen (
+        bedrijfsnr TEXT NOT NULL,
+        module_key TEXT NOT NULL CHECK (module_key IN ('MANAGEMENT')),
+        verborgen_op TEXT NOT NULL,
+        PRIMARY KEY (bedrijfsnr, module_key)
+      )`,
+    ],
+  },
 ];
 
 function schemaMetaTableExists(db: DatabaseSync): boolean {

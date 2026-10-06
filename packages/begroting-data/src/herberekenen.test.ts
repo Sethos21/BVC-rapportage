@@ -154,6 +154,23 @@ describe("herberekenBegroting — status/bestaan/verplichte input", () => {
     const resultaat = herberekenBegroting(db, versie.id);
     expect(resultaat.module2.complexen).toEqual([]);
   });
+
+  it("6 (UX_10, CONTRACTCONFLICT-besluit 2026-10-06): zonder verborgen-markering blijft module3 null bij ontbrekende invoer (ongewijzigd bestaand gedrag)", () => {
+    const versie = maakMinimaalGeldigeConceptVersie();
+    const resultaat = herberekenBegroting(db, versie.id);
+    expect(resultaat.module3).toBeNull();
+  });
+
+  it("7 (UX_10, CONTRACTCONFLICT-besluit 2026-10-06): Managementvergoeding verborgen voor deze administratie + geen invoer -> CONCEPT-voorvertoning toont een geldig, controlevrij €0-resultaat i.p.v. null/onbekend", async () => {
+    const { verbergModule } = await import("./verborgenOnderdelen.js");
+    const versie = maakMinimaalGeldigeConceptVersie();
+    verbergModule(db, "070", "MANAGEMENT");
+
+    const resultaat = herberekenBegroting(db, versie.id);
+    expect(resultaat.module3).not.toBeNull();
+    expect(resultaat.module3!.jaartotaal.bedrag.toString()).toBe("0");
+    expect(resultaat.module3!.controleVereist).toEqual([]);
+  });
 });
 
 describe("herberekenBegroting — autoritatieve velden", () => {

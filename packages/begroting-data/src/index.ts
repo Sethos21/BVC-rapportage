@@ -292,8 +292,12 @@ export {
 } from "./verzekeringEstimated.js";
 
 // Canon erfpacht (OB-034) — UITSLUITEND concept-persistence (regels per complex +
-// beoordeeld-vlag). Geen integratie in herberekenen/vaststellen/frozen en geen
-// "verborgen module"-registratie — zie migratie 28 en de oplevering.
+// beoordeeld-vlag). Geen integratie in herberekenen/vaststellen/frozen. Canon blijft
+// HOLD (geen UI) — zie Master Contract. De "verborgen module"-registratie waarnaar deze
+// comment eerder verwees bestaat inmiddels (migratie 43, zie `verborgenOnderdelen.js`
+// hieronder), maar UITSLUITEND voor Managementvergoeding — Canon is daar bewust geen
+// onderdeel van (CONTRACTCONFLICT-besluit 2026-10-06: "maak andere modules niet generiek
+// verbergbaar zonder afzonderlijk vastgesteld besluit").
 export {
   schrijfCanonErfpachtRegels,
   leesCanonErfpachtRegels,
@@ -301,6 +305,12 @@ export {
   type CanonErfpachtRegelInvoer,
 } from "./canonErfpachtRegels.js";
 export { schrijfCanonErfpachtBeoordeeld, leesCanonErfpachtBeoordeeld } from "./canonErfpachtBeoordeeld.js";
+
+// UX_10 "Verborgen onderdelen" (CONTRACTCONFLICT-besluit 2026-10-06, migratie 43) —
+// uitsluitend Managementvergoeding, per administratie. Zie `verborgenOnderdelen.ts`'s
+// moduledoc en `herberekenen.ts`'s `HerberekenInvoer`-moduledoc voor de ene plek waar dit
+// de Module-3-berekening beïnvloedt.
+export { VERBERGBARE_MODULES, isModuleVerborgen, leesVerborgenModules, verbergModule, toonModule, type VerbergbareModule } from "./verborgenOnderdelen.js";
 
 // DELTA BUILD 3 (2026-09-24) — Onderhoud-brede orchestratie: Begroting
 // (Gepland + Correctief/Dagelijks) + Werkelijk (exact éénmaal, op

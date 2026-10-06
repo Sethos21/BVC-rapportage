@@ -28,6 +28,7 @@ import {
   leesRenteCategorieState,
   leesRenteEstimatedVerwachting,
   leesRenteRegels,
+  leesVerborgenModules,
   leesVerzekeringBeoordeeld,
   leesVerzekeringRegels,
   leesWozHistorieCsv,
@@ -60,7 +61,10 @@ import {
   schrijfVerzekeringRegels,
   schrijfWozObjecten,
   schrijfWozSetBevestigd,
+  isModuleVerborgen,
   stelBegrotingVast,
+  toonModule,
+  verbergModule,
   verwijderConceptVersie,
   VoorstelOvernameGeweigerdError,
   type AlgemeneKostenRegelInvoer,
@@ -106,6 +110,7 @@ import {
   renderKiesBoekperiodeScherm,
   renderLeegstandForm,
   renderManagementForm,
+  renderManagementVerbergenScherm,
   renderRenteForm,
   renderVerwijderBevestigingScherm,
   renderVerzekeringenForm,
@@ -222,6 +227,7 @@ function hoofdschermUrl(administratieId: string, versieId: string, laatstAfgeslo
 async function toonHoofdscherm(res: ServerResponse, g: Geopend, laatstAfgeslotenBoekperiode: string, melding?: string): Promise<void> {
   try {
     const vergelijkend = leesBegrotingsWerkomgeving(g.root, g.administratieId, g.bedrijfsnr, g.db, g.versie, laatstAfgeslotenBoekperiode);
+    const verborgenModules = leesVerborgenModules(g.db, g.bedrijfsnr);
     stuurHtml(
       res,
       200,
@@ -231,6 +237,7 @@ async function toonHoofdscherm(res: ServerResponse, g: Geopend, laatstAfgesloten
         versie: g.versie,
         vergelijkend,
         laatstAfgeslotenBoekperiode,
+        verborgenModules,
         ...(melding !== undefined ? { melding } : {}),
       }),
     );
@@ -599,6 +606,89 @@ export async function handleBegrotingRequest(root: string, req: IncomingMessage,
     }
   }
 
+  // GET/POST /begroting/{administratieId}/{versieId}/module/management/verbergen (UX_10, CONTRACTCONFLICT-besluit 2026-10-06)
+  if (segmenten.length === 6 && segmenten[3] === "module" && segmenten[4] === "management" && segmenten[5] === "verbergen") {
+    const g = open(root, administratieId, versieId);
+    if (g === null) {
+      stuurHtml(res, 404, renderFoutPagina("Niet gevonden", "Deze begrotingsversie of administratie bestaat niet."));
+      return true;
+    }
+    try {
+      const managementUrl = `/begroting/${encodeURIComponent(administratieId)}/${encodeURIComponent(versieId)}/module/management`;
+      const verbergenUrl = `${managementUrl}/verbergen`;
+      if (g.versie.status !== "CONCEPT") {
+        stuurHtml(res, 400, renderFoutPagina("Niet meer wijzigbaar", "Deze begrotingsversie is vastgesteld en is alleen-lezen.", managementUrl));
+        return true;
+      }
+      const bestaandeInvoer = leesModule3Invoer(g.db, g.versie.id);
+      if (req.method === "GET") {
+        stuurHtml(res, 200, renderManagementVerbergenScherm({ administratieId, weergavenaam: g.weergavenaam, versie: g.versie, heeftBestaandeInvoer: bestaandeInvoer !== null, actieUrl: verbergenUrl, terugUrl: managementUrl }));
+        return true;
+      }
+      if (req.method === "POST") {
+        if (bestaandeInvoer !== null) {
+          // Punt 7 (CONTRACTCONFLICT-besluit): een bestaand bedrag mag nooit onzichtbaar uit de P&L verdwijnen — verbergen wordt hier hard geweigerd, ongeacht wat de POST-body beweert.
+          stuurHtml(
+            res,
+            400,
+            renderFoutPagina(
+              "Verbergen niet mogelijk",
+              "Er is al invoer vastgelegd voor Managementvergoeding bij deze administratie — verbergen is pas mogelijk nadat die invoer is verwijderd op het Managementvergoeding-scherm.",
+              managementUrl,
+            ),
+          );
+          return true;
+        }
+        const velden = Object.fromEntries(new URLSearchParams(await leesBody(req)));
+        if (tekst(velden["bevestiging"]) !== "1") {
+          stuurHtml(
+            res,
+            400,
+            renderManagementVerbergenScherm({
+              administratieId,
+              weergavenaam: g.weergavenaam,
+              versie: g.versie,
+              heeftBestaandeInvoer: false,
+              actieUrl: verbergenUrl,
+              terugUrl: managementUrl,
+              fouten: ["Bevestig expliciet dat Managementvergoeding voor deze administratie niet van toepassing is."],
+            }),
+          );
+          return true;
+        }
+        verbergModule(g.db, g.bedrijfsnr, "MANAGEMENT");
+        const laatstAfgeslotenBoekperiode = opgeslagenBoekperiode(g);
+        stuurRedirect(res, laatstAfgeslotenBoekperiode !== null ? hoofdschermUrl(administratieId, versieId, laatstAfgeslotenBoekperiode, "Managementvergoeding is gemarkeerd als niet van toepassing.") : managementUrl);
+        return true;
+      }
+      return false;
+    } finally {
+      g.db.close();
+    }
+  }
+
+  // POST /begroting/{administratieId}/{versieId}/module/management/weergeven (UX_10: herstellen)
+  if (req.method === "POST" && segmenten.length === 6 && segmenten[3] === "module" && segmenten[4] === "management" && segmenten[5] === "weergeven") {
+    const g = open(root, administratieId, versieId);
+    if (g === null) {
+      stuurHtml(res, 404, renderFoutPagina("Niet gevonden", "Deze begrotingsversie of administratie bestaat niet."));
+      return true;
+    }
+    try {
+      const managementUrl = `/begroting/${encodeURIComponent(administratieId)}/${encodeURIComponent(versieId)}/module/management`;
+      if (g.versie.status !== "CONCEPT") {
+        stuurHtml(res, 400, renderFoutPagina("Niet meer wijzigbaar", "Deze begrotingsversie is vastgesteld en is alleen-lezen.", managementUrl));
+        return true;
+      }
+      toonModule(g.db, g.bedrijfsnr, "MANAGEMENT");
+      const laatstAfgeslotenBoekperiode = opgeslagenBoekperiode(g);
+      stuurRedirect(res, laatstAfgeslotenBoekperiode !== null ? hoofdschermUrl(administratieId, versieId, laatstAfgeslotenBoekperiode, "Managementvergoeding is weer zichtbaar.") : managementUrl);
+      return true;
+    } finally {
+      g.db.close();
+    }
+  }
+
   // GET/POST /begroting/{administratieId}/{versieId}/module/{moduleKey}
   if (segmenten.length === 5 && segmenten[3] === "module") {
     const moduleKey = segmenten[4]!;
@@ -929,7 +1019,37 @@ async function handleManagement(req: IncomingMessage, res: ServerResponse, g: Ge
             ? { ...leeg, wijze: huidig.wijze, bestaandBedrag: huidig.bestaandBedrag.toString(), bestaandEenheid: huidig.eenheid, indexatiePercentage: huidig.indexatiePercentage.toString(), indexatiedatum: huidig.indexatiedatum.toISOString().slice(0, 10) }
             : { ...leeg, wijze: huidig.wijze, nieuwBedrag: huidig.nieuwBedrag.toString(), nieuweEenheid: huidig.nieuweEenheid };
     const pnlHtml = vergelijkend !== null ? moduleWerkomgevingPnLHtml(vergelijkend, ["MANAGEMENTVERGOEDING"]) : "";
-    stuurHtml(res, 200, renderManagementForm({ actieUrl, terugUrl, huidig: form, alleenLezen: g.versie.status !== "CONCEPT", pnlHtml, fragment: isFragmentVerzoek(req) }));
+    const verborgen = isModuleVerborgen(g.db, g.bedrijfsnr, "MANAGEMENT");
+    const verbergenUrl = `/begroting/${encodeURIComponent(g.administratieId)}/${encodeURIComponent(g.versie.id)}/module/management/verbergen`;
+    const weergevenUrl = `/begroting/${encodeURIComponent(g.administratieId)}/${encodeURIComponent(g.versie.id)}/module/management/weergeven`;
+    stuurHtml(
+      res,
+      200,
+      renderManagementForm({
+        actieUrl,
+        terugUrl,
+        huidig: form,
+        alleenLezen: g.versie.status !== "CONCEPT",
+        pnlHtml,
+        fragment: isFragmentVerzoek(req),
+        verborgen,
+        verbergenUrl,
+        weergevenUrl,
+      }),
+    );
+    return true;
+  }
+
+  if (isModuleVerborgen(g.db, g.bedrijfsnr, "MANAGEMENT")) {
+    stuurHtml(
+      res,
+      400,
+      renderFoutPagina(
+        "Niet van toepassing",
+        "Managementvergoeding is voor deze administratie gemarkeerd als niet van toepassing — maak het onderdeel eerst weer zichtbaar voordat je invoer opslaat.",
+        terugUrl,
+      ),
+    );
     return true;
   }
 

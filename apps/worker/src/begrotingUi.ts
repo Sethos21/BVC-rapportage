@@ -489,7 +489,14 @@ export interface HoofdschermOpties {
   vergelijkend: VergelijkendeBegrotingsPnLResultaat;
   laatstAfgeslotenBoekperiode: string;
   melding?: string;
+  /** UX_10 "Verborgen onderdelen" (CONTRACTCONFLICT-besluit 2026-10-06) — module-sleutels ("MANAGEMENT") die voor deze administratie als niet van toepassing zijn gemarkeerd. */
+  verborgenModules?: readonly string[];
 }
+
+/** Koppelt een verbergbare module-sleutel aan de bijbehorende P&L-regelSleutel(s) en weergavenaam — uitsluitend Managementvergoeding. */
+const VERBORGEN_MODULE_INFO: Record<string, { label: string; regelSleutels: readonly string[] }> = {
+  MANAGEMENT: { label: "Managementvergoeding", regelSleutels: ["MANAGEMENTVERGOEDING"] },
+};
 
 const GROEP_VOLGORDE: readonly PnLGroepBovenEbitda[] = ["OPBRENGSTEN", "MANAGEMENT_EN_BEHEER", "EXPLOITATIE_LASTEN", "ALGEMENE_KOSTEN"];
 
@@ -582,8 +589,11 @@ const HOOFDSCHERM_SCRIPT = `
 
 export function renderBegrotingHoofdscherm(o: HoofdschermOpties): string {
   const { vergelijkend } = o;
-  const bovenRegels = vergelijkend.regels.filter((r) => r.boomPositie === "BOVEN_EBITDA");
-  const onderRegels = vergelijkend.regels.filter((r) => r.boomPositie === "ONDER_EBITDA");
+  const verborgenModules = o.verborgenModules ?? [];
+  // UX_10 "Verborgen onderdelen": een verborgen module's regel(s) tellen niet mee in de hoofdtabel — "uitsluitend zichtbare, toepasselijke onderdelen tellen mee" (§10). De onderliggende P&L-waarde zelf (bewust €0, zie herberekenen.ts) blijft ongewijzigd in de EBITDA-som.
+  const verborgenRegelSleutels = new Set(verborgenModules.flatMap((m) => VERBORGEN_MODULE_INFO[m]?.regelSleutels ?? []));
+  const bovenRegels = vergelijkend.regels.filter((r) => r.boomPositie === "BOVEN_EBITDA" && !verborgenRegelSleutels.has(r.regelSleutel));
+  const onderRegels = vergelijkend.regels.filter((r) => r.boomPositie === "ONDER_EBITDA" && !verborgenRegelSleutels.has(r.regelSleutel));
 
   const groepenHtml = GROEP_VOLGORDE.map((groep) => {
     const regels = bovenRegels.filter((r) => r.groep === groep);
@@ -592,6 +602,24 @@ export function renderBegrotingHoofdscherm(o: HoofdschermOpties): string {
   }).join("");
 
   const onderHtml = onderRegels.length > 0 ? `<tr class="groep"><td colspan="6">Onder EBITDA</td></tr>${onderRegels.map((r) => regelRij(o, r)).join("")}` : "";
+
+  const verborgenOnderdelenHtml =
+    verborgenModules.length === 0
+      ? ""
+      : `<div class="card">
+      <h2 style="margin-top:0">Verborgen onderdelen</h2>
+      <ul class="lijst">
+        ${verborgenModules
+          .map((m) => {
+            const info = VERBORGEN_MODULE_INFO[m];
+            const weergevenUrl = `/begroting/${encodeURIComponent(o.administratieId)}/${encodeURIComponent(o.versie.id)}/module/${m.toLowerCase()}/weergeven`;
+            return `<li><span>${escapeHtml(info?.label ?? m)} — niet van toepassing</span>${
+              o.versie.status === "CONCEPT" ? `<form method="POST" action="${escapeHtml(weergevenUrl)}" style="display:inline"><button type="submit" class="secundair">Weergeven</button></form>` : ""
+            }</li>`;
+          })
+          .join("")}
+      </ul>
+    </div>`;
 
   const ebitdaRij = (naam: string, resultaat: (typeof vergelijkend)["werkelijk"] | null) =>
     resultaat === null
@@ -623,6 +651,7 @@ export function renderBegrotingHoofdscherm(o: HoofdschermOpties): string {
         </tbody>
       </table>
     </div>
+    ${verborgenOnderdelenHtml}
     <a class="terug" href="/begroting?administratieId=${encodeURIComponent(o.administratieId)}">← Terug naar begrotingskeuze</a>
     ${HOOFDSCHERM_SCRIPT}`;
   return werkomgevingShell(
@@ -798,10 +827,32 @@ export interface ManagementFormOpties {
   fragment?: boolean;
   huidig: { wijze: string; bedrag: string; eenheid: string; ingangsdatum: string; bestaandBedrag: string; bestaandEenheid: string; indexatiePercentage: string; indexatiedatum: string; nieuwBedrag: string; nieuweEenheid: string };
   pnlHtml?: string;
+  /** UX_10 "Verborgen onderdelen" (CONTRACTCONFLICT-besluit 2026-10-06) — uitsluitend Managementvergoeding. */
+  verborgen?: boolean;
+  verbergenUrl?: string;
+  weergevenUrl?: string;
 }
 
 export function renderManagementForm(o: ManagementFormOpties): string {
   const eenheidOpties = (naam: string, huidig: string) => `<select name="${naam}"><option value="MAAND"${huidig === "MAAND" ? " selected" : ""}>per maand</option><option value="JAAR"${huidig === "JAAR" ? " selected" : ""}>per jaar</option></select>`;
+
+  if (o.verborgen === true) {
+    const inhoud = `
+      ${o.pnlHtml ?? ""}
+      <div class="banner">
+        <strong>Niet van toepassing.</strong> Managementvergoeding is voor deze administratie gemarkeerd als niet van toepassing — de post telt mee als bewust €0 en blokkeert vaststellen niet.
+      </div>
+      ${
+        o.alleenLezen
+          ? ""
+          : `<form method="POST" action="${escapeHtml(o.weergevenUrl ?? "")}">
+        <button type="submit" class="secundair">Weergeven</button>
+      </form>`
+      }`;
+    return moduleFormShell({ titel: "Managementvergoeding", terugUrl: o.terugUrl, ...(o.fouten !== undefined ? { fouten: o.fouten } : {}), inhoud, alleenLezen: o.alleenLezen === true, fragment: o.fragment === true });
+  }
+
+  const verbergenLinkHtml = o.alleenLezen || !o.verbergenUrl ? "" : `<p class="sub"><a href="${escapeHtml(o.verbergenUrl)}">Niet van toepassing — dit onderdeel verbergen</a></p>`;
   const inhoud = `
     ${o.pnlHtml ?? ""}
     <p class="sub">Kies precies één van de drie situaties (UX_03) en vul uitsluitend de bijbehorende velden in.</p>
@@ -822,8 +873,33 @@ export function renderManagementForm(o: ManagementFormOpties): string {
       <label for="nieuweEenheid">Eenheid nieuw bedrag</label>${eenheidOpties("nieuweEenheid", o.huidig.nieuweEenheid)}
 
       <button type="submit">Opslaan</button>
-    </form>`;
+    </form>
+    ${verbergenLinkHtml}`;
   return moduleFormShell({ titel: "Managementvergoeding", terugUrl: o.terugUrl, ...(o.fouten !== undefined ? { fouten: o.fouten } : {}), inhoud, alleenLezen: o.alleenLezen === true, fragment: o.fragment === true });
+}
+
+/** UX_10 — bevestigingsscherm vóór het markeren van Managementvergoeding als niet van toepassing (punt 7: expliciete controle). */
+export function renderManagementVerbergenScherm(o: {
+  administratieId: string;
+  weergavenaam: string;
+  versie: Begrotingsversie;
+  heeftBestaandeInvoer: boolean;
+  actieUrl: string;
+  terugUrl: string;
+  fouten?: readonly string[];
+}): string {
+  const foutenHtml = o.fouten && o.fouten.length > 0 ? `<div class="fouten"><strong>Controleer:</strong><ul>${o.fouten.map((f) => `<li>${escapeHtml(f)}</li>`).join("")}</ul></div>` : "";
+  const inhoud = o.heeftBestaandeInvoer
+    ? `<div class="fouten">Er is al invoer vastgelegd voor Managementvergoeding bij deze administratie — verbergen is pas mogelijk nadat die invoer is verwijderd op het Managementvergoeding-scherm.</div>
+       <a class="terug" href="${escapeHtml(o.terugUrl)}">← Terug naar Managementvergoeding</a>`
+    : `${foutenHtml}
+       <p class="sub">Managementvergoeding wordt dan voor deze administratie beschouwd als niet van toepassing: de post telt mee als bewust €0 in de P&amp;L en blokkeert vaststellen niet meer. Dit is geen verwijdering — het onderdeel blijft herstelbaar via "Weergeven".</p>
+       <form method="POST" action="${escapeHtml(o.actieUrl)}">
+         <label><input type="checkbox" name="bevestiging" value="1" style="width:auto;display:inline-block;margin-right:8px" required />Ik bevestig dat Managementvergoeding voor deze administratie niet van toepassing is</label>
+         <button type="submit">Markeer als niet van toepassing</button>
+       </form>
+       <a class="terug" href="${escapeHtml(o.terugUrl)}">← Terug zonder te verbergen</a>`;
+  return moduleFormShell({ titel: "Managementvergoeding verbergen", terugUrl: o.terugUrl, inhoud });
 }
 
 export interface CorrectiefRegelRow {

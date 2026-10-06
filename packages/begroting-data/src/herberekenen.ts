@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import Decimal from "decimal.js";
 import {
   ALGEMENE_KOSTEN_CATEGORIEEN,
   LEEGSTAND_CATEGORIEEN,
@@ -110,6 +111,7 @@ import { leesModule1Overrides } from "./module1Overrides.js";
 import { leesModule1Snapshot } from "./module1Snapshot.js";
 import { leesModule2Config } from "./module2Config.js";
 import { leesModule3Invoer } from "./module3Invoer.js";
+import { isModuleVerborgen } from "./verborgenOnderdelen.js";
 import { leesVerzekeringBeoordeeld } from "./verzekeringBeoordeeld.js";
 import { leesVerzekeringRegels, type VerzekeringRegel } from "./verzekeringRegels.js";
 import { leesWozObjecten, type WozObject } from "./wozObjecten.js";
@@ -426,6 +428,19 @@ function withReadTransaction<T>(db: DatabaseSync, fn: () => T): T {
  * geldige, veelvoorkomende CONCEPT-toestand ("nog niet beoordeeld"), geen
  * foutgeval en geen aanleiding voor een default-invoer (zie
  * `HerberekendeBegroting`'s moduledoc).
+ *
+ * UX_10 "Verborgen onderdelen" (CONTRACTCONFLICT-besluit 2026-10-06) — ÉÉN bewuste, smalle
+ * uitzondering op bovenstaande regel: `leesHerberekenInvoerZonderTransactie` levert hier een
+ * synthetische, controlevrije `{wijze: "NIEUWE_VERGOEDING", bedrag: 0, eenheid: "MAAND",
+ * ingangsdatum: null}` in plaats van `null`, UITSLUITEND wanneer (a) er voor deze begrotingsversie
+ * geen echte Module-3-invoer is opgeslagen (`leesModule3Invoer` geeft `null`) ÉN (b) Management voor
+ * deze administratie expliciet is gemarkeerd als niet van toepassing (`isModuleVerborgen`, zie
+ * `verborgenOnderdelen.ts`). Dit schrijft NOOIT de echte `begroting_module3_invoer`-tabel — de
+ * substitutie bestaat uitsluitend in dit in-memory leesresultaat, voor precies deze ene berekening.
+ * Bestaat er al wél echte invoer, dan wint die altijd onveranderd (verbergen kan nooit een bestaand
+ * bedrag uit de P&L laten verdwijnen — dat blokkeert al bij het verbergen zelf, zie
+ * `apps/worker`'s route). Dit is de ENE plek waar deze substitutie gebeurt: `berekenBegrotingUitInvoer`
+ * zelf blijft ongewijzigd (ziet nooit het verschil tussen "echt ingevuld" en "verborgen, dus €0").
  */
 export interface HerberekenInvoer {
   versie: Begrotingsversie;
@@ -505,13 +520,20 @@ export function leesHerberekenInvoerZonderTransactie(db: DatabaseSync, versieId:
     throw new Error(`Begrotingsversie ${versieId}: geen Module-1-aannames opgeslagen — berekenen is zonder aannames niet mogelijk.`);
   }
 
+  // UX_10 "Verborgen onderdelen" (CONTRACTCONFLICT-besluit 2026-10-06) — zie `HerberekenInvoer`'s moduledoc hierboven.
+  const module3InvoerWerkelijk = leesModule3Invoer(db, versieId);
+  const module3Invoer =
+    module3InvoerWerkelijk === null && isModuleVerborgen(db, versie.bedrijfsnr, "MANAGEMENT")
+      ? { wijze: "NIEUWE_VERGOEDING" as const, bedrag: new Decimal(0), eenheid: "MAAND" as const, ingangsdatum: null }
+      : module3InvoerWerkelijk;
+
   return {
     versie,
     contracten: leesModule1Snapshot(db, versieId),
     aannames,
     overrides: leesModule1Overrides(db, versieId),
     configs: leesModule2Config(db, versieId),
-    module3Invoer: leesModule3Invoer(db, versieId),
+    module3Invoer,
     geplandOnderhoudActiviteiten: leesGeplandOnderhoudActiviteiten(db, versieId),
     geplandOnderhoudBeoordeeld: leesGeplandOnderhoudBeoordeeld(db, versieId),
     correctiefDagelijksRegels: leesCorrectiefDagelijksOnderhoudRegels(db, versieId),
