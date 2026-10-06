@@ -16,7 +16,7 @@ Bij interpretatie geldt de volgende volgorde:
 2. `FO_Exploitatiebegroting_v1.0.md` en `FO_Exploitatiebegroting_v1.0_ADDENDUM_2026-09-16.md` voor functionele en financiële regels.
 3. `09_Begrotingsmodule_UX_Vastgesteld.md` voor de vastgestelde gebruikersflow, schermwerking en invoerregels.
 4. `10_Begrotingsmodule_UX_Ontwerpen_Index.md` en de afzonderlijke bestanden in `UX_Ontwerpen/` als visuele referentie.
-5. `prototype/` en `11_Begrotingsmodule_Werkend_Prototype.zip` als interactieve en technische referentie.
+5. `mockup-actueel/` als actuele interactieve visuele referentie vanaf 6 oktober 2026. `prototype/` en `11_Begrotingsmodule_Werkend_Prototype.zip` blijven behouden als eerdere interactieve en technische referentie.
 
 Het prototype is geen zelfstandige bron van businesslogica. Bij strijd tussen prototype en het vastgestelde UX-contract is `09_Begrotingsmodule_UX_Vastgesteld.md` leidend. Bij strijd met een later expliciet besluit in de actuele `BEGROTING_MASTER_CONTRACT.md` is dat latere besluit leidend.
 
@@ -52,6 +52,8 @@ Het prototype is geen zelfstandige bron van businesslogica. Bij strijd tussen pr
 Niet-geselecteerde opties, tussentijdse QA-afbeeldingen en oudere captures zijn bewust niet opgenomen. Zij zijn geen actuele ontwerpbron.
 
 ## Prototype
+
+Vanaf 6 oktober 2026 is `mockup-actueel/` de actuele en leidende interactieve referentie voor visuele vormgeving en interactie. De bestaande UX-documentatie, afzonderlijke ontwerpen, `prototype/` en het ZIP-archief blijven ongewijzigd beschikbaar als vastgestelde of eerdere referentie. Het FO en de actuele Master Contract blijven leidend voor financiële en andere businesslogica.
 
 - `prototype/` bevat de uitgepakte, rechtstreeks leesbare bron van de werkende referentie.
 - `prototype/README.md` beschrijft de inhoud en het lokaal starten van de referentie.
