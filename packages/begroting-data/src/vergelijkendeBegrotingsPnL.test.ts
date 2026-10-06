@@ -8,6 +8,7 @@ import {
   ALGEMENE_KOSTEN_CATEGORIEEN,
   LEEGSTAND_CATEGORIEEN,
   RENTE_CATEGORIEEN,
+  berekenPnLBoom,
   berekenPnLPeriode,
   berekenWerkelijkAlgemeneKosten,
   berekenWerkelijkBeheer,
@@ -19,6 +20,7 @@ import {
   berekenWerkelijkRente,
   berekenWerkelijkVerzekeringen,
   berekenWerkelijkLeegstand,
+  onderhoudWerkelijkNaarPnLBovenEbitdaRegels,
   type BgContractFeiten,
   type BgManagementInvoer,
   type PnLBronmappingRegel,
@@ -313,5 +315,147 @@ describe("leesHuurBeheerVoorstelRegels / Voorstel vs Jouw begroting voor Huur+Be
     // Netto huur mét override/indexatie is 132.000 (zie vorige test) -> 5% variabele beheersvergoeding = 6.600. De bruto
     // RentRoll-huur (120.000, vóór indexatie/override) zou 6.000 hebben gegeven -- dit bewijst dat NIET die bruto waarde is gebruikt.
     expect(beheer.jouwBegroting).toEqual({ status: "BEKEND", bedrag: D(6600) });
+  });
+});
+
+/**
+ * MASTER CONTRACT §18.3 HERSTEL (2026-10-06, Fase 1) — bewijst dat de projectiegrens
+ * (`leesVergelijkendeBegrotingsPnL`, NIET de gedeelde Werkelijk-adapters) Onderhoud/
+ * Verzekeringen Werkelijk correct aggregeert naar de canonieke post, zonder dat de
+ * gedeelde adapters, calculators, persistence of bronlogica zijn gewijzigd.
+ */
+describe("Fase 1 herstel — Onderhoud/Verzekeringen Werkelijk sluiten aan op de canonieke P&L-post, geen weesregels", () => {
+  const ONDERHOUD_MAPPING: PnLBronmappingRegel[] = (["ONDERHOUD_GEBOUWEN", "ONDERHOUD_TERREIN", "ONDERHOUD_INSTALLATIES"] as const).map((categorie, i) => ({
+    bedrijfsnr: "070",
+    grootboekrekening: ["4300", "4330", "4340"][i]!,
+    ogbKostensoort: null,
+    economischeModule: "ONDERHOUD",
+    economischeCategorie: categorie,
+    geldigVanafBoekjaar: 2020,
+    geldigVanafPeriode: "01",
+    geldigTotBoekjaar: null,
+    geldigTotPeriode: null,
+    aangemaaktOp: new Date("2020-01-01T00:00:00.000Z"),
+  }));
+  const VERZEKERING_MAPPING: PnLBronmappingRegel[] = [
+    {
+      bedrijfsnr: "070",
+      grootboekrekening: "4130",
+      ogbKostensoort: null,
+      economischeModule: "VERZEKERINGEN",
+      economischeCategorie: "BRAND_OPSTALVERZEKERING",
+      geldigVanafBoekjaar: 2020,
+      geldigVanafPeriode: "01",
+      geldigTotBoekjaar: null,
+      geldigTotPeriode: null,
+      aangemaaktOp: new Date("2020-01-01T00:00:00.000Z"),
+    },
+  ];
+  const boeking = (grootboekrekening: string, saldo: Decimal): PnLRuweBoekingRegel => ({ grootboekrekening, ogbKostensoort: null, ogbKostensoortOmschrijving: null, complexnummer: "001", saldo });
+
+  it("Onderhoud: Gebouwen (600) + Terrein (150) + Installaties (225) verschijnen NIET als losse weesregels; de canonieke 'ONDERHOUD'-regel toont het exacte samengevoegde totaal (975), identiek aan de som van de bestaande detailbedragen", () => {
+    const id = bouwVersie("070", 2027, D(0));
+    const boekingen = [boeking("4300", D(600)), boeking("4330", D(150)), boeking("4340", D(225))];
+    const werkelijk = berekenPnLPeriode({ bedrijfsnr: "070", boekjaar: 2026, boekperiode: "06", opSysteemtijdstip: new Date() }, boekingen, ONDERHOUD_MAPPING).resultaat;
+
+    // De gedeelde adapter zelf blijft ONGEWIJZIGD: het ruwe Werkelijk-resultaat bevat de drie boekhouddimensies nog gewoon apart
+    // (ze voeden ook de losstaande productie-P&L-rapportage, zie moduledoc `vergelijkendeBegrotingsPnL.ts`).
+    const ruweSleutels = [...werkelijk.exploitatieLasten.regels].map((r) => r.regelSleutel);
+    expect(ruweSleutels).toEqual(expect.arrayContaining(["ONDERHOUD_GEBOUWEN", "ONDERHOUD_TERREIN", "ONDERHOUD_INSTALLATIES"]));
+
+    const onderhoudWerkelijkResultaat = berekenWerkelijkOnderhoud([
+      { economischeCategorie: "ONDERHOUD_GEBOUWEN", complexnummer: "001", saldo: D(600) },
+      { economischeCategorie: "ONDERHOUD_TERREIN", complexnummer: "001", saldo: D(150) },
+      { economischeCategorie: "ONDERHOUD_INSTALLATIES", complexnummer: "001", saldo: D(225) },
+    ]);
+    const invoer = estimatedInvoer({ onderhoud: { werkelijk: onderhoudWerkelijkResultaat, dekkingBevestigd: true, resterendeKwartalen: ["Q3", "Q4"] } });
+    const resultaat = leesVergelijkendeBegrotingsPnL(db, { nieuweVersieId: id, vorigJaarVersieId: null }, werkelijk, invoer);
+
+    // Geen weesregels in de vergelijkende hoofd-P&L.
+    expect(resultaat.regels.find((r) => r.regelSleutel === "ONDERHOUD_GEBOUWEN")).toBeUndefined();
+    expect(resultaat.regels.find((r) => r.regelSleutel === "ONDERHOUD_TERREIN")).toBeUndefined();
+    expect(resultaat.regels.find((r) => r.regelSleutel === "ONDERHOUD_INSTALLATIES")).toBeUndefined();
+
+    // De canonieke post toont het exacte, financieel ongewijzigde totaal.
+    expect(vind(resultaat, "ONDERHOUD").werkelijk).toEqual({ status: "BEKEND", bedrag: D(975) });
+
+    // Detailclassificatie blijft volledig intact en inhoudelijk ongewijzigd op het bestaande calculatorresultaat (geen nieuw datatype).
+    expect(onderhoudWerkelijkResultaat.perCategorie.map((c) => [c.categorie, c.categorieTotaal.toString()])).toEqual([
+      ["ONDERHOUD_GEBOUWEN", "600"],
+      ["ONDERHOUD_TERREIN", "150"],
+      ["ONDERHOUD_INSTALLATIES", "225"],
+    ]);
+    expect(onderhoudWerkelijkResultaat.moduleTotaal.toString()).toBe("975");
+  });
+
+  it("Onderhoud: zonder bevestigde dekking blijft de canonieke post ONBEKEND (nooit een stilzwijgende €0), ook al is er per categorie wel een bedrag bekend", () => {
+    const id = bouwVersie("070", 2027, D(0));
+    const werkelijk = berekenPnLPeriode({ bedrijfsnr: "070", boekjaar: 2026, boekperiode: "06", opSysteemtijdstip: new Date() }, [], []).resultaat;
+    const onderhoudWerkelijkResultaat = berekenWerkelijkOnderhoud([{ economischeCategorie: "ONDERHOUD_GEBOUWEN", complexnummer: "001", saldo: D(600) }]);
+    const invoer = estimatedInvoer({ onderhoud: { werkelijk: onderhoudWerkelijkResultaat, dekkingBevestigd: false, resterendeKwartalen: ["Q3", "Q4"] } });
+    const resultaat = leesVergelijkendeBegrotingsPnL(db, { nieuweVersieId: id, vorigJaarVersieId: null }, werkelijk, invoer);
+
+    expect(vind(resultaat, "ONDERHOUD").werkelijk).toMatchObject({ status: "ONBEKEND", dekkingReden: "GEEN_BEOORDELING" });
+  });
+
+  it("Onderhoud: een niet-geclassificeerde boeking blijft een eigen, zichtbare 'ONDERHOUD_NIET_GECLASSIFICEERD'-restpost (geen weesregel, geen stille €0/verdeling)", () => {
+    const id = bouwVersie("070", 2027, D(0));
+    // Rechtstreeks via de bestaande, ONGEWIJZIGDE adapter opgebouwd (zelfde functie als `berekenPnLPeriode` intern
+    // aanroept) zodat deze test geïsoleerd de projectiegrens bewijst, los van de volledige GL-routeringsketen.
+    const onderhoudWerkelijkResultaat = berekenWerkelijkOnderhoud([
+      { economischeCategorie: "ONDERHOUD_GEBOUWEN", complexnummer: "001", saldo: D(600) },
+      { economischeCategorie: null, complexnummer: "001", saldo: D(50) },
+    ]);
+    const werkelijk = berekenPnLBoom("WERKELIJK", onderhoudWerkelijkNaarPnLBovenEbitdaRegels(onderhoudWerkelijkResultaat, true));
+    const invoer = estimatedInvoer({ onderhoud: { werkelijk: onderhoudWerkelijkResultaat, dekkingBevestigd: true, resterendeKwartalen: ["Q3", "Q4"] } });
+    const resultaat = leesVergelijkendeBegrotingsPnL(db, { nieuweVersieId: id, vorigJaarVersieId: null }, werkelijk, invoer);
+
+    expect(vind(resultaat, "ONDERHOUD").werkelijk).toEqual({ status: "BEKEND", bedrag: D(600) }); // nietGeclassificeerd telt niet mee in moduleTotaal
+    const restpost = resultaat.regels.find((r) => r.regelSleutel === "ONDERHOUD_NIET_GECLASSIFICEERD");
+    expect(restpost).toBeDefined();
+    expect(restpost!.werkelijk?.status).toBe("ONBEKEND"); // nooit €0, nooit stil verdeeld over de drie categorieën
+  });
+
+  it("Verzekeringen: Brand-/opstalverzekering (700) verschijnt NIET als losse weesregel; de canonieke 'VERZEKERINGEN'-regel toont het exacte, ongewijzigde Werkelijk-totaal", () => {
+    const id = bouwVersie("070", 2027, D(0));
+    const boekingen = [boeking("4130", D(700))];
+    const werkelijk = berekenPnLPeriode({ bedrijfsnr: "070", boekjaar: 2026, boekperiode: "06", opSysteemtijdstip: new Date() }, boekingen, VERZEKERING_MAPPING).resultaat;
+
+    const ruweSleutels = [...werkelijk.exploitatieLasten.regels].map((r) => r.regelSleutel);
+    expect(ruweSleutels).toContain("BRAND_OPSTALVERZEKERING"); // gedeelde adapter ongewijzigd
+
+    const verzekeringWerkelijkResultaat = berekenWerkelijkVerzekeringen([{ economischeCategorie: "BRAND_OPSTALVERZEKERING", complexnummer: "001", saldo: D(700) }]);
+    const invoer = estimatedInvoer({ verzekeringen: { werkelijk: verzekeringWerkelijkResultaat, dekkingBevestigd: true, resterendeMaanden: [7, 8, 9, 10, 11, 12] } });
+    const resultaat = leesVergelijkendeBegrotingsPnL(db, { nieuweVersieId: id, vorigJaarVersieId: null }, werkelijk, invoer);
+
+    expect(resultaat.regels.find((r) => r.regelSleutel === "BRAND_OPSTALVERZEKERING")).toBeUndefined();
+    expect(vind(resultaat, "VERZEKERINGEN").werkelijk).toEqual({ status: "BEKEND", bedrag: D(700) });
+    expect(verzekeringWerkelijkResultaat.moduleTotaal.toString()).toBe("700"); // detail/totaal op het bestaande calculatorresultaat ongewijzigd
+  });
+
+  it("Verzekeringen Estimated: de canonieke 'VERZEKERINGEN'-regel (niet 'BRAND_OPSTALVERZEKERING') draagt het Estimated-totaal, consistent met Begroting/Werkelijk", () => {
+    zetGemeentelijkeLastenMapping("070");
+    const vorigId = bouwVersie("070", 2026, D(0));
+    const nieuweId = bouwVersie("070", 2027, D(0));
+    const werkelijk = berekenPnLPeriode({ bedrijfsnr: "070", boekjaar: 2026, boekperiode: "06", opSysteemtijdstip: new Date() }, [], []).resultaat;
+    const verzekeringWerkelijkResultaat = berekenWerkelijkVerzekeringen([{ economischeCategorie: "BRAND_OPSTALVERZEKERING", complexnummer: "001", saldo: D(700) }]);
+    const invoer = estimatedInvoer({ verzekeringen: { werkelijk: verzekeringWerkelijkResultaat, dekkingBevestigd: true, resterendeMaanden: [7, 8, 9, 10, 11, 12] } });
+    const resultaat = leesVergelijkendeBegrotingsPnL(db, { nieuweVersieId: nieuweId, vorigJaarVersieId: vorigId }, werkelijk, invoer);
+
+    expect(resultaat.regels.find((r) => r.regelSleutel === "BRAND_OPSTALVERZEKERING")).toBeUndefined();
+    const verzekeringen = vind(resultaat, "VERZEKERINGEN");
+    expect(verzekeringen.estimated).not.toBeNull();
+    expect(verzekeringen.estimated!.status).toBe("BEKEND");
+    if (verzekeringen.estimated!.status === "BEKEND") expect(verzekeringen.estimated!.bedrag.toString()).toBe("700"); // Werkelijk (700) + geen resterende verwachting geschreven (0 default)
+  });
+
+  it("Huur blijft volledig onaangeraakt: belast/onbelast en de bestaande Voorstel-/Werkelijk-logica zijn ongewijzigd na het Onderhoud/Verzekeringen-herstel", () => {
+    zetGemeentelijkeLastenMapping("070");
+    const id = bouwVersie("070", 2027, D(0));
+    const werkelijk = berekenPnLPeriode({ bedrijfsnr: "070", boekjaar: 2026, boekperiode: "06", opSysteemtijdstip: new Date() }, [{ grootboekrekening: "8000", ogbKostensoort: null, ogbKostensoortOmschrijving: null, complexnummer: null, saldo: D(-1000) }], []).resultaat;
+    const resultaat = leesVergelijkendeBegrotingsPnL(db, { nieuweVersieId: id, vorigJaarVersieId: null }, werkelijk, estimatedInvoer());
+
+    expect(vind(resultaat, "HUUROPBRENGST_BELAST").jouwBegroting).toEqual({ status: "BEKEND", bedrag: D(0) });
+    expect(vind(resultaat, "HUUROPBRENGST_ONBELAST").jouwBegroting).toEqual({ status: "BEKEND", bedrag: D(0) });
   });
 });

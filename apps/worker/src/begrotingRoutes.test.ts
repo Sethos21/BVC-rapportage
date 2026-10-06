@@ -507,6 +507,66 @@ describe("Onderhoud totaal zichtbaar op Gepland- en Correctief-detailscherm (UX-
       expect(correctiefHtml).toContain("Estimated Onderhoud totaal");
     });
   });
+
+  it("Fase 1 herstel (Master Contract §18.3): het hoofdscherm toont GEEN losse 'Onderhoud gebouwen/terrein/installaties'-weesregels meer; de echte Onderhoud-rij toont het samengevoegde Werkelijk-totaal in plaats van 'onbekend'", async () => {
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "boekingen.xlsx"), [boekingRij("4300", 300, null, null), boekingRij("4330", 150, null, null), boekingRij("4340", 75, null, null)]);
+    const mappingDb = openOrCreateDatabase(pnlBronmappingDatabasePad(root, ADMINISTRATIE_ID));
+    voegPnLBronmappingMutatieToe(mappingDb, pnlMapping("4300", "ONDERHOUD_GEBOUWEN"));
+    voegPnLBronmappingMutatieToe(mappingDb, pnlMapping("4330", "ONDERHOUD_TERREIN"));
+    voegPnLBronmappingMutatieToe(mappingDb, pnlMapping("4340", "ONDERHOUD_INSTALLATIES"));
+    mappingDb.close();
+
+    const { schrijfGeplandOnderhoudActiviteiten, schrijfGeplandOnderhoudBeoordeeld, schrijfCorrectiefDagelijksOnderhoudRegels, schrijfCorrectiefDagelijksOnderhoudBeoordeeld } = await import("@bvc/begroting-data");
+
+    await metServer(async (baseUrl) => {
+      const nieuw = await fetch(`${baseUrl}/begroting/nieuw`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ administratieId: ADMINISTRATIE_ID, begrotingsjaar: "2027", laatstAfgeslotenBoekperiode: "06", indexatiePercentage: "3" }).toString(),
+        redirect: "manual",
+      });
+      const hoofdschermUrl = nieuw.headers.get("location")!;
+      const versieId = hoofdschermUrl.split("/")[3]!.split("?")[0]!;
+
+      const db = openOrCreateDatabase(begrotingsversiesDatabasePad(root, ADMINISTRATIE_ID));
+      schrijfGeplandOnderhoudActiviteiten(db, versieId, [
+        {
+          id: null,
+          complexnummer: "001",
+          omschrijving: "Dakrenovatie",
+          grootboekrekening: "4300",
+          ogbKostensoort: null,
+          aanleidingType: "MJOP",
+          aanleidingToelichting: "MJOP 2027",
+          q1: new Decimal(1000),
+          q2: new Decimal(1000),
+          q3: new Decimal(1000),
+          q4: new Decimal(1000),
+          status: "GEPLAND",
+          leverancier: null,
+          offertebedrag: null,
+          notitie: null,
+        },
+      ]);
+      schrijfGeplandOnderhoudBeoordeeld(db, versieId, true);
+      schrijfCorrectiefDagelijksOnderhoudRegels(db, versieId, [{ id: null, omschrijving: "Dagelijks onderhoud", complexnummer: "001", grootboekrekening: "4330", ogbKostensoort: null, jaarbedrag: new Decimal(1200) }]);
+      schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versieId, true);
+      db.close();
+
+      const hoofdschermHtml = await (await fetch(`${baseUrl}/begroting/${ADMINISTRATIE_ID}/${versieId}?laatstAfgeslotenBoekperiode=06`)).text();
+
+      // Geen ongegroepeerde weesregels meer (vóór Fase 1 verschenen deze als losse, onverklaarde rijen zonder "Aanpassen"-link).
+      expect(hoofdschermHtml.toLowerCase()).not.toContain("onderhoud gebouwen");
+      expect(hoofdschermHtml.toLowerCase()).not.toContain("onderhoud terrein");
+      expect(hoofdschermHtml.toLowerCase()).not.toContain("onderhoud installaties");
+
+      // De echte "Onderhoud"-rij toont nu het samengevoegde Werkelijk-totaal (300+150+75=525) in plaats van "onbekend".
+      const onderhoudIndex = hoofdschermHtml.indexOf("Onderhoud (gepland + correctief/dagelijks)");
+      expect(onderhoudIndex).toBeGreaterThan(-1);
+      const onderhoudRijHtml = hoofdschermHtml.slice(onderhoudIndex, onderhoudIndex + 1200);
+      expect(onderhoudRijHtml).toContain("€ 525,00");
+    });
+  });
 });
 
 /**

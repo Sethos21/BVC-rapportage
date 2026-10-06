@@ -6,6 +6,8 @@ import {
   berekenBegroteHuuropbrengsten,
   berekenPnLBoom,
   huurBegrotingNaarPnLBovenEbitdaRegels,
+  ONDERHOUD_PNL_SLEUTEL,
+  VERZEKERINGEN_PNL_SLEUTEL,
   type BgOnderhoudKwartaal,
   type PnLBronBijdrage,
   type PnLGroepBovenEbitda,
@@ -116,6 +118,41 @@ function vindWaarde(resultaat: PurePnLResultaat | null, regelSleutel: string): P
 }
 
 /**
+ * MASTER CONTRACT §18.3 HERSTEL (2026-10-06, Fase 1): de gedeelde Werkelijk-adapters
+ * (`onderhoudWerkelijkPnLAdapter.ts`/`verzekeringWerkelijkPnLAdapter.ts` in `@bvc/reporting`,
+ * BEWUST ONGEWIJZIGD gelaten — ze voeden ook de losstaande, niet-begroting-specifieke
+ * productie-P&L-rapportage via `berekenPnLPeriode`/`renderPnLPeriode.ts`, die deze
+ * boekhouddimensies bewust apart met hun eigen label toont) geven Onderhoud/Verzekeringen
+ * Werkelijk terug op boekhouddimensie-niveau (Gebouwen/Terrein/Installaties resp. de
+ * verzekeringscategorie), niet op de canonieke Begroting/Estimated-sleutel (`ONDERHOUD`/
+ * `VERZEKERINGEN`). Deze projectiegrens — uitsluitend de vergelijkende begrotings-P&L,
+ * NIET de gedeelde adapter — weert deze technische detailsleutels daarom hier uit de
+ * canon-presentatie (ze zouden anders als ongegroepeerde weesregels naast de echte
+ * "Onderhoud"/"Verzekeringen"-rij verschijnen) en vervangt de Werkelijk-waarde van die rij
+ * door `moduleWerkelijkTotaalBijdrage` (zie hieronder). De bestaande, apart gelabelde
+ * `*_NIET_GECLASSIFICEERD`-restpost staat niet in deze set en blijft ongemoeid als eigen,
+ * zichtbare canon-regel bestaan.
+ */
+const WERKELIJK_DETAILSLEUTELS_IN_CANON: ReadonlySet<string> = new Set(["ONDERHOUD_GEBOUWEN", "ONDERHOUD_TERREIN", "ONDERHOUD_INSTALLATIES", "BRAND_OPSTALVERZEKERING"]);
+
+/**
+ * Projecteert Onderhoud/Verzekeringen Werkelijk naar de canonieke post via het reeds
+ * bestaande, ongewijzigde `moduleTotaal` op het calculatorresultaat dat de aanroeper toch al
+ * heeft (`EstimatedPnLInvoer.onderhoud`/`.verzekeringen` — dezelfde vorm als
+ * `PnLModuleWerkelijkBundel`, zie `bouwEstimatedPnLInvoer`). GEEN nieuwe berekening: `moduleTotaal`
+ * is al de som van de onderliggende categorieën; `perCategorie` blijft op datzelfde,
+ * ongewijzigde resultaat beschikbaar voor drill-down. Zelfde "Unknown != zero"-gedrag als de
+ * per-categorie-adapters: zonder bevestigde dekking blijft de post ONBEKEND, nooit een
+ * stilzwijgende €0.
+ */
+function moduleWerkelijkTotaalBijdrage(moduleBundel: { werkelijk: { moduleTotaal: Decimal }; dekkingBevestigd: boolean }, moduleNaam: string): PnLBronBijdrage {
+  if (!moduleBundel.dekkingBevestigd) {
+    return { status: "ONBEKEND", dekkingReden: "GEEN_BEOORDELING", toelichting: `Bron-/mappingdekking voor ${moduleNaam}-Werkelijk is niet expliciet bevestigd.` };
+  }
+  return { status: "BEKEND", bedrag: moduleBundel.werkelijk.moduleTotaal };
+}
+
+/**
  * Assembleert de vier vergelijkingskolommen voor één (bestaande) nieuwe begrotingsversie.
  * `werkelijkResultaat` en `estimatedInvoer` worden AANGELEVERD (bv. via `bouwEstimatedPnLInvoer`
  * op een echte productie-Werkelijk-ophaal) — deze functie berekent Werkelijk zelf nooit opnieuw.
@@ -145,11 +182,17 @@ export function leesVergelijkendeBegrotingsPnL(
   for (const bron of [jouwBegroting, werkelijkResultaat, begrotingVorigJaar, estimated]) {
     if (bron === null) continue;
     for (const regel of alleRegels(bron)) {
+      if (WERKELIJK_DETAILSLEUTELS_IN_CANON.has(regel.regelSleutel)) continue;
       if (!canon.has(regel.regelSleutel)) {
         canon.set(regel.regelSleutel, { boomPositie: regel.boomPositie, groep: regel.boomPositie === "BOVEN_EBITDA" ? regel.groep : null });
       }
     }
   }
+
+  const werkelijkOverrides: Record<string, PnLBronBijdrage> = {
+    [ONDERHOUD_PNL_SLEUTEL]: moduleWerkelijkTotaalBijdrage(estimatedInvoer.onderhoud, "Onderhoud"),
+    [VERZEKERINGEN_PNL_SLEUTEL]: moduleWerkelijkTotaalBijdrage(estimatedInvoer.verzekeringen, "Verzekeringen"),
+  };
 
   const regels: VergelijkendeBegrotingsPnLRegel[] = [...canon.entries()].map(([regelSleutel, { boomPositie, groep }]) => {
     const jouwWaarde = vindWaarde(jouwBegroting, regelSleutel);
@@ -169,7 +212,7 @@ export function leesVergelijkendeBegrotingsPnL(
       boomPositie,
       groep,
       begrotingVorigJaar: vindWaarde(begrotingVorigJaar, regelSleutel),
-      werkelijk: vindWaarde(werkelijkResultaat, regelSleutel),
+      werkelijk: werkelijkOverrides[regelSleutel] ?? vindWaarde(werkelijkResultaat, regelSleutel),
       estimated: vindWaarde(estimated, regelSleutel),
       jouwBegroting: jouwWaarde,
       voorstel,
