@@ -940,6 +940,13 @@ async function handleHuur(req: IncomingMessage, res: ServerResponse, g: Geopend,
 
   const fragment = isFragmentVerzoek(req);
   const weergaveSuffix = fragment ? "&fragment=1" : "";
+  // FASE 2 (Master Contract §18, referentie-implementatie 2026-10-07): compacte, module-eigen
+  // samenvatting i.p.v. de volledige vergelijkende P&L — uitsluitend reeds betrouwbaar beschikbare
+  // velden van de ongewijzigde pure Huur-motor (`module1.portefeuilleTotalen`). De Werkelijk/
+  // Estimated-waarden voor "Verleende huurkorting" komen uit dezelfde, bestaande canon-regel die
+  // ook het hoofdscherm gebruikt (`vergelijkend.regels`) — geen eigen module-ingang meer (zie
+  // `BEWERKBARE_MODULES`), maar de informatie blijft hier zichtbaar.
+  const kortingRegel = vergelijkend?.regels.find((r) => r.regelSleutel === "VERLEENDE_HUURKORTING") ?? null;
   stuurHtml(
     res,
     200,
@@ -954,11 +961,22 @@ async function handleHuur(req: IncomingMessage, res: ServerResponse, g: Geopend,
       begrotingsjaar: g.versie.begrotingsjaar,
       alleenLezen,
       algemeenIndexatiePercentage: fmtPercentageVeld(aannames.indexatiePercentage),
+      bronPeildatum: fmtDatumVeld(module1.bronPeildatum),
+      aantalContracten: module1.contracten.length,
       regels,
       complexRegels,
       controleVereist: module1.controleVereist.map((c) => `${c.contractnummer ?? "Algemeen"}: ${c.bericht}`),
       portefeuilleNetto: fmtBedragKort(portefeuilleNetto),
-      pnlHtml: vergelijkend !== null ? moduleWerkomgevingPnLHtml(vergelijkend, ["HUUROPBRENGST_BELAST", "HUUROPBRENGST_ONBELAST", "VERLEENDE_HUURKORTING"]) : "",
+      samenvatting: {
+        contracthuurVoorIndexatie: fmtBedragKort(module1.portefeuilleTotalen.brutoHuurZonderIndexatie),
+        indexatieEffect: fmtBedragKort(module1.portefeuilleTotalen.indexatieEffect),
+        korting: fmtBedragKort(module1.portefeuilleTotalen.huurkorting),
+        nettoHuur: fmtBedragKort(module1.portefeuilleTotalen.nettoHuur),
+        nettoHuurBelast: fmtBedragKort(module1.portefeuilleTotalen.nettoHuurBelast),
+        nettoHuurOnbelast: fmtBedragKort(module1.portefeuilleTotalen.nettoHuurOnbelast),
+        kortingWerkelijk: kortingRegel?.werkelijk ?? null,
+        kortingEstimated: kortingRegel?.estimated ?? null,
+      },
       fragment,
     }),
   );

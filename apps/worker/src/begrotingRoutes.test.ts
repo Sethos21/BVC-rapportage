@@ -1301,6 +1301,130 @@ describe("Huur/Beheer via echte HTTP-routes met een echte Contracten/RentRoll-fi
 });
 
 /**
+ * FASE 2 (Master Contract §18, referentie-implementatie 2026-10-07): Huur als eerste correcte
+ * compositie — ÉÉN functionele Huurmodule-ingang voor de TWEE financiële P&L-posten
+ * Huuropbrengst belast/onbelast, geen gedupliceerde vergelijkende P&L in de uitklap.
+ */
+describe("Fase 2 — Huur als referentie-implementatie: één functionele module-ingang, geen dubbele P&L", () => {
+  it("hoofdscherm: precies ÉÉN Huur-uitklap-ingang (groepsheader), Belast/Onbelast blijven afzonderlijke financiële regels zonder eigen Aanpassen-link", async () => {
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "contracten_huidig.xlsx"), [contractRij()]);
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "rentroll.xlsx"), [rentrollRij()]);
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "boekingen.xlsx"), []);
+
+    await metServer(async (baseUrl) => {
+      const nieuw = await fetch(`${baseUrl}/begroting/nieuw`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ administratieId: ADMINISTRATIE_ID, begrotingsjaar: "2028", laatstAfgeslotenBoekperiode: "06", indexatiePercentage: "0" }).toString(),
+        redirect: "manual",
+      });
+      const hoofdschermUrl = nieuw.headers.get("location")!;
+      const html = await (await fetch(baseUrl + hoofdschermUrl)).text();
+
+      // Eén functionele ingang: de groepsheader-rij "Huuropbrengsten" met de ENE data-expand-link naar /module/huur.
+      expect(html).toContain(">Huuropbrengsten<");
+      expect((html.match(/data-expand="HUUROPBRENGSTEN--huur"/g) ?? []).length).toBe(1);
+      expect((html.match(/data-url="[^"]*\/module\/huur\?/g) ?? []).length).toBe(1);
+
+      // Geen onafhankelijke uitklappen meer op Belast/Onbelast/Korting zelf.
+      expect(html).not.toContain('data-expand="HUUROPBRENGST_BELAST--huur"');
+      expect(html).not.toContain('data-expand="HUUROPBRENGST_ONBELAST--huur"');
+      expect(html).not.toContain('data-expand="VERLEENDE_HUURKORTING--huur"');
+
+      // Belast/Onbelast blijven zelf als afzonderlijke, financieel ongewijzigde canon-regels zichtbaar.
+      expect(html).toContain("Huuropbrengst belast");
+      expect(html).toContain("Huuropbrengst onbelast");
+      expect(html).toContain("€ 120.000,00"); // Jouw begroting, netto huur zonder override/korting/BTW-splitsing in deze fixture
+    });
+  });
+
+  it("Huurdetail (fragment) bevat GEEN gedupliceerde vergelijkende P&L meer, wel de compacte, module-eigen samenvatting met betrouwbare bestaande waarden", async () => {
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "contracten_huidig.xlsx"), [contractRij()]);
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "rentroll.xlsx"), [rentrollRij()]);
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "boekingen.xlsx"), []);
+
+    await metServer(async (baseUrl) => {
+      const nieuw = await fetch(`${baseUrl}/begroting/nieuw`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ administratieId: ADMINISTRATIE_ID, begrotingsjaar: "2028", laatstAfgeslotenBoekperiode: "06", indexatiePercentage: "0" }).toString(),
+        redirect: "manual",
+      });
+      const hoofdschermUrl = nieuw.headers.get("location")!;
+      const huurUrl = hoofdschermUrl.replace(/\?.*/, "") + "/module/huur?laatstAfgeslotenBoekperiode=06&fragment=1";
+      const huurHtml = await (await fetch(baseUrl + huurUrl)).text();
+
+      // Geen tweede vergelijkende-P&L-blok: de eyebrow-titel en de vijf vergelijkingskolommen komen hier niet meer voor.
+      expect(huurHtml).not.toContain("Vergelijkende P&amp;L");
+      expect(huurHtml).not.toContain("Begroting vorig jaar");
+      expect(huurHtml).not.toContain("Jouw begroting</th>");
+
+      // Nieuwe titel + compacte samenvatting, uitsluitend reeds bestaande, betrouwbare waarden.
+      expect(huurHtml).toContain("Specificatie netto huuropbrengsten");
+      expect(huurHtml).toContain("Opbouw netto huuropbrengsten");
+      expect(huurHtml).toContain("Contracthuur (vóór indexatie)");
+      expect(huurHtml).toContain("Indexatie-effect");
+      expect(huurHtml).toContain("Verleende huurkorting (al verwerkt in netto huur, geen losse aftrek)");
+      expect(huurHtml).toContain("waarvan Huuropbrengst belast");
+      expect(huurHtml).toContain("waarvan Huuropbrengst onbelast");
+      expect(huurHtml).toContain("€ 120.000,00"); // contracthuur vóór indexatie = netto huur in deze fixture (0% indexatie, geen korting)
+
+      // Contract-/complexspecificatie blijft onveranderd werken (bestaande functionaliteit).
+      expect(huurHtml).toContain("0000000043");
+      expect(huurHtml).toContain("Voorbeeld Huurder BV");
+    });
+  });
+
+  it("huurkorting veroorzaakt geen dubbeltelling: Werkelijk/Estimated-informatie blijft beschikbaar in de samenvatting zonder een losse P&L-aftrek te introduceren", async () => {
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "contracten_huidig.xlsx"), [contractRij()]);
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "rentroll.xlsx"), [rentrollRij()]);
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "boekingen.xlsx"), []);
+
+    await metServer(async (baseUrl) => {
+      const nieuw = await fetch(`${baseUrl}/begroting/nieuw`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ administratieId: ADMINISTRATIE_ID, begrotingsjaar: "2028", laatstAfgeslotenBoekperiode: "06", indexatiePercentage: "0" }).toString(),
+        redirect: "manual",
+      });
+      const hoofdschermUrl = nieuw.headers.get("location")!;
+      const html = await (await fetch(baseUrl + hoofdschermUrl)).text();
+
+      // "Verleende huurkorting" blijft als informatieve, niet-bewerkbare regel op het hoofdscherm — geen eigen Aanpassen-link,
+      // en geen dubbele aftrek (de Jouw-begroting-kolom van Huuropbrengst belast/onbelast blijft € 120.000,00, zie vorige test).
+      expect(html).toContain("Verleende huurkorting");
+      expect(html).not.toContain('data-expand="VERLEENDE_HUURKORTING--huur"');
+
+      const huurUrl = hoofdschermUrl.replace(/\?.*/, "") + "/module/huur?laatstAfgeslotenBoekperiode=06&fragment=1";
+      const huurHtml = await (await fetch(baseUrl + huurUrl)).text();
+      expect(huurHtml).toContain("Verleende huurkorting (al verwerkt in netto huur, geen losse aftrek)");
+    });
+  });
+
+  it("overige modules (Beheer) behouden hun bestaande compositie en pnlHtml onveranderd — Fase 2 rolt het patroon niet breder uit", async () => {
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "contracten_huidig.xlsx"), [contractRij()]);
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "rentroll.xlsx"), [rentrollRij()]);
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "boekingen.xlsx"), []);
+
+    await metServer(async (baseUrl) => {
+      const nieuw = await fetch(`${baseUrl}/begroting/nieuw`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ administratieId: ADMINISTRATIE_ID, begrotingsjaar: "2028", laatstAfgeslotenBoekperiode: "06", indexatiePercentage: "0" }).toString(),
+        redirect: "manual",
+      });
+      const hoofdschermUrl = nieuw.headers.get("location")!;
+      const beheerUrl = hoofdschermUrl.replace(/\?.*/, "") + "/module/beheer?laatstAfgeslotenBoekperiode=06&fragment=1";
+      const beheerHtml = await (await fetch(baseUrl + beheerUrl)).text();
+
+      // Beheer behoudt zijn bestaande, ongewijzigde vergelijkende-P&L-kaart (pnlHtml) — niet aangeraakt in deze fase.
+      expect(beheerHtml).toContain("Vergelijkende P&amp;L");
+      expect(beheerHtml).toContain("Begroting vorig jaar");
+    });
+  });
+});
+
+/**
  * Product-readiness fix (migratie 42) — bewijst dat de laatst afgesloten boekperiode nu persistent
  * bij de begrotingsversie wordt vastgelegd (`begroting_aannames`), nooit meer een hardcoded "12" of
  * een stilzwijgende afleiding, en dat een opgeslagen periode nooit door een afwijkende queryparameter

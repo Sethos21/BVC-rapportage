@@ -102,6 +102,8 @@ const BASIS_CSS = `
   tbody tr:hover td{background:#fbfcfc}
   tr.groep td{background:#f4f6f7;font-weight:650;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--line)}
   tr.subtotaal td{font-weight:700;border-top:2px solid var(--line);border-bottom:2px solid var(--line)}
+  /* FASE 2 (2026-10-07): puur presentationele groepsheader-rij — één functionele Huurmodule-ingang boven de twee financiële Huur-canon-regels. */
+  tr.huur-groep td{border-top:2px solid var(--line);padding-top:14px}
 
   .onbekend{color:var(--amber);font-weight:600}
   .naam{font-weight:650;display:block}
@@ -323,11 +325,21 @@ const GROEP_LABELS: Record<PnLGroepBovenEbitda, string> = {
   ALGEMENE_KOSTEN: "Algemene kosten",
 };
 
-/** Modules met een in deze tranche gebouwde invoerpagina — alle andere posten zijn deze tranche alleen-lezen in de vergelijkende P&L. */
+/**
+ * Modules met een in deze tranche gebouwde invoerpagina — alle andere posten zijn deze tranche
+ * alleen-lezen in de vergelijkende P&L.
+ *
+ * FASE 2 (Master Contract §18, referentie-implementatie 2026-10-07): `HUUROPBRENGST_BELAST`/
+ * `_ONBELAST` hebben hier BEWUST GEEN eigen entry meer — vóór deze fase kreeg elke regel een eigen
+ * "Aanpassen"-link naar dezelfde Huurmodule, waardoor het hoofdscherm oogde als TWEE onafhankelijke
+ * Huur-ingangen. De ÉNE functionele ingang staat nu op een apart gerenderde groepsheader-rij
+ * (`huurOpbrengstenGroepsheaderRij`), vóór deze twee — nog steeds hetzelfde `/module/huur`,
+ * ongewijzigd. `VERLEENDE_HUURKORTING` verliest om dezelfde reden zijn eigen ingang: korting blijft
+ * zichtbaar in de netto-huuropbouw (geen losse P&L-regel, zie §4/FO-addendum §A.1) en krijgt geen
+ * eigen Aanpassen-knop — Werkelijk/Estimated-informatie hierover blijft beschikbaar via de compacte
+ * samenvatting in de Huur-detailweergave (`huurSamenvattingHtml`), niet via een eigen module-ingang.
+ */
 const BEWERKBARE_MODULES: Record<string, readonly { key: string; label: string }[]> = {
-  HUUROPBRENGST_BELAST: [{ key: "huur", label: "Aanpassen" }],
-  HUUROPBRENGST_ONBELAST: [{ key: "huur", label: "Aanpassen" }],
-  VERLEENDE_HUURKORTING: [{ key: "huur", label: "Aanpassen" }],
   BEHEERKOSTEN: [{ key: "beheer", label: "Aanpassen" }],
   MANAGEMENTVERGOEDING: [{ key: "management", label: "Aanpassen" }],
   ONDERHOUD: [
@@ -523,6 +535,32 @@ const GROEP_VOLGORDE: readonly PnLGroepBovenEbitda[] = ["OPBRENGSTEN", "MANAGEME
  * backend-aanroep. Na vaststellen blijft de onderbouwing bereikbaar (UX_13 "Terugkijken"), nu ook
  * vanaf het hoofdscherm, met het label "Bekijken" i.p.v. "Aanpassen".
  */
+/** Canon-sleutels die functioneel bij de ÉNE Huurmodule horen — zie `huurOpbrengstenGroepsheaderRij`. */
+const HUUR_OPBRENGST_SLEUTELS: ReadonlySet<string> = new Set(["HUUROPBRENGST_BELAST", "HUUROPBRENGST_ONBELAST"]);
+
+/**
+ * FASE 2 (Master Contract §18, referentie-implementatie 2026-10-07) — ÉÉN functionele
+ * Huurmodule-ingang voor de TWEE financiële P&L-posten Huuropbrengst belast/onbelast. Puur
+ * presentationeel: geen canon-`regelSleutel`, geen bedragkolom, geen nieuwe berekening — uitsluitend
+ * de bestaande "Aanpassen"/"Bekijken"-link + de bestaande uitklapinfrastructuur (zelfde
+ * `data-expand`/`?fragment=1`-mechanisme als `regelRij`, hier éénmaal op groepsniveau in plaats van
+ * tweemaal onafhankelijk op Belast en Onbelast). `HUUROPBRENGST_BELAST` en `HUUROPBRENGST_ONBELAST`
+ * blijven zelf gewone, link-loze rijen (ze staan niet meer in `BEWERKBARE_MODULES`) met hun eigen,
+ * onveranderde bedragen.
+ */
+function huurOpbrengstenGroepsheaderRij(o: HoofdschermOpties): string {
+  const isConcept = o.versie.status === "CONCEPT";
+  const detailId = "HUUROPBRENGSTEN--huur";
+  const url = `/begroting/${encodeURIComponent(o.administratieId)}/${encodeURIComponent(o.versie.id)}/module/huur?laatstAfgeslotenBoekperiode=${encodeURIComponent(o.laatstAfgeslotenBoekperiode)}`;
+  const label = isConcept ? "Aanpassen" : "Bekijken";
+  const link = `<a class="bewerk" data-expand="${escapeHtml(detailId)}" data-url="${escapeHtml(url)}" href="${escapeHtml(url)}" aria-expanded="false" aria-controls="detail-row-${escapeHtml(detailId)}">${label}</a>`;
+  return `<tr class="huur-groep">
+    <td><span class="naam">Huuropbrengsten</span><span class="naam-sub">${link}</span></td>
+    <td></td><td></td><td></td><td></td><td></td><td></td>
+  </tr>
+  <tr class="detail-row" id="detail-row-${escapeHtml(detailId)}" style="display:none"><td colspan="7"><div class="detail-body" data-detail-body></div></td></tr>`;
+}
+
 function regelRij(o: HoofdschermOpties, r: VergelijkendeBegrotingsPnLRegel): string {
   const moduleLinks = BEWERKBARE_MODULES[r.regelSleutel];
   const isConcept = o.versie.status === "CONCEPT";
@@ -613,7 +651,19 @@ export function renderBegrotingHoofdscherm(o: HoofdschermOpties): string {
   const groepenHtml = GROEP_VOLGORDE.map((groep) => {
     const regels = bovenRegels.filter((r) => r.groep === groep);
     if (regels.length === 0) return "";
-    return `<tr class="groep"><td colspan="7">${escapeHtml(GROEP_LABELS[groep])}</td></tr>${regels.map((r) => regelRij(o, r)).join("")}`;
+    // FASE 2: de groepsheader voor "Huuropbrengsten" verschijnt eenmalig, vóór de eerste van de twee
+    // Huur-canon-regels die in deze groep voorkomt — positie-onafhankelijk, geen aanname over volgorde.
+    let huurHeaderGerenderd = false;
+    const rijenHtml = regels
+      .map((r) => {
+        if (HUUR_OPBRENGST_SLEUTELS.has(r.regelSleutel) && !huurHeaderGerenderd) {
+          huurHeaderGerenderd = true;
+          return huurOpbrengstenGroepsheaderRij(o) + regelRij(o, r);
+        }
+        return regelRij(o, r);
+      })
+      .join("");
+    return `<tr class="groep"><td colspan="7">${escapeHtml(GROEP_LABELS[groep])}</td></tr>${rijenHtml}`;
   }).join("");
 
   const onderHtml = onderRegels.length > 0 ? `<tr class="groep"><td colspan="7">Onder EBITDA</td></tr>${onderRegels.map((r) => regelRij(o, r)).join("")}` : "";
@@ -1096,12 +1146,62 @@ export interface ComplexHuurRegel {
 }
 
 /**
+ * FASE 2 (Master Contract §18, referentie-implementatie 2026-10-07) — compacte, module-eigen
+ * samenvatting van de Huurspecificatie. GEEN tweede vergelijkende P&L: uitsluitend reeds
+ * betrouwbaar beschikbare waarden van de ongewijzigde pure Huurcalculator
+ * (`BgHuurResultaat.portefeuilleTotalen`, zie `begroteHuuropbrengsten.ts`) — contracthuur vóór
+ * indexatie, het indexatie-effect, de verleende korting en de resulterende netto huur, uitgesplitst
+ * naar de twee financiële canon-posten (belast/onbelast). `kortingWerkelijk`/`kortingEstimated` zijn
+ * de bestaande Werkelijk/Estimated-waarden van de canon-regel `VERLEENDE_HUURKORTING` (dezelfde
+ * vergelijkende P&L als het hoofdscherm, hier éénmalig getoond als informatieve regel zodat deze
+ * informatie niet verloren gaat nu de regel geen eigen module-ingang meer heeft) — nooit een nieuwe
+ * berekening.
+ */
+export interface HuurSamenvattingVeld {
+  contracthuurVoorIndexatie: string;
+  indexatieEffect: string;
+  korting: string;
+  nettoHuur: string;
+  nettoHuurBelast: string;
+  nettoHuurOnbelast: string;
+  kortingWerkelijk: PnLBronBijdrage | null;
+  kortingEstimated: PnLBronBijdrage | null;
+}
+
+function huurSamenvattingHtml(s: HuurSamenvattingVeld): string {
+  const kortingInfoHtml =
+    s.kortingWerkelijk !== null || s.kortingEstimated !== null
+      ? `
+        ${s.kortingWerkelijk !== null ? `<tr><td>Verleende huurkorting — Werkelijk</td><td style="text-align:right">${fmtWaarde(s.kortingWerkelijk)}</td></tr>` : ""}
+        ${s.kortingEstimated !== null ? `<tr><td>Verleende huurkorting — Estimated</td><td style="text-align:right">${fmtWaarde(s.kortingEstimated)}</td></tr>` : ""}`
+      : "";
+  return `
+    <div class="card" style="margin-bottom:16px">
+      <div class="eyebrow">Opbouw netto huuropbrengsten</div>
+      <table style="margin:0">
+        <tbody>
+          <tr><td>Contracthuur (vóór indexatie)</td><td style="text-align:right">${escapeHtml(s.contracthuurVoorIndexatie)}</td></tr>
+          <tr><td>Indexatie-effect</td><td style="text-align:right">${escapeHtml(s.indexatieEffect)}</td></tr>
+          <tr><td>Verleende huurkorting (al verwerkt in netto huur, geen losse aftrek)</td><td style="text-align:right">${escapeHtml(s.korting)}</td></tr>
+          <tr><td><strong>Netto huur (Jouw begroting)</strong></td><td style="text-align:right"><strong>${escapeHtml(s.nettoHuur)}</strong></td></tr>
+          <tr><td>— waarvan Huuropbrengst belast</td><td style="text-align:right">${escapeHtml(s.nettoHuurBelast)}</td></tr>
+          <tr><td>— waarvan Huuropbrengst onbelast</td><td style="text-align:right">${escapeHtml(s.nettoHuurOnbelast)}</td></tr>
+          ${kortingInfoHtml}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+/**
  * Huur-detailweergave (UX_01, Tranche 12; complex/contract-toggle + aflopende-contracten-
- * aandachtspunt: UX-uitrol 2026-10-02 §4): toont de bewezen contractbasis per contract —
- * bronhuur/indexatie/override/resulterende huur/korting blijven zichtbaar onderscheiden zodat
- * later herleidbaar blijft hoe het bedrag is ontstaan (§10). Rekent zelf niets — alle bedragen
- * komen kant-en-klaar van de aanroeper (de bestaande, ongewijzigde pure Huur-motor); de
- * complexweergave is een zuivere optelling van de al-berekende contractregels.
+ * aandachtspunt: UX-uitrol 2026-10-02 §4; FASE 2 compositieherstel 2026-10-07 — mockup-referentie
+ * `docs/begroting/ux/mockup-actueel/` "Specificatie netto huuropbrengsten"): toont de bewezen
+ * contractbasis per contract — bronhuur/indexatie/override/resulterende huur/korting blijven
+ * zichtbaar onderscheiden zodat later herleidbaar blijft hoe het bedrag is ontstaan (§10). Rekent
+ * zelf niets — alle bedragen komen kant-en-klaar van de aanroeper (de bestaande, ongewijzigde pure
+ * Huur-motor); de complexweergave is een zuivere optelling van de al-berekende contractregels. Toont
+ * GEEN volledige vergelijkende P&L meer (die staat al op het hoofdscherm, zie
+ * `huurOpbrengstenGroepsheaderRij`) — uitsluitend de compacte, module-eigen `huurSamenvattingHtml`.
  */
 export function renderHuurDetail(o: {
   administratieId: string;
@@ -1115,11 +1215,13 @@ export function renderHuurDetail(o: {
   alleenLezen: boolean;
   fragment?: boolean;
   algemeenIndexatiePercentage: string;
+  bronPeildatum: string;
+  aantalContracten: number;
   regels: readonly HuurDetailRegel[];
   complexRegels: readonly ComplexHuurRegel[];
   controleVereist: readonly string[];
   portefeuilleNetto: string;
-  pnlHtml?: string;
+  samenvatting: HuurSamenvattingVeld;
 }): string {
   const waarschuwingenHtml = o.controleVereist.length > 0 ? `<div class="banner">${o.controleVereist.map(escapeHtml).join("<br/>")}</div>` : "";
   const weergaveToggleHtml = `
@@ -1167,7 +1269,8 @@ export function renderHuurDetail(o: {
         <tbody>${contractRijenHtml}</tbody>
       </table>`;
   const inhoud = `
-    ${o.pnlHtml ?? ""}
+    <div class="sub">Bron: contractbasis/RentRoll, peildatum ${escapeHtml(o.bronPeildatum)}. ${o.aantalContracten} contract${o.aantalContracten === 1 ? "" : "en"}.</div>
+    ${huurSamenvattingHtml(o.samenvatting)}
     ${waarschuwingenHtml}
     <div class="sub">Algemeen indexatiepercentage voor ${o.begrotingsjaar}: ${escapeHtml(o.algemeenIndexatiePercentage)}%. Een contractoverride vervangt uitsluitend het toegepaste percentage voor dat contract — de bronfeiten blijven ongewijzigd.</div>
     ${weergaveToggleHtml}
@@ -1176,7 +1279,7 @@ export function renderHuurDetail(o: {
       <p class="sub">Netto huur portefeuille (Jouw begroting): <strong>${escapeHtml(o.portefeuilleNetto)}</strong></p>
       ${o.alleenLezen || o.weergave === "complex" ? "" : `<button type="submit">Overrides opslaan</button>`}
     </form>`;
-  return moduleFormShell({ titel: `Huur — contractbasis ${o.begrotingsjaar}`, terugUrl: o.terugUrl, inhoud, alleenLezen: o.alleenLezen, fragment: o.fragment === true });
+  return moduleFormShell({ titel: `Specificatie netto huuropbrengsten — ${o.begrotingsjaar}`, terugUrl: o.terugUrl, inhoud, alleenLezen: o.alleenLezen, fragment: o.fragment === true });
 }
 
 export interface BeheerDetailRegel {
