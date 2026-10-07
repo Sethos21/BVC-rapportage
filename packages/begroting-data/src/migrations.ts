@@ -4482,6 +4482,103 @@ export const MIGRATIONS: readonly Migration[] = [
       )`,
     ],
   },
+
+  /**
+   * Migratie 44 — Huur naar vastgestelde UX (besluit 07-10-2026): drie nieuwe, additieve tabellen,
+   * geen wijziging aan bestaande Huur-/Module-1-tabellen.
+   *
+   * `begroting_huur_maandoverride` — de derde laag van de vastgestelde rekenvolgorde (huidige
+   * prijsregel+indexatie → toekomstige VS13-kortingswijziging → bewuste handmatige
+   * begrotingsoverride): een EUR/maand-bedrag voor nieuwe huurprijs en/of nieuwe korting, geldig
+   * vanaf `vanaf_maand` tot een eventuele volgende override voor hetzelfde contract. Zelfde
+   * lifecycle-precedent als `begroting_contract_override` (module1Overrides.ts) — uitsluitend een
+   * applicatielaag-CONCEPT-check, geen DB-trigger (consistent met dat bestaande override-patroon).
+   *
+   * `begroting_huur_fictief_contract` — een uitsluitend-binnen-de-begroting bestaand "Begrotingsaanname"-
+   * contract (nooit de brontabellen), met exact de velden die de ONGEWIJZIGDE `berekenBegroteHuuropbrengsten`
+   * nodig heeft (wordt op leestijd naar `BgContractFeiten` gemapt — zie `huurFictieveContracten.ts`).
+   * `contractnummer` wordt applicatielaag-zijdig gegenereerd met een niet-numeriek `FICTIEF-`-prefix,
+   * zodat het nooit met een echt bronfeit-contractnummer kan botsen. Triggers spiegelen
+   * `begroting_contract_snapshot` (migratie 3): na VASTGESTELD is dit net als de echte snapshot
+   * immutable.
+   *
+   * `begroting_huur_module` — de nieuwe Huur-beoordeeld-vlag (vóór dit besluit bestond geen
+   * beoordeeld-concept voor Huur/Beheer). Zelfde vorm/triggers als `begroting_verzekering_module`
+   * (migratie 12) — "Onderdeel beoordelen" is hiermee voor Huur een afzonderlijke, bestaande-
+   * reviewlogica-conforme handeling.
+   */
+  {
+    version: 44,
+    description: "Huur: maandoverrides, fictieve begrotingscontracten, module-brede beoordeeld-vlag",
+    ddl: [
+      `CREATE TABLE begroting_huur_maandoverride (
+        begroting_versie_id TEXT NOT NULL REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        contractnummer TEXT NOT NULL,
+        vanaf_maand INTEGER NOT NULL CHECK (vanaf_maand BETWEEN 1 AND 12),
+        nieuwe_bruto_huur_per_maand TEXT NULL,
+        nieuwe_korting_per_maand TEXT NULL,
+        PRIMARY KEY (begroting_versie_id, contractnummer, vanaf_maand)
+      )`,
+      `CREATE TABLE begroting_huur_fictief_contract (
+        begroting_versie_id TEXT NOT NULL REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        contractnummer TEXT NOT NULL,
+        huurder_naam TEXT NOT NULL,
+        complexnummer TEXT NULL,
+        ingangsdatum TEXT NOT NULL,
+        bruto_jaarhuur TEXT NOT NULL,
+        belast_onbelast TEXT NOT NULL CHECK (belast_onbelast IN ('BELAST', 'ONBELAST')),
+        korting_jaar TEXT NOT NULL DEFAULT '0',
+        aangemaakt_op TEXT NOT NULL,
+        PRIMARY KEY (begroting_versie_id, contractnummer)
+      )`,
+      `CREATE TRIGGER trg_begroting_huur_fictief_contract_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_huur_fictief_contract
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_huur_fictief_contract: begrotingsversie is VASTGESTELD, fictieve contracten zijn immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_huur_fictief_contract_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_huur_fictief_contract
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_huur_fictief_contract: begrotingsversie is VASTGESTELD, fictieve contracten zijn immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_huur_fictief_contract_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_huur_fictief_contract
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_huur_fictief_contract: begrotingsversie is VASTGESTELD, fictieve contracten zijn immutable');
+       END`,
+      `CREATE TABLE begroting_huur_module (
+        begroting_versie_id TEXT PRIMARY KEY REFERENCES begrotingsversies(id) ON DELETE CASCADE,
+        beoordeeld INTEGER NOT NULL CHECK (beoordeeld IN (0, 1))
+      )`,
+      `CREATE TRIGGER trg_begroting_huur_module_vastgesteld_no_insert
+       BEFORE INSERT ON begroting_huur_module
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = NEW.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_huur_module: begrotingsversie is VASTGESTELD, beoordeeld-vlag is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_huur_module_vastgesteld_no_update
+       BEFORE UPDATE ON begroting_huur_module
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_huur_module: begrotingsversie is VASTGESTELD, beoordeeld-vlag is immutable');
+       END`,
+      `CREATE TRIGGER trg_begroting_huur_module_vastgesteld_no_delete
+       BEFORE DELETE ON begroting_huur_module
+       FOR EACH ROW
+       WHEN (SELECT status FROM begrotingsversies WHERE id = OLD.begroting_versie_id) = 'VASTGESTELD'
+       BEGIN
+         SELECT RAISE(ABORT, 'begroting_huur_module: begrotingsversie is VASTGESTELD, beoordeeld-vlag is immutable');
+       END`,
+    ],
+  },
 ];
 
 function schemaMetaTableExists(db: DatabaseSync): boolean {

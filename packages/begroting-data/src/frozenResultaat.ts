@@ -393,6 +393,11 @@ function reconstrueerModule1(db: DatabaseSync, versieId: string, versie: Begroti
       huurkorting: new Decimal(r.huurkorting),
       nettoHuur: new Decimal(r.netto_huur),
       kortingswijzigingToegepast: optioneleParsedBusinessDate(r.kortingswijziging_toegepast),
+      // Besluit 07-10-2026 (Maandverloop): de bevroren maandregel-tabel bewaart deze badge-vlaggen
+      // bewust niet — de UITKOMST (bruto/korting/netto hierboven) is al volledig en correct bevroren;
+      // uitsluitend de "was dit een handmatige override"-traceerbaarheid vervalt bij Terugkijken.
+      prijsOverrideActief: false,
+      kortingOverrideActief: false,
     }));
 
     return {

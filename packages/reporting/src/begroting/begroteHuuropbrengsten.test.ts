@@ -2,7 +2,10 @@ import Decimal from "decimal.js";
 import { describe, expect, it } from "vitest";
 import {
   berekenBegroteHuuropbrengsten,
+  berekenHuurKwartaalTotalen,
+  somHuurKwartaalTotalen,
   type BgContractFeiten,
+  type BgContractMaandOverride,
   type BgContractOverride,
   type BgHuurAannames,
   type BgRentrollComponent,
@@ -831,6 +834,138 @@ describe("berekenBegroteHuuropbrengsten", () => {
       const c = resultaat.contracten[0]!;
       for (const regel of c.regels) expect(regel.huurkorting.toString()).toBe("500");
       expect(resultaat.controleVereist.some((i) => i.ernst === "KRITIEK" && i.bericht.includes("Invalid Date"))).toBe(true);
+    });
+  });
+
+  /**
+   * Besluit 07-10-2026 (Maandverloop) — laag 3 van de rekenvolgorde: huidige prijsregel+indexatie,
+   * dan bronfeit-kortingswijziging, dan pas de handmatige begrotingsoverride. Standaard (`[]`) is
+   * volledig backwards-compatibel met elke test hierboven.
+   */
+  describe("berekenBegroteHuuropbrengsten — Maandverloop-override (laag 3)", () => {
+    function maandOverride(overrides: Partial<BgContractMaandOverride> = {}): BgContractMaandOverride {
+      return { contractnummer: "C1", vanafMaand: 7, nieuweBrutoHuurPerMaand: null, nieuweKortingPerMaand: null, ...overrides };
+    }
+
+    it("zonder maandOverrides-argument blijft het resultaat exact gelijk aan vóór deze fase (default-parameter)", () => {
+      const metDefault = berekenBegroteHuuropbrengsten([contract()], [], aannames(), BRON_PEILDATUM);
+      const metExpliciteLegeLijst = berekenBegroteHuuropbrengsten([contract()], [], aannames(), BRON_PEILDATUM, []);
+      expect(metDefault.portefeuilleTotalen.nettoHuur.toString()).toBe(metExpliciteLegeLijst.portefeuilleTotalen.nettoHuur.toString());
+      for (const r of metDefault.contracten[0]!.regels) {
+        expect(r.prijsOverrideActief).toBe(false);
+        expect(r.kortingOverrideActief).toBe(false);
+      }
+    });
+
+    it("nieuwe huurprijs vanaf maand 7 vervangt brutoHuurMetIndexatie vanaf die maand, eerdere maanden ongewijzigd, geen dubbele indexatie", () => {
+      const resultaat = berekenBegroteHuuropbrengsten(
+        [contract({ rentrollComponenten: [vs01(120000)] })], // 10.000/maand basis, geen indexatiedatum dus geen indexatie-effect
+        [],
+        aannames(),
+        BRON_PEILDATUM,
+        [maandOverride({ nieuweBrutoHuurPerMaand: new Decimal(1500) })],
+      );
+      const regels = resultaat.contracten[0]!.regels;
+      expect(regels[5]!.brutoHuurMetIndexatie.toString()).toBe("10000"); // juni (maand 6): ongewijzigd
+      expect(regels[5]!.prijsOverrideActief).toBe(false);
+      expect(regels[6]!.brutoHuurMetIndexatie.toString()).toBe("1500"); // juli (maand 7): override
+      expect(regels[6]!.prijsOverrideActief).toBe(true);
+      expect(regels[11]!.brutoHuurMetIndexatie.toString()).toBe("1500"); // december: override blijft gelden
+      expect(regels[6]!.nettoHuur.toString()).toBe("1500"); // geen korting actief -> netto = override zelf
+    });
+
+    it("nieuwe korting (EUR/maand) vanaf maand 7 vervangt huurkorting vanaf die maand; prijs blijft ongewijzigd — geen dubbele aftrek", () => {
+      const resultaat = berekenBegroteHuuropbrengsten(
+        [contract({ rentrollComponenten: [vs01(120000), vs13(-12000)] })], // bruto 10.000/mnd, basiskorting 1.000/mnd
+        [],
+        aannames(),
+        BRON_PEILDATUM,
+        [maandOverride({ nieuweKortingPerMaand: new Decimal(250) })],
+      );
+      const regels = resultaat.contracten[0]!.regels;
+      expect(regels[5]!.huurkorting.toString()).toBe("1000"); // juni: basiskorting
+      expect(regels[5]!.kortingOverrideActief).toBe(false);
+      expect(regels[6]!.brutoHuurMetIndexatie.toString()).toBe("10000"); // prijs blijft de basis — override raakt uitsluitend korting
+      expect(regels[6]!.huurkorting.toString()).toBe("250"); // juli: override, NIET 1000 + 250 (geen dubbele aftrek)
+      expect(regels[6]!.kortingOverrideActief).toBe(true);
+      expect(regels[6]!.nettoHuur.toString()).toBe("9750"); // 10000 - 250, exact één keer afgetrokken
+    });
+
+    it("twee overrides op hetzelfde contract: de latere vanafMaand neemt het over vanaf zijn eigen maand, de eerste blijft gelden tussen de twee", () => {
+      const resultaat = berekenBegroteHuuropbrengsten(
+        [contract({ rentrollComponenten: [vs01(120000)] })],
+        [],
+        aannames(),
+        BRON_PEILDATUM,
+        [maandOverride({ vanafMaand: 4, nieuweBrutoHuurPerMaand: new Decimal(800) }), maandOverride({ vanafMaand: 9, nieuweBrutoHuurPerMaand: new Decimal(1200) })],
+      );
+      const regels = resultaat.contracten[0]!.regels;
+      expect(regels[2]!.brutoHuurMetIndexatie.toString()).toBe("10000"); // maart: vóór beide overrides
+      expect(regels[3]!.brutoHuurMetIndexatie.toString()).toBe("800"); // april t/m augustus: eerste override
+      expect(regels[7]!.brutoHuurMetIndexatie.toString()).toBe("800");
+      expect(regels[8]!.brutoHuurMetIndexatie.toString()).toBe("1200"); // september e.v.: tweede override neemt over
+      expect(regels[11]!.brutoHuurMetIndexatie.toString()).toBe("1200");
+    });
+
+    it("override op een onbekend contractnummer heeft geen effect op andere contracten (geen kruisbesmetting)", () => {
+      const resultaat = berekenBegroteHuuropbrengsten(
+        [contract({ contractnummer: "C1", rentrollComponenten: [vs01(120000)] })],
+        [],
+        aannames(),
+        BRON_PEILDATUM,
+        [maandOverride({ contractnummer: "ONBEKEND", nieuweBrutoHuurPerMaand: new Decimal(1) })],
+      );
+      expect(resultaat.contracten[0]!.regels[6]!.brutoHuurMetIndexatie.toString()).toBe("10000");
+    });
+
+    it("prijsoverride op een gebroken maand (ingangsdatum medio maand) wordt pro-rata toegepast, zelfde dagfractie-conventie als de basisprijs", () => {
+      const resultaat = berekenBegroteHuuropbrengsten(
+        [contract({ contractnummer: "C1", ingangsdatum: new Date("2027-01-15T00:00:00.000Z"), rentrollComponenten: [vs01(120000)] })],
+        [],
+        aannames(),
+        BRON_PEILDATUM,
+        [maandOverride({ vanafMaand: 1, nieuweBrutoHuurPerMaand: new Decimal(3100) })],
+      );
+      // januari 2027: 17 van de 31 dagen actief (15 t/m 31 inclusief) -> 3100 * 17/31
+      expect(resultaat.contracten[0]!.regels[0]!.brutoHuurMetIndexatie.toString()).toBe(new Decimal(3100).times(17).dividedBy(31).toString());
+    });
+  });
+
+  describe("berekenHuurKwartaalTotalen / somHuurKwartaalTotalen — afgeleid uit bestaande maandregels, geen nieuwe berekening", () => {
+    it("Q1-Q4 + jaartotaal zijn de exacte som van de bijbehorende drie maandregels", () => {
+      const resultaat = berekenBegroteHuuropbrengsten([contract({ rentrollComponenten: [vs01(120000), vs13(-12000)] })], [], aannames(), BRON_PEILDATUM);
+      const kwartalen = berekenHuurKwartaalTotalen(resultaat.contracten[0]!.regels);
+      expect(kwartalen.q1.nettoHuur.toString()).toBe("27000"); // 3 x (10000 - 1000)
+      expect(kwartalen.q1.brutoHuurMetIndexatie.toString()).toBe("30000");
+      expect(kwartalen.q1.huurkorting.toString()).toBe("3000");
+      expect(kwartalen.jaartotaal.nettoHuur.toString()).toBe(resultaat.contracten[0]!.jaartotaal.nettoHuur.toString());
+    });
+
+    it("een contract dat halverwege het jaar eindigt: de kwartalen ná het einde zijn €0 (automatische leegstand), zonder enige override nodig", () => {
+      const resultaat = berekenBegroteHuuropbrengsten(
+        [contract({ einddatum: new Date("2027-05-15T00:00:00.000Z"), rentrollComponenten: [vs01(120000)] })],
+        [],
+        aannames(),
+        BRON_PEILDATUM,
+      );
+      const kwartalen = berekenHuurKwartaalTotalen(resultaat.contracten[0]!.regels);
+      expect(kwartalen.q1.nettoHuur.toString()).toBe("30000"); // volledig actief
+      expect(kwartalen.q3.nettoHuur.toString()).toBe("0"); // volledig na contracteinde -> automatische leegstand
+      expect(kwartalen.q4.nettoHuur.toString()).toBe("0");
+    });
+
+    it("somHuurKwartaalTotalen telt meerdere contracten (bv. voor complexaggregatie) op tot exact de som van hun eigen kwartaaltotalen", () => {
+      const resultaat = berekenBegroteHuuropbrengsten(
+        [contract({ contractnummer: "C1", rentrollComponenten: [vs01(120000)] }), contract({ contractnummer: "C2", rentrollComponenten: [vs01(60000)] })],
+        [],
+        aannames(),
+        BRON_PEILDATUM,
+      );
+      const k1 = berekenHuurKwartaalTotalen(resultaat.contracten[0]!.regels);
+      const k2 = berekenHuurKwartaalTotalen(resultaat.contracten[1]!.regels);
+      const totaal = somHuurKwartaalTotalen([k1, k2]);
+      expect(totaal.q1.nettoHuur.toString()).toBe(k1.q1.nettoHuur.plus(k2.q1.nettoHuur).toString());
+      expect(totaal.jaartotaal.nettoHuur.toString()).toBe(resultaat.portefeuilleTotalen.nettoHuur.toString());
     });
   });
 });

@@ -32,6 +32,8 @@ function twaalfMaandRegels(nettoHuur: number | readonly number[]): BgHuurMaandRe
       huurkorting: new Decimal(0),
       nettoHuur: bedrag,
       kortingswijzigingToegepast: null,
+      prijsOverrideActief: false,
+      kortingOverrideActief: false,
     };
   });
 }
@@ -225,6 +227,8 @@ describe("berekenBegroteBeheersvergoeding", () => {
       huurkorting: new Decimal(4000), // grote korting: netto wijkt duidelijk af van bruto
       nettoHuur: new Decimal(6000),
       kortingswijzigingToegepast: null,
+      prijsOverrideActief: false,
+      kortingOverrideActief: false,
     }));
     const module1 = fakeModule1([fakeContract({ complexnummer: "001", regels: brutoRegels })]);
     const resultaat = berekenBegroteBeheersvergoeding(module1, [config({ complexnummer: "001", variabelPercentage: new Decimal(10) })]);

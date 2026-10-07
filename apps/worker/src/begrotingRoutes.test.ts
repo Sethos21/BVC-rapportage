@@ -1156,8 +1156,9 @@ describe("Huur/Beheer via echte HTTP-routes met een echte Contracten/RentRoll-fi
       expect(html1).toContain('class="sidebar"');
       expect(html1).toContain('class="pill concept"');
 
-      // Huur-detailpagina toont het contract.
-      const huurUrl = hoofdschermUrl.replace(/\?.*/, "") + "/module/huur?laatstAfgeslotenBoekperiode=06";
+      // Huur-detailpagina toont het contract. Besluit 07-10-2026 §3: "Per complex" is nu standaard
+      // actief, dus de contractweergave wordt hier expliciet opgevraagd (zelfde als vóór die fase).
+      const huurUrl = hoofdschermUrl.replace(/\?.*/, "") + "/module/huur?laatstAfgeslotenBoekperiode=06&weergave=contract";
       const huurDetail1 = await fetch(baseUrl + huurUrl);
       expect(huurDetail1.status).toBe(200);
       const huurDetailHtml1 = await huurDetail1.text();
@@ -1215,16 +1216,16 @@ describe("Huur/Beheer via echte HTTP-routes met een echte Contracten/RentRoll-fi
       const hoofdschermUrl = nieuw.headers.get("location")!;
       const huurUrl = hoofdschermUrl.replace(/\?.*/, "") + "/module/huur?laatstAfgeslotenBoekperiode=06";
 
-      // Standaard (contractweergave): het in 2028 aflopende contract 0000000099 is herkenbaar gemarkeerd; het doorlopende contract niet.
-      const contractHtml = await (await fetch(baseUrl + huurUrl)).text();
+      // Contractweergave (besluit 07-10-2026 §3: "Per complex" is nu standaard actief, hier expliciet opgevraagd): het in 2028 aflopende contract 0000000099 is herkenbaar gemarkeerd; het doorlopende contract niet.
+      const contractHtml = await (await fetch(`${baseUrl + huurUrl}&weergave=contract`)).text();
       expect(contractHtml).toContain("0000000099");
-      expect(contractHtml).toContain("loopt af in 2028");
+      expect(contractHtml).toContain("Loopt af in 2028");
       const regelAflopend = contractHtml.slice(contractHtml.indexOf("0000000099"), contractHtml.indexOf("0000000099") + 300);
-      expect(regelAflopend).toContain("loopt af in 2028");
+      expect(regelAflopend).toContain("Loopt af in 2028");
       const regelDoorlopend = contractHtml.slice(contractHtml.indexOf("0000000043"), contractHtml.indexOf("0000000043") + 300);
-      expect(regelDoorlopend).not.toContain("loopt af");
+      expect(regelDoorlopend).not.toContain("Loopt af");
 
-      // Complexweergave: twee complexen, geaggregeerd (netto 120.000 + 60.000), geen per-contract-overrideveld.
+      // Complexweergave (nu standaard, maar hier ook expliciet opgevraagd): twee complexen, geaggregeerd (netto 120.000 + 60.000), geen per-contract-overrideveld.
       const complexHtml = await (await fetch(`${baseUrl + huurUrl}&weergave=complex`)).text();
       expect(complexHtml).toContain("Per complex");
       expect(complexHtml).toContain("001");
@@ -1351,7 +1352,7 @@ describe("Fase 2 — Huur als referentie-implementatie: één functionele module
         redirect: "manual",
       });
       const hoofdschermUrl = nieuw.headers.get("location")!;
-      const huurUrl = hoofdschermUrl.replace(/\?.*/, "") + "/module/huur?laatstAfgeslotenBoekperiode=06&fragment=1";
+      const huurUrl = hoofdschermUrl.replace(/\?.*/, "") + "/module/huur?laatstAfgeslotenBoekperiode=06&fragment=1&weergave=contract";
       const huurHtml = await (await fetch(baseUrl + huurUrl)).text();
 
       // Geen tweede vergelijkende-P&L-blok: de eyebrow-titel en de vijf vergelijkingskolommen komen hier niet meer voor.
@@ -1359,15 +1360,14 @@ describe("Fase 2 — Huur als referentie-implementatie: één functionele module
       expect(huurHtml).not.toContain("Begroting vorig jaar");
       expect(huurHtml).not.toContain("Jouw begroting</th>");
 
-      // Nieuwe titel + compacte samenvatting, uitsluitend reeds bestaande, betrouwbare waarden.
+      // Nieuwe titel + compacte samenvatting (besluit 07-10-2026 §2: bruto belast + bruto onbelast − korting = netto), uitsluitend reeds bestaande, betrouwbare waarden.
       expect(huurHtml).toContain("Specificatie netto huuropbrengsten");
       expect(huurHtml).toContain("Opbouw netto huuropbrengsten");
-      expect(huurHtml).toContain("Contracthuur (vóór indexatie)");
-      expect(huurHtml).toContain("Indexatie-effect");
-      expect(huurHtml).toContain("Verleende huurkorting (al verwerkt in netto huur, geen losse aftrek)");
-      expect(huurHtml).toContain("waarvan Huuropbrengst belast");
-      expect(huurHtml).toContain("waarvan Huuropbrengst onbelast");
-      expect(huurHtml).toContain("€ 120.000,00"); // contracthuur vóór indexatie = netto huur in deze fixture (0% indexatie, geen korting)
+      expect(huurHtml).toContain("Bruto huuropbrengst belast");
+      expect(huurHtml).toContain("Bruto huuropbrengst onbelast");
+      expect(huurHtml).toContain("Verleende huurkorting");
+      expect(huurHtml).toContain("Netto huuropbrengsten");
+      expect(huurHtml).toContain("€ 120.000,00"); // bruto belast = netto huur in deze fixture (0% indexatie, geen korting)
 
       // Contract-/complexspecificatie blijft onveranderd werken (bestaande functionaliteit).
       expect(huurHtml).toContain("0000000043");
@@ -1397,7 +1397,10 @@ describe("Fase 2 — Huur als referentie-implementatie: één functionele module
 
       const huurUrl = hoofdschermUrl.replace(/\?.*/, "") + "/module/huur?laatstAfgeslotenBoekperiode=06&fragment=1";
       const huurHtml = await (await fetch(baseUrl + huurUrl)).text();
-      expect(huurHtml).toContain("Verleende huurkorting (al verwerkt in netto huur, geen losse aftrek)");
+      // Besluit 07-10-2026 §2: bruto belast + bruto onbelast − huurkorting = netto huuropbrengsten — korting staat exact één keer, als aftrekregel, nooit een tweede keer verrekend.
+      expect(huurHtml).toContain("Verleende huurkorting");
+      expect(huurHtml).toContain("Netto huuropbrengsten");
+      expect((huurHtml.match(/€ 120\.000,00/g) ?? []).length).toBeGreaterThan(0); // netto blijft 120.000 — korting (€0 in deze fixture) niet nogmaals afgetrokken
     });
   });
 
@@ -1420,6 +1423,262 @@ describe("Fase 2 — Huur als referentie-implementatie: één functionele module
       // Beheer behoudt zijn bestaande, ongewijzigde vergelijkende-P&L-kaart (pnlHtml) — niet aangeraakt in deze fase.
       expect(beheerHtml).toContain("Vergelijkende P&amp;L");
       expect(beheerHtml).toContain("Begroting vorig jaar");
+    });
+  });
+});
+
+/**
+ * Besluit 07-10-2026 ("Huur naar vastgestelde UX") — Q1-Q4, Maandverloop (controle + eenvoudige
+ * begrotingsinvoer), fictieve begrotingscontracten ("Contract toevoegen"), Onderdeel beoordelen/
+ * Voorstel overnemen, en finalized/read-only voor al deze nieuwe routes.
+ */
+describe("Huur naar vastgestelde UX (besluit 07-10-2026)", () => {
+  async function nieuweHuurBegroting(baseUrl: string): Promise<{ hoofdschermUrl: string; versieId: string; huurUrl: string }> {
+    const nieuw = await fetch(`${baseUrl}/begroting/nieuw`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ administratieId: ADMINISTRATIE_ID, begrotingsjaar: "2028", laatstAfgeslotenBoekperiode: "06", indexatiePercentage: "0" }).toString(),
+      redirect: "manual",
+    });
+    const hoofdschermUrl = nieuw.headers.get("location")!;
+    const versieId = hoofdschermUrl.split("/")[3]!.split("?")[0]!;
+    const huurUrl = hoofdschermUrl.replace(/\?.*/, "") + "/module/huur?laatstAfgeslotenBoekperiode=06";
+    return { hoofdschermUrl, versieId, huurUrl };
+  }
+
+  it("Q1-Q4 + jaartotaal zijn zichtbaar op de contract- én complexweergave, en sluiten aan op het jaartotaal uit de samenvatting", async () => {
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "contracten_huidig.xlsx"), [contractRij()]);
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "rentroll.xlsx"), [rentrollRij()]);
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "boekingen.xlsx"), []);
+
+    await metServer(async (baseUrl) => {
+      const { huurUrl } = await nieuweHuurBegroting(baseUrl);
+      const contractHtml = await (await fetch(`${baseUrl + huurUrl}&weergave=contract`)).text();
+      expect(contractHtml).toContain("<th>Q1</th>");
+      expect(contractHtml).toContain("<th>Q4</th>");
+      expect(contractHtml).toContain("€ 30.000,00"); // 120.000 / 4, 0% indexatie, geen korting
+
+      const complexHtml = await (await fetch(`${baseUrl + huurUrl}&weergave=complex`)).text();
+      expect(complexHtml).toContain("€ 30.000,00");
+      expect(complexHtml).toContain("€ 120.000,00"); // jaartotaal-kolom
+    });
+  });
+
+  it("Maandverloop: toont de bestaande maandregels, en een nieuwe huurprijs/korting vanaf een gekozen maand werkt door in maanden/kwartalen/jaartotaal via dezelfde rekenmotor", async () => {
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "contracten_huidig.xlsx"), [contractRij()]);
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "rentroll.xlsx"), [rentrollRij()]);
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "boekingen.xlsx"), []);
+
+    await metServer(async (baseUrl) => {
+      const { huurUrl, versieId } = await nieuweHuurBegroting(baseUrl);
+      const maandverloopUrl = `/begroting/${ADMINISTRATIE_ID}/${versieId}/module/huur/maandverloop?laatstAfgeslotenBoekperiode=06&contractnummer=0000000043`;
+
+      const voor = await (await fetch(baseUrl + maandverloopUrl)).text();
+      expect(voor).toContain("Maandverloop");
+      expect(voor).toContain("januari");
+      expect(voor).toContain("€ 10.000,00"); // 120.000 / 12, vlak
+
+      const opslaan = await fetch(baseUrl + maandverloopUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ vanafMaand: "7", nieuweBrutoHuurPerMaand: "1500", nieuweKortingPerMaand: "" }).toString(),
+        redirect: "manual",
+      });
+      expect(opslaan.status).toBe(302);
+
+      const na = await (await fetch(baseUrl + maandverloopUrl)).text();
+      expect(na).toContain("Handmatig aangepast");
+      // juni (vóór de override) blijft 10.000; juli (vanaf de override) wordt 1.500 — geen dubbele indexatie/aftrek.
+      const juniIdx = na.indexOf("juni");
+      const juliIdx = na.indexOf("juli");
+      expect(na.slice(juniIdx, juniIdx + 150)).toContain("€ 10.000,00");
+      expect(na.slice(juliIdx, juliIdx + 150)).toContain("€ 1.500,00");
+
+      // Kwartalen/jaartotaal op de contractweergave zijn automatisch herberekend uit dezelfde maandregels: Q3 = juli+aug+sep = 1500*3 = 4.500.
+      const contractHtml = await (await fetch(`${baseUrl + huurUrl}&weergave=contract`)).text();
+      expect(contractHtml).toContain("€ 4.500,00");
+      expect(contractHtml).toContain("Handmatig aangepast");
+    });
+  });
+
+  it("Contract toevoegen: een fictief contract telt mee in Q1-Q4/jaartotaal/complexaggregatie/belast-onbelast, wijzigt de bronadministratie niet, en kan worden gewijzigd en verwijderd", async () => {
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "contracten_huidig.xlsx"), [contractRij()]);
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "rentroll.xlsx"), [rentrollRij()]);
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "boekingen.xlsx"), []);
+
+    await metServer(async (baseUrl) => {
+      const { huurUrl, versieId } = await nieuweHuurBegroting(baseUrl);
+      const contractenUrl = `/begroting/${ADMINISTRATIE_ID}/${versieId}/module/huur/contracten?laatstAfgeslotenBoekperiode=06`;
+
+      const toevoegen = await fetch(baseUrl + contractenUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ huurderNaam: "Nieuwe Huurder BV", complexnummer: "003", ingangsdatum: "2028-01-01", brutoJaarhuur: "24000", belastOnbelast: "BELAST", kortingJaar: "0" }).toString(),
+        redirect: "manual",
+      });
+      expect(toevoegen.status).toBe(302);
+
+      const contractHtml = await (await fetch(`${baseUrl + huurUrl}&weergave=contract`)).text();
+      expect(contractHtml).toContain("Nieuwe Huurder BV");
+      expect(contractHtml).toContain("Begrotingsaanname");
+      expect(contractHtml).toContain("€ 144.000,00"); // portefeuille netto: 120.000 (bestaand) + 24.000 (fictief)
+
+      const complexHtml = await (await fetch(`${baseUrl + huurUrl}&weergave=complex`)).text();
+      expect(complexHtml).toContain("003"); // telt mee in complexaggregatie als eigen complex
+
+      // Wijzigen: contractnummer is server-side gegenereerd (FICTIEF-<uuid>) — opgehaald via de "Wijzigen"-link in de respons.
+      const wijzigMatch = /module\/huur\?[^"]*wijzigFictief=([^"&]+)/.exec(contractHtml);
+      expect(wijzigMatch).not.toBeNull();
+      const fictiefNr = decodeURIComponent(wijzigMatch![1]!);
+      expect(fictiefNr).toContain("FICTIEF-");
+
+      const wijzigenUrl = `/begroting/${ADMINISTRATIE_ID}/${versieId}/module/huur/contracten/${encodeURIComponent(fictiefNr)}?laatstAfgeslotenBoekperiode=06`;
+      const wijzigen = await fetch(baseUrl + wijzigenUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ contractnummer: fictiefNr, huurderNaam: "Nieuwe Huurder BV (gewijzigd)", complexnummer: "003", ingangsdatum: "2028-01-01", brutoJaarhuur: "30000", belastOnbelast: "BELAST", kortingJaar: "0" }).toString(),
+        redirect: "manual",
+      });
+      expect(wijzigen.status).toBe(302);
+      const naWijzigen = await (await fetch(`${baseUrl + huurUrl}&weergave=contract`)).text();
+      expect(naWijzigen).toContain("Nieuwe Huurder BV (gewijzigd)");
+      expect(naWijzigen).toContain("€ 150.000,00"); // 120.000 + 30.000
+
+      const verwijderenUrl = `/begroting/${ADMINISTRATIE_ID}/${versieId}/module/huur/contracten/${encodeURIComponent(fictiefNr)}/verwijderen?laatstAfgeslotenBoekperiode=06`;
+      const verwijderen = await fetch(baseUrl + verwijderenUrl, { method: "POST", redirect: "manual" });
+      expect(verwijderen.status).toBe(302);
+      const naVerwijderen = await (await fetch(`${baseUrl + huurUrl}&weergave=contract`)).text();
+      expect(naVerwijderen).not.toContain("Nieuwe Huurder BV");
+      expect(naVerwijderen).toContain("€ 120.000,00"); // terug naar uitsluitend de echte contractbasis
+    });
+  });
+
+  it("Onderdeel beoordelen is een afzonderlijke handeling; een relevante wijziging laat de beoordeling vervallen; Voorstel overnemen beoordeelt niet automatisch en wist handmatige overrides/Maandverloop-overrides", async () => {
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "contracten_huidig.xlsx"), [contractRij()]);
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "rentroll.xlsx"), [rentrollRij()]);
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "boekingen.xlsx"), []);
+
+    await metServer(async (baseUrl) => {
+      const { huurUrl } = await nieuweHuurBegroting(baseUrl);
+      const contractUrl = `${huurUrl}&weergave=contract`;
+
+      // Opslaan MET het beoordeeld-vinkje aangezet.
+      await fetch(baseUrl + contractUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ beoordeeld: "1" }).toString(),
+        redirect: "manual",
+      });
+      const naBeoordeeld = await (await fetch(baseUrl + contractUrl)).text();
+      expect(naBeoordeeld).toContain('name="beoordeeld"');
+      expect(naBeoordeeld).toMatch(/name="beoordeeld"[^>]*checked/);
+
+      // Een volgende, relevante wijziging (override opslaan) ZONDER het vinkje opnieuw aan te zetten: beoordeling vervalt.
+      await fetch(baseUrl + contractUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ "override_0000000043": "5" }).toString(),
+        redirect: "manual",
+      });
+      const naWijziging = await (await fetch(baseUrl + contractUrl)).text();
+      expect(naWijziging).not.toMatch(/name="beoordeeld"[^>]*checked/);
+      expect(naWijziging).toContain('value="5"'); // de override zelf is wel opgeslagen
+
+      // Voorstel overnemen: wist de indexatie-override (Jouw begroting terug naar 120.000, geen 10%-effect), beoordeelt niet automatisch.
+      const voorstelOvernemen = await fetch(baseUrl + contractUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ actie: "voorstelOvernemen" }).toString(),
+        redirect: "manual",
+      });
+      expect(voorstelOvernemen.status).toBe(302);
+      const naVoorstel = await (await fetch(baseUrl + contractUrl)).text();
+      expect(naVoorstel).not.toMatch(/name="beoordeeld"[^>]*checked/);
+      expect(naVoorstel).toContain('value=""'); // override-veld weer leeg
+    });
+  });
+
+  it("VASTGESTELD: Maandverloop, Contract toevoegen/wijzigen/verwijderen weigeren allemaal POST, blijven leesbaar via GET waar van toepassing", async () => {
+    schrijfXlsxFixture(join(bronGedeeldDir(root), "boekingen.xlsx"), []);
+    const {
+      maakBegrotingsversie,
+      schrijfModule1Snapshot,
+      schrijfModule1Aannames,
+      schrijfModule3Invoer,
+      schrijfGeplandOnderhoudBeoordeeld,
+      schrijfCorrectiefDagelijksOnderhoudRegels,
+      schrijfCorrectiefDagelijksOnderhoudBeoordeeld,
+      schrijfVerzekeringBeoordeeld,
+      schrijfGemeentelijkeLastenModule,
+      schrijfAlgemeneKostenCategorieState,
+      schrijfLeegstandCategorieState,
+      schrijfRenteCategorieState,
+      schrijfNietVerrekenbareBtwState,
+      stelBegrotingVast,
+    } = await import("@bvc/begroting-data");
+    const { ALGEMENE_KOSTEN_CATEGORIEEN, LEEGSTAND_CATEGORIEEN, RENTE_CATEGORIEEN } = await import("@bvc/reporting");
+
+    // Zelfde bewezen, volledig-vaststelbare opbouw als de bestaande "VASTGESTELD: dezelfde inline-
+    // uitklaplink..."-test — hier met één echt contract in de snapshot, zodat Maandverloop iets te
+    // tonen heeft.
+    const db = openOrCreateDatabase(begrotingsversiesDatabasePad(root, ADMINISTRATIE_ID));
+    const versie = maakBegrotingsversie(db, { originType: "NIEUW", bedrijfsnr: BEDRIJFSNR, begrotingsjaar: 2028, bronPeildatum: new Date() });
+    const versieId = versie.id;
+    schrijfModule1Snapshot(db, versieId, [
+      {
+        bedrijfsnr: BEDRIJFSNR,
+        contractnummer: "0000000043",
+        huurdernummer: null,
+        huurderNaam: "Voorbeeld Huurder BV",
+        complexnummer: "001",
+        rentrollComponenten: [{ vorderingsoort: "01", bedragJaar: new Decimal(120000), btwYn: "Y" }],
+        ingangsdatum: new Date("2020-01-01T00:00:00.000Z"),
+        einddatum: null,
+        indexatiedatum: null,
+        indexatieHerhalingMaanden: null,
+        toekomstigeKortingswijzigingen: [],
+      },
+    ]);
+    schrijfModule1Aannames(db, versieId, { begrotingsjaar: 2028, indexatiePercentage: new Decimal(0) }, "06");
+    schrijfModule3Invoer(db, versieId, { wijze: "NIEUWE_VERGOEDING", bedrag: new Decimal(500), eenheid: "MAAND", ingangsdatum: null });
+    schrijfGeplandOnderhoudBeoordeeld(db, versieId, true);
+    schrijfCorrectiefDagelijksOnderhoudRegels(db, versieId, []);
+    schrijfCorrectiefDagelijksOnderhoudBeoordeeld(db, versieId, true);
+    schrijfVerzekeringBeoordeeld(db, versieId, true);
+    schrijfGemeentelijkeLastenModule(db, versieId, { werkelijkeGemeentelijkeLasten: null, wozStijgingPercentage: null, lastenPercentageStijging: null, begrotingsPercentageOverride: null, beoordeeld: true });
+    schrijfAlgemeneKostenCategorieState(db, versieId, Object.fromEntries(ALGEMENE_KOSTEN_CATEGORIEEN.map((c: string) => [c, { beoordeeld: true, vorigJaarBedrag: null, verwachteVerhogingPercentage: null }])) as never);
+    schrijfLeegstandCategorieState(
+      db,
+      versieId,
+      Object.fromEntries(LEEGSTAND_CATEGORIEEN.map((c: string) => [c, { beoordeeld: true, laatstBekendServicekostenvoorschotJaar: null, laatstBekendServicekostenvoorschotJaarHerkomst: null, verwachteLeegstandsperiodeMaanden: null }])) as never,
+    );
+    schrijfRenteCategorieState(db, versieId, Object.fromEntries(RENTE_CATEGORIEEN.map((c: string) => [c, { beoordeeld: true }])) as never);
+    schrijfNietVerrekenbareBtwState(db, versieId, { beoordeeld: true, vorigJaarWerkelijk: null });
+    stelBegrotingVast(db, versieId, new Date());
+    db.close();
+
+    await metServer(async (baseUrl) => {
+      const contractenUrl = `/begroting/${ADMINISTRATIE_ID}/${versieId}/module/huur/contracten?laatstAfgeslotenBoekperiode=06`;
+      const toevoegenGeweigerd = await fetch(baseUrl + contractenUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ huurderNaam: "Te laat", ingangsdatum: "2028-01-01", brutoJaarhuur: "1000", belastOnbelast: "BELAST" }).toString(),
+        redirect: "manual",
+      });
+      expect(toevoegenGeweigerd.status).toBe(400);
+
+      const maandverloopUrl = `/begroting/${ADMINISTRATIE_ID}/${versieId}/module/huur/maandverloop?laatstAfgeslotenBoekperiode=06&contractnummer=0000000043`;
+      const maandverloopGet = await fetch(baseUrl + maandverloopUrl);
+      expect(maandverloopGet.status).toBe(200); // Terugkijken: blijft leesbaar
+      expect(await maandverloopGet.text()).not.toContain("Wijziging opslaan");
+
+      const maandverloopPostGeweigerd = await fetch(baseUrl + maandverloopUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ vanafMaand: "7", nieuweBrutoHuurPerMaand: "1", nieuweKortingPerMaand: "" }).toString(),
+        redirect: "manual",
+      });
+      expect(maandverloopPostGeweigerd.status).toBe(400);
     });
   });
 });

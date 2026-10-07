@@ -12,6 +12,9 @@ import {
   leesGemeentelijkeLastenVoorstelStatus,
   leesGeplandOnderhoudActiviteiten,
   leesGeplandOnderhoudBeoordeeld,
+  leesHuurBeoordeeld,
+  leesHuurFictieveContracten,
+  leesHuurMaandOverrides,
   leesLeegstandCategorieState,
   leesLeegstandRegels,
   leesLaatstAfgeslotenBoekperiode,
@@ -44,6 +47,8 @@ import {
   schrijfGemeentelijkeLastenRegels,
   schrijfGeplandOnderhoudActiviteiten,
   schrijfGeplandOnderhoudBeoordeeld,
+  schrijfHuurBeoordeeld,
+  schrijfHuurMaandOverrides,
   schrijfLeegstandCategorieState,
   schrijfLeegstandRegels,
   schrijfModule1Aannames,
@@ -66,9 +71,14 @@ import {
   toonModule,
   verbergModule,
   verwijderConceptVersie,
+  voegHuurFictiefContractToe,
+  wijzigHuurFictiefContract,
+  verwijderHuurFictiefContract,
+  naarBgContractFeiten,
   VoorstelOvernameGeweigerdError,
   type AlgemeneKostenRegelInvoer,
   type Begrotingsversie,
+  type BgHuurFictiefContract,
   type GemeentelijkeLastenRegelInvoer,
   type GeplandOnderhoudActiviteitInvoer,
   type LeegstandRegelInvoer,
@@ -79,13 +89,18 @@ import {
   ALGEMENE_KOSTEN_CATEGORIEEN,
   berekenBegroteBeheersvergoeding,
   berekenBegroteHuuropbrengsten,
+  berekenHuurKwartaalTotalen,
   berekenPnLBoom,
   berekenVerzekeringMaandverloop,
+  somHuurKwartaalTotalen,
   LEEGSTAND_CATEGORIEEN,
   vergelijkPnLResultaten,
   type BgAlgemeneKostenCategorie,
   type BgBeheerComplexConfig,
+  type BgContractFeiten,
+  type BgContractMaandOverride,
   type BgContractOverride,
+  type BgHuurKwartaalTotalen,
   type BgLeegstandCategorie,
   type BgManagementInvoer,
   type BgRenteCategorie,
@@ -107,6 +122,7 @@ import {
   renderGemeentelijkeLastenForm,
   renderGeplandOnderhoudForm,
   renderHuurDetail,
+  renderHuurMaandverloop,
   renderKiesBoekperiodeScherm,
   renderLeegstandForm,
   renderManagementForm,
@@ -121,6 +137,11 @@ import {
   type GeplandOnderhoudRegelVeld,
   type ComplexHuurRegel,
   type HuurDetailRegel,
+  type HuurFictiefContractFormulier,
+  type HuurFictiefContractRegel,
+  type HuurKwartaalVeld,
+  type HuurMaandverloopRegel,
+  type HuurSamenvattingVeld,
   type LeegstandCategorieOpties,
   moduleWerkomgevingPnLHtml,
   type OnderhoudTotaalSamenvattingVeld,
@@ -746,6 +767,26 @@ export async function handleBegrotingRequest(root: string, req: IncomingMessage,
     }
   }
 
+  // GET/POST /begroting/{administratieId}/{versieId}/module/huur/maandverloop?contractnummer=... (besluit 07-10-2026 §9)
+  if (segmenten.length === 6 && segmenten[3] === "module" && segmenten[4] === "huur" && segmenten[5] === "maandverloop") {
+    return handleHuurMaandverloop(req, res, url, root, administratieId, versieId);
+  }
+
+  // POST /begroting/{administratieId}/{versieId}/module/huur/contracten (besluit 07-10-2026 §11, toevoegen)
+  if (req.method === "POST" && segmenten.length === 6 && segmenten[3] === "module" && segmenten[4] === "huur" && segmenten[5] === "contracten") {
+    return handleHuurContractToevoegen(req, res, url, root, administratieId, versieId);
+  }
+
+  // POST /begroting/{administratieId}/{versieId}/module/huur/contracten/{contractnummer}/verwijderen
+  if (req.method === "POST" && segmenten.length === 8 && segmenten[3] === "module" && segmenten[4] === "huur" && segmenten[5] === "contracten" && segmenten[7] === "verwijderen") {
+    return handleHuurContractVerwijderen(req, res, url, root, administratieId, versieId, segmenten[6]!);
+  }
+
+  // POST /begroting/{administratieId}/{versieId}/module/huur/contracten/{contractnummer} (wijzigen)
+  if (req.method === "POST" && segmenten.length === 7 && segmenten[3] === "module" && segmenten[4] === "huur" && segmenten[5] === "contracten") {
+    return handleHuurContractWijzigen(req, res, url, root, administratieId, versieId, segmenten[6]!);
+  }
+
   // GET/POST /begroting/{administratieId}/{versieId}/module/{moduleKey}
   if (segmenten.length === 5 && segmenten[3] === "module") {
     const moduleKey = segmenten[4]!;
@@ -753,6 +794,218 @@ export async function handleBegrotingRequest(root: string, req: IncomingMessage,
   }
 
   return false;
+}
+
+/** Leest/parst de fictief-contract-formuliervelden, gedeeld tussen toevoegen en wijzigen — zelfde validatie, geen duplicate businesslogica. */
+function parseHuurFictiefContractVelden(velden: Record<string, string>): { huurderNaam: string; complexnummer: string | null; ingangsdatum: Date; brutoJaarhuur: Decimal; belastOnbelast: "BELAST" | "ONBELAST"; kortingJaar: Decimal } {
+  const huurderNaam = tekst(velden["huurderNaam"]);
+  if (huurderNaam.length === 0) throw new Error("Huurder-/contractnaam is verplicht.");
+  const complexnummerTekst = tekst(velden["complexnummer"]);
+  const ingangsdatumTekst = tekst(velden["ingangsdatum"]);
+  if (ingangsdatumTekst.length === 0) throw new Error("Ingangsdatum is verplicht.");
+  const brutoJaarhuur = parseGeld(tekst(velden["brutoJaarhuur"]));
+  if (brutoJaarhuur === null) throw new Error("Huurprijs is verplicht en moet een geldig bedrag zijn.");
+  const belastOnbelast = tekst(velden["belastOnbelast"]) === "ONBELAST" ? "ONBELAST" : "BELAST";
+  const kortingTekst = tekst(velden["kortingJaar"]);
+  const kortingJaar = kortingTekst.length === 0 ? new Decimal(0) : parseGeld(kortingTekst);
+  if (kortingJaar === null) throw new Error("Huurkorting moet een geldig bedrag zijn.");
+  return { huurderNaam, complexnummer: complexnummerTekst.length > 0 ? complexnummerTekst : null, ingangsdatum: new Date(`${ingangsdatumTekst}T00:00:00.000Z`), brutoJaarhuur, belastOnbelast, kortingJaar };
+}
+
+function huurUrlVoor(administratieId: string, versieId: string, laatstAfgeslotenBoekperiode: string): string {
+  return `/begroting/${encodeURIComponent(administratieId)}/${encodeURIComponent(versieId)}/module/huur?laatstAfgeslotenBoekperiode=${encodeURIComponent(laatstAfgeslotenBoekperiode)}&weergave=contract`;
+}
+
+/** Besluit 07-10-2026 §11 ("Contract toevoegen") — maakt uitsluitend een fictief contract binnen de begroting; raakt de bronadministratie nooit. */
+async function handleHuurContractToevoegen(req: IncomingMessage, res: ServerResponse, url: URL, root: string, administratieId: string, versieId: string): Promise<boolean> {
+  const g = open(root, administratieId, versieId);
+  if (g === null) {
+    stuurHtml(res, 404, renderFoutPagina("Niet gevonden", "Deze begrotingsversie of administratie bestaat niet."));
+    return true;
+  }
+  const laatstAfgeslotenBoekperiode = opgeslagenBoekperiode(g) ?? "";
+  const huurUrl = huurUrlVoor(administratieId, versieId, laatstAfgeslotenBoekperiode);
+  try {
+    if (g.versie.status !== "CONCEPT") {
+      stuurHtml(res, 400, renderFoutPagina("Niet meer wijzigbaar", "Deze begrotingsversie is vastgesteld en is alleen-lezen.", huurUrl));
+      return true;
+    }
+    const velden = Object.fromEntries(new URLSearchParams(await leesBody(req)));
+    const invoer = parseHuurFictiefContractVelden(velden);
+    voegHuurFictiefContractToe(g.db, g.versie.id, invoer);
+    schrijfHuurBeoordeeld(g.db, g.versie.id, false);
+    stuurRedirect(res, huurUrl);
+    return true;
+  } catch (error) {
+    stuurHtml(res, 400, renderFoutPagina("Contract kon niet worden toegevoegd", error instanceof Error ? error.message : String(error), huurUrl));
+    return true;
+  } finally {
+    g.db.close();
+  }
+}
+
+/** Besluit 07-10-2026 §11 — wijzigt een bestaand fictief contract (volledige vervanging van de bewerkbare velden). */
+async function handleHuurContractWijzigen(req: IncomingMessage, res: ServerResponse, url: URL, root: string, administratieId: string, versieId: string, contractnummer: string): Promise<boolean> {
+  const g = open(root, administratieId, versieId);
+  if (g === null) {
+    stuurHtml(res, 404, renderFoutPagina("Niet gevonden", "Deze begrotingsversie of administratie bestaat niet."));
+    return true;
+  }
+  const laatstAfgeslotenBoekperiode = opgeslagenBoekperiode(g) ?? "";
+  const huurUrl = huurUrlVoor(administratieId, versieId, laatstAfgeslotenBoekperiode);
+  try {
+    if (g.versie.status !== "CONCEPT") {
+      stuurHtml(res, 400, renderFoutPagina("Niet meer wijzigbaar", "Deze begrotingsversie is vastgesteld en is alleen-lezen.", huurUrl));
+      return true;
+    }
+    const velden = Object.fromEntries(new URLSearchParams(await leesBody(req)));
+    const invoer = parseHuurFictiefContractVelden(velden);
+    wijzigHuurFictiefContract(g.db, g.versie.id, contractnummer, invoer);
+    schrijfHuurBeoordeeld(g.db, g.versie.id, false);
+    stuurRedirect(res, huurUrl);
+    return true;
+  } catch (error) {
+    stuurHtml(res, 400, renderFoutPagina("Contract kon niet worden gewijzigd", error instanceof Error ? error.message : String(error), huurUrl));
+    return true;
+  } finally {
+    g.db.close();
+  }
+}
+
+/** Besluit 07-10-2026 §11 — verwijdert een fictief contract. Geen bevestigingsscherm (eenvoudig, raakt uitsluitend begrotingsdata die de gebruiker zelf heeft toegevoegd, nooit een bronfeit). */
+async function handleHuurContractVerwijderen(req: IncomingMessage, res: ServerResponse, url: URL, root: string, administratieId: string, versieId: string, contractnummer: string): Promise<boolean> {
+  const g = open(root, administratieId, versieId);
+  if (g === null) {
+    stuurHtml(res, 404, renderFoutPagina("Niet gevonden", "Deze begrotingsversie of administratie bestaat niet."));
+    return true;
+  }
+  const laatstAfgeslotenBoekperiode = opgeslagenBoekperiode(g) ?? "";
+  const huurUrl = huurUrlVoor(administratieId, versieId, laatstAfgeslotenBoekperiode);
+  try {
+    if (g.versie.status !== "CONCEPT") {
+      stuurHtml(res, 400, renderFoutPagina("Niet meer wijzigbaar", "Deze begrotingsversie is vastgesteld en is alleen-lezen.", huurUrl));
+      return true;
+    }
+    verwijderHuurFictiefContract(g.db, g.versie.id, contractnummer);
+    schrijfHuurBeoordeeld(g.db, g.versie.id, false);
+    stuurRedirect(res, huurUrl);
+    return true;
+  } catch (error) {
+    stuurHtml(res, 400, renderFoutPagina("Contract kon niet worden verwijderd", error instanceof Error ? error.message : String(error), huurUrl));
+    return true;
+  } finally {
+    g.db.close();
+  }
+}
+
+/**
+ * Maandverloop (besluit 07-10-2026 §9) — januari t/m december voor ÉÉN contract (bronfeit of
+ * fictief, zelfde behandeling), rechtstreeks uit `berekenHuurContext`'s bestaande maandregels.
+ * POST voegt een nieuwe Maandverloop-override toe (laag 3) voor dit contract vanaf de gekozen
+ * maand — vervangt een eventuele eerdere override voor exact dezelfde (contract, vanafMaand)-
+ * combinatie, laat overrides van andere maanden/contracten ongewijzigd.
+ */
+async function handleHuurMaandverloop(req: IncomingMessage, res: ServerResponse, url: URL, root: string, administratieId: string, versieId: string): Promise<boolean> {
+  const g = open(root, administratieId, versieId);
+  if (g === null) {
+    stuurHtml(res, 404, renderFoutPagina("Niet gevonden", "Deze begrotingsversie of administratie bestaat niet."));
+    return true;
+  }
+  const laatstAfgeslotenBoekperiode = opgeslagenBoekperiode(g) ?? "";
+  const huurUrl = huurUrlVoor(administratieId, versieId, laatstAfgeslotenBoekperiode);
+  const contractnummer = url.searchParams.get("contractnummer") ?? "";
+  const alleenLezen = g.versie.status !== "CONCEPT";
+  try {
+    if (contractnummer.length === 0) {
+      stuurHtml(res, 400, renderFoutPagina("Onbekend contract", "Geen contractnummer opgegeven.", huurUrl));
+      return true;
+    }
+
+    // Zelfde generieke lifecycle-regel als `handleModuleRoute`'s guard: Terugkijken blijft leesbaar
+    // (GET), uitsluitend schrijfacties worden op een niet-CONCEPT-versie geweigerd.
+    if (req.method !== "GET" && alleenLezen) {
+      stuurHtml(res, 400, renderFoutPagina("Niet meer wijzigbaar", "Deze begrotingsversie is vastgesteld en is alleen-lezen.", huurUrl));
+      return true;
+    }
+
+    if (req.method === "POST" && !alleenLezen) {
+      const velden = Object.fromEntries(new URLSearchParams(await leesBody(req)));
+      try {
+        const vanafMaand = Number(tekst(velden["vanafMaand"]));
+        if (!Number.isInteger(vanafMaand) || vanafMaand < 1 || vanafMaand > 12) throw new Error("Kies een geldige maand (1 t/m 12).");
+        const nieuwePrijsTekst = tekst(velden["nieuweBrutoHuurPerMaand"]);
+        const nieuweKortingTekst = tekst(velden["nieuweKortingPerMaand"]);
+        const nieuweBrutoHuurPerMaand = nieuwePrijsTekst.length > 0 ? parseGeld(nieuwePrijsTekst) : null;
+        const nieuweKortingPerMaand = nieuweKortingTekst.length > 0 ? parseGeld(nieuweKortingTekst) : null;
+        if (nieuwePrijsTekst.length > 0 && nieuweBrutoHuurPerMaand === null) throw new Error("Nieuwe huurprijs moet een geldig bedrag zijn.");
+        if (nieuweKortingTekst.length > 0 && nieuweKortingPerMaand === null) throw new Error("Nieuwe huurkorting moet een geldig bedrag zijn.");
+        if (nieuweBrutoHuurPerMaand === null && nieuweKortingPerMaand === null) throw new Error("Vul minstens een nieuwe huurprijs of een nieuwe korting in.");
+
+        const bestaande = leesHuurMaandOverrides(g.db, g.versie.id);
+        const overig = bestaande.filter((o) => !(o.contractnummer === contractnummer && o.vanafMaand === vanafMaand));
+        const nieuw: BgContractMaandOverride = { contractnummer, vanafMaand, nieuweBrutoHuurPerMaand, nieuweKortingPerMaand };
+        schrijfHuurMaandOverrides(g.db, g.versie.id, [...overig, nieuw]);
+        schrijfHuurBeoordeeld(g.db, g.versie.id, false);
+        stuurRedirect(res, `/begroting/${encodeURIComponent(administratieId)}/${encodeURIComponent(versieId)}/module/huur/maandverloop?laatstAfgeslotenBoekperiode=${encodeURIComponent(laatstAfgeslotenBoekperiode)}&contractnummer=${encodeURIComponent(contractnummer)}`);
+        return true;
+      } catch (error) {
+        stuurHtml(res, 400, renderFoutPagina("Wijziging kon niet worden opgeslagen", error instanceof Error ? error.message : String(error), huurUrl));
+        return true;
+      }
+    }
+
+    let context: ReturnType<typeof berekenHuurContext>;
+    try {
+      context = berekenHuurContext(g);
+    } catch (error) {
+      stuurHtml(res, 500, renderFoutPagina("Huur kon niet worden berekend", error instanceof Error ? error.message : String(error), huurUrl));
+      return true;
+    }
+    if (context === null) {
+      stuurHtml(res, 400, renderFoutPagina("Nog niet mogelijk", "Er zijn nog geen Module-1-aannames (algemeen indexatiepercentage) voor deze begroting vastgelegd.", huurUrl));
+      return true;
+    }
+    const contract = context.module1.contracten.find((c) => c.contractnummer === contractnummer);
+    if (contract === undefined) {
+      stuurHtml(res, 404, renderFoutPagina("Onbekend contract", `Contract ${contractnummer} bestaat niet (meer) binnen deze begroting.`, huurUrl));
+      return true;
+    }
+
+    const regels: HuurMaandverloopRegel[] = contract.regels.map((r) => ({
+      maand: `${MAAND_NAMEN[r.maand - 1]}`,
+      huurprijs: fmtBedragKort(r.brutoHuurMetIndexatie),
+      korting: fmtBedragKort(r.huurkorting),
+      netto: fmtBedragKort(r.nettoHuur),
+      heeftToekomstigePrijsregel: r.kortingswijzigingToegepast !== null,
+      heeftHandmatigeOverride: r.prijsOverrideActief || r.kortingOverrideActief,
+    }));
+    const bestaandeOverrides = context.maandOverrides
+      .filter((o) => o.contractnummer === contractnummer)
+      .sort((a, b) => a.vanafMaand - b.vanafMaand)
+      .map((o) => ({
+        vanafMaand: MAAND_NAMEN[o.vanafMaand - 1]!,
+        nieuweBrutoHuurPerMaand: o.nieuweBrutoHuurPerMaand !== null ? fmtBedragKort(o.nieuweBrutoHuurPerMaand) : null,
+        nieuweKortingPerMaand: o.nieuweKortingPerMaand !== null ? fmtBedragKort(o.nieuweKortingPerMaand) : null,
+      }));
+
+    stuurHtml(
+      res,
+      200,
+      renderHuurMaandverloop({
+        terugUrl: huurUrl,
+        actieUrl: `${url.pathname}?laatstAfgeslotenBoekperiode=${encodeURIComponent(laatstAfgeslotenBoekperiode)}&contractnummer=${encodeURIComponent(contractnummer)}`,
+        alleenLezen,
+        fragment: isFragmentVerzoek(req),
+        contractnummer,
+        huurderNaam: contract.huurderNaam,
+        regels,
+        bestaandeOverrides,
+      }),
+    );
+    return true;
+  } finally {
+    g.db.close();
+  }
 }
 
 async function handleModuleRoute(root: string, req: IncomingMessage, res: ServerResponse, url: URL, administratieId: string, versieId: string, moduleKey: string): Promise<boolean> {
@@ -854,8 +1107,41 @@ function fmtDatumVeld(d: Date): string {
 }
 
 /**
- * Huur-detailweergave (UX_01, Tranche 12, §9/§10/§22): roept de ongewijzigde pure
- * `berekenBegroteHuuropbrengsten` aan met de bevroren Module-1-snapshot + de huidige overrides —
+ * Besluit 07-10-2026 ("Huur naar vastgestelde UX") — DE ENE plek die bronfeit-contracten (Module-1-
+ * snapshot) en fictieve begrotingscontracten (§11) samenvoegt vóór de aanroep van de ONGEWIJZIGDE
+ * pure `berekenBegroteHuuropbrengsten`, inclusief de bestaande overrides (laag 1, indexatiepercentage)
+ * én de nieuwe Maandverloop-overrides (laag 3). Gebruikt door `handleHuur`, `handleBeheer` (de
+ * variabele-vergoeding-grondslag moet exact dezelfde netto huur gebruiken) en de nieuwe Maandverloop-/
+ * Contracten-handlers — zodat deze module-brede uitkomst overal consistent is, zelfde eis als
+ * `herberekenen.ts`'s ene gedeelde leespad.
+ */
+function berekenHuurContext(g: Geopend): {
+  module1: ReturnType<typeof berekenBegroteHuuropbrengsten>;
+  aannames: ReturnType<typeof leesModule1Aannames>;
+  overrides: readonly BgContractOverride[];
+  maandOverrides: readonly BgContractMaandOverride[];
+  fictieveContracten: readonly BgHuurFictiefContract[];
+  fictieveContractnummers: ReadonlySet<string>;
+} | null {
+  const aannames = leesModule1Aannames(g.db, g.versie.id);
+  if (aannames === null) return null;
+  const echteContracten = leesModule1Snapshot(g.db, g.versie.id);
+  const fictieveContracten = leesHuurFictieveContracten(g.db, g.versie.id);
+  const alleContracten: BgContractFeiten[] = [...echteContracten, ...fictieveContracten.map((fc) => naarBgContractFeiten(fc, g.bedrijfsnr))];
+  const overrides = leesModule1Overrides(g.db, g.versie.id);
+  const maandOverrides = leesHuurMaandOverrides(g.db, g.versie.id);
+  const module1 = berekenBegroteHuuropbrengsten(alleContracten, overrides, aannames, g.versie.bronPeildatum, maandOverrides);
+  return { module1, aannames, overrides, maandOverrides, fictieveContracten, fictieveContractnummers: new Set(fictieveContracten.map((fc) => fc.contractnummer)) };
+}
+
+function fmtHuurKwartalen(k: BgHuurKwartaalTotalen): HuurKwartaalVeld {
+  return { q1: fmtBedragKort(k.q1.nettoHuur), q2: fmtBedragKort(k.q2.nettoHuur), q3: fmtBedragKort(k.q3.nettoHuur), q4: fmtBedragKort(k.q4.nettoHuur), jaar: fmtBedragKort(k.jaartotaal.nettoHuur) };
+}
+
+/**
+ * Huur-detailweergave (UX_01, Tranche 12, §9/§10/§22; besluit 07-10-2026 "Huur naar vastgestelde
+ * UX"): roept de ongewijzigde pure `berekenBegroteHuuropbrengsten` aan met de bevroren Module-1-
+ * snapshot + fictieve contracten + overrides + Maandverloop-overrides (`berekenHuurContext`) —
  * exact dezelfde berekening als de vergelijkende P&L, hier uitsluitend uitgesplitst per contract.
  * Blijft leesbaar (GET) na vaststellen; schrijven (POST) is uitsluitend op CONCEPT mogelijk (zie
  * `handleModuleRoute`'s guard).
@@ -863,15 +1149,23 @@ function fmtDatumVeld(d: Date): string {
 async function handleHuur(req: IncomingMessage, res: ServerResponse, g: Geopend, actieUrl: string, terugUrl: string, vergelijkend: Vergelijkend): Promise<boolean> {
   const alleenLezen = g.versie.status !== "CONCEPT";
   const contracten = leesModule1Snapshot(g.db, g.versie.id);
-  const aannames = leesModule1Aannames(g.db, g.versie.id);
-  if (aannames === null) {
-    stuurHtml(res, 400, renderFoutPagina("Nog niet mogelijk", "Er zijn nog geen Module-1-aannames (algemeen indexatiepercentage) voor deze begroting vastgelegd.", terugUrl));
-    return true;
-  }
+  const laatstAfgeslotenBoekperiode = new URL(actieUrl, "http://localhost").searchParams.get("laatstAfgeslotenBoekperiode") ?? "";
 
   if (req.method === "POST" && !alleenLezen) {
     const velden = Object.fromEntries(new URLSearchParams(await leesBody(req)));
     try {
+      // Besluit 07-10-2026 §12: "Voorstel overnemen" is een afzonderlijke actie, los van opslaan/
+      // beoordelen — neemt de berekende voorstelwaarde over door de handmatige lagen (indexatie-
+      // override + Maandverloop-override) te wissen; fictieve contracten blijven onaangeroerd (dat
+      // is toegevoegde data, geen afwijking-van-voorstel). Beoordeling vervalt (relevante wijziging).
+      if (tekst(velden["actie"]) === "voorstelOvernemen") {
+        schrijfModule1Overrides(g.db, g.versie.id, []);
+        schrijfHuurMaandOverrides(g.db, g.versie.id, []);
+        schrijfHuurBeoordeeld(g.db, g.versie.id, false);
+        stuurRedirect(res, terugUrl);
+        return true;
+      }
+
       const overrides: BgContractOverride[] = [];
       for (const contract of contracten) {
         const ingevoerd = tekst(velden[`override_${contract.contractnummer}`]);
@@ -881,6 +1175,7 @@ async function handleHuur(req: IncomingMessage, res: ServerResponse, g: Geopend,
         overrides.push({ contractnummer: contract.contractnummer, indexatiePercentage: percentage, scope: "VERSIE" });
       }
       schrijfModule1Overrides(g.db, g.versie.id, overrides);
+      schrijfHuurBeoordeeld(g.db, g.versie.id, tekst(velden["beoordeeld"]) === "1");
       stuurRedirect(res, terugUrl);
       return true;
     } catch (error) {
@@ -889,16 +1184,25 @@ async function handleHuur(req: IncomingMessage, res: ServerResponse, g: Geopend,
     }
   }
 
-  const overrides = leesModule1Overrides(g.db, g.versie.id);
-  let module1;
+  let context: ReturnType<typeof berekenHuurContext>;
   try {
-    module1 = berekenBegroteHuuropbrengsten(contracten, overrides, aannames, g.versie.bronPeildatum);
+    context = berekenHuurContext(g);
   } catch (error) {
     stuurHtml(res, 500, renderFoutPagina("Huur kon niet worden berekend", error instanceof Error ? error.message : String(error), terugUrl));
     return true;
   }
+  if (context === null) {
+    stuurHtml(res, 400, renderFoutPagina("Nog niet mogelijk", "Er zijn nog geen Module-1-aannames (algemeen indexatiepercentage) voor deze begroting vastgelegd.", terugUrl));
+    return true;
+  }
+  const { module1, aannames, overrides, fictieveContracten, fictieveContractnummers } = context;
 
   const einddatumPerContract = new Map(contracten.map((c) => [c.contractnummer, c.einddatum]));
+  const weergave0 = new URL(req.url ?? "", "http://localhost").searchParams.get("weergave");
+  const weergave = weergave0 === "contract" ? "contract" : "complex"; // besluit §3: "Per complex standaard actief"
+  const fragment = isFragmentVerzoek(req);
+  const weergaveSuffix = fragment ? "&fragment=1" : "";
+
   const regels: HuurDetailRegel[] = module1.contracten.map((c) => {
     const einddatum = einddatumPerContract.get(c.contractnummer) ?? null;
     return {
@@ -916,37 +1220,92 @@ async function handleHuur(req: IncomingMessage, res: ServerResponse, g: Geopend,
       // UX §4: "de contractweergave toont herkenbaar welke contracten in het begrotingsjaar aflopen" — puur presentatie-join op de al-bestaande snapshotdatum, geen nieuwe business­regel.
       looptAfDitJaar: einddatum !== null && einddatum.getUTCFullYear() === g.versie.begrotingsjaar,
       einddatum: einddatum ? fmtDatumVeld(einddatum) : null,
+      kwartalen: fmtHuurKwartalen(berekenHuurKwartaalTotalen(c.regels)),
+      heeftToekomstigePrijsregel: c.regels.some((r) => r.kortingswijzigingToegepast !== null),
+      heeftHandmatigeMaandoverride: c.regels.some((r) => r.prijsOverrideActief || r.kortingOverrideActief),
+      isFictief: fictieveContractnummers.has(c.contractnummer),
+      maandverloopUrl: `/begroting/${encodeURIComponent(g.administratieId)}/${encodeURIComponent(g.versie.id)}/module/huur/maandverloop?laatstAfgeslotenBoekperiode=${encodeURIComponent(laatstAfgeslotenBoekperiode)}&contractnummer=${encodeURIComponent(c.contractnummer)}`,
     };
   });
 
   const portefeuilleNetto = module1.portefeuilleTotalen.nettoHuurBelast.plus(module1.portefeuilleTotalen.nettoHuurOnbelast).plus(module1.portefeuilleTotalen.nettoHuurOnbekendeBtw);
 
-  // UX §4: "de gebruiker kan wisselen tussen een complexweergave en een contractweergave" — server-rendered toggle via query param, geen client-side state nodig. Zuivere aggregatie van de al-berekende Decimal-jaartotalen per complex — geen nieuwe berekening.
-  const weergave = new URL(req.url ?? "", "http://localhost").searchParams.get("weergave") === "complex" ? "complex" : "contract";
-  const complexGroepen = new Map<string, { bruto: Decimal; korting: Decimal; netto: Decimal; aantal: number }>();
+  // UX §4: "de gebruiker kan wisselen tussen een complexweergave en een contractweergave" — server-rendered toggle via query param, geen client-side state nodig. Zuivere aggregatie van de al-berekende Decimal-/kwartaaltotalen per complex — geen nieuwe berekening.
+  const complexGroepen = new Map<string, { bruto: Decimal; korting: Decimal; netto: Decimal; aantal: number; kwartalen: BgHuurKwartaalTotalen[] }>();
   for (const c of module1.contracten) {
     const key = c.complexnummer ?? "Onbekend";
-    const bestaand = complexGroepen.get(key) ?? { bruto: new Decimal(0), korting: new Decimal(0), netto: new Decimal(0), aantal: 0 };
+    const bestaand = complexGroepen.get(key) ?? { bruto: new Decimal(0), korting: new Decimal(0), netto: new Decimal(0), aantal: 0, kwartalen: [] };
+    bestaand.kwartalen.push(berekenHuurKwartaalTotalen(c.regels));
     complexGroepen.set(key, {
       bruto: bestaand.bruto.plus(c.jaartotaal.brutoHuurMetIndexatie),
       korting: bestaand.korting.plus(c.jaartotaal.huurkorting),
       netto: bestaand.netto.plus(c.jaartotaal.nettoHuur),
       aantal: bestaand.aantal + 1,
+      kwartalen: bestaand.kwartalen,
     });
   }
   const complexRegels: ComplexHuurRegel[] = [...complexGroepen.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([complexnummer, t]) => ({ complexnummer, aantalContracten: t.aantal, bruto: fmtBedragKort(t.bruto), korting: fmtBedragKort(t.korting), netto: fmtBedragKort(t.netto) }));
+    .map(([complexnummer, t]) => ({
+      complexnummer,
+      aantalContracten: t.aantal,
+      bruto: fmtBedragKort(t.bruto),
+      korting: fmtBedragKort(t.korting),
+      netto: fmtBedragKort(t.netto),
+      kwartalen: fmtHuurKwartalen(somHuurKwartaalTotalen(t.kwartalen)),
+    }));
 
-  const fragment = isFragmentVerzoek(req);
-  const weergaveSuffix = fragment ? "&fragment=1" : "";
-  // FASE 2 (Master Contract §18, referentie-implementatie 2026-10-07): compacte, module-eigen
-  // samenvatting i.p.v. de volledige vergelijkende P&L — uitsluitend reeds betrouwbaar beschikbare
-  // velden van de ongewijzigde pure Huur-motor (`module1.portefeuilleTotalen`). De Werkelijk/
-  // Estimated-waarden voor "Verleende huurkorting" komen uit dezelfde, bestaande canon-regel die
-  // ook het hoofdscherm gebruikt (`vergelijkend.regels`) — geen eigen module-ingang meer (zie
-  // `BEWERKBARE_MODULES`), maar de informatie blijft hier zichtbaar.
+  // Besluit §2: bruto belast/onbelast — zuivere aggregatie van de al-berekende per-contractjaartotalen, geen nieuwe berekening.
+  const brutoBelast = som(module1.contracten.filter((c) => c.belastOnbelast === "BELAST").map((c) => c.jaartotaal.brutoHuurMetIndexatie));
+  const brutoOnbelast = som(module1.contracten.filter((c) => c.belastOnbelast === "ONBELAST").map((c) => c.jaartotaal.brutoHuurMetIndexatie));
+  const moduleKwartalen = somHuurKwartaalTotalen(module1.contracten.map((c) => berekenHuurKwartaalTotalen(c.regels)));
+
+  // Besluit §11: "+ Contract toevoegen" — bewerkbaar formulier, vooraf ingevuld bij `?wijzigFictief=<nr>`.
+  const wijzigFictiefNr = new URL(req.url ?? "", "http://localhost").searchParams.get("wijzigFictief");
+  const teWijzigen = wijzigFictiefNr !== null ? fictieveContracten.find((fc) => fc.contractnummer === wijzigFictiefNr) ?? null : null;
+  const contractFormulier: HuurFictiefContractFormulier | null =
+    teWijzigen !== null
+      ? {
+          contractnummer: teWijzigen.contractnummer,
+          huurderNaam: teWijzigen.huurderNaam,
+          complexnummer: teWijzigen.complexnummer ?? "",
+          ingangsdatum: fmtDatumVeld(teWijzigen.ingangsdatum),
+          brutoJaarhuur: fmtBedragKort(teWijzigen.brutoJaarhuur),
+          belastOnbelast: teWijzigen.belastOnbelast,
+          kortingJaar: fmtBedragKort(teWijzigen.kortingJaar),
+        }
+      : null;
+  const fictieveContractenVeld: HuurFictiefContractRegel[] = fictieveContracten.map((fc) => ({
+    contractnummer: fc.contractnummer,
+    huurderNaam: fc.huurderNaam,
+    complexnummer: fc.complexnummer,
+    ingangsdatum: fmtDatumVeld(fc.ingangsdatum),
+    brutoJaarhuur: fmtBedragKort(fc.brutoJaarhuur),
+    belastOnbelast: fc.belastOnbelast,
+    kortingJaar: fmtBedragKort(fc.kortingJaar),
+    wijzigenUrl: `${actieUrl}&weergave=contract&wijzigFictief=${encodeURIComponent(fc.contractnummer)}`,
+    verwijderenUrl: `/begroting/${encodeURIComponent(g.administratieId)}/${encodeURIComponent(g.versie.id)}/module/huur/contracten/${encodeURIComponent(fc.contractnummer)}/verwijderen?laatstAfgeslotenBoekperiode=${encodeURIComponent(laatstAfgeslotenBoekperiode)}`,
+  }));
+
+  // FASE 2 (Master Contract §18): compacte, module-eigen samenvatting i.p.v. de volledige
+  // vergelijkende P&L — uitsluitend reeds betrouwbaar beschikbare velden van de ongewijzigde pure
+  // Huur-motor. De Werkelijk/Estimated-waarden voor "Verleende huurkorting" komen uit dezelfde,
+  // bestaande canon-regel die ook het hoofdscherm gebruikt (`vergelijkend.regels`).
   const kortingRegel = vergelijkend?.regels.find((r) => r.regelSleutel === "VERLEENDE_HUURKORTING") ?? null;
+  const samenvatting: HuurSamenvattingVeld = {
+    contracthuurVoorIndexatie: fmtBedragKort(module1.portefeuilleTotalen.brutoHuurZonderIndexatie),
+    indexatieEffect: fmtBedragKort(module1.portefeuilleTotalen.indexatieEffect),
+    brutoBelast: fmtBedragKort(brutoBelast),
+    brutoOnbelast: fmtBedragKort(brutoOnbelast),
+    korting: fmtBedragKort(module1.portefeuilleTotalen.huurkorting),
+    nettoHuur: fmtBedragKort(module1.portefeuilleTotalen.nettoHuur),
+    nettoHuurBelast: fmtBedragKort(module1.portefeuilleTotalen.nettoHuurBelast),
+    nettoHuurOnbelast: fmtBedragKort(module1.portefeuilleTotalen.nettoHuurOnbelast),
+    kwartalen: fmtHuurKwartalen(moduleKwartalen),
+    kortingWerkelijk: kortingRegel?.werkelijk ?? null,
+    kortingEstimated: kortingRegel?.estimated ?? null,
+  };
+
   stuurHtml(
     res,
     200,
@@ -960,23 +1319,24 @@ async function handleHuur(req: IncomingMessage, res: ServerResponse, g: Geopend,
       complexWeergaveUrl: `${actieUrl}&weergave=complex${weergaveSuffix}`,
       begrotingsjaar: g.versie.begrotingsjaar,
       alleenLezen,
-      algemeenIndexatiePercentage: fmtPercentageVeld(aannames.indexatiePercentage),
+      algemeenIndexatiePercentage: fmtPercentageVeld(aannames!.indexatiePercentage),
       bronPeildatum: fmtDatumVeld(module1.bronPeildatum),
       aantalContracten: module1.contracten.length,
       regels,
       complexRegels,
-      controleVereist: module1.controleVereist.map((c) => `${c.contractnummer ?? "Algemeen"}: ${c.bericht}`),
+      // Besluit 07-10-2026 §3: "Verwijder de huidige technische/grote meldingenweergave uit de
+      // primaire UX." INFORMATIEF-meldingen (bv. "indexatiedatum ligt ná het begrotingsjaar — geen
+      // indexatie toegepast") zijn routinematige, verwachte uitleg per contract, geen uitzondering —
+      // die blijven daarom hier bewust ongetoond (geen nieuwe plek verzonnen om ze te "verbergen";
+      // ze blijven gewoon in `module1.controleVereist` beschikbaar voor eventuele latere, compacte
+      // weergave per contract). Alleen echte uitzonderingen (WAARSCHUWING/KRITIEK) blijven zichtbaar.
+      controleVereist: module1.controleVereist.filter((c) => c.ernst !== "INFORMATIEF").map((c) => `${c.contractnummer ?? "Algemeen"}: ${c.bericht}`),
       portefeuilleNetto: fmtBedragKort(portefeuilleNetto),
-      samenvatting: {
-        contracthuurVoorIndexatie: fmtBedragKort(module1.portefeuilleTotalen.brutoHuurZonderIndexatie),
-        indexatieEffect: fmtBedragKort(module1.portefeuilleTotalen.indexatieEffect),
-        korting: fmtBedragKort(module1.portefeuilleTotalen.huurkorting),
-        nettoHuur: fmtBedragKort(module1.portefeuilleTotalen.nettoHuur),
-        nettoHuurBelast: fmtBedragKort(module1.portefeuilleTotalen.nettoHuurBelast),
-        nettoHuurOnbelast: fmtBedragKort(module1.portefeuilleTotalen.nettoHuurOnbelast),
-        kortingWerkelijk: kortingRegel?.werkelijk ?? null,
-        kortingEstimated: kortingRegel?.estimated ?? null,
-      },
+      samenvatting,
+      beoordeeld: leesHuurBeoordeeld(g.db, g.versie.id),
+      fictieveContracten: fictieveContractenVeld,
+      contractToevoegenUrl: `/begroting/${encodeURIComponent(g.administratieId)}/${encodeURIComponent(g.versie.id)}/module/huur/contracten?laatstAfgeslotenBoekperiode=${encodeURIComponent(laatstAfgeslotenBoekperiode)}`,
+      contractFormulier,
       fragment,
     }),
   );
@@ -991,20 +1351,21 @@ async function handleHuur(req: IncomingMessage, res: ServerResponse, g: Geopend,
  */
 async function handleBeheer(req: IncomingMessage, res: ServerResponse, g: Geopend, actieUrl: string, terugUrl: string, vergelijkend: Vergelijkend): Promise<boolean> {
   const alleenLezen = g.versie.status !== "CONCEPT";
-  const contracten = leesModule1Snapshot(g.db, g.versie.id);
-  const aannames = leesModule1Aannames(g.db, g.versie.id);
-  if (aannames === null) {
-    stuurHtml(res, 400, renderFoutPagina("Nog niet mogelijk", "Er zijn nog geen Module-1-aannames (algemeen indexatiepercentage) voor deze begroting vastgelegd.", terugUrl));
-    return true;
-  }
-  const overrides = leesModule1Overrides(g.db, g.versie.id);
-  let module1;
+  // Besluit 07-10-2026: dezelfde gedeelde context als `handleHuur` (`berekenHuurContext`) — de
+  // variabele beheersvergoeding moet exact dezelfde netto-huur-grondslag gebruiken, inclusief
+  // fictieve contracten en Maandverloop-overrides, anders lopen Huur en Beheer financieel uiteen.
+  let context: ReturnType<typeof berekenHuurContext>;
   try {
-    module1 = berekenBegroteHuuropbrengsten(contracten, overrides, aannames, g.versie.bronPeildatum);
+    context = berekenHuurContext(g);
   } catch (error) {
     stuurHtml(res, 500, renderFoutPagina("Huur kon niet worden berekend", error instanceof Error ? error.message : String(error), terugUrl));
     return true;
   }
+  if (context === null) {
+    stuurHtml(res, 400, renderFoutPagina("Nog niet mogelijk", "Er zijn nog geen Module-1-aannames (algemeen indexatiepercentage) voor deze begroting vastgelegd.", terugUrl));
+    return true;
+  }
+  const module1 = context.module1;
   const complexnummers = [...new Set(module1.contracten.map((c) => c.complexnummer).filter((c): c is string => c !== null))].sort();
 
   if (req.method === "POST" && !alleenLezen) {

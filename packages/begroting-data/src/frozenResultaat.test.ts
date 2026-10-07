@@ -68,6 +68,8 @@ function legeMaandregels12() {
     huurkorting: new Decimal(0),
     nettoHuur: new Decimal(0),
     kortingswijzigingToegepast: null,
+    prijsOverrideActief: false,
+    kortingOverrideActief: false,
   }));
 }
 

@@ -105,6 +105,36 @@ const BASIS_CSS = `
   /* FASE 2 (2026-10-07): puur presentationele groepsheader-rij — één functionele Huurmodule-ingang boven de twee financiële Huur-canon-regels. */
   tr.huur-groep td{border-top:2px solid var(--line);padding-top:14px}
 
+  /* Besluit 07-10-2026 ("Huur naar vastgestelde UX") — mockup-referentie docs/begroting/ux/mockup-actueel/ (.rent-summary/.rent-metric, badges, .contract-row.has-attention), vertaald naar de bestaande tokens. */
+  .rent-metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin:0}
+  .rent-metric{min-height:58px;border:1px solid var(--line);border-radius:5px;background:#fff;padding:9px 12px;display:flex;flex-direction:column;justify-content:center}
+  .rent-metric span{color:var(--muted);font-size:10.5px}
+  .rent-metric strong{margin-top:5px;color:var(--ink);font-size:14px;font-variant-numeric:tabular-nums}
+  .rent-metric-totaal{background:var(--green-soft);border-color:#bfd8cf}
+  .rent-metric-totaal span,.rent-metric-totaal strong{color:var(--green-dark)}
+
+  .badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;margin-right:4px;vertical-align:middle}
+  .badge-info{background:#eef3f6;color:#3d5166}
+  .badge-aanname{background:var(--amber-soft);color:var(--amber)}
+
+  .naam-sub.attentie{color:#a06608;font-weight:650}
+
+  .tabel-scroll{overflow-x:auto}
+
+  .tekst-knop{border:0;background:transparent;color:var(--green);padding:0;font-size:12.5px;font-weight:650;cursor:pointer;text-decoration:underline}
+  .tekst-knop:hover{color:var(--green-dark)}
+
+  details.contract-toevoegen{margin-top:16px;border:1px solid var(--line);border-radius:var(--radius);padding:2px 16px;background:#fff}
+  details.contract-toevoegen summary{cursor:pointer;padding:12px 0;font-weight:650;color:var(--green-dark);font-size:13.5px;list-style:none}
+  details.contract-toevoegen summary::-webkit-details-marker{display:none}
+  details.contract-toevoegen summary::before{content:"";margin-right:0}
+  details.contract-toevoegen[open] summary{border-bottom:1px solid var(--line);margin-bottom:14px}
+  details.contract-toevoegen form{padding-bottom:16px}
+
+  @media (max-width:980px){
+    .rent-metrics{grid-template-columns:repeat(2,1fr)}
+  }
+
   .onbekend{color:var(--amber);font-weight:600}
   .naam{font-weight:650;display:block}
   .naam-sub{display:block;font-size:11px;color:var(--muted);font-weight:400;margin-top:2px}
@@ -1120,6 +1150,14 @@ export function renderRenteForm(o: {
   return moduleFormShell({ titel: isOpbrengst ? "Opbrengst rente" : "Rente leningen", terugUrl: o.terugUrl, ...(o.fouten !== undefined ? { fouten: o.fouten } : {}), inhoud, alleenLezen: o.alleenLezen === true, fragment: o.fragment === true });
 }
 
+export interface HuurKwartaalVeld {
+  q1: string;
+  q2: string;
+  q3: string;
+  q4: string;
+  jaar: string;
+}
+
 export interface HuurDetailRegel {
   contractnummer: string;
   huurderNaam: string | null;
@@ -1135,6 +1173,15 @@ export interface HuurDetailRegel {
   /** UX §4: contract loopt in het begrotingsjaar zelf af — een zichtbaar aandachtspunt in de contractweergave, geen blokkade. */
   looptAfDitJaar: boolean;
   einddatum: string | null;
+  /** Besluit 07-10-2026 — Q1-Q4 + jaartotaal (netto), rechtstreeks afgeleid uit de bestaande maandregels (`berekenHuurKwartaalTotalen`). */
+  kwartalen: HuurKwartaalVeld;
+  /** Badge "Toekomstige prijsregel" — minstens één maand gebruikt de bronfeit-kortingswijziging (laag 2). */
+  heeftToekomstigePrijsregel: boolean;
+  /** Badge "Handmatig aangepast" — minstens één maand gebruikt een Maandverloop-override (laag 3, prijs en/of korting). */
+  heeftHandmatigeMaandoverride: boolean;
+  /** Badge "Begrotingsaanname" — dit is een fictief contract (§11), nooit een bronfeit. */
+  isFictief: boolean;
+  maandverloopUrl: string;
 }
 
 export interface ComplexHuurRegel {
@@ -1143,6 +1190,7 @@ export interface ComplexHuurRegel {
   bruto: string;
   korting: string;
   netto: string;
+  kwartalen: HuurKwartaalVeld;
 }
 
 /**
@@ -1160,14 +1208,27 @@ export interface ComplexHuurRegel {
 export interface HuurSamenvattingVeld {
   contracthuurVoorIndexatie: string;
   indexatieEffect: string;
+  /** Bruto huuropbrengst belast — som van de bruto (ná indexatie) jaartotalen van de BELAST-contracten. */
+  brutoBelast: string;
+  /** Bruto huuropbrengst onbelast — idem voor ONBELAST. */
+  brutoOnbelast: string;
   korting: string;
   nettoHuur: string;
   nettoHuurBelast: string;
   nettoHuurOnbelast: string;
+  /** Module-brede Q1-Q4 + jaartotaal (netto), afgeleid uit de bestaande maandregels — zie `berekenHuurKwartaalTotalen`/`somHuurKwartaalTotalen`. */
+  kwartalen: HuurKwartaalVeld;
   kortingWerkelijk: PnLBronBijdrage | null;
   kortingEstimated: PnLBronBijdrage | null;
 }
 
+/**
+ * Besluit 07-10-2026 §2 — de vastgestelde financiële opbouw: bruto belast + bruto onbelast −
+ * huurkorting = netto huuropbrengsten. Huurkorting wordt hier negatief weergegeven (zie `signed`),
+ * exact ÉÉN keer afgetrokken — dezelfde, al bestaande `portefeuilleTotalen.nettoHuur` (de pure
+ * Huurcalculator trekt de korting al af bij de bron, zie `begroteHuuropbrengsten.ts`); deze kaart
+ * toont uitsluitend hoe dat getal is opgebouwd, zonder het nogmaals te berekenen.
+ */
 function huurSamenvattingHtml(s: HuurSamenvattingVeld): string {
   const kortingInfoHtml =
     s.kortingWerkelijk !== null || s.kortingEstimated !== null
@@ -1178,30 +1239,75 @@ function huurSamenvattingHtml(s: HuurSamenvattingVeld): string {
   return `
     <div class="card" style="margin-bottom:16px">
       <div class="eyebrow">Opbouw netto huuropbrengsten</div>
-      <table style="margin:0">
+      <table style="margin:0 0 14px">
         <tbody>
-          <tr><td>Contracthuur (vóór indexatie)</td><td style="text-align:right">${escapeHtml(s.contracthuurVoorIndexatie)}</td></tr>
-          <tr><td>Indexatie-effect</td><td style="text-align:right">${escapeHtml(s.indexatieEffect)}</td></tr>
-          <tr><td>Verleende huurkorting (al verwerkt in netto huur, geen losse aftrek)</td><td style="text-align:right">${escapeHtml(s.korting)}</td></tr>
-          <tr><td><strong>Netto huur (Jouw begroting)</strong></td><td style="text-align:right"><strong>${escapeHtml(s.nettoHuur)}</strong></td></tr>
-          <tr><td>— waarvan Huuropbrengst belast</td><td style="text-align:right">${escapeHtml(s.nettoHuurBelast)}</td></tr>
-          <tr><td>— waarvan Huuropbrengst onbelast</td><td style="text-align:right">${escapeHtml(s.nettoHuurOnbelast)}</td></tr>
-          ${kortingInfoHtml}
+          <tr><td>Bruto huuropbrengst belast</td><td style="text-align:right">${escapeHtml(s.brutoBelast)}</td></tr>
+          <tr><td>Bruto huuropbrengst onbelast</td><td style="text-align:right">${escapeHtml(s.brutoOnbelast)}</td></tr>
+          <tr><td>Verleende huurkorting</td><td style="text-align:right">&minus; ${escapeHtml(s.korting)}</td></tr>
+          <tr><td><strong>Netto huuropbrengsten</strong></td><td style="text-align:right"><strong>${escapeHtml(s.nettoHuur)}</strong></td></tr>
         </tbody>
       </table>
+      <div class="rent-metrics">
+        <div class="rent-metric"><span>Contracthuur</span><strong>${escapeHtml(s.contracthuurVoorIndexatie)}</strong></div>
+        <div class="rent-metric"><span>Verwachte indexatie</span><strong>${escapeHtml(s.indexatieEffect)}</strong></div>
+        <div class="rent-metric"><span>Leegstand &amp; korting</span><strong>&minus; ${escapeHtml(s.korting)}</strong></div>
+        <div class="rent-metric rent-metric-totaal"><span>Netto voorstel</span><strong>${escapeHtml(s.nettoHuur)}</strong></div>
+      </div>
+      <table style="margin:14px 0 0">
+        <thead><tr><th style="text-align:left">Q1</th><th>Q2</th><th>Q3</th><th>Q4</th><th>Jaartotaal</th></tr></thead>
+        <tbody><tr><td class="naam">${escapeHtml(s.kwartalen.q1)}</td><td>${escapeHtml(s.kwartalen.q2)}</td><td>${escapeHtml(s.kwartalen.q3)}</td><td>${escapeHtml(s.kwartalen.q4)}</td><td><strong>${escapeHtml(s.kwartalen.jaar)}</strong></td></tr></tbody>
+      </table>
+      ${
+        kortingInfoHtml
+          ? `<table style="margin:10px 0 0"><tbody>${kortingInfoHtml}</tbody></table>`
+          : ""
+      }
     </div>`;
+}
+
+/** Besluit 07-10-2026 §5/§10/§11 — compacte badges per contractregel, zie `HuurDetailRegel`. */
+function huurBadgesHtml(r: HuurDetailRegel): string {
+  const badges: string[] = [];
+  if (r.isFictief) badges.push(`<span class="badge badge-aanname">Begrotingsaanname</span>`);
+  if (r.heeftToekomstigePrijsregel) badges.push(`<span class="badge badge-info">Toekomstige prijsregel</span>`);
+  if (r.heeftHandmatigeMaandoverride) badges.push(`<span class="badge badge-info">Handmatig aangepast</span>`);
+  return badges.join(" ");
+}
+
+export interface HuurFictiefContractRegel {
+  contractnummer: string;
+  huurderNaam: string;
+  complexnummer: string | null;
+  ingangsdatum: string;
+  brutoJaarhuur: string;
+  belastOnbelast: "BELAST" | "ONBELAST";
+  kortingJaar: string;
+  wijzigenUrl: string;
+  verwijderenUrl: string;
+}
+
+/** Vooraf ingevulde waarden bij het wijzigen van een bestaand fictief contract — `null`-velden = leeg formulier (toevoegen). */
+export interface HuurFictiefContractFormulier {
+  contractnummer: string | null;
+  huurderNaam: string;
+  complexnummer: string;
+  ingangsdatum: string;
+  brutoJaarhuur: string;
+  belastOnbelast: "BELAST" | "ONBELAST";
+  kortingJaar: string;
 }
 
 /**
  * Huur-detailweergave (UX_01, Tranche 12; complex/contract-toggle + aflopende-contracten-
- * aandachtspunt: UX-uitrol 2026-10-02 §4; FASE 2 compositieherstel 2026-10-07 — mockup-referentie
- * `docs/begroting/ux/mockup-actueel/` "Specificatie netto huuropbrengsten"): toont de bewezen
- * contractbasis per contract — bronhuur/indexatie/override/resulterende huur/korting blijven
- * zichtbaar onderscheiden zodat later herleidbaar blijft hoe het bedrag is ontstaan (§10). Rekent
- * zelf niets — alle bedragen komen kant-en-klaar van de aanroeper (de bestaande, ongewijzigde pure
- * Huur-motor); de complexweergave is een zuivere optelling van de al-berekende contractregels. Toont
- * GEEN volledige vergelijkende P&L meer (die staat al op het hoofdscherm, zie
- * `huurOpbrengstenGroepsheaderRij`) — uitsluitend de compacte, module-eigen `huurSamenvattingHtml`.
+ * aandachtspunt: UX-uitrol 2026-10-02 §4; FASE 2 compositieherstel 2026-10-07; besluit 07-10-2026
+ * "Huur naar vastgestelde UX" — mockup-referentie `docs/begroting/ux/mockup-actueel/` "Specificatie
+ * netto huuropbrengsten"): toont de bewezen contractbasis per contract — bronhuur/indexatie/
+ * override/resulterende huur/korting blijven zichtbaar onderscheiden zodat later herleidbaar blijft
+ * hoe het bedrag is ontstaan (§10). Rekent zelf niets — alle bedragen komen kant-en-klaar van de
+ * aanroeper (de bestaande, ongewijzigde pure Huur-motor); de complexweergave is een zuivere
+ * optelling van de al-berekende contractregels. Toont GEEN volledige vergelijkende P&L meer (die
+ * staat al op het hoofdscherm, zie `huurOpbrengstenGroepsheaderRij`) — uitsluitend de compacte,
+ * module-eigen `huurSamenvattingHtml`.
  */
 export function renderHuurDetail(o: {
   administratieId: string;
@@ -1222,6 +1328,10 @@ export function renderHuurDetail(o: {
   controleVereist: readonly string[];
   portefeuilleNetto: string;
   samenvatting: HuurSamenvattingVeld;
+  beoordeeld: boolean;
+  fictieveContracten: readonly HuurFictiefContractRegel[];
+  contractToevoegenUrl: string;
+  contractFormulier: HuurFictiefContractFormulier | null;
 }): string {
   const waarschuwingenHtml = o.controleVereist.length > 0 ? `<div class="banner">${o.controleVereist.map(escapeHtml).join("<br/>")}</div>` : "";
   const weergaveToggleHtml = `
@@ -1235,15 +1345,20 @@ export function renderHuurDetail(o: {
     .map(
       (r) => `<tr>
       <td><span class="naam">${escapeHtml(r.contractnummer)}</span><span class="naam-sub">${escapeHtml(r.huurderNaam ?? "onbekende huurder")} · complex ${escapeHtml(r.complexnummer ?? "-")}</span>${
-        r.looptAfDitJaar ? `<span class="naam-sub" style="color:#b45309">⚠ loopt af in ${o.begrotingsjaar}${r.einddatum ? ` (${escapeHtml(r.einddatum)})` : ""}</span>` : ""
-      }</td>
+        r.looptAfDitJaar ? `<span class="naam-sub attentie">Loopt af in ${o.begrotingsjaar}${r.einddatum ? ` (${escapeHtml(r.einddatum)})` : ""}</span>` : ""
+      }${huurBadgesHtml(r) ? `<span class="naam-sub">${huurBadgesHtml(r)}</span>` : ""}<span class="naam-sub"><a href="${escapeHtml(r.maandverloopUrl)}">Maandverloop</a></span></td>
       <td>${escapeHtml(r.belastOnbelast)}</td>
       <td>${escapeHtml(r.indexatiePercentageGebruikt)}% (${r.indexatiePercentageBron === "OVERRIDE" ? "override" : "algemeen"})</td>
       <td>${r.effectieveIndexatiedatum ? escapeHtml(r.effectieveIndexatiedatum) : "-"}</td>
       <td>${escapeHtml(r.bruto)}</td>
       <td>${escapeHtml(r.korting)}</td>
       <td>${escapeHtml(r.netto)}</td>
-      <td>${o.alleenLezen ? escapeHtml(r.overrideWaarde || "-") : `<input type="text" name="override_${escapeHtml(r.contractnummer)}" value="${escapeHtml(r.overrideWaarde)}" placeholder="algemeen" style="width:70px" />`}</td>
+      <td>${escapeHtml(r.kwartalen.q1)}</td>
+      <td>${escapeHtml(r.kwartalen.q2)}</td>
+      <td>${escapeHtml(r.kwartalen.q3)}</td>
+      <td>${escapeHtml(r.kwartalen.q4)}</td>
+      <td><strong>${escapeHtml(r.kwartalen.jaar)}</strong></td>
+      <td>${o.alleenLezen ? escapeHtml(r.overrideWaarde || "-") : `<input type="text" name="override_${escapeHtml(r.contractnummer)}" value="${escapeHtml(r.overrideWaarde)}" placeholder="algemeen" style="width:60px" />`}</td>
     </tr>`,
     )
     .join("");
@@ -1255,19 +1370,74 @@ export function renderHuurDetail(o: {
       <td>${escapeHtml(r.bruto)}</td>
       <td>${escapeHtml(r.korting)}</td>
       <td>${escapeHtml(r.netto)}</td>
+      <td>${escapeHtml(r.kwartalen.q1)}</td>
+      <td>${escapeHtml(r.kwartalen.q2)}</td>
+      <td>${escapeHtml(r.kwartalen.q3)}</td>
+      <td>${escapeHtml(r.kwartalen.q4)}</td>
+      <td><strong>${escapeHtml(r.kwartalen.jaar)}</strong></td>
     </tr>`,
     )
     .join("");
   const tabelHtml =
     o.weergave === "complex"
       ? `<table style="margin-bottom:16px">
-        <thead><tr><th style="text-align:left">Complex</th><th>Aantal contracten</th><th>Bruto</th><th>Korting</th><th>Netto</th></tr></thead>
+        <thead><tr><th style="text-align:left">Complex</th><th>Aantal contracten</th><th>Bruto</th><th>Korting</th><th>Netto</th><th>Q1</th><th>Q2</th><th>Q3</th><th>Q4</th><th>Jaartotaal</th></tr></thead>
         <tbody>${complexRijenHtml}</tbody>
       </table>`
-      : `<table style="margin-bottom:16px">
-        <thead><tr><th style="text-align:left">Contract</th><th>Belast/onbelast</th><th>Indexatie</th><th>Ingangsdatum indexatie</th><th>Bruto</th><th>Korting</th><th>Netto</th><th>Override %</th></tr></thead>
+      : `<div class="tabel-scroll"><table style="margin-bottom:16px">
+        <thead><tr><th style="text-align:left">Contract</th><th>Belast/onbelast</th><th>Indexatie</th><th>Ingangsdatum indexatie</th><th>Bruto</th><th>Korting</th><th>Netto</th><th>Q1</th><th>Q2</th><th>Q3</th><th>Q4</th><th>Jaartotaal</th><th>Override %</th></tr></thead>
         <tbody>${contractRijenHtml}</tbody>
-      </table>`;
+      </table></div>`;
+
+  const cf = o.contractFormulier;
+  const contractToevoegenHtml =
+    o.weergave === "contract" && !o.alleenLezen
+      ? `<details class="contract-toevoegen"${cf !== null ? " open" : ""}>
+      <summary>${cf !== null ? "Fictief contract wijzigen" : "+ Contract toevoegen"}</summary>
+      <p class="sub">Een fictief contract bestaat uitsluitend binnen deze begroting (bv. een verwachte nieuwe huurder), wijzigt nooit de bronadministratie, en wordt door dezelfde rekenmotor verwerkt — zichtbaar als "Begrotingsaanname".</p>
+      <form method="POST" action="${escapeHtml(o.contractToevoegenUrl)}">
+        ${cf !== null ? `<input type="hidden" name="contractnummer" value="${escapeHtml(cf.contractnummer ?? "")}" />` : ""}
+        <label for="huurderNaam">Huurder-/contractnaam</label>
+        <input type="text" name="huurderNaam" id="huurderNaam" value="${escapeHtml(cf?.huurderNaam ?? "")}" required />
+        <label for="complexnummer">Complex/unit</label>
+        <input type="text" name="complexnummer" id="complexnummer" value="${escapeHtml(cf?.complexnummer ?? "")}" placeholder="optioneel" />
+        <label for="ingangsdatum">Ingangsdatum</label>
+        <input type="date" name="ingangsdatum" id="ingangsdatum" value="${escapeHtml(cf?.ingangsdatum ?? "")}" required />
+        <label for="brutoJaarhuur">Huurprijs (bruto, per jaar)</label>
+        <input type="text" name="brutoJaarhuur" id="brutoJaarhuur" value="${escapeHtml(cf?.brutoJaarhuur ?? "")}" placeholder="bv. 24.000,00" required />
+        <label for="belastOnbelast">Belast/onbelast</label>
+        <select name="belastOnbelast" id="belastOnbelast">
+          <option value="BELAST"${(cf?.belastOnbelast ?? "BELAST") === "BELAST" ? " selected" : ""}>Belast</option>
+          <option value="ONBELAST"${cf?.belastOnbelast === "ONBELAST" ? " selected" : ""}>Onbelast</option>
+        </select>
+        <label for="kortingJaar">Huurkorting (per jaar, optioneel)</label>
+        <input type="text" name="kortingJaar" id="kortingJaar" value="${escapeHtml(cf?.kortingJaar ?? "")}" placeholder="0,00" />
+        <button type="submit">${cf !== null ? "Wijziging opslaan" : "Contract toevoegen"}</button>
+      </form>
+    </details>`
+      : "";
+  const fictieveContractenHtml =
+    o.weergave === "contract" && o.fictieveContracten.length > 0
+      ? `<table style="margin:16px 0">
+        <thead><tr><th style="text-align:left">Fictief contract</th><th>Belast/onbelast</th><th>Bruto/jaar</th><th>Korting/jaar</th><th></th></tr></thead>
+        <tbody>${o.fictieveContracten
+          .map(
+            (f) => `<tr>
+          <td><span class="naam">${escapeHtml(f.huurderNaam)}</span><span class="naam-sub">complex ${escapeHtml(f.complexnummer ?? "-")} · vanaf ${escapeHtml(f.ingangsdatum)}</span><span class="naam-sub"><span class="badge badge-aanname">Begrotingsaanname</span></span></td>
+          <td>${f.belastOnbelast === "BELAST" ? "Belast" : "Onbelast"}</td>
+          <td>${escapeHtml(f.brutoJaarhuur)}</td>
+          <td>${escapeHtml(f.kortingJaar)}</td>
+          <td>${
+            o.alleenLezen
+              ? ""
+              : `<a href="${escapeHtml(f.wijzigenUrl)}">Wijzigen</a> · <form method="POST" action="${escapeHtml(f.verwijderenUrl)}" style="display:inline"><button type="submit" class="tekst-knop">Verwijderen</button></form>`
+          }</td>
+        </tr>`,
+          )
+          .join("")}</tbody>
+      </table>`
+      : "";
+
   const inhoud = `
     <div class="sub">Bron: contractbasis/RentRoll, peildatum ${escapeHtml(o.bronPeildatum)}. ${o.aantalContracten} contract${o.aantalContracten === 1 ? "" : "en"}.</div>
     ${huurSamenvattingHtml(o.samenvatting)}
@@ -1277,9 +1447,92 @@ export function renderHuurDetail(o: {
     <form method="POST" action="${escapeHtml(o.actieUrl)}">
       ${tabelHtml}
       <p class="sub">Netto huur portefeuille (Jouw begroting): <strong>${escapeHtml(o.portefeuilleNetto)}</strong></p>
-      ${o.alleenLezen || o.weergave === "complex" ? "" : `<button type="submit">Overrides opslaan</button>`}
-    </form>`;
+      ${
+        o.alleenLezen || o.weergave === "complex"
+          ? ""
+          : `<button type="submit">Opslaan</button> <button type="submit" name="actie" value="voorstelOvernemen" class="secundair">Voorstel overnemen</button>
+      ${beoordeeldCheckbox("beoordeeld", o.beoordeeld)}`
+      }
+    </form>
+    ${fictieveContractenHtml}
+    ${contractToevoegenHtml}`;
   return moduleFormShell({ titel: `Specificatie netto huuropbrengsten — ${o.begrotingsjaar}`, terugUrl: o.terugUrl, inhoud, alleenLezen: o.alleenLezen, fragment: o.fragment === true });
+}
+
+export interface HuurMaandverloopRegel {
+  maand: string;
+  huurprijs: string;
+  korting: string;
+  netto: string;
+  heeftToekomstigePrijsregel: boolean;
+  heeftHandmatigeOverride: boolean;
+}
+
+/**
+ * Maandverloop (besluit 07-10-2026 §9) — januari t/m december voor ÉÉN contract, rechtstreeks uit
+ * de bestaande maandregels (geen herberekening). Dient tegelijk als controleweergave (elke regel
+ * toont hoe het bedrag die maand is ontstaan) en als eenvoudige begrotingsinvoer: de gebruiker kiest
+ * een maand en vult een nieuwe huurprijs en/of nieuwe korting in (EUR/maand) — dat wordt het
+ * bestaande prijsregel-/override-model (`BgContractMaandOverride`, laag 3), nooit een eigen
+ * rekenmotor. Na opslaan lopen maanden/kwartalen/jaartotaal/aggregaties automatisch opnieuw door
+ * dezelfde, ongewijzigde Huurcalculator.
+ */
+export function renderHuurMaandverloop(o: {
+  terugUrl: string;
+  actieUrl: string;
+  alleenLezen: boolean;
+  fragment?: boolean;
+  contractnummer: string;
+  huurderNaam: string | null;
+  regels: readonly HuurMaandverloopRegel[];
+  bestaandeOverrides: readonly { vanafMaand: string; nieuweBrutoHuurPerMaand: string | null; nieuweKortingPerMaand: string | null }[];
+}): string {
+  const maandOpties = o.regels.map((r, i) => `<option value="${i + 1}">${escapeHtml(r.maand)}</option>`).join("");
+  const regelsHtml = o.regels
+    .map((r) => {
+      const badges = [
+        r.heeftToekomstigePrijsregel ? `<span class="badge badge-info">Toekomstige prijsregel</span>` : "",
+        r.heeftHandmatigeOverride ? `<span class="badge badge-info">Handmatig aangepast</span>` : "",
+      ]
+        .filter((b) => b.length > 0)
+        .join(" ");
+      return `<tr>
+      <td class="naam">${escapeHtml(r.maand)}${badges ? `<span class="naam-sub">${badges}</span>` : ""}</td>
+      <td>${escapeHtml(r.huurprijs)}</td>
+      <td>${escapeHtml(r.korting)}</td>
+      <td><strong>${escapeHtml(r.netto)}</strong></td>
+    </tr>`;
+    })
+    .join("");
+  const bestaandeOverridesHtml =
+    o.bestaandeOverrides.length > 0
+      ? `<table style="margin:16px 0"><thead><tr><th style="text-align:left">Vanaf</th><th>Nieuwe huurprijs</th><th>Nieuwe korting</th></tr></thead><tbody>${o.bestaandeOverrides
+          .map((ov) => `<tr><td class="naam">${escapeHtml(ov.vanafMaand)}</td><td>${ov.nieuweBrutoHuurPerMaand !== null ? escapeHtml(ov.nieuweBrutoHuurPerMaand) : "-"}</td><td>${ov.nieuweKortingPerMaand !== null ? escapeHtml(ov.nieuweKortingPerMaand) : "-"}</td></tr>`)
+          .join("")}</tbody></table>`
+      : "";
+  const inhoud = `
+    <div class="sub">${escapeHtml(o.huurderNaam ?? "onbekende huurder")} · contract ${escapeHtml(o.contractnummer)}</div>
+    <table style="margin:16px 0">
+      <thead><tr><th style="text-align:left">Maand</th><th>Huurprijs</th><th>Huurkorting</th><th>Netto huur</th></tr></thead>
+      <tbody>${regelsHtml}</tbody>
+    </table>
+    ${bestaandeOverridesHtml}
+    ${
+      o.alleenLezen
+        ? ""
+        : `<p class="sub">Vul een nieuwe huurprijs en/of nieuwe korting in — deze geldt vanaf de gekozen maand tot een eventuele volgende wijziging voor dit contract.</p>
+    <form method="POST" action="${escapeHtml(o.actieUrl)}">
+      <label for="vanafMaand">Vanaf maand</label>
+      <select name="vanafMaand" id="vanafMaand">${maandOpties}</select>
+      <label for="nieuweBrutoHuurPerMaand">Nieuwe huurprijs (EUR/maand, optioneel)</label>
+      <input type="text" name="nieuweBrutoHuurPerMaand" id="nieuweBrutoHuurPerMaand" placeholder="ongewijzigd laten = leeg" />
+      <label for="nieuweKortingPerMaand">Nieuwe huurkorting (EUR/maand, optioneel)</label>
+      <input type="text" name="nieuweKortingPerMaand" id="nieuweKortingPerMaand" placeholder="ongewijzigd laten = leeg" />
+      <button type="submit">Wijziging opslaan</button>
+    </form>`
+    }
+    <a class="terug" href="${escapeHtml(o.terugUrl)}">← Terug naar Huur</a>`;
+  return moduleFormShell({ titel: `Maandverloop — ${o.huurderNaam ?? o.contractnummer}`, terugUrl: o.terugUrl, inhoud, alleenLezen: o.alleenLezen, fragment: o.fragment === true });
 }
 
 export interface BeheerDetailRegel {

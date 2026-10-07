@@ -39,6 +39,19 @@ export { schrijfModule1Aannames, leesModule1Aannames, leesLaatstAfgeslotenBoekpe
 export { schrijfModule1Overrides, leesModule1Overrides } from "./module1Overrides.js";
 export { schrijfModule2Config, leesModule2Config } from "./module2Config.js";
 
+// Huur naar vastgestelde UX (besluit 07-10-2026) — Maandverloop-overrides (laag 3, `BgContractMaandOverride`
+// komt rechtstreeks uit `@bvc/reporting`), fictieve begrotingscontracten, en de nieuwe Huur-beoordeeld-vlag.
+export { schrijfHuurMaandOverrides, leesHuurMaandOverrides } from "./huurMaandOverrides.js";
+export {
+  voegHuurFictiefContractToe,
+  wijzigHuurFictiefContract,
+  verwijderHuurFictiefContract,
+  leesHuurFictieveContracten,
+  naarBgContractFeiten,
+  type BgHuurFictiefContract,
+} from "./huurFictieveContracten.js";
+export { schrijfHuurBeoordeeld, leesHuurBeoordeeld } from "./huurBeoordeeld.js";
+
 // Zelfde principe voor Module 3 (Managementvergoeding, fase 2C.2):
 // `BgManagementInvoer` komt rechtstreeks uit `@bvc/reporting` — geen
 // shadow-type hier. `leesModule3Invoer` geeft `null` terug als er nog geen

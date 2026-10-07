@@ -224,6 +224,45 @@ export interface BgContractOverride {
   reden?: string;
 }
 
+/**
+ * HUUR NAAR VASTGESTELDE UX (besluit 07-10-2026, "Maandverloop") — de DERDE laag van de
+ * vastgestelde rekenvolgorde: 1) huidige prijsregel + indexatie, 2) bronfeit-bewezen toekomstige
+ * VS13-kortingswijziging (`BgToekomstigeKortingswijziging`, hierboven), 3) een bewuste handmatige
+ * begrotingsoverride. GEEN bronfeit, GEEN validatie tegen een bronpeildatum (in tegenstelling tot
+ * punt 2) — dit IS de begrotingsaanname zelf, rechtstreeks door de gebruiker ingevoerd. Beide velden
+ * zijn directe EUR/MAAND-bedragen (geen jaarbedrag/12, geen percentage) en onafhankelijk van elkaar:
+ * `null` = deze override wijzigt die component niet, de voorgaande laag blijft gelden. Geldt vanaf
+ * `vanafMaand` t/m maand 12 van het begrotingsjaar, tot een eventuele latere override (hogere
+ * `vanafMaand`) voor hetzelfde contract/dezelfde component het overneemt — zelfde "geldt-vanaf-tot-
+ * de-volgende" semantiek als de bronfeit-kortingswijziging, bewust NIET dezelfde validatiefuncctie
+ * (dit is geen bronfeit, dus geen bronPeildatum-/contracteinde-validatie nodig).
+ */
+export interface BgContractMaandOverride {
+  contractnummer: string;
+  vanafMaand: number; // 1..12
+  /** Vervangt `brutoHuurMetIndexatie` (vóór dagfractie) vanaf deze maand. `null` = ongewijzigd. */
+  nieuweBrutoHuurPerMaand: Decimal | null;
+  /** Vervangt `huurkorting` (vóór dagfractie, positieve magnitude) vanaf deze maand. `null` = ongewijzigd. */
+  nieuweKortingPerMaand: Decimal | null;
+}
+
+/**
+ * Generieke "vanaf-maand-tot-de-volgende"-layering voor de Maandverloop-override — herbruikt dezelfde
+ * aard van algoritme als `bepaalKortingBasisPerMaand`, maar zonder diens bronfeit-specifieke validatie
+ * (geen bronPeildatum/contracteinde-check: een begrotingsoverride is per definitie altijd "nu" geldig).
+ * `null`-waarden op een override worden genegeerd (die component blijft bij de vorige laag).
+ */
+function bepaalMaandOverridePerMaand(wijzigingen: readonly { vanafMaand: number; waarde: Decimal | null }[]): (Decimal | null)[] {
+  const basisPerMaand: (Decimal | null)[] = new Array(12).fill(null);
+  const gesorteerd = [...wijzigingen].filter((w) => w.waarde !== null).sort((a, b) => a.vanafMaand - b.vanafMaand);
+  for (const wijziging of gesorteerd) {
+    for (let maand = wijziging.vanafMaand; maand <= 12; maand += 1) {
+      basisPerMaand[maand - 1] = wijziging.waarde;
+    }
+  }
+  return basisPerMaand;
+}
+
 export interface BgHuurAannames {
   begrotingsjaar: number;
   /** Algemeen verwacht indexatiepercentage — begrotingsAANNAME, nooit een bronfeit. Uitgedrukt als getal, bv. `3` voor 3%. */
@@ -234,11 +273,17 @@ export interface BgHuurMaandRegel {
   maand: number; // 1..12
   brutoHuurZonderIndexatie: Decimal;
   indexatieEffect: Decimal;
+  /** Na toepassing van laag 2 (bronfeit-kortingswijziging raakt dit veld niet) én laag 3 (prijsoverride, zie `prijsOverrideActief`). */
   brutoHuurMetIndexatie: Decimal;
+  /** Na toepassing van laag 3 (kortingoverride, zie `kortingOverrideActief`) indien actief. */
   huurkorting: Decimal;
   nettoHuur: Decimal;
   /** Ingangsdatum van de bronfeit-kortingswijziging die deze maand bepaalt, of `null` = de basis (huidige) korting geldt nog. */
   kortingswijzigingToegepast: Date | null;
+  /** `true` = `brutoHuurMetIndexatie` komt deze maand van een handmatige Maandverloop-prijsoverride (laag 3), niet van indexatie/bron. */
+  prijsOverrideActief: boolean;
+  /** `true` = `huurkorting` komt deze maand van een handmatige Maandverloop-kortingoverride (laag 3), niet van de bronfeit-basis/-wijziging. */
+  kortingOverrideActief: boolean;
 }
 
 interface BgJaartotalen {
@@ -673,6 +718,8 @@ export function berekenBegroteHuuropbrengsten(
    * zonder een geldige reden.
    */
   bronPeildatum: Date,
+  /** Laag 3 van de vastgestelde rekenvolgorde (besluit 07-10-2026, Maandverloop) — zie `BgContractMaandOverride`. Standaard leeg: volledig backwards-compatibel met elke bestaande aanroep. */
+  maandOverrides: readonly BgContractMaandOverride[] = [],
 ): BgHuurResultaat {
   // Invariant (fase 1A, expliciet vastgesteld): deze functie verwerkt EXACT
   // één administratie per aanroep. `contractnummer` is daarmee een geldige
@@ -689,6 +736,13 @@ export function berekenBegroteHuuropbrengsten(
   }
 
   const controleVereist: BgControleItem[] = [];
+
+  const maandOverridesPerContract = new Map<string, BgContractMaandOverride[]>();
+  for (const maandOverride of maandOverrides) {
+    const groep = maandOverridesPerContract.get(maandOverride.contractnummer) ?? [];
+    groep.push(maandOverride);
+    maandOverridesPerContract.set(maandOverride.contractnummer, groep);
+  }
 
   const overridePerContract = new Map<string, BgContractOverride>();
   for (const override of overrides) {
@@ -773,14 +827,25 @@ export function berekenBegroteHuuropbrengsten(
     );
     controleVereist.push(...kortingswijzigingMeldingen);
 
+    // Laag 3 (besluit 07-10-2026, Maandverloop): bewuste handmatige begrotingsoverride, ná indexatie
+    // (laag 1) en bronfeit-kortingswijziging (laag 2) — zie `BgContractMaandOverride`'s moduledoc.
+    const contractMaandOverrides = maandOverridesPerContract.get(contract.contractnummer) ?? [];
+    const prijsOverridePerMaand = bepaalMaandOverridePerMaand(contractMaandOverrides.map((o) => ({ vanafMaand: o.vanafMaand, waarde: o.nieuweBrutoHuurPerMaand })));
+    const kortingOverridePerMaand = bepaalMaandOverridePerMaand(contractMaandOverrides.map((o) => ({ vanafMaand: o.vanafMaand, waarde: o.nieuweKortingPerMaand })));
+
     const regels: BgHuurMaandRegel[] = [];
     for (let maand = 1; maand <= 12; maand += 1) {
       const dagfractie = dagfracties[maand - 1]!;
       const brutoHuurZonderIndexatie = brutoMaandBasis.times(dagfractie);
       const indexatieActief = indexatiemaand !== null && maand >= indexatiemaand;
       const indexatieEffect = indexatieActief ? brutoHuurZonderIndexatie.times(indexatiePercentageGebruikt).dividedBy(100) : new Decimal(0);
-      const brutoHuurMetIndexatie = brutoHuurZonderIndexatie.plus(indexatieEffect);
-      const huurkortingMaand = kortingBasisPerMaand[maand - 1]!.times(dagfractie);
+      const brutoHuurMetIndexatieBasis = brutoHuurZonderIndexatie.plus(indexatieEffect);
+      const huurkortingMaandBasis = kortingBasisPerMaand[maand - 1]!.times(dagfractie);
+
+      const prijsOverride = prijsOverridePerMaand[maand - 1] ?? null;
+      const kortingOverride = kortingOverridePerMaand[maand - 1] ?? null;
+      const brutoHuurMetIndexatie = prijsOverride !== null ? prijsOverride.times(dagfractie) : brutoHuurMetIndexatieBasis;
+      const huurkortingMaand = kortingOverride !== null ? kortingOverride.times(dagfractie) : huurkortingMaandBasis;
       const nettoHuur = brutoHuurMetIndexatie.minus(huurkortingMaand);
 
       regels.push({
@@ -791,6 +856,8 @@ export function berekenBegroteHuuropbrengsten(
         huurkorting: huurkortingMaand,
         nettoHuur,
         kortingswijzigingToegepast: kortingswijzigingPerMaand[maand - 1] ?? null,
+        prijsOverrideActief: prijsOverride !== null,
+        kortingOverrideActief: kortingOverride !== null,
       });
     }
 
@@ -856,4 +923,70 @@ export function berekenBegroteHuuropbrengsten(
     portefeuilleTotalen,
     controleVereist,
   };
+}
+
+// ── Kwartaalweergave (besluit 07-10-2026) ───────────────────────────────────
+
+export type BgHuurKwartaal = "Q1" | "Q2" | "Q3" | "Q4";
+
+export interface BgHuurKwartaalTotaal {
+  brutoHuurMetIndexatie: Decimal;
+  huurkorting: Decimal;
+  nettoHuur: Decimal;
+}
+
+export interface BgHuurKwartaalTotalen {
+  q1: BgHuurKwartaalTotaal;
+  q2: BgHuurKwartaalTotaal;
+  q3: BgHuurKwartaalTotaal;
+  q4: BgHuurKwartaalTotaal;
+  jaartotaal: BgHuurKwartaalTotaal;
+}
+
+const HUUR_KWARTAAL_MAANDEN: Record<BgHuurKwartaal, readonly number[]> = {
+  Q1: [1, 2, 3],
+  Q2: [4, 5, 6],
+  Q3: [7, 8, 9],
+  Q4: [10, 11, 12],
+};
+
+/**
+ * Q1-Q4 + jaartotaal, AFGELEID uit de al-bestaande maandregels (besluit 07-10-2026 §6/§7/§8) — geen
+ * nieuwe berekening, geen handmatige kwartaalinvoer, geen jaarbedrag/12-benadering. Werkt zowel op
+ * één contract se eigen `regels` als op een opgetelde lijst van meerdere contracten (complexaggregatie
+ * — de aanroeper telt eerst de per-contract-regels bij elkaar op, zie `apps/worker`'s
+ * complexaggregatie-precedent), zodat prijswijzigingen/indexatie/korting/contracteinde/leegstand/
+ * fictieve opvolging automatisch in het juiste kwartaal terechtkomen. Herbruikbaar door Reporting
+ * zonder de Huur-maandmotor opnieuw te implementeren.
+ */
+export function berekenHuurKwartaalTotalen(regels: readonly BgHuurMaandRegel[]): BgHuurKwartaalTotalen {
+  const totaalVoorMaanden = (maanden: readonly number[]): BgHuurKwartaalTotaal => {
+    const relevant = regels.filter((r) => maanden.includes(r.maand));
+    return {
+      brutoHuurMetIndexatie: som(relevant.map((r) => r.brutoHuurMetIndexatie)),
+      huurkorting: som(relevant.map((r) => r.huurkorting)),
+      nettoHuur: som(relevant.map((r) => r.nettoHuur)),
+    };
+  };
+  return {
+    q1: totaalVoorMaanden(HUUR_KWARTAAL_MAANDEN.Q1),
+    q2: totaalVoorMaanden(HUUR_KWARTAAL_MAANDEN.Q2),
+    q3: totaalVoorMaanden(HUUR_KWARTAAL_MAANDEN.Q3),
+    q4: totaalVoorMaanden(HUUR_KWARTAAL_MAANDEN.Q4),
+    jaartotaal: totaalVoorMaanden([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]),
+  };
+}
+
+/**
+ * Som van meerdere contracten se Q1-Q4/jaartotalen — pure optelling, geen nieuwe berekening.
+ * Bedoeld voor de complexaggregatie (meerdere contracten binnen één complex) en de
+ * portefeuille-/module-brede Q1-Q4-weergave (alle contracten samen).
+ */
+export function somHuurKwartaalTotalen(totalen: readonly BgHuurKwartaalTotalen[]): BgHuurKwartaalTotalen {
+  const somVoor = (key: keyof BgHuurKwartaalTotalen): BgHuurKwartaalTotaal => ({
+    brutoHuurMetIndexatie: som(totalen.map((t) => t[key].brutoHuurMetIndexatie)),
+    huurkorting: som(totalen.map((t) => t[key].huurkorting)),
+    nettoHuur: som(totalen.map((t) => t[key].nettoHuur)),
+  });
+  return { q1: somVoor("q1"), q2: somVoor("q2"), q3: somVoor("q3"), q4: somVoor("q4"), jaartotaal: somVoor("jaartotaal") };
 }

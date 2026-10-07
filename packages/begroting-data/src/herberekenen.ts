@@ -29,6 +29,7 @@ import {
   type BgBeheerComplexConfig,
   type BgBeheerResultaat,
   type BgContractFeiten,
+  type BgContractMaandOverride,
   type BgContractOverride,
   type BgCorrectiefDagelijksRegelInvoer,
   type BgCorrectiefDagelijksRegelUitkomst,
@@ -107,6 +108,8 @@ import {
   type RenteCategorieStateInvoer,
 } from "./renteCategorieState.js";
 import { leesRenteRegels, type RenteRegel } from "./renteRegels.js";
+import { leesHuurFictieveContracten, naarBgContractFeiten } from "./huurFictieveContracten.js";
+import { leesHuurMaandOverrides } from "./huurMaandOverrides.js";
 import { leesModule1Overrides } from "./module1Overrides.js";
 import { leesModule1Snapshot } from "./module1Snapshot.js";
 import { leesModule2Config } from "./module2Config.js";
@@ -444,9 +447,12 @@ function withReadTransaction<T>(db: DatabaseSync, fn: () => T): T {
  */
 export interface HerberekenInvoer {
   versie: Begrotingsversie;
+  /** Bronfeit-contracten (Module-1-snapshot) + fictieve begrotingscontracten (besluit 07-10-2026 §11), al samengevoegd — `berekenBegroteHuuropbrengsten` onderscheidt ze zelf op geen enkele manier (zie `huurFictieveContracten.ts`'s moduledoc). */
   contracten: readonly BgContractFeiten[];
   aannames: BgHuurAannames;
   overrides: readonly BgContractOverride[];
+  /** Laag 3 van de Huur-rekenvolgorde (besluit 07-10-2026, "Maandverloop") — zie `BgContractMaandOverride`. */
+  maandOverrides: readonly BgContractMaandOverride[];
   configs: readonly BgBeheerComplexConfig[];
   module3Invoer: BgManagementInvoer | null;
   /** Rauwe GO-P1-persistence — GEEN pure-module-vorm; de mapping naar `BgGeplandOnderhoudActiviteitInvoer` gebeurt pas in `berekenBegrotingUitInvoer`. */
@@ -527,11 +533,18 @@ export function leesHerberekenInvoerZonderTransactie(db: DatabaseSync, versieId:
       ? { wijze: "NIEUWE_VERGOEDING" as const, bedrag: new Decimal(0), eenheid: "MAAND" as const, ingangsdatum: null }
       : module3InvoerWerkelijk;
 
+  // Besluit 07-10-2026 §11 ("Contract toevoegen"): fictieve begrotingscontracten worden hier,
+  // en ALLEEN hier, samengevoegd met de bronfeit-snapshot — zowel het CONCEPT-voorbeeld
+  // (`berekenBegrotingUitInvoer`) als `stelBegrotingVast` lopen door dit ENE gedeelde leespad,
+  // zelfde precedent als UX_10's Managementvergoeding-substitutie hierboven.
+  const fictieveContracten = leesHuurFictieveContracten(db, versieId).map((fc) => naarBgContractFeiten(fc, versie.bedrijfsnr));
+
   return {
     versie,
-    contracten: leesModule1Snapshot(db, versieId),
+    contracten: [...leesModule1Snapshot(db, versieId), ...fictieveContracten],
     aannames,
     overrides: leesModule1Overrides(db, versieId),
+    maandOverrides: leesHuurMaandOverrides(db, versieId),
     configs: leesModule2Config(db, versieId),
     module3Invoer,
     geplandOnderhoudActiviteiten: leesGeplandOnderhoudActiviteiten(db, versieId),
@@ -1148,7 +1161,7 @@ export function berekenBegrotingUitInvoer(
 } {
   let module1: BgHuurResultaat;
   try {
-    module1 = berekenBegroteHuuropbrengsten(invoer.contracten, invoer.overrides, invoer.aannames, invoer.versie.bronPeildatum);
+    module1 = berekenBegroteHuuropbrengsten(invoer.contracten, invoer.overrides, invoer.aannames, invoer.versie.bronPeildatum, invoer.maandOverrides);
   } catch (error) {
     throw new Error(
       `Berekening van begrotingsversie ${versieId} is mislukt tijdens Module 1: ${error instanceof Error ? error.message : String(error)}`,
