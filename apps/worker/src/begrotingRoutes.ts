@@ -303,6 +303,41 @@ async function toonHoofdscherm(res: ServerResponse, g: Geopend, laatstAfgesloten
     const vergelijkend = leesBegrotingsWerkomgeving(g.root, g.administratieId, g.bedrijfsnr, g.db, g.versie, laatstAfgeslotenBoekperiode);
     const verborgenModules = leesVerborgenModules(g.db, g.bedrijfsnr);
     const beoordelingPerRegel = leesBeoordelingPerRegel(g);
+    // Correctieronde (visuele controle, besluit 07-10-2026) — bruto belast/onbelast/korting voor
+    // Jouw begroting op het hoofdscherm, uit dezelfde, ongewijzigde `berekenHuurContext` als
+    // `handleHuur`/`handleBeheer`. Faalt deze (bv. nog geen Module-1-aannames), dan blijft de
+    // decompositie stil `null` — het hoofdscherm zelf blijft gewoon werken (zelfde gedrag als de
+    // bestaande `vergelijkend`-try/catch hieronder).
+    let huurBrutoDecompositie: { brutoBelast: Decimal; brutoOnbelast: Decimal; korting: Decimal } | null = null;
+    // Voorstel krijgt dezelfde bruto/korting-decompositie, berekend zonder overrides/fictieve
+    // contracten — exact de invoer die `leesHuurBeheerVoorstelRegels` ook gebruikt voor de
+    // Voorstel-kolom. Zo blijft "Voorstel" voor Huur zichtbaar naast "Jouw begroting" (bestaande,
+    // reeds werkende functionaliteit) in plaats van stilzwijgend "onbekend" te worden.
+    let huurBrutoDecompositieVoorstel: { brutoBelast: Decimal; brutoOnbelast: Decimal; korting: Decimal } | null = null;
+    try {
+      const huurContext = berekenHuurContext(g);
+      if (huurContext !== null) {
+        const { module1 } = huurContext;
+        huurBrutoDecompositie = {
+          brutoBelast: som(module1.contracten.filter((c) => c.belastOnbelast === "BELAST").map((c) => c.jaartotaal.brutoHuurMetIndexatie)),
+          brutoOnbelast: som(module1.contracten.filter((c) => c.belastOnbelast === "ONBELAST").map((c) => c.jaartotaal.brutoHuurMetIndexatie)),
+          korting: module1.portefeuilleTotalen.huurkorting,
+        };
+      }
+      const aannames = leesModule1Aannames(g.db, g.versie.id);
+      if (aannames !== null) {
+        const echteContracten = leesModule1Snapshot(g.db, g.versie.id);
+        const module1Voorstel = berekenBegroteHuuropbrengsten(echteContracten, [], aannames, g.versie.bronPeildatum);
+        huurBrutoDecompositieVoorstel = {
+          brutoBelast: som(module1Voorstel.contracten.filter((c) => c.belastOnbelast === "BELAST").map((c) => c.jaartotaal.brutoHuurMetIndexatie)),
+          brutoOnbelast: som(module1Voorstel.contracten.filter((c) => c.belastOnbelast === "ONBELAST").map((c) => c.jaartotaal.brutoHuurMetIndexatie)),
+          korting: module1Voorstel.portefeuilleTotalen.huurkorting,
+        };
+      }
+    } catch {
+      huurBrutoDecompositie = null;
+      huurBrutoDecompositieVoorstel = null;
+    }
     stuurHtml(
       res,
       200,
@@ -314,6 +349,8 @@ async function toonHoofdscherm(res: ServerResponse, g: Geopend, laatstAfgesloten
         laatstAfgeslotenBoekperiode,
         verborgenModules,
         beoordelingPerRegel,
+        huurBrutoDecompositie,
+        huurBrutoDecompositieVoorstel,
         ...(melding !== undefined ? { melding } : {}),
       }),
     );
@@ -1201,7 +1238,6 @@ async function handleHuur(req: IncomingMessage, res: ServerResponse, g: Geopend,
   const weergave0 = new URL(req.url ?? "", "http://localhost").searchParams.get("weergave");
   const weergave = weergave0 === "contract" ? "contract" : "complex"; // besluit §3: "Per complex standaard actief"
   const fragment = isFragmentVerzoek(req);
-  const weergaveSuffix = fragment ? "&fragment=1" : "";
 
   const regels: HuurDetailRegel[] = module1.contracten.map((c) => {
     const einddatum = einddatumPerContract.get(c.contractnummer) ?? null;
@@ -1315,8 +1351,13 @@ async function handleHuur(req: IncomingMessage, res: ServerResponse, g: Geopend,
       terugUrl,
       actieUrl,
       weergave,
-      contractWeergaveUrl: `${actieUrl}&weergave=contract${weergaveSuffix}`,
-      complexWeergaveUrl: `${actieUrl}&weergave=complex${weergaveSuffix}`,
+      // Correctieronde (visuele controle): altijd zonder `&fragment=1` — dit zijn gewone <a>-links
+      // (geen `data-expand`), dus een volledige paginanavigatie. Droegen ze de fragment-status van
+      // het huidige (mogelijk inline-uitgeklapte) verzoek over, dan navigeerde de browser naar een
+      // fragment-only respons zonder <html>/<style>-skelet en viel alle opmaak weg (exact de
+      // gemelde bug).
+      contractWeergaveUrl: `${actieUrl}&weergave=contract`,
+      complexWeergaveUrl: `${actieUrl}&weergave=complex`,
       begrotingsjaar: g.versie.begrotingsjaar,
       alleenLezen,
       algemeenIndexatiePercentage: fmtPercentageVeld(aannames!.indexatiePercentage),

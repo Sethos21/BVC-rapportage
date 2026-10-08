@@ -1150,7 +1150,7 @@ describe("Huur/Beheer via echte HTTP-routes met een echte Contracten/RentRoll-fi
       // Hoofdscherm toont de contract-afgeleide Huur/Beheer-waarden (bruto huur 120.000, geen indexatie/override -> 0% algemeen).
       const hoofdscherm1 = await fetch(baseUrl + hoofdschermUrl);
       const html1 = await hoofdscherm1.text();
-      expect(html1).toContain("Huuropbrengst belast");
+      expect(html1).toContain("Bruto huuropbrengst belast");
       expect(html1).toContain("€ 120.000,00");
       // UX-assemblagedelta: CONCEPT toont de werkomgeving-shell met de "Concept"-pill.
       expect(html1).toContain('class="sidebar"');
@@ -1333,8 +1333,8 @@ describe("Fase 2 — Huur als referentie-implementatie: één functionele module
       expect(html).not.toContain('data-expand="VERLEENDE_HUURKORTING--huur"');
 
       // Belast/Onbelast blijven zelf als afzonderlijke, financieel ongewijzigde canon-regels zichtbaar.
-      expect(html).toContain("Huuropbrengst belast");
-      expect(html).toContain("Huuropbrengst onbelast");
+      expect(html).toContain("Bruto huuropbrengst belast");
+      expect(html).toContain("Bruto huuropbrengst onbelast");
       expect(html).toContain("€ 120.000,00"); // Jouw begroting, netto huur zonder override/korting/BTW-splitsing in deze fixture
     });
   });
@@ -1372,6 +1372,32 @@ describe("Fase 2 — Huur als referentie-implementatie: één functionele module
       // Contract-/complexspecificatie blijft onveranderd werken (bestaande functionaliteit).
       expect(huurHtml).toContain("0000000043");
       expect(huurHtml).toContain("Voorbeeld Huurder BV");
+
+      // Correctieronde (visuele controle) regressie op bug #4: vanuit een INLINE-uitgeklapte
+      // Huur-weergave (dus opgehaald met &fragment=1) mogen de "Per contract"/"Per complex"-links
+      // zelf NOOIT &fragment=1 meedragen — het zijn gewone <a>-links zonder data-expand, dus een
+      // klik erop is een volledige paginanavigatie. Draagt de link per ongeluk de fragment-status
+      // van het huidige (ingeklapte) verzoek over, dan navigeert de browser naar een fragment-only
+      // respons zonder <html>/<style>-skelet en valt alle opmaak weg (exact de gemelde bug).
+      const contractLinkMatch = huurHtml.match(/<a href="([^"]*)"[^>]*>Per contract<\/a>/);
+      const complexLinkMatch = huurHtml.match(/<a href="([^"]*)"[^>]*>Per complex<\/a>/);
+      expect(contractLinkMatch).not.toBeNull();
+      expect(complexLinkMatch).not.toBeNull();
+      const contractLinkUrl = contractLinkMatch![1]!.replace(/&amp;/g, "&");
+      const complexLinkUrl = complexLinkMatch![1]!.replace(/&amp;/g, "&");
+      expect(contractLinkUrl).not.toContain("fragment=1");
+      expect(complexLinkUrl).not.toContain("fragment=1");
+
+      // Rechtstreekse (volledige) navigatie naar die links moet ALTIJD de gestylede Worker-shell
+      // opleveren — nooit een kaal fragment-document — onafhankelijk van de navigatieroute waarmee
+      // de gebruiker er terechtkomt (zie opdracht §4/§8, paden A/B/C/D).
+      const contractVolledig = await (await fetch(baseUrl + contractLinkUrl)).text();
+      const complexVolledig = await (await fetch(baseUrl + complexLinkUrl)).text();
+      for (const html of [contractVolledig, complexVolledig]) {
+        expect(html).toContain("<html");
+        expect(html).toContain("<style>");
+        expect(html).toContain('class="sidebar"');
+      }
     });
   });
 
@@ -1454,8 +1480,8 @@ describe("Huur naar vastgestelde UX (besluit 07-10-2026)", () => {
     await metServer(async (baseUrl) => {
       const { huurUrl } = await nieuweHuurBegroting(baseUrl);
       const contractHtml = await (await fetch(`${baseUrl + huurUrl}&weergave=contract`)).text();
-      expect(contractHtml).toContain("<th>Q1</th>");
-      expect(contractHtml).toContain("<th>Q4</th>");
+      expect(contractHtml).toContain(">Q1</th>");
+      expect(contractHtml).toContain(">Q4</th>");
       expect(contractHtml).toContain("€ 30.000,00"); // 120.000 / 4, 0% indexatie, geen korting
 
       const complexHtml = await (await fetch(`${baseUrl + huurUrl}&weergave=complex`)).text();
@@ -1814,7 +1840,7 @@ describe("laatstAfgeslotenBoekperiode persistent per begrotingsversie (product-r
       });
       const hoofdschermUrl = nieuw.headers.get("location")!;
       const html = await (await fetch(baseUrl + hoofdschermUrl)).text();
-      expect(html).toContain("Huuropbrengst belast");
+      expect(html).toContain("Bruto huuropbrengst belast");
       expect(html).toContain("€ 120.000,00"); // zelfde contract-afgeleide bruto huur als vóór deze fix
     });
   });

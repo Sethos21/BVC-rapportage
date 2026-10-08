@@ -121,6 +121,18 @@ const BASIS_CSS = `
 
   .tabel-scroll{overflow-x:auto}
 
+  /* Correctieronde (visuele controle, besluit 07-10-2026) — uitsluitend binnen de Huur-financiële
+     tabellen: voorkomt dat het euroteken en het bedrag door wrapping op twee regels terechtkomen,
+     en geeft Q1-Q4/Jaartotaal vaste, niet-verspringende kolombreedtes. Bewust geschrapt via een
+     eigen klasse i.p.v. de generieke table/td-regels hierboven, zodat andere modules ongewijzigd
+     blijven. */
+  .huur-fin th,.huur-fin td{white-space:nowrap}
+  .huur-fin th:first-child,.huur-fin td:first-child{white-space:normal}
+  .huur-fin .col-kwartaal{min-width:78px}
+  .huur-fin .col-jaar{min-width:92px;font-weight:700}
+  .huur-fin td.col-jaar{background:var(--green-soft);color:var(--green-dark)}
+  .huur-fin .col-contract{min-width:230px;white-space:normal}
+
   .tekst-knop{border:0;background:transparent;color:var(--green);padding:0;font-size:12.5px;font-weight:650;cursor:pointer;text-decoration:underline}
   .tekst-knop:hover{color:var(--green-dark)}
 
@@ -285,8 +297,11 @@ function fmtVoorstel(v: VergelijkendeBegrotingsPnLRegel["voorstel"]): string {
 }
 
 const LABELS: Record<string, string> = {
-  HUUROPBRENGST_BELAST: "Huuropbrengst belast",
-  HUUROPBRENGST_ONBELAST: "Huuropbrengst onbelast",
+  // Correctieronde (visuele controle, besluit 07-10-2026): "Bruto" in het label — zie `regelRij`'s
+  // Huur-overrides, die ervoor zorgen dat elke kolom op deze twee rijen ook werkelijk bruto toont
+  // (of expliciet "onbekend" i.p.v. stilzwijgend de netto-canonwaarde onder een bruto-label).
+  HUUROPBRENGST_BELAST: "Bruto huuropbrengst belast",
+  HUUROPBRENGST_ONBELAST: "Bruto huuropbrengst onbelast",
   VERLEENDE_HUURKORTING: "Verleende huurkorting",
   HUUR_NIET_GECLASSIFICEERD: "Huur — niet geclassificeerd",
   BEHEERKOSTEN: "Beheersvergoeding",
@@ -542,6 +557,16 @@ export interface HoofdschermOpties {
   verborgenModules?: readonly string[];
   /** UX_3 punt 7 "Beoordeling in gewone gebruikerstaal" — regelSleutel -> label, zie `leesBeoordelingPerRegel` in begrotingRoutes.ts. */
   beoordelingPerRegel?: Record<string, string>;
+  /**
+   * Correctieronde (visuele controle, besluit 07-10-2026) — bruto belast/onbelast/korting voor
+   * Jouw begroting, uit de bestaande, ongewijzigde Huurcalculator (`module1.portefeuilleTotalen`/
+   * per-contract jaartotalen, zie `berekenHuurContext` in begrotingRoutes.ts). `null` = de
+   * Huurberekening kon niet worden uitgevoerd (bv. nog geen aannames) — dan blijft deze
+   * decompositie "onbekend", nooit verzonnen of afgeleid uit de netto-canonwaarde.
+   */
+  huurBrutoDecompositie?: { brutoBelast: Decimal; brutoOnbelast: Decimal; korting: Decimal } | null;
+  /** Zelfde decompositie als `huurBrutoDecompositie`, maar voor Voorstel (zonder overrides/fictieve contracten) — zie `regelRij`. */
+  huurBrutoDecompositieVoorstel?: { brutoBelast: Decimal; brutoOnbelast: Decimal; korting: Decimal } | null;
 }
 
 /** Koppelt een verbergbare module-sleutel aan de bijbehorende P&L-regelSleutel(s) en weergavenaam — uitsluitend Managementvergoeding. */
@@ -578,18 +603,55 @@ const HUUR_OPBRENGST_SLEUTELS: ReadonlySet<string> = new Set(["HUUROPBRENGST_BEL
  * blijven zelf gewone, link-loze rijen (ze staan niet meer in `BEWERKBARE_MODULES`) met hun eigen,
  * onveranderde bedragen.
  */
+/**
+ * Correctieronde (visuele controle, besluit 07-10-2026) — de groepsheader toont nu ook het
+ * Netto-huuropbrengsten-totaal, voor alle vijf kolommen. GEEN nieuwe berekening: `totaalOpbrengsten`
+ * is de al-bestaande boven-EBITDA-subtotaalgroep van de Pure P&L Engine, en "OPBRENGSTEN" bevat
+ * uitsluitend de Huur-canon-posten (Belast/Onbelast/Korting/niet-geclassificeerd) — dus dit subtotaal
+ * IS al exact de netto Huur-uitkomst, voor elke kolom afzonderlijk al op "Unknown != zero" bewaakt
+ * (zelfde `.volledigheid`-mechanisme als de bestaande EBITDA-rij hieronder). Dit is de plek waar
+ * "bruto belast + bruto onbelast − korting" bij elkaar komt tot "= netto huuropbrengsten".
+ */
+function huurNettoTotaalCel(resultaat: (VergelijkendeBegrotingsPnLResultaat)["werkelijk"] | null): string {
+  if (resultaat === null) return `<span class="onbekend">onbekend</span>`;
+  return resultaat.totaalOpbrengsten.volledigheid.status === "VOLLEDIG"
+    ? `<strong>${fmtBedrag(resultaat.totaalOpbrengsten.besteWetenSom)}</strong>`
+    : `<span class="onbekend" title="Onvolledig: niet alle Huur-posten zijn bekend"><strong>${fmtBedrag(resultaat.totaalOpbrengsten.besteWetenSom)}</strong> (onvolledig)</span>`;
+}
+
 function huurOpbrengstenGroepsheaderRij(o: HoofdschermOpties): string {
   const isConcept = o.versie.status === "CONCEPT";
   const detailId = "HUUROPBRENGSTEN--huur";
   const url = `/begroting/${encodeURIComponent(o.administratieId)}/${encodeURIComponent(o.versie.id)}/module/huur?laatstAfgeslotenBoekperiode=${encodeURIComponent(o.laatstAfgeslotenBoekperiode)}`;
   const label = isConcept ? "Aanpassen" : "Bekijken";
   const link = `<a class="bewerk" data-expand="${escapeHtml(detailId)}" data-url="${escapeHtml(url)}" href="${escapeHtml(url)}" aria-expanded="false" aria-controls="detail-row-${escapeHtml(detailId)}">${label}</a>`;
+  const v = o.vergelijkend;
   return `<tr class="huur-groep">
-    <td><span class="naam">Huuropbrengsten</span><span class="naam-sub">${link}</span></td>
-    <td></td><td></td><td></td><td></td><td></td><td></td>
+    <td><span class="naam">Huuropbrengsten</span><span class="naam-sub">Netto huuropbrengsten</span><span class="naam-sub">${link}</span></td>
+    <td>${huurNettoTotaalCel(v.begrotingVorigJaar)}</td>
+    <td>${huurNettoTotaalCel(v.werkelijk)}</td>
+    <td>${huurNettoTotaalCel(v.estimated)}</td>
+    <td>—</td>
+    <td>${huurNettoTotaalCel(v.jouwBegroting)}</td>
+    <td></td>
   </tr>
   <tr class="detail-row" id="detail-row-${escapeHtml(detailId)}" style="display:none"><td colspan="7"><div class="detail-body" data-detail-body></div></td></tr>`;
 }
+
+/**
+ * Correctieronde (visuele controle, besluit 07-10-2026) — §1: "Huuropbrengst belast/onbelast" zijn
+ * in de bestaande canon NETTO (al ná korting); "Verleende huurkorting" komt bij Werkelijk/Estimated
+ * uit een eigen, BRUTO GL-boeking. Die twee financiële betekenissen door elkaar op het hoofdscherm
+ * tonen (netto belast/onbelast ÉN een losse kortingsregel) suggereert ten onrechte een dubbele
+ * aftrek. Oplossing — GEEN canon-wijziging, uitsluitend presentatie: voor deze drie sleutels tonen
+ * Begroting-vorig-jaar/Voorstel bewust "onbekend" (een betrouwbare bruto-uitsplitsing bestaat daar
+ * niet) i.p.v. stilzwijgend de netto-waarde onder een "Bruto"-label; Werkelijk/Estimated blijven
+ * ONGEWIJZIGD (die zijn al bruto-native); Jouw begroting toont de echte bruto/kortingwaarde uit
+ * `o.huurBrutoDecompositie` (dezelfde, elders al gebruikte Huurcalculator-uitkomst) i.p.v. de
+ * netto-canonwaarde. Het onderliggende canon-/EBITDA-cijfer verandert hierdoor niet — uitsluitend
+ * wat in DEZE kolomcel wordt getoond.
+ */
+const HUUR_BRUTO_KORTING_OVERRIDE_SLEUTELS: ReadonlySet<string> = new Set(["HUUROPBRENGST_BELAST", "HUUROPBRENGST_ONBELAST", "VERLEENDE_HUURKORTING"]);
 
 function regelRij(o: HoofdschermOpties, r: VergelijkendeBegrotingsPnLRegel): string {
   const moduleLinks = BEWERKBARE_MODULES[r.regelSleutel];
@@ -611,13 +673,42 @@ function regelRij(o: HoofdschermOpties, r: VergelijkendeBegrotingsPnLRegel): str
     .map((d) => `<tr class="detail-row" id="detail-row-${escapeHtml(d.detailId)}" style="display:none"><td colspan="7"><div class="detail-body" data-detail-body></div></td></tr>`)
     .join("");
   const beoordeling = o.beoordelingPerRegel?.[r.regelSleutel];
+
+  let begrotingVorigJaarCel = fmtWaarde(r.begrotingVorigJaar);
+  let voorstelCel = fmtVoorstel(r.voorstel);
+  let jouwBegrotingCel = fmtWaarde(r.jouwBegroting);
+  if (HUUR_BRUTO_KORTING_OVERRIDE_SLEUTELS.has(r.regelSleutel)) {
+    begrotingVorigJaarCel = `<span class="onbekend" title="Een bruto-/kortingsuitsplitsing voor een eerder begrotingsjaar is niet apart bewaard.">onbekend</span>`;
+    const d = o.huurBrutoDecompositie;
+    jouwBegrotingCel =
+      d === null || d === undefined
+        ? `<span class="onbekend">onbekend</span>`
+        : r.regelSleutel === "HUUROPBRENGST_BELAST"
+          ? fmtBedrag(d.brutoBelast)
+          : r.regelSleutel === "HUUROPBRENGST_ONBELAST"
+            ? fmtBedrag(d.brutoOnbelast)
+            : `&minus; ${fmtBedrag(d.korting)}`;
+    if (r.regelSleutel === "VERLEENDE_HUURKORTING") {
+      // Voorstel heeft voor deze sleutel geen afzonderlijke berekening (zie VOORSTEL_AUTOMATISCH_SLEUTELS) —
+      // bestaand gedrag (fmtVoorstel(r.voorstel), doorgaans "—") blijft ongewijzigd.
+    } else {
+      const dv = o.huurBrutoDecompositieVoorstel;
+      voorstelCel =
+        dv === null || dv === undefined
+          ? `<span class="onbekend" title="Een bruto-uitsplitsing van het voorstel is niet apart berekend.">onbekend</span>`
+          : r.regelSleutel === "HUUROPBRENGST_BELAST"
+            ? fmtBedrag(dv.brutoBelast)
+            : fmtBedrag(dv.brutoOnbelast);
+    }
+  }
+
   return `<tr>
     <td><span class="naam">${escapeHtml(label(r.regelSleutel))}</span>${bewerkLinksHtml ? `<span class="naam-sub">${bewerkLinksHtml}</span>` : ""}</td>
-    <td>${fmtWaarde(r.begrotingVorigJaar)}</td>
+    <td>${begrotingVorigJaarCel}</td>
     <td>${fmtWaarde(r.werkelijk)}</td>
     <td>${fmtWaarde(r.estimated)}</td>
-    <td>${fmtVoorstel(r.voorstel)}</td>
-    <td>${fmtWaarde(r.jouwBegroting)}</td>
+    <td>${voorstelCel}</td>
+    <td>${jouwBegrotingCel}</td>
     <td>${beoordeling !== undefined ? escapeHtml(beoordeling) : ""}</td>
   </tr>${detailRijenHtml}`;
 }
@@ -1239,7 +1330,7 @@ function huurSamenvattingHtml(s: HuurSamenvattingVeld): string {
   return `
     <div class="card" style="margin-bottom:16px">
       <div class="eyebrow">Opbouw netto huuropbrengsten</div>
-      <table style="margin:0 0 14px">
+      <table class="huur-fin" style="margin:0 0 14px">
         <tbody>
           <tr><td>Bruto huuropbrengst belast</td><td style="text-align:right">${escapeHtml(s.brutoBelast)}</td></tr>
           <tr><td>Bruto huuropbrengst onbelast</td><td style="text-align:right">${escapeHtml(s.brutoOnbelast)}</td></tr>
@@ -1253,9 +1344,9 @@ function huurSamenvattingHtml(s: HuurSamenvattingVeld): string {
         <div class="rent-metric"><span>Leegstand &amp; korting</span><strong>&minus; ${escapeHtml(s.korting)}</strong></div>
         <div class="rent-metric rent-metric-totaal"><span>Netto voorstel</span><strong>${escapeHtml(s.nettoHuur)}</strong></div>
       </div>
-      <table style="margin:14px 0 0">
-        <thead><tr><th style="text-align:left">Q1</th><th>Q2</th><th>Q3</th><th>Q4</th><th>Jaartotaal</th></tr></thead>
-        <tbody><tr><td class="naam">${escapeHtml(s.kwartalen.q1)}</td><td>${escapeHtml(s.kwartalen.q2)}</td><td>${escapeHtml(s.kwartalen.q3)}</td><td>${escapeHtml(s.kwartalen.q4)}</td><td><strong>${escapeHtml(s.kwartalen.jaar)}</strong></td></tr></tbody>
+      <table class="huur-fin" style="margin:14px 0 0">
+        <thead><tr><th style="text-align:left">&nbsp;</th><th class="col-kwartaal">Q1</th><th class="col-kwartaal">Q2</th><th class="col-kwartaal">Q3</th><th class="col-kwartaal">Q4</th><th class="col-jaar">Jaartotaal</th></tr></thead>
+        <tbody><tr><td>Kwartaaltotalen</td><td class="col-kwartaal">${escapeHtml(s.kwartalen.q1)}</td><td class="col-kwartaal">${escapeHtml(s.kwartalen.q2)}</td><td class="col-kwartaal">${escapeHtml(s.kwartalen.q3)}</td><td class="col-kwartaal">${escapeHtml(s.kwartalen.q4)}</td><td class="col-jaar"><strong>${escapeHtml(s.kwartalen.jaar)}</strong></td></tr></tbody>
       </table>
       ${
         kortingInfoHtml
@@ -1353,11 +1444,11 @@ export function renderHuurDetail(o: {
       <td>${escapeHtml(r.bruto)}</td>
       <td>${escapeHtml(r.korting)}</td>
       <td>${escapeHtml(r.netto)}</td>
-      <td>${escapeHtml(r.kwartalen.q1)}</td>
-      <td>${escapeHtml(r.kwartalen.q2)}</td>
-      <td>${escapeHtml(r.kwartalen.q3)}</td>
-      <td>${escapeHtml(r.kwartalen.q4)}</td>
-      <td><strong>${escapeHtml(r.kwartalen.jaar)}</strong></td>
+      <td class="col-kwartaal">${escapeHtml(r.kwartalen.q1)}</td>
+      <td class="col-kwartaal">${escapeHtml(r.kwartalen.q2)}</td>
+      <td class="col-kwartaal">${escapeHtml(r.kwartalen.q3)}</td>
+      <td class="col-kwartaal">${escapeHtml(r.kwartalen.q4)}</td>
+      <td class="col-jaar"><strong>${escapeHtml(r.kwartalen.jaar)}</strong></td>
       <td>${o.alleenLezen ? escapeHtml(r.overrideWaarde || "-") : `<input type="text" name="override_${escapeHtml(r.contractnummer)}" value="${escapeHtml(r.overrideWaarde)}" placeholder="algemeen" style="width:60px" />`}</td>
     </tr>`,
     )
@@ -1370,22 +1461,22 @@ export function renderHuurDetail(o: {
       <td>${escapeHtml(r.bruto)}</td>
       <td>${escapeHtml(r.korting)}</td>
       <td>${escapeHtml(r.netto)}</td>
-      <td>${escapeHtml(r.kwartalen.q1)}</td>
-      <td>${escapeHtml(r.kwartalen.q2)}</td>
-      <td>${escapeHtml(r.kwartalen.q3)}</td>
-      <td>${escapeHtml(r.kwartalen.q4)}</td>
-      <td><strong>${escapeHtml(r.kwartalen.jaar)}</strong></td>
+      <td class="col-kwartaal">${escapeHtml(r.kwartalen.q1)}</td>
+      <td class="col-kwartaal">${escapeHtml(r.kwartalen.q2)}</td>
+      <td class="col-kwartaal">${escapeHtml(r.kwartalen.q3)}</td>
+      <td class="col-kwartaal">${escapeHtml(r.kwartalen.q4)}</td>
+      <td class="col-jaar"><strong>${escapeHtml(r.kwartalen.jaar)}</strong></td>
     </tr>`,
     )
     .join("");
   const tabelHtml =
     o.weergave === "complex"
-      ? `<table style="margin-bottom:16px">
-        <thead><tr><th style="text-align:left">Complex</th><th>Aantal contracten</th><th>Bruto</th><th>Korting</th><th>Netto</th><th>Q1</th><th>Q2</th><th>Q3</th><th>Q4</th><th>Jaartotaal</th></tr></thead>
+      ? `<table class="huur-fin" style="margin-bottom:16px">
+        <thead><tr><th style="text-align:left">Complex</th><th>Aantal contracten</th><th>Bruto</th><th>Korting</th><th>Netto</th><th class="col-kwartaal">Q1</th><th class="col-kwartaal">Q2</th><th class="col-kwartaal">Q3</th><th class="col-kwartaal">Q4</th><th class="col-jaar">Jaartotaal</th></tr></thead>
         <tbody>${complexRijenHtml}</tbody>
       </table>`
-      : `<div class="tabel-scroll"><table style="margin-bottom:16px">
-        <thead><tr><th style="text-align:left">Contract</th><th>Belast/onbelast</th><th>Indexatie</th><th>Ingangsdatum indexatie</th><th>Bruto</th><th>Korting</th><th>Netto</th><th>Q1</th><th>Q2</th><th>Q3</th><th>Q4</th><th>Jaartotaal</th><th>Override %</th></tr></thead>
+      : `<div class="tabel-scroll"><table class="huur-fin" style="margin-bottom:16px">
+        <thead><tr><th class="col-contract" style="text-align:left">Contract</th><th>Belast/onbelast</th><th>Indexatie</th><th>Ingangsdatum indexatie</th><th>Bruto</th><th>Korting</th><th>Netto</th><th class="col-kwartaal">Q1</th><th class="col-kwartaal">Q2</th><th class="col-kwartaal">Q3</th><th class="col-kwartaal">Q4</th><th class="col-jaar">Jaartotaal</th><th>Override %</th></tr></thead>
         <tbody>${contractRijenHtml}</tbody>
       </table></div>`;
 
@@ -1500,20 +1591,20 @@ export function renderHuurMaandverloop(o: {
       <td class="naam">${escapeHtml(r.maand)}${badges ? `<span class="naam-sub">${badges}</span>` : ""}</td>
       <td>${escapeHtml(r.huurprijs)}</td>
       <td>${escapeHtml(r.korting)}</td>
-      <td><strong>${escapeHtml(r.netto)}</strong></td>
+      <td class="col-jaar"><strong>${escapeHtml(r.netto)}</strong></td>
     </tr>`;
     })
     .join("");
   const bestaandeOverridesHtml =
     o.bestaandeOverrides.length > 0
-      ? `<table style="margin:16px 0"><thead><tr><th style="text-align:left">Vanaf</th><th>Nieuwe huurprijs</th><th>Nieuwe korting</th></tr></thead><tbody>${o.bestaandeOverrides
+      ? `<table class="huur-fin" style="margin:16px 0"><thead><tr><th style="text-align:left">Vanaf</th><th>Nieuwe huurprijs</th><th>Nieuwe korting</th></tr></thead><tbody>${o.bestaandeOverrides
           .map((ov) => `<tr><td class="naam">${escapeHtml(ov.vanafMaand)}</td><td>${ov.nieuweBrutoHuurPerMaand !== null ? escapeHtml(ov.nieuweBrutoHuurPerMaand) : "-"}</td><td>${ov.nieuweKortingPerMaand !== null ? escapeHtml(ov.nieuweKortingPerMaand) : "-"}</td></tr>`)
           .join("")}</tbody></table>`
       : "";
   const inhoud = `
     <div class="sub">${escapeHtml(o.huurderNaam ?? "onbekende huurder")} · contract ${escapeHtml(o.contractnummer)}</div>
-    <table style="margin:16px 0">
-      <thead><tr><th style="text-align:left">Maand</th><th>Huurprijs</th><th>Huurkorting</th><th>Netto huur</th></tr></thead>
+    <table class="huur-fin" style="margin:16px 0">
+      <thead><tr><th style="text-align:left">Maand</th><th>Huurprijs</th><th>Huurkorting</th><th class="col-jaar">Netto huur</th></tr></thead>
       <tbody>${regelsHtml}</tbody>
     </table>
     ${bestaandeOverridesHtml}
